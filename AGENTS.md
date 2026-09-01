@@ -30,14 +30,12 @@ Do not reopen these. The reasons are in docs/research/.
 
 ## Quality gates
 
-These gates apply to all Rust code in this repository. CI will enforce them
-once the workspace exists. Until then, check them yourself before every PR.
+These gates apply to all Rust code in this repository. Check them yourself
+before every PR.
 
 - Cognitive complexity per function: less than 22 (clippy).
 - Cyclomatic complexity per function: less than 22.
 - Lines per file: less than 500.
-- Test coverage: 100 percent of changed lines (cargo llvm-cov).
-- Mutation testing: 0 surviving mutants in changed code (cargo-mutants).
 - Dead code: 0. No unused functions, no unused dependencies (cargo-udeps).
   Do not hide dead code with allow attributes.
 - Redundant code: 0. Search for an existing helper before you write a new
@@ -46,11 +44,22 @@ once the workspace exists. Until then, check them yourself before every PR.
   needs a one-line reason. Every unsafe block needs a safety comment.
 - cargo clippy with warnings denied must pass. cargo fmt must pass.
 
+## Testing
+
+- Do not write excessive tests. Test writing is extremely limited.
+- Write a test only when there is a strong reason. Default is no test.
+- When a test is allowed, write the test before the code (test first).
+  Never add a test after the code it covers.
+- Do not add tests to cover lines, to reach a coverage number, or to
+  satisfy a tool.
+- Keep existing tests that pass. Do not add new tests to existing modules
+  unless the same test-first rule applies.
+
 ## Git
 
 - Never push to main. Create a branch, push with git push -u origin, then
   open a PR.
-- Run tests and lint before every push.
+- Run cargo clippy and cargo fmt before every push.
 - Add a DCO Signed-off-by line to every commit.
 - Never add co-author attribution of any kind.
 - Review the staged file list before committing. Drop unrelated files and
