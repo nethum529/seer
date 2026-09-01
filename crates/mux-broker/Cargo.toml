@@ -1,0 +1,6 @@
+[package]
+name = "mux-broker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]

@@ -1,0 +1,6 @@
+[package]
+name = "mux-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
