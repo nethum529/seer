@@ -11,6 +11,11 @@ use std::time::{Duration, Instant};
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
 
+#[path = "support/server_io.rs"]
+mod server_io;
+
+use server_io::receive;
+
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
@@ -376,10 +381,6 @@ fn send(stream: &mut TcpStream, message: &ServerMsg) {
     codec::encode(stream, message).expect("server message must encode");
 }
 
-fn receive(stream: &mut TcpStream) -> ClientMsg {
-    codec::decode(stream).expect("client message must decode")
-}
-
 fn listener() -> TcpListener {
     TcpListener::bind("127.0.0.1:0").expect("listener must bind")
 }
@@ -393,7 +394,7 @@ fn accept(listener: &TcpListener) -> TcpStream {
         match listener.accept() {
             Ok((stream, _)) => {
                 stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .set_read_timeout(Some(Duration::from_millis(100)))
                     .expect("read timeout must be set");
                 stream
                     .set_write_timeout(Some(Duration::from_secs(5)))
