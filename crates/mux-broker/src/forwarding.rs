@@ -41,8 +41,10 @@ impl<'a> Coordinator<'a> {
         runtimes: &'a RuntimeManager,
     ) -> io::Result<Self> {
         let (event_sender, events) = mpsc::channel();
-        let client_reader = spawn_client_reader(client.try_clone()?, event_sender.clone());
-        let mut coordinator = Self {
+        let client_reader = client.try_clone()?;
+        let runtime = connect_runtime(runtimes, owner, None, &event_sender)?;
+        let client_reader = spawn_client_reader(client_reader, event_sender.clone());
+        Ok(Self {
             client,
             client_reader: Some(client_reader),
             owner,
@@ -50,11 +52,9 @@ impl<'a> Coordinator<'a> {
             runtimes,
             event_sender,
             events,
-            runtime: None,
+            runtime: Some(runtime),
             peeking: false,
-        };
-        coordinator.switch_runtime(owner, None)?;
-        Ok(coordinator)
+        })
     }
 
     fn run(&mut self) -> io::Result<()> {
@@ -147,21 +147,12 @@ impl<'a> Coordinator<'a> {
 
     fn switch_runtime(&mut self, user: &str, first: Option<&ClientMsg>) -> io::Result<()> {
         self.close_runtime()?;
-        let mut stream = self.runtimes.connect(user)?;
-        if let Some(message) = first {
-            codec::encode(&mut stream, message)?;
-        }
-        let identity = Arc::new(());
-        let reader = spawn_runtime_reader(
-            stream.try_clone()?,
-            Arc::clone(&identity),
-            self.event_sender.clone(),
-        );
-        self.runtime = Some(RuntimeConnection {
-            stream,
-            identity,
-            reader,
-        });
+        self.runtime = Some(connect_runtime(
+            self.runtimes,
+            user,
+            first,
+            &self.event_sender,
+        )?);
         Ok(())
     }
 
@@ -187,6 +178,25 @@ struct RuntimeConnection {
     stream: UnixStream,
     identity: Arc<()>,
     reader: JoinHandle<()>,
+}
+
+fn connect_runtime(
+    runtimes: &RuntimeManager,
+    user: &str,
+    first: Option<&ClientMsg>,
+    sender: &Sender<Event>,
+) -> io::Result<RuntimeConnection> {
+    let mut stream = runtimes.connect(user)?;
+    if let Some(message) = first {
+        codec::encode(&mut stream, message)?;
+    }
+    let identity = Arc::new(());
+    let reader = spawn_runtime_reader(stream.try_clone()?, Arc::clone(&identity), sender.clone());
+    Ok(RuntimeConnection {
+        stream,
+        identity,
+        reader,
+    })
 }
 
 impl RuntimeConnection {
