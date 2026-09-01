@@ -1,7 +1,8 @@
 use std::io::Write;
 use std::net::{TcpListener, TcpStream};
-use std::process::{Command, Output};
+use std::process::{Command, Output, Stdio};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use mux_core::Tree;
 use mux_core::proto::{ClientMsg, ServerMsg, codec};
@@ -50,19 +51,66 @@ fn handles_welcome_and_refused_replies() {
 }
 
 #[test]
+fn sends_peek_after_welcome() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
+    let addr = listener
+        .local_addr()
+        .expect("listener must have an address");
+    let server = thread::spawn(move || {
+        let (mut stream, _) = listener.accept().expect("server must accept a client");
+        assert_hello(
+            &mut stream,
+            ClientMsg::Hello {
+                user: "bob".into(),
+                token: "valid".into(),
+            },
+        );
+        codec::encode(
+            &mut stream,
+            &ServerMsg::Welcome {
+                user: "bob".into(),
+                tree: Tree::new(),
+            },
+        )
+        .expect("server must encode Welcome");
+        let message: ClientMsg = codec::decode(&mut stream).expect("server must decode Peek");
+        assert_eq!(
+            message,
+            ClientMsg::Peek {
+                user: "alice".into(),
+                workspace: "w1".into(),
+            }
+        );
+    });
+
+    let output = run(&[addr.to_string().as_str(), "bob", "valid", "--peek", "alice"]);
+    assert_eq!(output.status.code(), Some(0));
+    assert_eq!(output.stdout, b"connected as bob\n");
+    assert!(output.stderr.is_empty());
+
+    server.join().expect("server must finish");
+}
+
+#[test]
 fn rejects_invalid_argument_counts() {
     let cases: &[&[&str]] = &[
         &[],
         &["addr"],
         &["addr", "user"],
         &["addr", "user", "token", "extra"],
+        &["addr", "user", "token", "--peek"],
+        &["addr", "user", "token", "--other", "alice"],
+        &["addr", "user", "token", "--peek", "alice", "extra"],
     ];
 
     for arguments in cases {
         let output = run(arguments);
         assert_eq!(output.status.code(), Some(2));
         assert!(output.stdout.is_empty());
-        assert_eq!(output.stderr, b"usage: mux-client <addr> <user> <token>\n");
+        assert_eq!(
+            output.stderr,
+            b"usage: mux-client <addr> <user> <token> [--peek <target-user>]\n"
+        );
     }
 }
 
@@ -126,8 +174,29 @@ fn run_client(addr: String, user: &str, token: &str) -> Output {
 }
 
 fn run(arguments: &[&str]) -> Output {
-    Command::new(env!("CARGO_BIN_EXE_mux-client"))
+    let mut child = Command::new(env!("CARGO_BIN_EXE_mux-client"))
         .args(arguments)
-        .output()
-        .expect("client must run")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("client must start");
+    let deadline = Instant::now() + Duration::from_secs(5);
+
+    loop {
+        if child
+            .try_wait()
+            .expect("client status must be available")
+            .is_some()
+        {
+            return child
+                .wait_with_output()
+                .expect("client output must be read");
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("client must be killed after timeout");
+            let _ = child.wait();
+            panic!("client did not finish before timeout");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
 }
