@@ -1346,6 +1346,7 @@ version = "0.1.0"
 dependencies = [
  "constant_time_eq",
  "getrandom 0.3.4",
+ "libc",
  "seer-core",
  "serde",
  "serde_json",
@@ -1366,6 +1367,7 @@ name = "seer-runtime"
 version = "0.1.0"
 dependencies = [
  "alacritty_terminal",
+ "libc",
  "portable-pty",
  "seer-core",
 ]
