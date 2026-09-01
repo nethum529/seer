@@ -4,29 +4,9 @@ use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
 use alacritty_terminal::term::{Config, Term};
 use alacritty_terminal::vte::ansi::{Color as AlacrittyColor, NamedColor, Processor};
+pub use mux_core::{Cell, Color};
 
 const SCROLLBACK_LINES: usize = 1_000;
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum Color {
-    Default,
-    Indexed(u8),
-    Rgb { red: u8, green: u8, blue: u8 },
-}
-
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct Cell {
-    pub character: char,
-    pub fg: Color,
-    pub bg: Color,
-    pub bold: bool,
-    pub italic: bool,
-    pub underline: bool,
-    pub dim: bool,
-    pub inverse: bool,
-    pub hidden: bool,
-    pub strikeout: bool,
-}
 
 pub struct PaneGrid {
     terminal: Term<VoidListener>,
@@ -59,7 +39,7 @@ impl PaneGrid {
             .map(|row| {
                 let line = Line(row as i32 - display_offset);
                 (0..grid.columns())
-                    .map(|column| Cell::from(&grid[line][Column(column)]))
+                    .map(|column| map_cell(&grid[line][Column(column)]))
                     .collect()
             })
             .collect()
@@ -70,20 +50,18 @@ impl PaneGrid {
     }
 }
 
-impl From<&AlacrittyCell> for Cell {
-    fn from(cell: &AlacrittyCell) -> Self {
-        Self {
-            character: cell.c,
-            fg: map_color(cell.fg),
-            bg: map_color(cell.bg),
-            bold: cell.flags.contains(Flags::BOLD),
-            italic: cell.flags.contains(Flags::ITALIC),
-            underline: cell.flags.intersects(Flags::ALL_UNDERLINES),
-            dim: cell.flags.contains(Flags::DIM),
-            inverse: cell.flags.contains(Flags::INVERSE),
-            hidden: cell.flags.contains(Flags::HIDDEN),
-            strikeout: cell.flags.contains(Flags::STRIKEOUT),
-        }
+fn map_cell(cell: &AlacrittyCell) -> Cell {
+    Cell {
+        character: cell.c,
+        fg: map_color(cell.fg),
+        bg: map_color(cell.bg),
+        bold: cell.flags.contains(Flags::BOLD),
+        italic: cell.flags.contains(Flags::ITALIC),
+        underline: cell.flags.intersects(Flags::ALL_UNDERLINES),
+        dim: cell.flags.contains(Flags::DIM),
+        inverse: cell.flags.contains(Flags::INVERSE),
+        hidden: cell.flags.contains(Flags::HIDDEN),
+        strikeout: cell.flags.contains(Flags::STRIKEOUT),
     }
 }
 
