@@ -38,7 +38,9 @@ fn invite_reports_refused_and_unexpected_replies() {
     assert_eq!(refused.status.code(), Some(1));
     assert_eq!(refused.stderr, b"owner only\n");
 
-    let unexpected = run_invite(ServerMsg::Tree { tree: Tree::new() });
+    let unexpected = run_invite(ServerMsg::Bye {
+        reason: "server stopped".into(),
+    });
     assert_eq!(unexpected.status.code(), Some(2));
     assert_eq!(unexpected.stderr, b"error: unexpected server reply\n");
 }
@@ -71,8 +73,18 @@ fn join_hides_the_invitation_on_a_terminal() {
             },
         )
         .expect("Joined must encode");
+        drop(stream);
+
+        let mut attached = accept(&listener);
+        assert_eq!(
+            receive(&mut attached),
+            ClientMsg::Hello {
+                user_id: "user-bob".into(),
+                credential: "secret".into(),
+            }
+        );
         codec::encode(
-            &mut stream,
+            &mut attached,
             &ServerMsg::Welcome {
                 user_id: "user-bob".into(),
                 name: "bob".into(),
@@ -82,7 +94,7 @@ fn join_hides_the_invitation_on_a_terminal() {
         )
         .expect("Welcome must encode");
         codec::encode(
-            &mut stream,
+            &mut attached,
             &ServerMsg::Bye {
                 reason: "test complete".into(),
             },

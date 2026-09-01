@@ -1,6 +1,6 @@
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::TcpStream;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
@@ -59,7 +59,7 @@ pub(crate) fn join() -> Result<(), CommandError> {
                 user_id,
                 credential,
                 name,
-            } => return complete_join(stream, &capsule, user_id, credential, name),
+            } => return complete_join(&capsule, user_id, credential, name),
             ServerMsg::Refused { reason } => return Err(CommandError::usage(reason)),
             _ => return Err(unexpected_reply()),
         }
@@ -67,24 +67,24 @@ pub(crate) fn join() -> Result<(), CommandError> {
 }
 
 fn complete_join(
-    mut stream: TcpStream,
     capsule: &capsule::Capsule,
     user_id: String,
     credential: String,
     name: String,
 ) -> Result<(), CommandError> {
     let mut store = ServerStore::load().map_err(CommandError::system)?;
-    store.make_current(ServerEntry {
+    let server = ServerEntry {
         endpoint: capsule.endpoint.clone(),
         alias: capsule.alias.clone(),
         user_id,
         name: name.clone(),
         credential,
         current: true,
-    });
+    };
+    store.make_current(server.clone());
     store.save().map_err(CommandError::system)?;
     println!("Joined as {name}. Attaching...");
-    let tree = welcome_tree(receive(&mut stream)?)?;
+    let (stream, tree) = authenticate(&server)?;
     finish_session(io::stdout().is_terminal(), stream, tree, None, tui::run)
 }
 
@@ -99,7 +99,7 @@ pub(crate) fn invite() -> Result<(), CommandError> {
     let server = selected_server()?;
     let (mut stream, _) = authenticate(&server)?;
     send(&mut stream, &ClientMsg::Invite)?;
-    match receive(&mut stream)? {
+    match receive_reply(&mut stream)? {
         ServerMsg::Seat { capsule, .. } => {
             println!("Seat ready. It works once and expires in 1 hour.");
             println!("Send this invitation through a private channel:\n");
@@ -149,7 +149,7 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
     let server = selected_server()?;
     let (mut stream, tree) = authenticate(&server)?;
     send(&mut stream, &ClientMsg::ListPeople)?;
-    let people = people_reply(receive(&mut stream)?)?;
+    let people = people_reply(receive_reply(&mut stream)?)?;
     let Some(person) = people.iter().find(|person| person.name == target) else {
         print_close_names(target, &people);
         return Err(CommandError::usage(format!("no person named {target}")));
@@ -281,14 +281,14 @@ fn authenticate(server: &ServerEntry) -> Result<(TcpStream, Tree), CommandError>
         credential: server.credential.clone(),
     };
     send(&mut stream, &hello)?;
-    let tree = welcome_tree(receive(&mut stream)?)?;
+    let tree = welcome_tree(receive_reply(&mut stream)?)?;
     Ok((stream, tree))
 }
 
 fn people(server: &ServerEntry) -> Result<Vec<Person>, CommandError> {
     let (mut stream, _) = authenticate(server)?;
     send(&mut stream, &ClientMsg::ListPeople)?;
-    people_reply(receive(&mut stream)?)
+    people_reply(receive_reply(&mut stream)?)
 }
 
 fn people_reply(reply: ServerMsg) -> Result<Vec<Person>, CommandError> {
@@ -320,6 +320,42 @@ fn send(stream: &mut TcpStream, message: &ClientMsg) -> Result<(), CommandError>
 
 fn receive(stream: &mut TcpStream) -> Result<ServerMsg, CommandError> {
     codec::decode(stream).map_err(CommandError::system)
+}
+
+fn receive_reply(stream: &mut TcpStream) -> Result<ServerMsg, CommandError> {
+    receive_reply_before(stream, Instant::now() + NETWORK_TIMEOUT)
+}
+
+fn receive_reply_before(
+    stream: &mut TcpStream,
+    deadline: Instant,
+) -> Result<ServerMsg, CommandError> {
+    loop {
+        let reply = codec::decode(&mut DeadlineReader { stream, deadline })
+            .map_err(CommandError::system)?;
+        if !matches!(
+            reply,
+            ServerMsg::Tree { .. } | ServerMsg::Frame { .. } | ServerMsg::Cells { .. }
+        ) {
+            return Ok(reply);
+        }
+    }
+}
+
+struct DeadlineReader<'a> {
+    stream: &'a mut TcpStream,
+    deadline: Instant,
+}
+
+impl Read for DeadlineReader<'_> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "command reply timed out"))?;
+        self.stream.set_read_timeout(Some(remaining))?;
+        self.stream.read(buffer)
+    }
 }
 
 fn finish_session(
