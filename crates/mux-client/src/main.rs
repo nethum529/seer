@@ -1,9 +1,13 @@
 use std::env;
-use std::io;
+use std::io::{self, IsTerminal};
 use std::net::TcpStream;
 use std::process::ExitCode;
 
 use mux_core::proto::{ClientMsg, ServerMsg, codec};
+
+mod input;
+mod state;
+mod tui;
 
 struct Arguments {
     addr: String,
@@ -17,16 +21,20 @@ fn main() -> ExitCode {
         return ExitCode::from(2);
     };
 
-    match exchange_hello(arguments) {
-        Ok(ServerMsg::Welcome { user, .. }) => {
-            println!("connected as {user}");
-            ExitCode::SUCCESS
+    match connect(arguments) {
+        Ok((stream, ServerMsg::Welcome { user, tree })) => {
+            if io::stdout().is_terminal() {
+                run_tui(stream, tree)
+            } else {
+                println!("connected as {user}");
+                ExitCode::SUCCESS
+            }
         }
-        Ok(ServerMsg::Refused { reason }) => {
+        Ok((_, ServerMsg::Refused { reason })) => {
             eprintln!("refused: {reason}");
             ExitCode::FAILURE
         }
-        Ok(_) => {
+        Ok((_, _)) => {
             eprintln!("error: unexpected server reply");
             ExitCode::from(2)
         }
@@ -50,12 +58,23 @@ fn parse_arguments() -> Option<Arguments> {
     Some(Arguments { addr, user, token })
 }
 
-fn exchange_hello(arguments: Arguments) -> io::Result<ServerMsg> {
+fn connect(arguments: Arguments) -> io::Result<(TcpStream, ServerMsg)> {
     let mut stream = TcpStream::connect(arguments.addr)?;
     let hello = ClientMsg::Hello {
         user: arguments.user,
         token: arguments.token,
     };
     codec::encode(&mut stream, &hello)?;
-    codec::decode(&mut stream)
+    let reply = codec::decode(&mut stream)?;
+    Ok((stream, reply))
+}
+
+fn run_tui(stream: TcpStream, tree: mux_core::Tree) -> ExitCode {
+    match tui::run(stream, tree) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("error: {error}");
+            ExitCode::from(2)
+        }
+    }
 }
