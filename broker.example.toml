@@ -1,0 +1,9 @@
+listen = "127.0.0.1:7321"
+
+[[users]]
+user = "alice"
+token = "replace-with-alice-token"
+
+[[users]]
+user = "bob"
+token = "replace-with-bob-token"
