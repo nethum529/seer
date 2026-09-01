@@ -2,7 +2,7 @@ pub mod codec;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{SplitDirection, Tree};
+use crate::{Cell, SplitDirection, Tree};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ClientMsg {
@@ -24,6 +24,7 @@ pub enum ServerMsg {
     Refused { reason: String },
     Tree { tree: Tree },
     Frame { pane: String, bytes: Vec<u8> },
+    Cells { pane: String, rows: Vec<Vec<Cell>> },
     Bye { reason: String },
 }
 
@@ -34,7 +35,7 @@ mod tests {
     use serde::{Serialize, de::DeserializeOwned};
 
     use super::{ClientMsg, ServerMsg, codec};
-    use crate::{PaneSize, SplitDirection, Tree};
+    use crate::{Cell, Color, PaneSize, SplitDirection, Tree};
 
     fn assert_round_trip<T>(message: &T)
     where
@@ -120,6 +121,39 @@ mod tests {
             ServerMsg::Frame {
                 pane: "w1:p1".into(),
                 bytes: vec![0, 1, 255],
+            },
+            ServerMsg::Cells {
+                pane: "w1:p1".into(),
+                rows: vec![
+                    vec![Cell {
+                        character: 'A',
+                        fg: Color::Indexed(1),
+                        bg: Color::Default,
+                        bold: true,
+                        italic: false,
+                        underline: false,
+                        dim: false,
+                        inverse: false,
+                        hidden: false,
+                        strikeout: false,
+                    }],
+                    vec![Cell {
+                        character: 'B',
+                        fg: Color::Rgb {
+                            red: 10,
+                            green: 20,
+                            blue: 30,
+                        },
+                        bg: Color::Indexed(2),
+                        bold: false,
+                        italic: true,
+                        underline: true,
+                        dim: false,
+                        inverse: false,
+                        hidden: false,
+                        strikeout: false,
+                    }],
+                ],
             },
             ServerMsg::Bye {
                 reason: "detached".into(),
