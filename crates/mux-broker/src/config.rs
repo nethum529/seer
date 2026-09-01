@@ -5,16 +5,22 @@ use std::path::Path;
 
 use serde::Deserialize;
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct Config {
     pub listen: SocketAddr,
+    #[serde(default = "default_shell")]
+    pub shell: String,
     pub users: Vec<UserConfig>,
 }
 
-#[derive(Deserialize)]
+#[derive(Clone, Deserialize)]
 pub struct UserConfig {
     pub user: String,
     pub token: String,
+}
+
+fn default_shell() -> String {
+    "sh".to_owned()
 }
 
 impl Config {
@@ -41,11 +47,21 @@ mod tests {
         let config = Config::load(path).expect("example config must load");
 
         assert_eq!(config.listen.to_string(), "127.0.0.1:7321");
+        assert_eq!(config.shell, "sh");
         assert_eq!(config.users.len(), 2);
         assert_eq!(config.users[0].user, "alice");
         assert_eq!(config.users[0].token, "replace-with-alice-token");
         assert_eq!(config.users[1].user, "bob");
         assert_eq!(config.users[1].token, "replace-with-bob-token");
+    }
+
+    #[test]
+    fn loads_configured_shell() {
+        let config =
+            toml::from_str::<Config>("listen = \"127.0.0.1:7321\"\nshell = \"bash\"\nusers = []\n")
+                .expect("config must load");
+
+        assert_eq!(config.shell, "bash");
     }
 
     #[test]

@@ -1,10 +1,14 @@
 use std::io::{self, Read};
 use std::net::{TcpListener, TcpStream};
+use std::os::unix::net::UnixStream;
+use std::sync::Arc;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use mux_core::Tree;
 use mux_core::proto::{ClientMsg, ServerMsg, codec};
 
+use crate::runtime::RuntimeManager;
 use crate::{Config, UserConfig};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -13,14 +17,30 @@ const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
 
 pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
+    let broker = Arc::new(Broker::new(config)?);
     for connection in listener.incoming() {
-        let mut stream = connection?;
-        report_handshake(handshake(&mut stream, &config.users, HANDSHAKE_TIMEOUT));
+        let stream = connection?;
+        let broker = Arc::clone(&broker);
+        thread::spawn(move || report_connection(handle_connection(stream, &broker)));
     }
     Ok(())
 }
 
-fn report_handshake(result: io::Result<()>) -> bool {
+struct Broker {
+    users: Vec<UserConfig>,
+    runtimes: RuntimeManager,
+}
+
+impl Broker {
+    fn new(config: &Config) -> io::Result<Self> {
+        Ok(Self {
+            users: config.users.clone(),
+            runtimes: RuntimeManager::new(config.shell.clone())?,
+        })
+    }
+}
+
+fn report_connection(result: io::Result<()>) -> bool {
     if let Err(error) = result {
         eprintln!("broker connection error: {error}");
         true
@@ -29,17 +49,30 @@ fn report_handshake(result: io::Result<()>) -> bool {
     }
 }
 
-fn handshake(stream: &mut TcpStream, users: &[UserConfig], timeout: Duration) -> io::Result<()> {
+fn handle_connection(mut stream: TcpStream, broker: &Broker) -> io::Result<()> {
+    let Some(user) = handshake(&mut stream, &broker.users, HANDSHAKE_TIMEOUT)? else {
+        return Ok(());
+    };
+    stream.set_read_timeout(None)?;
+    let runtime = broker.runtimes.connect(&user)?;
+    forward(stream, runtime)
+}
+
+fn handshake(
+    stream: &mut TcpStream,
+    users: &[UserConfig],
+    timeout: Duration,
+) -> io::Result<Option<String>> {
     let deadline = Instant::now() + timeout;
     let message = match read_message(stream, deadline) {
         Ok(message) => message,
-        Err(error) if connection_was_silent(&error) => return Ok(()),
-        Err(_) => return refuse(stream, INVALID_MESSAGE),
+        Err(error) if connection_was_silent(&error) => return Ok(None),
+        Err(_) => return refuse(stream, INVALID_MESSAGE).map(|()| None),
     };
 
     match message {
         ClientMsg::Hello { user, token } => authenticate(stream, users, &user, &token),
-        _ => refuse(stream, EXPECTED_HELLO),
+        _ => refuse(stream, EXPECTED_HELLO).map(|()| None),
     }
 }
 
@@ -52,7 +85,7 @@ fn authenticate(
     users: &[UserConfig],
     user: &str,
     token: &str,
-) -> io::Result<()> {
+) -> io::Result<Option<String>> {
     let valid = users
         .iter()
         .find(|entry| entry.user == user)
@@ -65,10 +98,69 @@ fn authenticate(
                 user: user.to_owned(),
                 tree: Tree::new(),
             },
-        )
+        )?;
+        Ok(Some(user.to_owned()))
     } else {
-        refuse(stream, INVALID_CREDENTIALS)
+        refuse(stream, INVALID_CREDENTIALS).map(|()| None)
     }
+}
+
+fn forward(client: TcpStream, runtime: UnixStream) -> io::Result<()> {
+    let client_reader = client.try_clone()?;
+    let runtime_reader = runtime.try_clone()?;
+    let to_runtime = thread::spawn(move || forward_client_messages(client_reader, runtime));
+    let to_client = thread::spawn(move || forward_server_messages(runtime_reader, client));
+
+    let to_runtime_result = join_forwarder(to_runtime);
+    let to_client_result = join_forwarder(to_client);
+    to_runtime_result.and(to_client_result)
+}
+
+fn forward_client_messages(mut client: TcpStream, mut runtime: UnixStream) -> io::Result<()> {
+    let result = copy_messages::<_, _, ClientMsg>(&mut client, &mut runtime);
+    close_connection(&client, &runtime);
+    result
+}
+
+fn forward_server_messages(mut runtime: UnixStream, mut client: TcpStream) -> io::Result<()> {
+    let result = copy_messages::<_, _, ServerMsg>(&mut runtime, &mut client);
+    close_connection(&client, &runtime);
+    result
+}
+
+fn copy_messages<R, W, M>(reader: &mut R, writer: &mut W) -> io::Result<()>
+where
+    R: Read,
+    W: io::Write,
+    M: serde::de::DeserializeOwned + serde::Serialize,
+{
+    loop {
+        let message = codec::decode::<_, M>(reader)?;
+        codec::encode(writer, &message)?;
+    }
+}
+
+fn close_connection(client: &TcpStream, runtime: &UnixStream) {
+    let _ = client.shutdown(std::net::Shutdown::Both);
+    let _ = runtime.shutdown(std::net::Shutdown::Both);
+}
+
+fn join_forwarder(worker: thread::JoinHandle<io::Result<()>>) -> io::Result<()> {
+    match worker.join() {
+        Ok(Err(error)) if connection_was_closed(&error) => Ok(()),
+        Ok(result) => result,
+        Err(_) => Err(io::Error::other("forward thread panicked")),
+    }
+}
+
+fn connection_was_closed(error: &io::Error) -> bool {
+    matches!(
+        error.kind(),
+        io::ErrorKind::UnexpectedEof
+            | io::ErrorKind::ConnectionAborted
+            | io::ErrorKind::ConnectionReset
+            | io::ErrorKind::BrokenPipe
+    )
 }
 
 fn refuse(stream: &mut TcpStream, reason: &str) -> io::Result<()> {
@@ -119,7 +211,10 @@ mod tests {
     use std::thread;
     use std::time::Duration;
 
-    use super::{connection_was_silent, handshake, report_handshake, tokens_equal};
+    use super::{
+        connection_was_closed, connection_was_silent, handshake, join_forwarder, report_connection,
+        tokens_equal,
+    };
 
     #[test]
     fn token_comparison_checks_all_bytes_and_length() {
@@ -144,7 +239,7 @@ mod tests {
         let bytes_read = std::io::Read::read(&mut client, &mut byte)
             .expect("silent connection must close without a response");
 
-        assert!(result.is_ok());
+        assert_eq!(result.expect("silent handshake must finish"), None);
         assert_eq!(bytes_read, 0);
     }
 
@@ -163,9 +258,47 @@ mod tests {
     }
 
     #[test]
+    fn identifies_closed_connection_errors() {
+        for kind in [
+            io::ErrorKind::UnexpectedEof,
+            io::ErrorKind::ConnectionAborted,
+            io::ErrorKind::ConnectionReset,
+            io::ErrorKind::BrokenPipe,
+        ] {
+            assert!(connection_was_closed(&io::Error::from(kind)));
+        }
+        assert!(!connection_was_closed(&io::Error::from(
+            io::ErrorKind::InvalidData
+        )));
+    }
+
+    #[test]
+    fn joins_forwarder_results() {
+        assert!(join_forwarder(thread::spawn(|| Ok(()))).is_ok());
+        assert!(
+            join_forwarder(thread::spawn(|| Err(io::Error::from(
+                io::ErrorKind::UnexpectedEof
+            ))))
+            .is_ok()
+        );
+
+        let error = join_forwarder(thread::spawn(|| {
+            Err(io::Error::from(io::ErrorKind::InvalidData))
+        }))
+        .expect_err("invalid data must be returned");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+
+        let panic_error = join_forwarder(thread::spawn(|| -> io::Result<()> {
+            panic!("test panic");
+        }))
+        .expect_err("thread panic must be returned");
+        assert_eq!(panic_error.kind(), io::ErrorKind::Other);
+    }
+
+    #[test]
     fn reports_handshake_error() {
-        assert!(report_handshake(Err(io::Error::other("test error"))));
-        assert!(!report_handshake(Ok(())));
+        assert!(report_connection(Err(io::Error::other("test error"))));
+        assert!(!report_connection(Ok(())));
     }
 
     #[test]
