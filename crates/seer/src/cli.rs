@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use crate::commands::{self, CommandError};
 
-const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start          Start the server\n  invite         Create an invitation\n  join           Join a server\n  list           List saved servers and people\n  attach         Attach to your tree\n  detach         Detach this client\n  peek <person>  View another person's tree\n";
+const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start          Start the server\n  invite         Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Attach to your tree\n  detach         Detach this client\n  peek <person>  View another person's tree\n";
 
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
@@ -10,6 +10,7 @@ enum Command {
     Start,
     Invite,
     Join,
+    JoinWithInvitation(String),
     List,
     Attach,
     Detach,
@@ -31,7 +32,8 @@ pub(crate) fn run(arguments: impl Iterator<Item = String>) -> ExitCode {
         }
         Command::Start => return crate::start::run(),
         Command::Invite => commands::invite(),
-        Command::Join => commands::join(),
+        Command::Join => commands::join(None),
+        Command::JoinWithInvitation(invitation) => commands::join(Some(&invitation)),
         Command::List => commands::list(),
         Command::Attach => commands::attach(),
         Command::Detach => commands::detach(),
@@ -46,7 +48,13 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ()> {
         "--help" | "-h" if arguments.next().is_none() => Command::Help,
         "start" if arguments.next().is_none() => Command::Start,
         "invite" if arguments.next().is_none() => Command::Invite,
-        "join" if arguments.next().is_none() => Command::Join,
+        "join" => match arguments.next() {
+            None => Command::Join,
+            Some(invitation) if arguments.next().is_none() => {
+                Command::JoinWithInvitation(invitation)
+            }
+            Some(_) => return Err(()),
+        },
         "list" if arguments.next().is_none() => Command::List,
         "attach" if arguments.next().is_none() => Command::Attach,
         "detach" if arguments.next().is_none() => Command::Detach,
