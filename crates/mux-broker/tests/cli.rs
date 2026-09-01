@@ -4,14 +4,19 @@ use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mux_core::Tree;
 use mux_core::proto::{ClientMsg, ServerMsg, codec};
 
 #[test]
 fn requires_config_path() {
-    let output = broker_command().output().expect("broker must start");
+    let child = broker_command()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("broker must start");
+    let output = wait_for_output(child);
 
     assert!(!output.status.success());
     assert!(stderr(&output).contains("usage: mux-broker <config-path>"));
@@ -23,12 +28,17 @@ fn loads_config_and_listens() {
     let config = TemporaryConfig::new(address);
     let child = broker_command()
         .arg(&config.path)
+        .env("XDG_RUNTIME_DIR", &config.directory)
+        .env("MUX_RUNTIME_BIN", config.directory.join("missing-runtime"))
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("broker must start");
     let _broker = BrokerProcess(child);
     let mut stream = connect_when_ready(address);
+    stream
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("read timeout must set");
 
     codec::encode(
         &mut stream,
@@ -78,6 +88,7 @@ fn connect_when_ready(address: SocketAddr) -> TcpStream {
 
 struct TemporaryConfig {
     path: PathBuf,
+    directory: PathBuf,
 }
 
 impl TemporaryConfig {
@@ -86,24 +97,24 @@ impl TemporaryConfig {
             .duration_since(UNIX_EPOCH)
             .expect("system time must be after the Unix epoch")
             .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "mux-broker-{}-{timestamp}.toml",
-            std::process::id()
-        ));
+        let directory =
+            std::env::temp_dir().join(format!("mux-broker-cli-{}-{timestamp}", std::process::id()));
+        fs::create_dir(&directory).expect("temporary directory must be created");
+        let path = directory.join("broker.toml");
         let contents = format!(
             "listen = \"{address}\"\n\n[[users]]\nuser = \"alice\"\ntoken = \"alice-secret\"\n"
         );
         fs::write(&path, contents).expect("temporary config must write");
-        Self { path }
+        Self { path, directory }
     }
 }
 
 impl Drop for TemporaryConfig {
     fn drop(&mut self) {
-        if let Err(error) = fs::remove_file(&self.path)
+        if let Err(error) = fs::remove_dir_all(&self.directory)
             && error.kind() != io::ErrorKind::NotFound
         {
-            panic!("temporary config must be removed: {error}");
+            panic!("temporary directory must be removed: {error}");
         }
     }
 }
@@ -112,7 +123,36 @@ struct BrokerProcess(Child);
 
 impl Drop for BrokerProcess {
     fn drop(&mut self) {
+        if matches!(self.0.try_wait(), Ok(Some(_))) {
+            return;
+        }
         let _ = self.0.kill();
-        let _ = self.0.wait();
+        let kill_deadline = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < kill_deadline {
+            if matches!(self.0.try_wait(), Ok(Some(_))) {
+                return;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+    }
+}
+
+fn wait_for_output(mut child: Child) -> Output {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if child
+            .try_wait()
+            .expect("broker status must be available")
+            .is_some()
+        {
+            return child
+                .wait_with_output()
+                .expect("broker output must be available");
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            panic!("broker did not exit within 2 seconds");
+        }
+        thread::sleep(Duration::from_millis(10));
     }
 }
