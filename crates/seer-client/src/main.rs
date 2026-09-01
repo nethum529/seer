@@ -6,6 +6,7 @@ use std::process::ExitCode;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
 mod input;
+mod start;
 mod state;
 mod tui;
 
@@ -17,7 +18,19 @@ struct Arguments {
 }
 
 fn main() -> ExitCode {
-    let Some(arguments) = parse_arguments(env::args().skip(1)) else {
+    let mut raw_arguments = env::args().skip(1);
+    let Some(first) = raw_arguments.next() else {
+        eprintln!("usage: seer-client <addr> <user> <token> [--peek <target-user>]");
+        return ExitCode::from(2);
+    };
+    if first == "start" {
+        if raw_arguments.next().is_some() {
+            eprintln!("usage: seer-client start");
+            return ExitCode::from(2);
+        }
+        return start::run();
+    }
+    let Some(arguments) = parse_arguments(std::iter::once(first).chain(raw_arguments)) else {
         eprintln!("usage: seer-client <addr> <user> <token> [--peek <target-user>]");
         return ExitCode::from(2);
     };
