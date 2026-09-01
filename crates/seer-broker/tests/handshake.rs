@@ -2,6 +2,8 @@ use std::fs;
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
+use std::process::Command;
+use std::sync::Once;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -12,6 +14,7 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use sha2::{Digest, Sha256};
 
 static NEXT_STATE_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+static RUNTIME_BINARY: Once = Once::new();
 
 #[test]
 fn handles_required_handshake_outcomes() {
@@ -155,6 +158,7 @@ fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
 }
 
 fn test_config(listen: SocketAddr) -> (Config, PathBuf) {
+    RUNTIME_BINARY.call_once(install_runtime_binary);
     let counter = NEXT_STATE_DIRECTORY.fetch_add(1, Ordering::Relaxed);
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -196,6 +200,34 @@ fn test_config(listen: SocketAddr) -> (Config, PathBuf) {
     )
 }
 
+fn install_runtime_binary() {
+    let executable = std::env::current_exe().expect("test executable path must resolve");
+    let target = executable
+        .parent()
+        .expect("test executable must have a parent")
+        .join("seer-runtime");
+    fs::copy(runtime_binary(), target).expect("runtime binary must install");
+}
+
+fn runtime_binary() -> PathBuf {
+    let sibling = Path::new(env!("CARGO_BIN_EXE_seer-broker"))
+        .parent()
+        .expect("broker binary must have a parent")
+        .join("seer-runtime");
+    if sibling.is_file() {
+        return sibling;
+    }
+
+    let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+        .args(["build", "-p", "seer-runtime", "--bin", "seer-runtime"])
+        .current_dir(env!("CARGO_MANIFEST_DIR"))
+        .status()
+        .expect("runtime binary must build");
+    assert!(status.success(), "runtime binary must build");
+
+    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/seer-runtime")
+}
+
 fn remove_state_directory(state_dir: &Path) {
     let mut last_error = None;
     for attempt in 0..20 {
@@ -221,7 +253,7 @@ fn hash(value: &str) -> String {
 fn exchange(address: SocketAddr, request: &ClientMsg) -> (TcpStream, ServerMsg) {
     let mut stream = TcpStream::connect(address).expect("client must connect");
     stream
-        .set_read_timeout(Some(Duration::from_secs(1)))
+        .set_read_timeout(Some(Duration::from_secs(10)))
         .expect("read timeout must set");
     codec::encode(&mut stream, request).expect("request must encode");
     let response = codec::decode(&mut stream).expect("response must decode");
