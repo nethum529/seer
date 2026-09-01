@@ -1,7 +1,7 @@
 [workspace]
 members = [
     "crates/seer-broker",
-    "crates/seer-client",
+    "crates/seer",
     "crates/seer-core",
     "crates/seer-runtime",
 ]

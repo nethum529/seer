@@ -1,13 +1,14 @@
 [package]
-name = "seer-client"
+name = "seer"
 version.workspace = true
 edition.workspace = true
 
 [dependencies]
 crossterm = "0.29"
 libc = "0.2"
-seer-core = { path = "../seer-core" }
 ratatui = "0.30"
+rpassword = "7.4"
+seer-core = { path = "../seer-core" }
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
 toml = "0.9"

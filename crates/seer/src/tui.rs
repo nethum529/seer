@@ -1,4 +1,4 @@
-use std::cell::Cell as ModeCell;
+use std::cell::{Cell as ModeCell, RefCell};
 use std::io::{self, Stdout};
 use std::net::{Shutdown, TcpStream};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -15,7 +15,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Widget};
+use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{Cell, Color, Tree};
 
@@ -26,6 +26,7 @@ const EVENT_WAIT: Duration = Duration::from_millis(25);
 
 thread_local! {
     static VIEW_ONLY: ModeCell<bool> = const { ModeCell::new(false) };
+    static PEEK_PERSON: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
 enum ReaderEvent {
@@ -211,12 +212,25 @@ fn is_control_char(key: KeyEvent, character: char) -> bool {
     key.code == KeyCode::Char(character) && key.modifiers.contains(KeyModifiers::CONTROL)
 }
 
+#[cfg(test)]
 pub(crate) fn set_view_only(view_only: bool) {
     VIEW_ONLY.set(view_only);
+    if !view_only {
+        PEEK_PERSON.set(None);
+    }
+}
+
+pub(crate) fn set_peek_person(person: Option<&str>) {
+    VIEW_ONLY.set(person.is_some());
+    PEEK_PERSON.set(person.map(str::to_owned));
 }
 
 fn is_view_only() -> bool {
     VIEW_ONLY.get()
+}
+
+fn peek_person() -> Option<String> {
+    PEEK_PERSON.with_borrow(Clone::clone)
 }
 
 fn send(stream: &mut TcpStream, message: &ClientMsg) -> io::Result<()> {
@@ -224,7 +238,19 @@ fn send(stream: &mut TcpStream, message: &ClientMsg) -> io::Result<()> {
 }
 
 fn draw(frame: &mut ratatui::Frame<'_>, state: &ClientState) {
-    let area = frame.area();
+    let mut area = frame.area();
+    if let Some(person) = peek_person() {
+        let banner_height = area.height.min(2);
+        let banner = Rect::new(area.x, area.y, area.width, banner_height);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "PEEK: {person} - READ ONLY\nWorkspace: {person}/current"
+            )),
+            banner,
+        );
+        area.y = area.y.saturating_add(banner_height);
+        area.height = area.height.saturating_sub(banner_height);
+    }
     let Some(tab) = state.visible_tab() else {
         return;
     };
@@ -309,185 +335,4 @@ impl Drop for TerminalSession {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::io::{self, Read};
-    use std::net::{TcpListener, TcpStream};
-    use std::time::Duration;
-
-    use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-    use seer_core::proto::{ClientMsg, codec};
-    use seer_core::{PaneSize, Tree};
-
-    use super::{LoopControl, handle_event, set_view_only};
-    use crate::state::ClientState;
-
-    #[test]
-    fn view_only_events_send_no_session_changes() {
-        let (mut client, mut server) = socket_pair();
-        let mut state = state_with_pane();
-        let mut command_pending = false;
-        set_view_only(true);
-        let events = [
-            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
-            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
-            Event::Key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE)),
-            Event::Resize(120, 40),
-        ];
-
-        for event in events {
-            assert_eq!(
-                handle_event(event, &mut client, &mut state, &mut command_pending)
-                    .expect("event handling must succeed"),
-                LoopControl::Continue
-            );
-        }
-
-        assert_no_message(&mut server);
-    }
-
-    #[test]
-    fn active_events_send_input_focus_and_resize() {
-        let (mut client, mut server) = socket_pair();
-        let mut state = state_with_pane();
-        let mut command_pending = false;
-        set_view_only(false);
-
-        handle_event(
-            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("input key must be handled");
-        handle_event(
-            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("command prefix must be handled");
-        handle_event(
-            Event::Key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE)),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("focus key must be handled");
-        handle_event(
-            Event::Resize(120, 40),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("resize must be handled");
-
-        assert_eq!(
-            decode(&mut server),
-            ClientMsg::Input {
-                pane: "w1:p1".into(),
-                bytes: b"a".to_vec(),
-            }
-        );
-        assert_eq!(
-            decode(&mut server),
-            ClientMsg::FocusPane {
-                pane: "w1:p1".into(),
-            }
-        );
-        assert_eq!(
-            decode(&mut server),
-            ClientMsg::Resize {
-                cols: 120,
-                rows: 40,
-            }
-        );
-    }
-
-    #[test]
-    fn release_keys_send_no_messages() {
-        let (mut client, mut server) = socket_pair();
-        let mut state = state_with_pane();
-        let mut command_pending = false;
-        set_view_only(false);
-        let release = KeyEvent::new_with_kind(
-            KeyCode::Char('a'),
-            KeyModifiers::NONE,
-            KeyEventKind::Release,
-        );
-
-        assert_eq!(
-            handle_event(
-                Event::Key(release),
-                &mut client,
-                &mut state,
-                &mut command_pending,
-            )
-            .expect("release key must be handled"),
-            LoopControl::Continue
-        );
-
-        assert_no_message(&mut server);
-    }
-
-    #[test]
-    fn control_q_detaches_in_view_only_mode() {
-        let (mut client, mut server) = socket_pair();
-        let mut state = state_with_pane();
-        let mut command_pending = false;
-        set_view_only(true);
-
-        assert_eq!(
-            handle_event(
-                Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
-                &mut client,
-                &mut state,
-                &mut command_pending,
-            )
-            .expect("detach key must be handled"),
-            LoopControl::Exit
-        );
-        assert_eq!(decode(&mut server), ClientMsg::Detach);
-    }
-
-    fn decode(stream: &mut TcpStream) -> ClientMsg {
-        codec::decode(stream).expect("client message must decode")
-    }
-
-    fn assert_no_message(stream: &mut TcpStream) {
-        stream
-            .set_read_timeout(Some(Duration::from_millis(50)))
-            .expect("read timeout must be set");
-        let mut byte = [0];
-        let error = stream
-            .read_exact(&mut byte)
-            .expect_err("event must not send a message");
-        assert!(matches!(
-            error.kind(),
-            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-        ));
-    }
-
-    fn socket_pair() -> (TcpStream, TcpStream) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-        let client = TcpStream::connect(
-            listener
-                .local_addr()
-                .expect("listener must have an address"),
-        )
-        .expect("client must connect");
-        let (server, _) = listener.accept().expect("server must accept client");
-        server
-            .set_read_timeout(Some(Duration::from_secs(1)))
-            .expect("read timeout must be set");
-        (client, server)
-    }
-
-    fn state_with_pane() -> ClientState {
-        let mut tree = Tree::new();
-        tree.create_workspace("main")
-            .expect("workspace must be created");
-        tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
-            .expect("tab must be created");
-        ClientState::new(tree)
-    }
-}
+mod tests;

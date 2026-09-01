@@ -300,8 +300,8 @@ fn unreadable_server_store_is_not_replaced() {
 fn install_binaries(directory: &TestDirectory) -> PathBuf {
     let bin_dir = directory.path.join("b");
     fs::create_dir(&bin_dir).expect("binary directory must be created");
-    let executable = bin_dir.join("seer-client");
-    fs::copy(env!("CARGO_BIN_EXE_seer-client"), &executable).expect("client binary must be copied");
+    let executable = bin_dir.join("seer");
+    fs::copy(env!("CARGO_BIN_EXE_seer"), &executable).expect("client binary must be copied");
     let test_binary = std::env::current_exe().expect("test binary path must be available");
     assert!(!test_binary.to_string_lossy().contains('\''));
     let script = format!(
