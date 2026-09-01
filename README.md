@@ -20,8 +20,12 @@ On the owner's Linux machine, run these commands from the repository:
 
 ```sh
 cargo install --path crates/seer
+cargo install --path crates/seer-broker
+cargo install --path crates/seer-runtime
 seer start
 ```
+
+All three land in `~/.cargo/bin`, which must be on `PATH`.
 
 Copy the printed `seer join <capsule>` line and send it to the friend through
 a private channel.
