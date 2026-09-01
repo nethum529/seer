@@ -206,6 +206,15 @@ fn install_runtime_binary() {
         .parent()
         .expect("test executable must have a parent")
         .join("seer-runtime");
+    fs::remove_file(&target)
+        .or_else(|error| {
+            if error.kind() == std::io::ErrorKind::NotFound {
+                Ok(())
+            } else {
+                Err(error)
+            }
+        })
+        .expect("old runtime binary must remove");
     fs::copy(runtime_binary(), target).expect("runtime binary must install");
 }
 
