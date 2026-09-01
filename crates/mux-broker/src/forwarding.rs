@@ -311,6 +311,8 @@ mod tests {
     #[test]
     fn runtime_connection_close_shuts_down_its_reader() {
         let (stream, peer) = UnixStream::pair().expect("runtime pair must open");
+        peer.set_read_timeout(Some(WAIT_TIMEOUT))
+            .expect("read timeout must set");
         let (sender, _events) = mpsc::channel();
         let identity = Arc::new(());
         let reader = super::spawn_runtime_reader(
@@ -424,6 +426,8 @@ mod tests {
 
     fn attach_runtime(coordinator: &mut Coordinator<'_>) -> UnixStream {
         let (stream, peer) = UnixStream::pair().expect("runtime pair must open");
+        peer.set_read_timeout(Some(WAIT_TIMEOUT))
+            .expect("read timeout must set");
         let identity = Arc::new(());
         let reader = super::spawn_runtime_reader(
             stream.try_clone().expect("runtime stream must clone"),
@@ -443,13 +447,13 @@ mod tests {
         let address = listener.local_addr().expect("listener must have address");
         let client = TcpStream::connect(address).expect("client must connect");
         let (server, _) = listener.accept().expect("server must accept");
+        client
+            .set_read_timeout(Some(WAIT_TIMEOUT))
+            .expect("read timeout must set");
         (server, client)
     }
 
     fn assert_tcp_closed(mut stream: TcpStream) {
-        stream
-            .set_read_timeout(Some(WAIT_TIMEOUT))
-            .expect("read timeout must set");
         let mut byte = [0];
         match stream.read(&mut byte) {
             Ok(0) => {}
@@ -466,9 +470,6 @@ mod tests {
     }
 
     fn assert_unix_closed(mut stream: UnixStream) {
-        stream
-            .set_read_timeout(Some(WAIT_TIMEOUT))
-            .expect("read timeout must set");
         let mut byte = [0];
         match stream.read(&mut byte) {
             Ok(0) => {}
