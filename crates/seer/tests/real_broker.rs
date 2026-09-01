@@ -63,21 +63,14 @@ fn commands_work_with_stream_messages_from_the_real_broker() {
 fn invitation_from(output: &[u8]) -> String {
     let output = text(output);
     let lines: Vec<&str> = output.lines().collect();
-    assert_eq!(
-        lines.get(..3),
-        Some(
-            [
-                "Seat ready. It works once and expires in 1 hour.",
-                "Send this invitation through a private channel:",
-                "",
-            ]
-            .as_slice()
-        )
-    );
-    let invitation = lines.get(3).expect("invitation line must print");
-    assert_eq!(lines.len(), 4);
+    assert_eq!(lines.first(), Some(&"Send this to a friend:"));
+    let join = lines.get(1).expect("join command must print");
+    let invitation = join
+        .strip_prefix("seer join ")
+        .expect("join command must include the invitation");
+    assert_eq!(lines.len(), 2);
     assert!(invitation.starts_with("SEER1-127.0.0.1-"));
-    (*invitation).to_owned()
+    invitation.to_owned()
 }
 
 fn write_store(config: &Path, address: SocketAddr, name: &str, user_id: &str, credential: &str) {

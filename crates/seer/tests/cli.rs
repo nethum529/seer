@@ -43,10 +43,10 @@ fn help_detach_and_missing_attach_have_exact_results() {
     assert_eq!(invalid.status.code(), Some(2));
     assert!(invalid.stdout.is_empty());
     assert!(text(&invalid.stderr).starts_with("Usage: seer <command>\n"));
-    for command in ["start", "invite", "join", "list", "attach", "detach"] {
+    for command in ["start", "invite", "list", "attach", "detach"] {
         let extra = run(&config, &[command, "extra"], "");
         assert_eq!(extra.status.code(), Some(2));
-        assert!(text(&extra.stderr).starts_with("Usage: seer <command>\n"));
+        assert!(text(&extra.stderr).contains("join [capsule] Join a server"));
     }
 }
 
@@ -303,7 +303,7 @@ fn invite_prints_the_worked_example_block() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
         output.stdout,
-        b"Seat ready. It works once and expires in 1 hour.\nSend this invitation through a private channel:\n\nSEER1-team.example.com-7321-A7K4Q9P2\n"
+        b"Send this to a friend:\nseer join SEER1-team.example.com-7321-A7K4Q9P2\n"
     );
     assert!(output.stderr.is_empty());
     server.join().expect("server must finish");
