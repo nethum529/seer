@@ -3,7 +3,8 @@ use std::net::{TcpListener, TcpStream};
 use std::process::{Command, Output};
 use std::thread;
 
-use mux_core::proto::{ClientMsg, ServerMsg, Tree, codec};
+use mux_core::Tree;
+use mux_core::proto::{ClientMsg, ServerMsg, codec};
 
 #[test]
 fn handles_welcome_and_refused_replies() {
@@ -20,7 +21,7 @@ fn handles_welcome_and_refused_replies() {
             },
             ServerMsg::Welcome {
                 user: "alice".into(),
-                tree: Tree,
+                tree: Tree::new(),
             },
         );
         answer(
@@ -78,7 +79,7 @@ fn rejects_unexpected_and_invalid_replies() {
                 user: "alice".into(),
                 token: "valid".into(),
             },
-            ServerMsg::Tree { tree: Tree },
+            ServerMsg::Tree { tree: Tree::new() },
         );
 
         let (mut stream, _) = listener.accept().expect("server must accept a client");
