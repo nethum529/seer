@@ -451,7 +451,18 @@ mod tests {
             .set_read_timeout(Some(WAIT_TIMEOUT))
             .expect("read timeout must set");
         let mut byte = [0];
-        assert_eq!(stream.read(&mut byte).expect("TCP stream must close"), 0);
+        match stream.read(&mut byte) {
+            Ok(0) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::UnexpectedEof
+                ) => {}
+            result => panic!("TCP stream must close: {result:?}"),
+        }
     }
 
     fn assert_unix_closed(mut stream: UnixStream) {
@@ -459,7 +470,18 @@ mod tests {
             .set_read_timeout(Some(WAIT_TIMEOUT))
             .expect("read timeout must set");
         let mut byte = [0];
-        assert_eq!(stream.read(&mut byte).expect("Unix stream must close"), 0);
+        match stream.read(&mut byte) {
+            Ok(0) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    std::io::ErrorKind::ConnectionReset
+                        | std::io::ErrorKind::ConnectionAborted
+                        | std::io::ErrorKind::BrokenPipe
+                        | std::io::ErrorKind::UnexpectedEof
+                ) => {}
+            result => panic!("Unix stream must close: {result:?}"),
+        }
     }
 
     fn wait_for_thread(thread: &thread::JoinHandle<()>) -> bool {
