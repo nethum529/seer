@@ -6,7 +6,7 @@ use std::{
     env,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
-    net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket},
     os::unix::{
         fs::{OpenOptionsExt, PermissionsExt},
         process::CommandExt,
@@ -119,7 +119,7 @@ fn prompt_config() -> io::Result<BrokerConfig> {
     let login = env::var("USER")
         .or_else(|_| env::var("LOGNAME"))
         .unwrap_or_else(|_| "owner".to_owned());
-    let host = host_name();
+    let host = published_host();
     let owner_name = prompt("Your name", &login)?;
     let published_addr = prompt("Published address", &format!("{host}:{PORT}"))?;
     let port = published_addr
@@ -133,6 +133,26 @@ fn prompt_config() -> io::Result<BrokerConfig> {
         owner_name,
         state_dir: state_dir()?,
     })
+}
+#[cfg(target_os = "linux")]
+fn published_host() -> String {
+    let host = host_name();
+    Command::new("tailscale")
+        .args(["ip", "-4"])
+        .output()
+        .ok()
+        .filter(|output| output.status.success())
+        .and_then(|output| String::from_utf8(output.stdout).ok())
+        .and_then(|output| output.trim().parse::<Ipv4Addr>().ok())
+        .or_else(|| {
+            let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+            socket.connect((Ipv4Addr::new(192, 0, 2, 1), PORT)).ok()?;
+            match socket.local_addr().ok()?.ip() {
+                IpAddr::V4(ip) if !ip.is_loopback() => Some(ip),
+                _ => None,
+            }
+        })
+        .map_or(host, |ip| ip.to_string())
 }
 #[cfg(target_os = "linux")]
 fn host_name() -> String {
