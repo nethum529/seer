@@ -4,6 +4,7 @@ use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -11,6 +12,7 @@ use sha2::{Digest, Sha256};
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 pub(super) struct TestFiles {
     root: PathBuf,
@@ -23,12 +25,16 @@ pub(super) struct TestFiles {
 
 impl TestFiles {
     pub(super) fn new() -> Self {
+        let counter = NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time must be after the Unix epoch")
             .as_nanos()
             % 1_000_000_000;
-        let root = PathBuf::from(format!("/tmp/sbf-{}-{timestamp}", std::process::id()));
+        let root = PathBuf::from(format!(
+            "/tmp/sbf-{}-{counter}-{timestamp}",
+            std::process::id()
+        ));
         fs::create_dir(&root).expect("temporary directory must be created");
         Self {
             config: root.join("broker.toml"),
@@ -152,12 +158,23 @@ impl Drop for TestFiles {
                 try_terminate_process(pid);
             }
         }
-        if let Err(error) = fs::remove_dir_all(&self.root)
-            && error.kind() != io::ErrorKind::NotFound
-        {
-            panic!("temporary directory must be removed: {error}");
+        remove_temporary_directory(&self.root);
+    }
+}
+
+fn remove_temporary_directory(directory: &Path) {
+    let mut last_error = None;
+    for attempt in 0..20 {
+        match fs::remove_dir_all(directory) {
+            Ok(()) => return,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+            Err(error) => last_error = Some(error),
+        }
+        if attempt < 19 {
+            thread::sleep(Duration::from_millis(50));
         }
     }
+    panic!("temporary directory must be removed: {last_error:?}");
 }
 
 pub(super) struct ProcessGuard(Child);

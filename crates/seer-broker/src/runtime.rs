@@ -188,11 +188,14 @@ mod tests {
     use std::process::Command;
     use std::sync::Mutex;
     use std::thread;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::Duration;
 
     use super::{
         RuntimeManager, connect_with_retry, create_private_directory, current_uid,
         runtime_binary_next_to, runtime_directory_path, validate_socket_path,
+    };
+    use crate::test_support::{
+        remove_directory, temporary_directory as create_temporary_directory,
     };
 
     #[test]
@@ -207,7 +210,7 @@ mod tests {
         assert_eq!(fallback, Path::new("/tmp/seer-123"));
         assert_eq!(mode(&xdg), 0o700);
 
-        fs::remove_dir_all(temporary).expect("temporary directory must be removed");
+        remove_directory(&temporary, "temporary directory must be removed");
     }
 
     #[test]
@@ -258,7 +261,7 @@ mod tests {
 
         drop(stream);
         worker.join().expect("listener thread must finish");
-        fs::remove_dir_all(temporary).expect("temporary directory must be removed");
+        remove_directory(&temporary, "temporary directory must be removed");
     }
 
     #[test]
@@ -267,7 +270,7 @@ mod tests {
         let socket = temporary.join("m.sock");
 
         connect_with_retry(&socket, 2).expect_err("missing socket must fail");
-        fs::remove_dir_all(temporary).expect("temporary directory must be removed");
+        remove_directory(&temporary, "temporary directory must be removed");
     }
 
     #[test]
@@ -295,7 +298,7 @@ mod tests {
         wait_or_kill(child, Duration::from_millis(20));
         wait_or_kill(child, Duration::from_millis(20));
         drop(processes);
-        fs::remove_dir_all(temporary).expect("temporary directory must be removed");
+        remove_directory(&temporary, "temporary directory must be removed");
     }
 
     #[test]
@@ -315,14 +318,7 @@ mod tests {
     }
 
     fn temporary_directory(name: &str) -> std::path::PathBuf {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time must be after the Unix epoch")
-            .as_nanos()
-            % 1_000_000_000;
-        let path = Path::new("/tmp").join(format!("mb-{name}-{}-{timestamp}", std::process::id()));
-        fs::create_dir(&path).expect("temporary directory must be created");
-        path
+        create_temporary_directory(&format!("mb-{name}"))
     }
 
     fn mode(path: &Path) -> u32 {

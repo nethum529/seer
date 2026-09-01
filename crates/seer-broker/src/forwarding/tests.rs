@@ -6,12 +6,13 @@ use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::mpsc;
 use std::thread;
-use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
 use super::{Action, Coordinator, RuntimeConnection, join_reader, spawn_client_reader};
 use crate::server::BrokerState;
+use crate::test_support::{remove_directory, temporary_directory};
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(1);
 
@@ -371,12 +372,7 @@ struct TestBroker {
 
 impl TestBroker {
     fn new() -> Self {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time must be valid")
-            .as_nanos()
-            % 1_000_000_000;
-        let directory = PathBuf::from(format!("/tmp/sf-{}-{timestamp}", std::process::id()));
+        let directory = temporary_directory("sf");
         let config = crate::Config {
             listen: "127.0.0.1:0".parse().expect("address must parse"),
             published_addr: "host:7321".into(),
@@ -391,6 +387,6 @@ impl TestBroker {
 
 impl Drop for TestBroker {
     fn drop(&mut self) {
-        fs::remove_dir_all(&self.directory).expect("broker state must be removed");
+        remove_directory(&self.directory, "broker state must be removed");
     }
 }

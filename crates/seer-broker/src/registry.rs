@@ -282,9 +282,11 @@ fn invalid_json(error: serde_json::Error) -> io::Error {
 mod tests {
     use std::fs;
     use std::path::{Path, PathBuf};
-    use std::time::{SystemTime, UNIX_EPOCH};
 
     use super::{JoinError, PersonRecord, Registry, credential_hash, hashes_equal, load_json};
+    use crate::test_support::{
+        remove_directory, temporary_directory as create_temporary_directory,
+    };
 
     #[test]
     fn registry_round_trip_and_owner_credential_is_returned_once() {
@@ -466,17 +468,10 @@ mod tests {
     }
 
     fn temporary_directory(name: &str) -> PathBuf {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time must be valid")
-            .as_nanos()
-            % 1_000_000_000;
-        let path = PathBuf::from(format!("/tmp/sr-{name}-{}-{timestamp}", std::process::id()));
-        fs::create_dir(&path).expect("temporary directory must be created");
-        path
+        create_temporary_directory(&format!("sr-{name}"))
     }
 
     fn remove(path: impl AsRef<Path>) {
-        fs::remove_dir_all(path).expect("temporary directory must be removed");
+        remove_directory(path.as_ref(), "temporary directory must be removed");
     }
 }

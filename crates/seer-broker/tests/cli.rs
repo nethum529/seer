@@ -3,12 +3,15 @@ use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use sha2::{Digest, Sha256};
+
+static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn requires_config_path() {
@@ -147,12 +150,16 @@ impl TemporaryConfig {
     }
 
     fn create(address: SocketAddr, seed_owner: bool) -> Self {
+        let counter = NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time must be after the Unix epoch")
             .as_nanos()
             % 1_000_000_000;
-        let directory = PathBuf::from(format!("/tmp/sbc-{}-{timestamp}", std::process::id()));
+        let directory = PathBuf::from(format!(
+            "/tmp/sbc-{}-{counter}-{timestamp}",
+            std::process::id()
+        ));
         fs::create_dir(&directory).expect("temporary directory must be created");
         let path = directory.join("broker.toml");
         let state_dir = directory.join("state");
@@ -194,12 +201,23 @@ fn wait_for_file(path: &Path) -> bool {
 
 impl Drop for TemporaryConfig {
     fn drop(&mut self) {
-        if let Err(error) = fs::remove_dir_all(&self.directory)
-            && error.kind() != io::ErrorKind::NotFound
-        {
-            panic!("temporary directory must be removed: {error}");
+        remove_temporary_directory(&self.directory);
+    }
+}
+
+fn remove_temporary_directory(directory: &Path) {
+    let mut last_error = None;
+    for attempt in 0..20 {
+        match fs::remove_dir_all(directory) {
+            Ok(()) => return,
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return,
+            Err(error) => last_error = Some(error),
+        }
+        if attempt < 19 {
+            thread::sleep(Duration::from_millis(50));
         }
     }
+    panic!("temporary directory must be removed: {last_error:?}");
 }
 
 struct BrokerProcess(Child);

@@ -300,6 +300,7 @@ mod tests {
     use std::time::Duration;
 
     use super::{PublishedAddress, connection_was_silent, report_connection};
+    use crate::test_support::{remove_directory, temporary_directory};
 
     #[test]
     fn published_address_creates_the_required_capsule() {
@@ -443,7 +444,7 @@ mod tests {
         );
         let second_token = registry.create_seat().expect("seat must be created");
         assert!(super::join(&mut closed_server, &registry, &second_token, "Other").is_err());
-        std::fs::remove_dir_all(directory).expect("state directory must be removed");
+        remove_directory(&directory, "state directory must be removed");
     }
 
     #[test]
@@ -468,7 +469,7 @@ mod tests {
             ..config
         };
         assert!(super::serve(listener, &config).is_err());
-        std::fs::remove_dir_all(directory).expect("state directory must be removed");
+        remove_directory(&directory, "state directory must be removed");
     }
 
     fn tcp_pair() -> (TcpStream, TcpStream) {
@@ -482,11 +483,6 @@ mod tests {
     }
 
     fn test_directory(name: &str) -> PathBuf {
-        let timestamp = std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .expect("system time must be valid")
-            .as_nanos()
-            % 1_000_000_000;
-        PathBuf::from(format!("/tmp/ss-{name}-{}-{timestamp}", std::process::id()))
+        temporary_directory(&format!("ss-{name}"))
     }
 }

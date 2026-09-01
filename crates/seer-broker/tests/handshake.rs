@@ -1,7 +1,8 @@
 use std::fs;
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -9,6 +10,8 @@ use seer_broker::{Config, serve};
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use sha2::{Digest, Sha256};
+
+static NEXT_STATE_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn handles_required_handshake_outcomes() {
@@ -47,7 +50,7 @@ fn handles_required_handshake_outcomes() {
 
     let (non_hello_stream, non_hello) = exchange(address, &ClientMsg::Detach);
     assert_refused_and_closed(non_hello_stream, non_hello, "expected Hello");
-    fs::remove_dir_all(state_dir).expect("state directory must be removed");
+    remove_state_directory(&state_dir);
 }
 
 #[test]
@@ -69,7 +72,7 @@ fn handles_a_second_connection_while_the_first_is_silent() {
     );
 
     assert_refused_and_closed(stream, response, "invalid credentials");
-    fs::remove_dir_all(state_dir).expect("state directory must be removed");
+    remove_state_directory(&state_dir);
 }
 
 #[test]
@@ -148,16 +151,20 @@ fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
             .iter()
             .any(|person| person["user_id"] == joined_user)
     );
-    fs::remove_dir_all(state_dir).expect("state directory must be removed");
+    remove_state_directory(&state_dir);
 }
 
 fn test_config(listen: SocketAddr) -> (Config, PathBuf) {
+    let counter = NEXT_STATE_DIRECTORY.fetch_add(1, Ordering::Relaxed);
     let timestamp = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .expect("system time must be valid")
         .as_nanos()
         % 1_000_000_000;
-    let state_dir = PathBuf::from(format!("/tmp/sh-{}-{timestamp}", std::process::id()));
+    let state_dir = PathBuf::from(format!(
+        "/tmp/sh-{}-{counter}-{timestamp}",
+        std::process::id()
+    ));
     fs::create_dir(&state_dir).expect("state directory must be created");
     let alice_hash = hash("alice-secret");
     let bob_hash = hash("bob-secret");
@@ -187,6 +194,21 @@ fn test_config(listen: SocketAddr) -> (Config, PathBuf) {
         },
         state_dir,
     )
+}
+
+fn remove_state_directory(state_dir: &Path) {
+    let mut last_error = None;
+    for attempt in 0..20 {
+        match fs::remove_dir_all(state_dir) {
+            Ok(()) => return,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return,
+            Err(error) => last_error = Some(error),
+        }
+        if attempt < 19 {
+            thread::sleep(Duration::from_millis(50));
+        }
+    }
+    panic!("state directory must be removed: {last_error:?}");
 }
 
 fn hash(value: &str) -> String {
