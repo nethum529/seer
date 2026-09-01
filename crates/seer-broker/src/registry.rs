@@ -229,7 +229,7 @@ fn hashes_equal(expected: &str, supplied: &str) -> bool {
     constant_time_eq::constant_time_eq(expected.as_bytes(), supplied.as_bytes())
 }
 
-fn random_hex<const N: usize>() -> io::Result<String> {
+pub(crate) fn random_hex<const N: usize>() -> io::Result<String> {
     let mut bytes = [0_u8; N];
     getrandom::fill(&mut bytes).map_err(|error| io::Error::other(error.to_string()))?;
     Ok(encode_hex(&bytes))

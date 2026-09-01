@@ -29,15 +29,19 @@ fn handles_required_handshake_outcomes() {
             credential: "alice-secret".into(),
         },
     );
-    assert_eq!(
-        welcome,
-        ServerMsg::Welcome {
-            user_id: "u-alice".into(),
-            name: "Alice".into(),
-            client_id: String::new(),
-            tree: Tree::new(),
-        }
-    );
+    let ServerMsg::Welcome {
+        user_id,
+        name,
+        client_id,
+        tree,
+    } = welcome
+    else {
+        panic!("expected Welcome");
+    };
+    assert_eq!(user_id, "u-alice");
+    assert_eq!(name, "Alice");
+    assert_random_client_id(&client_id);
+    assert_eq!(tree, Tree::new());
 
     let (bad_token_stream, bad_token) = exchange(
         address,
@@ -216,6 +220,11 @@ fn hash(value: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
+}
+
+fn assert_random_client_id(client_id: &str) {
+    assert_eq!(client_id.len(), 32);
+    assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
 }
 
 fn exchange(address: SocketAddr, request: &ClientMsg) -> (TcpStream, ServerMsg) {

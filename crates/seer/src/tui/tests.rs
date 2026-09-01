@@ -5,10 +5,12 @@ use std::time::Duration;
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use seer_core::proto::{ClientMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{PaneSize, Tree};
 
-use super::{LoopControl, draw, handle_event, set_peek_person, set_view_only};
+use super::{
+    LoopControl, apply_server_message, draw, handle_event, set_peek_person, set_view_only,
+};
 use crate::state::ClientState;
 
 #[test]
@@ -137,6 +139,32 @@ fn control_q_detaches_in_view_only_mode() {
         LoopControl::Exit
     );
     assert_eq!(decode(&mut server), ClientMsg::Detach);
+}
+
+#[test]
+fn detached_bye_has_a_distinct_exit() {
+    let mut state = state_with_pane();
+
+    assert_eq!(
+        apply_server_message(
+            ServerMsg::Bye {
+                reason: "detached".into(),
+            },
+            &mut state,
+        )
+        .expect("Bye must apply"),
+        LoopControl::Detached
+    );
+    assert_eq!(
+        apply_server_message(
+            ServerMsg::Bye {
+                reason: "server stopped".into(),
+            },
+            &mut state,
+        )
+        .expect("Bye must apply"),
+        LoopControl::Exit
+    );
 }
 
 #[test]

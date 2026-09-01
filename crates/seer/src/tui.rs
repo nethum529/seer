@@ -38,9 +38,16 @@ enum ReaderEvent {
 enum LoopControl {
     Continue,
     Exit,
+    Detached,
 }
 
-pub(crate) fn run(mut stream: TcpStream, tree: Tree) -> io::Result<()> {
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum SessionExit {
+    Client,
+    Detached,
+}
+
+pub(crate) fn run(mut stream: TcpStream, tree: Tree) -> io::Result<SessionExit> {
     let mut terminal = TerminalSession::start()?;
     let reader = stream.try_clone()?;
     let (receiver, reader_thread) = spawn_reader(reader);
@@ -48,7 +55,10 @@ pub(crate) fn run(mut stream: TcpStream, tree: Tree) -> io::Result<()> {
     drop(terminal);
     let _ = stream.shutdown(Shutdown::Both);
     join_reader(reader_thread)?;
-    loop_result
+    loop_result.map(|control| match control {
+        LoopControl::Detached => SessionExit::Detached,
+        LoopControl::Continue | LoopControl::Exit => SessionExit::Client,
+    })
 }
 
 fn spawn_reader(mut stream: TcpStream) -> (Receiver<ReaderEvent>, JoinHandle<()>) {
@@ -82,14 +92,15 @@ fn run_loop(
     stream: &mut TcpStream,
     receiver: &Receiver<ReaderEvent>,
     tree: Tree,
-) -> io::Result<()> {
+) -> io::Result<LoopControl> {
     let mut state = ClientState::new(tree);
     let mut command_pending = false;
     let mut dirty = true;
 
     loop {
-        if receive_messages(receiver, &mut state, &mut dirty)? == LoopControl::Exit {
-            return Ok(());
+        let received = receive_messages(receiver, &mut state, &mut dirty)?;
+        if received != LoopControl::Continue {
+            return Ok(received);
         }
         if dirty {
             terminal.draw(|frame| draw(frame, &state))?;
@@ -97,8 +108,10 @@ fn run_loop(
         }
         if event::poll(EVENT_WAIT)? {
             let event = event::read()?;
-            if handle_event(event, stream, &mut state, &mut command_pending)? == LoopControl::Exit {
-                return Ok(());
+            if let LoopControl::Exit =
+                handle_event(event, stream, &mut state, &mut command_pending)?
+            {
+                return Ok(LoopControl::Exit);
             }
             dirty = true;
         }
@@ -113,8 +126,9 @@ fn receive_messages(
     loop {
         match receiver.try_recv() {
             Ok(ReaderEvent::Message(message)) => {
-                if apply_server_message(message, state)? == LoopControl::Exit {
-                    return Ok(LoopControl::Exit);
+                let control = apply_server_message(message, state)?;
+                if control != LoopControl::Continue {
+                    return Ok(control);
                 }
                 *dirty = true;
             }
@@ -134,6 +148,9 @@ fn apply_server_message(message: ServerMsg, state: &mut ClientState) -> io::Resu
     match message {
         ServerMsg::Tree { tree } => state.replace_tree(tree),
         ServerMsg::Cells { pane, rows } => state.apply_cells(pane, rows),
+        ServerMsg::Bye { reason } if reason == "detached" => {
+            return Ok(LoopControl::Detached);
+        }
         ServerMsg::Bye { .. } => return Ok(LoopControl::Exit),
         ServerMsg::Frame { .. } => {}
         ServerMsg::Welcome { .. }

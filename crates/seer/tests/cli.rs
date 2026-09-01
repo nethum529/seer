@@ -33,7 +33,7 @@ fn help_detach_and_missing_attach_have_exact_results() {
 
     let detach = run(&config, &["detach"], "");
     assert_eq!(detach.status.code(), Some(1));
-    assert_eq!(detach.stderr, b"no attached client in this shell\n");
+    assert_eq!(detach.stderr, b"run seer join first\n");
 
     let attach = run(&config, &["attach"], "");
     assert_eq!(attach.status.code(), Some(1));

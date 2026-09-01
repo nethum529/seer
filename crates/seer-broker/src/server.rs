@@ -1,14 +1,13 @@
-use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::{TcpListener, TcpStream};
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
 
 use crate::Config;
+use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
 use crate::registry::{PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
@@ -35,7 +34,7 @@ pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
 pub(crate) struct BrokerState {
     registry: Registry,
     runtimes: RuntimeManager,
-    attachments: AttachmentCounts,
+    attachments: Attachments,
     published: PublishedAddress,
 }
 
@@ -48,7 +47,7 @@ impl BrokerState {
             Self {
                 registry,
                 runtimes,
-                attachments: AttachmentCounts::default(),
+                attachments: Attachments::default(),
                 published,
             },
             owner_credential,
@@ -85,56 +84,21 @@ impl BrokerState {
             .collect();
         Ok(ServerMsg::People { people })
     }
-}
 
-#[derive(Default)]
-struct AttachmentCounts(Mutex<HashMap<String, u32>>);
-
-impl AttachmentCounts {
-    fn attach(&self, user_id: &str) -> io::Result<AttachmentGuard<'_>> {
-        let mut counts = self.lock()?;
-        let count = counts.entry(user_id.to_owned()).or_default();
-        *count = count.saturating_add(1);
-        Ok(AttachmentGuard {
-            counts: self,
-            user_id: user_id.to_owned(),
-        })
+    pub(crate) fn attach_client(
+        &self,
+        user_id: &str,
+        writer: ClientWriter,
+    ) -> io::Result<AttachmentGuard<'_>> {
+        self.attachments.attach(user_id, writer)
     }
 
-    fn count(&self, user_id: &str) -> u32 {
-        self.0
-            .lock()
-            .ok()
-            .and_then(|counts| counts.get(user_id).copied())
-            .unwrap_or(0)
+    pub(crate) fn clients(&self, user_id: &str, excluded: &str) -> io::Result<Vec<ClientInfo>> {
+        self.attachments.clients(user_id, excluded)
     }
 
-    fn detach(&self, user_id: &str) {
-        if let Ok(mut counts) = self.0.lock()
-            && let Some(count) = counts.get_mut(user_id)
-        {
-            *count = count.saturating_sub(1);
-            if *count == 0 {
-                counts.remove(user_id);
-            }
-        }
-    }
-
-    fn lock(&self) -> io::Result<std::sync::MutexGuard<'_, HashMap<String, u32>>> {
-        self.0
-            .lock()
-            .map_err(|_| io::Error::other("attachment count lock is poisoned"))
-    }
-}
-
-struct AttachmentGuard<'a> {
-    counts: &'a AttachmentCounts,
-    user_id: String,
-}
-
-impl Drop for AttachmentGuard<'_> {
-    fn drop(&mut self) {
-        self.counts.detach(&self.user_id);
+    pub(crate) fn detach_client(&self, user_id: &str, client_id: &str) -> io::Result<bool> {
+        self.attachments.detach_client(user_id, client_id)
     }
 }
 
@@ -182,7 +146,6 @@ fn handle_connection(mut stream: TcpStream, broker: &BrokerState) -> io::Result<
         return Ok(());
     };
     stream.set_read_timeout(None)?;
-    let _attachment = broker.attachments.attach(&person.user_id)?;
     forward(stream, &person, broker)
 }
 
@@ -221,15 +184,6 @@ fn authenticate(
     let Some(person) = registry.authenticate(user_id, credential)? else {
         return refuse(stream, INVALID_CREDENTIALS).map(|()| None);
     };
-    codec::encode(
-        stream,
-        &ServerMsg::Welcome {
-            user_id: person.user_id.clone(),
-            name: person.name.clone(),
-            client_id: String::new(),
-            tree: Tree::new(),
-        },
-    )?;
     Ok(Some(person))
 }
 
@@ -393,19 +347,6 @@ mod tests {
     }
 
     #[test]
-    fn attachment_counts_return_to_zero() {
-        let counts = super::AttachmentCounts::default();
-        counts.detach("missing");
-        let first = counts.attach("u1").expect("attachment must count");
-        let second = counts.attach("u1").expect("attachment must count");
-        assert_eq!(counts.count("u1"), 2);
-        drop(first);
-        assert_eq!(counts.count("u1"), 1);
-        drop(second);
-        assert_eq!(counts.count("u1"), 0);
-    }
-
-    #[test]
     fn authentication_and_join_write_their_success_replies() {
         let directory = test_directory("replies");
         let (registry, credential) =
@@ -419,10 +360,6 @@ mod tests {
                 .expect("authentication must finish")
                 .expect("owner must authenticate");
         assert_eq!(authenticated.user_id, owner.user_id);
-        assert!(matches!(
-            seer_core::proto::codec::decode::<_, seer_core::proto::ServerMsg>(&mut client),
-            Ok(seer_core::proto::ServerMsg::Welcome { .. })
-        ));
 
         let token = registry.create_seat().expect("seat must be created");
         let joined = super::join(&mut server, &registry, &token, "Guest")
@@ -439,8 +376,7 @@ mod tests {
             .shutdown(std::net::Shutdown::Write)
             .expect("server writes must close");
         assert!(
-            super::authenticate(&mut closed_server, &registry, &owner.user_id, &credential)
-                .is_err()
+            super::authenticate(&mut closed_server, &registry, &owner.user_id, "wrong").is_err()
         );
         let second_token = registry.create_seat().expect("seat must be created");
         assert!(super::join(&mut closed_server, &registry, &second_token, "Other").is_err());

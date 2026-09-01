@@ -96,7 +96,7 @@ fn join_hides_the_invitation_on_a_terminal() {
         codec::encode(
             &mut attached,
             &ServerMsg::Bye {
-                reason: "test complete".into(),
+                reason: "detached".into(),
             },
         )
         .expect("Bye must encode");
@@ -105,8 +105,16 @@ fn join_hides_the_invitation_on_a_terminal() {
 
     let output = run_terminal(&config, &input);
 
-    assert_eq!(output.status.code(), Some(0));
-    assert!(!String::from_utf8_lossy(&output.stdout).contains("private-seat"));
+    assert_eq!(
+        output.status.code(),
+        Some(0),
+        "stdout: {} stderr: {}",
+        String::from_utf8_lossy(&output.stdout),
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8_lossy(&output.stdout);
+    assert!(!stdout.contains("private-seat"));
+    assert!(stdout.contains("Detached from 127.0.0.1. Your panes are still running."));
     server.join().expect("server must finish");
 }
 

@@ -29,8 +29,15 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     send_hello(&mut first, "alice", "alice-secret");
     assert_welcome(read_message(&mut first), "alice");
     codec::encode(&mut first, &ClientMsg::CreateTab).expect("CreateTab must encode");
-    wait_for_tree_with_tab(&mut first);
+    let tree = wait_for_tree_with_tab(&mut first);
     assert!(wait_for_cells(&mut first));
+    let pane = &tree.workspaces[0].tabs[0].panes[0].id;
+    send_input(
+        &mut first,
+        pane,
+        "printf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/alice-pane.pid\"\n",
+    );
+    temporary.assert_process_running(temporary.pane_pid("alice"));
     let runtime_pid = temporary.runtime_pid("alice");
     temporary.assert_runtime_arguments("alice");
     temporary.assert_socket_directory();
@@ -195,7 +202,8 @@ fn assert_welcome(message: ServerMsg, expected_user: &str) {
         } => {
             assert_eq!(user_id, expected_user);
             assert_eq!(name, expected_user);
-            assert!(client_id.is_empty());
+            assert_eq!(client_id.len(), 32);
+            assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
             assert!(tree.workspaces.is_empty());
         }
         other => panic!("expected Welcome, got {other:?}"),

@@ -1,12 +1,14 @@
 use std::io;
 use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
-use std::sync::Arc;
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
 
+use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
+use crate::attachments::{AttachmentGuard, ClientWriter, lock_writer};
 use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 
@@ -21,8 +23,10 @@ pub(crate) fn forward(
 }
 
 struct Coordinator<'a> {
-    client: TcpStream,
+    client: ClientWriter,
     client_reader: Option<JoinHandle<()>>,
+    attachment: Option<AttachmentGuard<'a>>,
+    client_id: String,
     owner: &'a str,
     owner_is_admin: bool,
     broker: &'a BrokerState,
@@ -40,11 +44,25 @@ impl<'a> Coordinator<'a> {
     ) -> io::Result<Self> {
         let (event_sender, events) = mpsc::channel();
         let client_reader = client.try_clone()?;
+        let client = Arc::new(Mutex::new(client));
+        let attachment = broker.attach_client(&owner.user_id, Arc::clone(&client))?;
+        let client_id = attachment.client_id().to_owned();
+        write_client(
+            &client,
+            &ServerMsg::Welcome {
+                user_id: owner.user_id.clone(),
+                name: owner.name.clone(),
+                client_id: client_id.clone(),
+                tree: Tree::new(),
+            },
+        )?;
         let runtime = connect_runtime(broker, &owner.user_id, None, &event_sender)?;
         let client_reader = spawn_client_reader(client_reader, event_sender.clone());
         Ok(Self {
             client,
             client_reader: Some(client_reader),
+            attachment: Some(attachment),
+            client_id,
             owner: &owner.user_id,
             owner_is_admin: owner.is_owner,
             broker,
@@ -83,18 +101,27 @@ impl<'a> Coordinator<'a> {
     fn handle_client_message(&mut self, message: ClientMsg) -> io::Result<Action> {
         match message {
             ClientMsg::Invite if self.owner_is_admin => {
-                codec::encode(&mut self.client, &self.broker.invite()?)?;
+                self.write_client(&self.broker.invite()?)?;
             }
             ClientMsg::Invite => {
-                codec::encode(
-                    &mut self.client,
-                    &ServerMsg::Refused {
-                        reason: "owner access required".into(),
-                    },
-                )?;
+                self.write_client(&ServerMsg::Refused {
+                    reason: "owner access required".into(),
+                })?;
             }
             ClientMsg::ListPeople => {
-                codec::encode(&mut self.client, &self.broker.people()?)?;
+                self.write_client(&self.broker.people()?)?;
+            }
+            ClientMsg::DetachClient { client_id } if client_id.is_empty() => {
+                let clients = self.broker.clients(self.owner, &self.client_id)?;
+                self.write_client(&ServerMsg::Clients { clients })?;
+            }
+            ClientMsg::DetachClient { client_id } => {
+                if !self.broker.detach_client(self.owner, &client_id)? {
+                    eprintln!("broker refused DetachClient for user {}", self.owner);
+                    self.write_client(&ServerMsg::Refused {
+                        reason: "client does not belong to this person".into(),
+                    })?;
+                }
             }
             ClientMsg::Peek { ref user, .. } if self.user_exists(user)? => {
                 self.switch_runtime(user, Some(&message))?;
@@ -123,7 +150,7 @@ impl<'a> Coordinator<'a> {
         }
         match result {
             Ok(message) => {
-                codec::encode(&mut self.client, &message)?;
+                self.write_client(&message)?;
                 Ok(Action::Continue)
             }
             Err(_) if self.peeking => {
@@ -152,6 +179,10 @@ impl<'a> Coordinator<'a> {
         codec::encode(&mut runtime.stream, message)
     }
 
+    fn write_client(&self, message: &ServerMsg) -> io::Result<()> {
+        write_client(&self.client, message)
+    }
+
     fn stop_peek(&mut self) -> io::Result<()> {
         self.peeking = false;
         self.switch_runtime(self.owner, None)
@@ -176,7 +207,10 @@ impl<'a> Coordinator<'a> {
     }
 
     fn close(&mut self) -> io::Result<()> {
-        let _ = self.client.shutdown(std::net::Shutdown::Both);
+        self.attachment.take();
+        if let Ok(client) = lock_writer(&self.client) {
+            let _ = client.shutdown(std::net::Shutdown::Both);
+        }
         let runtime_result = self.close_runtime();
         let client_result = match self.client_reader.take() {
             Some(reader) => join_reader(reader),
@@ -184,6 +218,10 @@ impl<'a> Coordinator<'a> {
         };
         runtime_result.and(client_result)
     }
+}
+
+fn write_client(client: &ClientWriter, message: &ServerMsg) -> io::Result<()> {
+    codec::encode(&mut *lock_writer(client)?, message)
 }
 
 struct RuntimeConnection {

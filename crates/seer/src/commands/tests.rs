@@ -3,14 +3,15 @@ use std::net::{TcpListener, TcpStream};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{Person, ServerMsg, codec};
+use seer_core::proto::{ClientInfo, Person, ServerMsg, codec};
 use seer_core::{Cell, Tree};
 
 use super::{
-    edit_distance_at_most_one, finish_session, is_close, people_reply, pick_server,
-    receive_reply_before, welcome_tree,
+    edit_distance_at_most_one, finish_session, is_close, people_reply, pick_client, pick_server,
+    receive_clients, receive_reply_before, welcome_tree,
 };
 use crate::store::ServerEntry;
+use crate::tui::SessionExit;
 
 #[test]
 fn picker_retries_and_selects_a_number() {
@@ -55,6 +56,24 @@ fn picker_reports_end_of_input() {
 }
 
 #[test]
+fn client_picker_selects_a_number_and_rejects_empty_input() {
+    let clients = [client("first", 5), client("second", 10)];
+    let mut output = Vec::new();
+    let selected = pick_client(&clients, &mut Cursor::new(b"2\n"), &mut output)
+        .expect("picker must select a client");
+
+    assert_eq!(selected, clients[1]);
+    assert_eq!(
+        String::from_utf8(output).expect("picker output must be UTF-8"),
+        "Select a client:\n  1. first (connected 5 seconds)\n  2. second (connected 10 seconds)\nClient: "
+    );
+    let error = pick_client(&clients, &mut Cursor::new([]), &mut Vec::new())
+        .expect_err("empty input must fail");
+    assert_eq!(error.code, 1);
+    assert_eq!(error.message, "no client selected");
+}
+
+#[test]
 fn handshake_reply_helpers_reject_refused_and_unexpected_messages() {
     let refused = ServerMsg::Refused {
         reason: "not allowed".into(),
@@ -94,23 +113,60 @@ fn handshake_reply_helpers_reject_refused_and_unexpected_messages() {
 }
 
 #[test]
+fn client_reply_skips_runtime_messages_and_reports_refusal() {
+    let (mut client_stream, mut server_stream) = socket_pair();
+    codec::encode(&mut server_stream, &ServerMsg::Tree { tree: Tree::new() })
+        .expect("Tree must encode");
+    codec::encode(
+        &mut server_stream,
+        &ServerMsg::Clients {
+            clients: vec![client("client-1", 2)],
+        },
+    )
+    .expect("Clients must encode");
+    assert_eq!(
+        receive_clients(&mut client_stream).expect("Clients must be received"),
+        vec![client("client-1", 2)]
+    );
+
+    let (mut client_stream, mut server_stream) = socket_pair();
+    codec::encode(
+        &mut server_stream,
+        &ServerMsg::Refused {
+            reason: "not allowed".into(),
+        },
+    )
+    .expect("Refused must encode");
+    let error = receive_clients(&mut client_stream).expect_err("Refused must fail");
+    assert_eq!(error.code, 1);
+    assert_eq!(error.message, "not allowed");
+}
+
+#[test]
 fn terminal_session_configures_peek_and_runs() {
     let (client, _server) = socket_pair();
-    let result = finish_session(true, client, Tree::new(), Some("alice"), |_, tree| {
-        assert!(tree.workspaces.is_empty());
-        Ok(())
-    });
+    let result = finish_session(
+        true,
+        client,
+        Tree::new(),
+        Some("alice"),
+        "team",
+        |_, tree| {
+            assert!(tree.workspaces.is_empty());
+            Ok(SessionExit::Client)
+        },
+    );
     assert!(result.is_ok());
 
     let (client, _server) = socket_pair();
-    let error = finish_session(true, client, Tree::new(), None, |_, _| {
+    let error = finish_session(true, client, Tree::new(), None, "team", |_, _| {
         Err(io::Error::other("TUI failed"))
     })
     .expect_err("TUI failure must propagate");
     assert_eq!(error.message, "error: TUI failed");
 
     let (client, _server) = socket_pair();
-    let result = finish_session(false, client, Tree::new(), None, |_, _| {
+    let result = finish_session(false, client, Tree::new(), None, "team", |_, _| {
         Err(io::Error::other("runner must not be called"))
     });
     assert!(result.is_ok());
@@ -180,5 +236,12 @@ fn server(alias: &str) -> ServerEntry {
         name: "alice".into(),
         credential: "secret".into(),
         current: false,
+    }
+}
+
+fn client(client_id: &str, connected_secs: u64) -> ClientInfo {
+    ClientInfo {
+        client_id: client_id.into(),
+        connected_secs,
     }
 }
