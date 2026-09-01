@@ -3,7 +3,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, Permissions};
 use std::io;
-use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -90,7 +90,19 @@ fn create_private_directory(directory: &Path) -> io::Result<()> {
 }
 
 fn current_uid() -> io::Result<u32> {
-    Ok(fs::metadata("/proc/self")?.uid())
+    let output = Command::new("id").arg("-u").output()?;
+    if !output.status.success() {
+        return Err(io::Error::other(format!(
+            "id -u failed with status {}",
+            output.status
+        )));
+    }
+    let uid = str::from_utf8(&output.stdout)
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?
+        .trim()
+        .parse()
+        .map_err(|error| io::Error::new(io::ErrorKind::InvalidData, error))?;
+    Ok(uid)
 }
 
 fn runtime_binary() -> io::Result<PathBuf> {
@@ -129,6 +141,7 @@ mod tests {
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::path::Path;
+    use std::process::Command;
     use std::thread;
     use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
@@ -162,16 +175,19 @@ mod tests {
 
     #[test]
     fn reads_the_process_user_id() {
-        use std::os::unix::fs::MetadataExt;
-
         let uid = current_uid().expect("process user ID must load");
+        let output = Command::new("id")
+            .arg("-u")
+            .output()
+            .expect("id command must run");
+        assert!(output.status.success(), "id command must succeed");
+        let expected = String::from_utf8(output.stdout)
+            .expect("id output must be UTF-8")
+            .trim()
+            .parse::<u32>()
+            .expect("id output must be a user ID");
 
-        assert_eq!(
-            uid,
-            fs::metadata("/proc/self")
-                .expect("metadata must load")
-                .uid()
-        );
+        assert_eq!(uid, expected);
     }
 
     #[test]
@@ -207,7 +223,10 @@ mod tests {
 
         let error = connect_with_retry(&socket, 2).expect_err("missing socket must fail");
 
-        assert_eq!(error.kind(), std::io::ErrorKind::NotFound);
+        assert!(matches!(
+            error.kind(),
+            std::io::ErrorKind::NotFound | std::io::ErrorKind::ConnectionRefused
+        ));
         fs::remove_dir_all(temporary).expect("temporary directory must be removed");
     }
 

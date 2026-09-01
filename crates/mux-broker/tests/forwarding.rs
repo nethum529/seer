@@ -247,29 +247,16 @@ fn runtime_binary() -> PathBuf {
         return sibling;
     }
 
-    runtime_from_parent_working_directories().expect("workspace runtime binary must exist")
-}
+    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
+    let manifest_directory = Path::new(env!("CARGO_MANIFEST_DIR"));
+    let status = Command::new(cargo)
+        .args(["build", "-p", "mux-runtime", "--bin", "mux-runtime"])
+        .current_dir(manifest_directory)
+        .status()
+        .expect("runtime binary must build");
+    assert!(status.success(), "runtime binary must build");
 
-fn runtime_from_parent_working_directories() -> Option<PathBuf> {
-    let mut pid = std::process::id();
-    for _ in 0..8 {
-        pid = parent_pid(pid)?;
-        let working_directory = fs::read_link(format!("/proc/{pid}/cwd")).ok()?;
-        let candidate = working_directory.join("target/debug/mux-runtime");
-        if candidate.is_file() {
-            return Some(candidate);
-        }
-    }
-    None
-}
-
-fn parent_pid(pid: u32) -> Option<u32> {
-    fs::read_to_string(format!("/proc/{pid}/status"))
-        .ok()?
-        .lines()
-        .find_map(|line| line.strip_prefix("PPid:\t"))?
-        .parse()
-        .ok()
+    manifest_directory.join("../../target/debug/mux-runtime")
 }
 
 fn wait_for_file(path: &Path) -> bool {
