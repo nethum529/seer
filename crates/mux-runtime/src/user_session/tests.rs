@@ -60,6 +60,15 @@ fn writes_input_to_the_focused_pane_and_polls_cells() {
 }
 
 #[test]
+fn poll_omits_a_quiet_pane() {
+    let mut session = session_with_tab();
+    assert!(wait_for_cells(&mut session, |_| true).is_some());
+
+    assert!(session.poll().is_empty());
+    close_all_panes(&mut session);
+}
+
+#[test]
 fn closes_a_pane_and_kills_its_process() {
     let mut session = session_with_tab();
     session
@@ -184,11 +193,15 @@ fn wait_for_cells(
     matches: impl Fn(&str) -> bool,
 ) -> Option<Vec<ServerMsg>> {
     let deadline = Instant::now() + WAIT_TIMEOUT;
+    let mut matched_messages = None;
     while Instant::now() < deadline {
         let messages = session.poll();
+        if messages.is_empty() && matched_messages.is_some() {
+            return matched_messages;
+        }
         let text = cells_text(&messages);
         if !messages.is_empty() && matches(&text) {
-            return Some(messages);
+            matched_messages = Some(messages);
         }
         thread::sleep(POLL_INTERVAL);
     }
