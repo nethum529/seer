@@ -1,3 +1,4 @@
+use std::cell::Cell as ModeCell;
 use std::io::{self, Stdout};
 use std::net::{Shutdown, TcpStream};
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -23,12 +24,16 @@ use crate::state::{ClientState, pane_rects};
 
 const EVENT_WAIT: Duration = Duration::from_millis(25);
 
+thread_local! {
+    static VIEW_ONLY: ModeCell<bool> = const { ModeCell::new(false) };
+}
+
 enum ReaderEvent {
     Message(ServerMsg),
     Failed(io::Error),
 }
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 enum LoopControl {
     Continue,
     Exit,
@@ -150,7 +155,7 @@ fn handle_event(
         Event::Key(key) if key.kind != KeyEventKind::Release => {
             handle_key(key, stream, state, command_pending)
         }
-        Event::Resize(cols, rows) => {
+        Event::Resize(cols, rows) if !is_view_only() => {
             send(stream, &ClientMsg::Resize { cols, rows })?;
             Ok(LoopControl::Continue)
         }
@@ -167,6 +172,9 @@ fn handle_key(
     if is_control_char(key, 'q') {
         send(stream, &ClientMsg::Detach)?;
         return Ok(LoopControl::Exit);
+    }
+    if is_view_only() {
+        return Ok(LoopControl::Continue);
     }
     if is_control_char(key, 'b') {
         *command_pending = true;
@@ -196,6 +204,14 @@ fn handle_key(
 
 fn is_control_char(key: KeyEvent, character: char) -> bool {
     key.code == KeyCode::Char(character) && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+pub(crate) fn set_view_only(view_only: bool) {
+    VIEW_ONLY.set(view_only);
+}
+
+fn is_view_only() -> bool {
+    VIEW_ONLY.get()
 }
 
 fn send(stream: &mut TcpStream, message: &ClientMsg) -> io::Result<()> {
@@ -284,5 +300,189 @@ impl Drop for TerminalSession {
         let _ = self.terminal.show_cursor();
         let _ = execute!(io::stdout(), LeaveAlternateScreen);
         let _ = disable_raw_mode();
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use std::io::{self, Read};
+    use std::net::{TcpListener, TcpStream};
+    use std::time::Duration;
+
+    use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+    use mux_core::proto::{ClientMsg, codec};
+    use mux_core::{PaneSize, Tree};
+
+    use super::{LoopControl, handle_event, set_view_only};
+    use crate::state::ClientState;
+
+    #[test]
+    fn view_only_events_send_no_session_changes() {
+        let (mut client, mut server) = socket_pair();
+        let mut state = state_with_pane();
+        let mut command_pending = false;
+        set_view_only(true);
+        let events = [
+            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+            Event::Key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE)),
+            Event::Resize(120, 40),
+        ];
+
+        for event in events {
+            assert_eq!(
+                handle_event(event, &mut client, &mut state, &mut command_pending)
+                    .expect("event handling must succeed"),
+                LoopControl::Continue
+            );
+        }
+
+        assert_no_message(&mut server);
+    }
+
+    #[test]
+    fn active_events_send_input_focus_and_resize() {
+        let (mut client, mut server) = socket_pair();
+        let mut state = state_with_pane();
+        let mut command_pending = false;
+        set_view_only(false);
+
+        handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            &mut client,
+            &mut state,
+            &mut command_pending,
+        )
+        .expect("input key must be handled");
+        handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+            &mut client,
+            &mut state,
+            &mut command_pending,
+        )
+        .expect("command prefix must be handled");
+        handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE)),
+            &mut client,
+            &mut state,
+            &mut command_pending,
+        )
+        .expect("focus key must be handled");
+        handle_event(
+            Event::Resize(120, 40),
+            &mut client,
+            &mut state,
+            &mut command_pending,
+        )
+        .expect("resize must be handled");
+
+        assert_eq!(
+            decode(&mut server),
+            ClientMsg::Input {
+                pane: "w1:p1".into(),
+                bytes: b"a".to_vec(),
+            }
+        );
+        assert_eq!(
+            decode(&mut server),
+            ClientMsg::FocusPane {
+                pane: "w1:p1".into(),
+            }
+        );
+        assert_eq!(
+            decode(&mut server),
+            ClientMsg::Resize {
+                cols: 120,
+                rows: 40,
+            }
+        );
+    }
+
+    #[test]
+    fn release_keys_send_no_messages() {
+        let (mut client, mut server) = socket_pair();
+        let mut state = state_with_pane();
+        let mut command_pending = false;
+        set_view_only(false);
+        let release = KeyEvent::new_with_kind(
+            KeyCode::Char('a'),
+            KeyModifiers::NONE,
+            KeyEventKind::Release,
+        );
+
+        assert_eq!(
+            handle_event(
+                Event::Key(release),
+                &mut client,
+                &mut state,
+                &mut command_pending,
+            )
+            .expect("release key must be handled"),
+            LoopControl::Continue
+        );
+
+        assert_no_message(&mut server);
+    }
+
+    #[test]
+    fn control_q_detaches_in_view_only_mode() {
+        let (mut client, mut server) = socket_pair();
+        let mut state = state_with_pane();
+        let mut command_pending = false;
+        set_view_only(true);
+
+        assert_eq!(
+            handle_event(
+                Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
+                &mut client,
+                &mut state,
+                &mut command_pending,
+            )
+            .expect("detach key must be handled"),
+            LoopControl::Exit
+        );
+        assert_eq!(decode(&mut server), ClientMsg::Detach);
+    }
+
+    fn decode(stream: &mut TcpStream) -> ClientMsg {
+        codec::decode(stream).expect("client message must decode")
+    }
+
+    fn assert_no_message(stream: &mut TcpStream) {
+        stream
+            .set_read_timeout(Some(Duration::from_millis(50)))
+            .expect("read timeout must be set");
+        let mut byte = [0];
+        let error = stream
+            .read_exact(&mut byte)
+            .expect_err("event must not send a message");
+        assert!(matches!(
+            error.kind(),
+            io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+        ));
+    }
+
+    fn socket_pair() -> (TcpStream, TcpStream) {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
+        let client = TcpStream::connect(
+            listener
+                .local_addr()
+                .expect("listener must have an address"),
+        )
+        .expect("client must connect");
+        let (server, _) = listener.accept().expect("server must accept client");
+        server
+            .set_read_timeout(Some(Duration::from_secs(1)))
+            .expect("read timeout must be set");
+        (client, server)
+    }
+
+    fn state_with_pane() -> ClientState {
+        let mut tree = Tree::new();
+        tree.create_workspace("main")
+            .expect("workspace must be created");
+        tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
+            .expect("tab must be created");
+        ClientState::new(tree)
     }
 }
