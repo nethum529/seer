@@ -43,8 +43,8 @@ fn loads_config_and_listens() {
     codec::encode(
         &mut stream,
         &ClientMsg::Hello {
-            user: "alice".into(),
-            token: "alice-secret".into(),
+            user_id: "alice".into(),
+            credential: "alice-secret".into(),
         },
     )
     .expect("Hello must encode");
@@ -53,7 +53,9 @@ fn loads_config_and_listens() {
     assert_eq!(
         response,
         ServerMsg::Welcome {
-            user: "alice".into(),
+            user_id: "alice".into(),
+            name: "alice".into(),
+            client_id: String::new(),
             tree: Tree::new(),
         }
     );

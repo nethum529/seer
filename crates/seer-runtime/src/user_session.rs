@@ -45,6 +45,10 @@ impl UserSession {
             ClientMsg::Input { pane, bytes } => self.write_input(&pane, &bytes),
             ClientMsg::Resize { cols, rows } => self.resize(cols, rows),
             ClientMsg::Hello { .. }
+            | ClientMsg::Join { .. }
+            | ClientMsg::Invite
+            | ClientMsg::ListPeople
+            | ClientMsg::DetachClient { .. }
             | ClientMsg::Peek { .. }
             | ClientMsg::StopPeek
             | ClientMsg::Detach => Ok(Vec::new()),

@@ -135,7 +135,12 @@ fn apply_server_message(message: ServerMsg, state: &mut ClientState) -> io::Resu
         ServerMsg::Cells { pane, rows } => state.apply_cells(pane, rows),
         ServerMsg::Bye { .. } => return Ok(LoopControl::Exit),
         ServerMsg::Frame { .. } => {}
-        ServerMsg::Welcome { .. } | ServerMsg::Refused { .. } => {
+        ServerMsg::Welcome { .. }
+        | ServerMsg::Joined { .. }
+        | ServerMsg::Seat { .. }
+        | ServerMsg::People { .. }
+        | ServerMsg::Clients { .. }
+        | ServerMsg::Refused { .. } => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "unexpected handshake message",

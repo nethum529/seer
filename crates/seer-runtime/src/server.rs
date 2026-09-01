@@ -266,8 +266,17 @@ mod tests {
         ];
         let deferred = [
             ClientMsg::Hello {
-                user: "alice".into(),
-                token: "token".into(),
+                user_id: "alice".into(),
+                credential: "token".into(),
+            },
+            ClientMsg::Join {
+                seat_token: "seat".into(),
+                name: "alice".into(),
+            },
+            ClientMsg::Invite,
+            ClientMsg::ListPeople,
+            ClientMsg::DetachClient {
+                client_id: "client-1".into(),
             },
             ClientMsg::Peek {
                 user: "alice".into(),

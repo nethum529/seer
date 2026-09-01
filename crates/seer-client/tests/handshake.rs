@@ -17,19 +17,21 @@ fn handles_welcome_and_refused_replies() {
         answer(
             &listener,
             ClientMsg::Hello {
-                user: "alice".into(),
-                token: "valid".into(),
+                user_id: "alice".into(),
+                credential: "valid".into(),
             },
             ServerMsg::Welcome {
-                user: "alice".into(),
+                user_id: "alice".into(),
+                name: "alice".into(),
+                client_id: "client-1".into(),
                 tree: Tree::new(),
             },
         );
         answer(
             &listener,
             ClientMsg::Hello {
-                user: "bob".into(),
-                token: "invalid".into(),
+                user_id: "bob".into(),
+                credential: "invalid".into(),
             },
             ServerMsg::Refused {
                 reason: "invalid token".into(),
@@ -61,14 +63,16 @@ fn sends_peek_after_welcome() {
         assert_hello(
             &mut stream,
             ClientMsg::Hello {
-                user: "bob".into(),
-                token: "valid".into(),
+                user_id: "bob".into(),
+                credential: "valid".into(),
             },
         );
         codec::encode(
             &mut stream,
             &ServerMsg::Welcome {
-                user: "bob".into(),
+                user_id: "bob".into(),
+                name: "bob".into(),
+                client_id: "client-2".into(),
                 tree: Tree::new(),
             },
         )
@@ -124,8 +128,8 @@ fn rejects_unexpected_and_invalid_replies() {
         answer(
             &listener,
             ClientMsg::Hello {
-                user: "alice".into(),
-                token: "valid".into(),
+                user_id: "alice".into(),
+                credential: "valid".into(),
             },
             ServerMsg::Tree { tree: Tree::new() },
         );
@@ -134,8 +138,8 @@ fn rejects_unexpected_and_invalid_replies() {
         assert_hello(
             &mut stream,
             ClientMsg::Hello {
-                user: "alice".into(),
-                token: "valid".into(),
+                user_id: "alice".into(),
+                credential: "valid".into(),
             },
         );
         stream
