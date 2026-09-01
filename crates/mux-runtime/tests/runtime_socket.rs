@@ -11,7 +11,7 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mux_core::proto::{ClientMsg, ServerMsg, codec};
 
-const CONNECT_ATTEMPTS: usize = 100;
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(2);
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -166,11 +166,15 @@ fn runtime_command() -> Command {
 }
 
 fn connect_when_ready(path: &Path) -> UnixStream {
-    let mut last_error = None;
-    for _ in 0..CONNECT_ATTEMPTS {
+    let mut last_error;
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    loop {
         match UnixStream::connect(path) {
             Ok(stream) => return stream,
             Err(error) => last_error = Some(error),
+        }
+        if Instant::now() >= deadline {
+            break;
         }
         thread::sleep(RETRY_INTERVAL);
     }
@@ -179,7 +183,8 @@ fn connect_when_ready(path: &Path) -> UnixStream {
 
 fn connect_after_replacement(path: &Path, stale_inode: u64) -> UnixStream {
     let mut last_error = None;
-    for _ in 0..CONNECT_ATTEMPTS {
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    loop {
         match fs::metadata(path) {
             Ok(metadata) if metadata.ino() != stale_inode => match UnixStream::connect(path) {
                 Ok(stream) => return stream,
@@ -187,6 +192,9 @@ fn connect_after_replacement(path: &Path, stale_inode: u64) -> UnixStream {
             },
             Ok(_) => {}
             Err(error) => last_error = Some(error),
+        }
+        if Instant::now() >= deadline {
+            break;
         }
         thread::sleep(RETRY_INTERVAL);
     }
