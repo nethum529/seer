@@ -22,7 +22,6 @@ const PORT: u16 = 7321;
 const START_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(target_os = "linux")]
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
-
 #[cfg(target_os = "linux")]
 #[derive(Deserialize, Serialize)]
 struct BrokerConfig {
@@ -31,14 +30,12 @@ struct BrokerConfig {
     owner_name: String,
     state_dir: PathBuf,
 }
-
 #[cfg(target_os = "linux")]
 #[derive(Default, Deserialize, Serialize)]
 struct ServersFile {
     #[serde(default)]
     servers: Vec<ServerEntry>,
 }
-
 #[cfg(target_os = "linux")]
 #[derive(Deserialize, Serialize)]
 struct ServerEntry {
@@ -117,7 +114,6 @@ fn load_or_create_config(path: &Path) -> io::Result<(BrokerConfig, bool)> {
         Err(error) => Err(error),
     }
 }
-
 #[cfg(target_os = "linux")]
 fn prompt_config() -> io::Result<BrokerConfig> {
     let login = env::var("USER")
@@ -126,14 +122,18 @@ fn prompt_config() -> io::Result<BrokerConfig> {
     let host = host_name();
     let owner_name = prompt("Your name", &login)?;
     let published_addr = prompt("Published address", &format!("{host}:{PORT}"))?;
+    let port = published_addr
+        .rsplit_once(':')
+        .map_or("", |parts| parts.1)
+        .parse()
+        .map_err(invalid_data)?;
     Ok(BrokerConfig {
-        listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), PORT),
+        listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
         published_addr,
         owner_name,
         state_dir: state_dir()?,
     })
 }
-
 #[cfg(target_os = "linux")]
 fn host_name() -> String {
     env::var("HOSTNAME")
@@ -145,7 +145,6 @@ fn host_name() -> String {
         .filter(|value| !value.is_empty())
         .unwrap_or_else(|| "localhost".to_owned())
 }
-
 #[cfg(target_os = "linux")]
 fn prompt(label: &str, default: &str) -> io::Result<String> {
     print!("{label} [{default}]: ");
@@ -159,17 +158,14 @@ fn prompt(label: &str, default: &str) -> io::Result<String> {
         value.to_owned()
     })
 }
-
 #[cfg(target_os = "linux")]
 fn toml_text(value: &impl Serialize) -> io::Result<String> {
     toml::to_string_pretty(value).map_err(invalid_data)
 }
-
 #[cfg(target_os = "linux")]
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
 }
-
 #[cfg(target_os = "linux")]
 fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new()
@@ -181,7 +177,6 @@ fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     file.set_permissions(fs::Permissions::from_mode(0o600))?;
     file.write_all(contents)
 }
-
 #[cfg(target_os = "linux")]
 fn running_broker(config: &BrokerConfig) -> bool {
     let pid_path = config.state_dir.join("broker.pid");
@@ -193,7 +188,6 @@ fn running_broker(config: &BrokerConfig) -> bool {
     };
     owns_listen_socket(pid, config.listen) && port_accepts(config.listen)
 }
-
 #[cfg(target_os = "linux")]
 fn owns_listen_socket(pid: i32, listen: SocketAddr) -> bool {
     let Ok(entries) = fs::read_dir(format!("/proc/{pid}/fd")) else {
@@ -207,7 +201,6 @@ fn owns_listen_socket(pid: i32, listen: SocketAddr) -> bool {
             .is_some_and(|inode| listening.contains(&inode))
     })
 }
-
 #[cfg(target_os = "linux")]
 fn listening_inodes(port: u16) -> Vec<String> {
     ["/proc/net/tcp", "/proc/net/tcp6"]
@@ -222,7 +215,6 @@ fn listening_inodes(port: u16) -> Vec<String> {
         })
         .collect()
 }
-
 #[cfg(target_os = "linux")]
 fn listening_inode(line: &str, port: u16) -> Option<String> {
     let fields: Vec<_> = line.split_whitespace().collect();
@@ -234,7 +226,6 @@ fn listening_inode(line: &str, port: u16) -> Option<String> {
         None
     }
 }
-
 #[cfg(target_os = "linux")]
 fn socket_inode(path: &Path) -> Option<String> {
     path.to_str()?
@@ -242,7 +233,6 @@ fn socket_inode(path: &Path) -> Option<String> {
         .strip_suffix(']')
         .map(str::to_owned)
 }
-
 #[cfg(target_os = "linux")]
 fn port_accepts(listen: SocketAddr) -> bool {
     let address = if listen.ip().is_unspecified() {
@@ -252,7 +242,6 @@ fn port_accepts(listen: SocketAddr) -> bool {
     };
     TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok()
 }
-
 #[cfg(target_os = "linux")]
 fn start_broker(
     config_path: &Path,
@@ -298,7 +287,9 @@ fn complete_start(
     wait_for_port(child, config.listen, deadline)?;
     if first_start {
         let credential = wait_for_credential(log_path, log_start, deadline)?;
-        save_owner(config_dir, config, credential)?;
+        let save_result = save_owner(config_dir, config, credential);
+        strip_owner_credential(log_path)?;
+        save_result?;
     }
     write_private(
         &config.state_dir.join("broker.pid"),
@@ -422,6 +413,16 @@ fn read_credential(path: &Path, start: u64) -> io::Result<Option<String>> {
             .filter(|value| !value.is_empty())
             .map(str::to_owned)
     }))
+}
+
+#[cfg(target_os = "linux")]
+fn strip_owner_credential(path: &Path) -> io::Result<()> {
+    let contents = fs::read_to_string(path)?;
+    let filtered = contents
+        .split_inclusive('\n')
+        .filter(|line| !line.starts_with("owner-credential: "))
+        .collect::<String>();
+    write_private(path, filtered.as_bytes())
 }
 
 #[cfg(target_os = "linux")]
