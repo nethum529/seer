@@ -95,9 +95,10 @@ fn non_owner_invite_is_refused() {
 #[test]
 fn non_owner_invite_reports_a_closed_client() {
     let broker = TestBroker::new();
-    let (client, peer) = tcp_pair();
-    peer.shutdown(std::net::Shutdown::Both)
-        .expect("peer must close");
+    let (client, _peer) = tcp_pair();
+    client
+        .shutdown(std::net::Shutdown::Write)
+        .expect("client writes must close");
     let mut coordinator = coordinator(client, &broker.state);
     coordinator.owner_is_admin = false;
 
