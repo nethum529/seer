@@ -2,7 +2,7 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, Permissions};
-use std::io;
+use std::io::{self, PipeWriter};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
@@ -15,12 +15,16 @@ use std::time::Duration;
 const CONNECT_RETRIES: usize = 500;
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_SOCKET_PATH_BYTES: usize = 99;
+struct RuntimeProcess {
+    child: Child,
+    _lifeline: PipeWriter,
+}
 
 pub(crate) struct RuntimeManager {
     binary: PathBuf,
     shell: String,
     state_dir: PathBuf,
-    processes: Mutex<HashMap<String, Child>>,
+    processes: Mutex<HashMap<String, RuntimeProcess>>,
 }
 
 impl RuntimeManager {
@@ -51,7 +55,7 @@ impl RuntimeManager {
         }
 
         let process_is_running = match processes.get_mut(user_id) {
-            Some(process) => process.try_wait()?.is_none(),
+            Some(process) => process.child.try_wait()?.is_none(),
             None => false,
         };
         if !process_is_running {
@@ -79,14 +83,19 @@ impl RuntimeManager {
         socket_path: &Path,
         state_directory: &Path,
         user_id: &str,
-    ) -> io::Result<Child> {
-        Command::new(&self.binary)
+    ) -> io::Result<RuntimeProcess> {
+        let (reader, writer) = io::pipe()?;
+        let child = Command::new(&self.binary)
             .arg(socket_path)
             .arg(user_id)
             .arg(&self.shell)
             .current_dir(state_directory)
-            .stdin(Stdio::null())
-            .spawn()
+            .stdin(Stdio::from(reader))
+            .spawn()?;
+        Ok(RuntimeProcess {
+            child,
+            _lifeline: writer,
+        })
     }
 }
 
@@ -292,11 +301,11 @@ mod tests {
             .connect_with_retries("spawn-test", 0)
             .expect_err("exited runtime must not open a socket");
         let mut processes = manager.processes.lock().expect("process lock must work");
-        let child = processes
+        let process = processes
             .get_mut("spawn-test")
             .expect("spawned process must be recorded");
-        wait_or_kill(child, Duration::from_millis(20));
-        wait_or_kill(child, Duration::from_millis(20));
+        wait_or_kill(&mut process.child, Duration::from_millis(20));
+        wait_or_kill(&mut process.child, Duration::from_millis(20));
         drop(processes);
         remove_directory(&temporary, "temporary directory must be removed");
     }
