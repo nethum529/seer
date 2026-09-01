@@ -772,42 +772,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "mux-broker"
-version = "0.1.0"
-dependencies = [
- "constant_time_eq",
- "mux-core",
- "serde",
- "toml",
-]
-
-[[package]]
-name = "mux-client"
-version = "0.1.0"
-dependencies = [
- "crossterm",
- "mux-core",
- "ratatui",
-]
-
-[[package]]
-name = "mux-core"
-version = "0.1.0"
-dependencies = [
- "serde",
- "serde_json",
-]
-
-[[package]]
-name = "mux-runtime"
-version = "0.1.0"
-dependencies = [
- "alacritty_terminal",
- "mux-core",
- "portable-pty",
-]
-
-[[package]]
 name = "nix"
 version = "0.28.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1340,6 +1304,42 @@ name = "scopeguard"
 version = "1.2.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
+
+[[package]]
+name = "seer-broker"
+version = "0.1.0"
+dependencies = [
+ "constant_time_eq",
+ "seer-core",
+ "serde",
+ "toml",
+]
+
+[[package]]
+name = "seer-client"
+version = "0.1.0"
+dependencies = [
+ "crossterm",
+ "ratatui",
+ "seer-core",
+]
+
+[[package]]
+name = "seer-core"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+]
+
+[[package]]
+name = "seer-runtime"
+version = "0.1.0"
+dependencies = [
+ "alacritty_terminal",
+ "portable-pty",
+ "seer-core",
+]
 
 [[package]]
 name = "semver"

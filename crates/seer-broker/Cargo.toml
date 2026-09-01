@@ -1,0 +1,10 @@
+[package]
+name = "seer-broker"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+constant_time_eq = "0.4"
+seer-core = { path = "../seer-core" }
+serde = { version = "1", features = ["derive"] }
+toml = "0.9"

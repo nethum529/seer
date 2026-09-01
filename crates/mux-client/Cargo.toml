@@ -1,9 +1,0 @@
-[package]
-name = "mux-client"
-version.workspace = true
-edition.workspace = true
-
-[dependencies]
-crossterm = "0.29"
-mux-core = { path = "../mux-core" }
-ratatui = "0.30"

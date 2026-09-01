@@ -14,21 +14,20 @@ research in `docs/research/08-multiuser-prior-art.md`. It accepts the settled
 model: one public broker, one runtime per human user, and one private workspace
 tree per user. It focuses only on how a human enters and leaves that model.
 
-The examples use `mux` as a provisional product command. This does not select
-the final product name.
+`seer` is the product command.
 
 ## Short answer
 
 Use seven plain verbs:
 
 ```text
-mux start
-mux invite
-mux join
-mux list
-mux attach
-mux detach
-mux peek <person>
+seer start
+seer invite
+seer join
+seer list
+seer attach
+seer detach
+seer peek <person>
 ```
 
 `start` creates or starts the one server. `invite` creates one unused seat.
@@ -331,13 +330,13 @@ Do not call a person, runtime, workspace tree, and client connection a
 
 | Command | Common-path contract |
 | --- | --- |
-| `mux start` | On the Linux host, initialize the one server if absent and start it as a background service. If it is already running, report that state and succeed. Never create a second unnamed server. On first use, ask for the owner's display name and the published address if they are not configured. |
-| `mux invite` | Create one single-use seat token for the current server. Print one copyable invitation capsule that contains the server endpoint, server identity fingerprint, and high-entropy token. Default expiry is one hour. Do not attach the token to a person name. |
-| `mux join` | Ask for the invitation capsule with hidden input. Verify the server identity, claim the unused seat, then ask for the person's display name. Save a new device credential with owner-only permissions. Invalidate the seat token and perform the first attach. |
-| `mux list` | Show saved servers, the caller's identity on each, server reachability, attachment state, and people available to peek. Never print credentials or invitation tokens. With one current server, show it first. |
-| `mux attach` | Attach to the caller's own tree on the current server. With one saved server, select it. With several and no current server, open a picker. Never create a person, seat, or server. Never detach another client. |
-| `mux detach` | Detach only the calling client. From the TUI command line, the caller is exact. From a separate shell, detach the caller's only active client or show a client picker. Keep the runtime, PTYs, and pane processes alive. |
-| `mux peek <person>` | Open the named person's tree in read-only mode. Default to that person's active workspace and show a picker when no workspace is active. Show a permanent `PEEK: <person> - READ ONLY` banner. Never forward input or resize that person's PTYs. |
+| `seer start` | On the Linux host, initialize the one server if absent and start it as a background service. If it is already running, report that state and succeed. Never create a second unnamed server. On first use, ask for the owner's display name and the published address if they are not configured. |
+| `seer invite` | Create one single-use seat token for the current server. Print one copyable invitation capsule that contains the server endpoint, server identity fingerprint, and high-entropy token. Default expiry is one hour. Do not attach the token to a person name. |
+| `seer join` | Ask for the invitation capsule with hidden input. Verify the server identity, claim the unused seat, then ask for the person's display name. Save a new device credential with owner-only permissions. Invalidate the seat token and perform the first attach. |
+| `seer list` | Show saved servers, the caller's identity on each, server reachability, attachment state, and people available to peek. Never print credentials or invitation tokens. With one current server, show it first. |
+| `seer attach` | Attach to the caller's own tree on the current server. With one saved server, select it. With several and no current server, open a picker. Never create a person, seat, or server. Never detach another client. |
+| `seer detach` | Detach only the calling client. From the TUI command line, the caller is exact. From a separate shell, detach the caller's only active client or show a client picker. Keep the runtime, PTYs, and pane processes alive. |
+| `seer peek <person>` | Open the named person's tree in read-only mode. Default to that person's active workspace and show a picker when no workspace is active. Show a permanent `PEEK: <person> - READ ONLY` banner. Never forward input or resize that person's PTYs. |
 
 The commands have no required flags on the common path. A positional person
 name in `peek` is the object of the action, not an option. Advanced automation
@@ -361,7 +360,7 @@ forms.
   name change must not change ownership or access records.
 - A claimed seat becomes a device credential. The invitation token is not a
   permanent login token and cannot be used again from another device.
-- `attach` fails with "run mux join first" when no identity is saved. It never
+- `attach` fails with "run seer join first" when no identity is saved. It never
   falls back to create.
 - `attach` opens another client when one is already attached. It does not use
   tmux-style `-d` takeover behavior.
@@ -394,7 +393,7 @@ Alice creates the server on `team.example.com`. The first run asks only for
 values that are not already configured.
 
 ```text
-alice@team:~$ mux start
+alice@team:~$ seer start
 Your name [alice]: alice
 Published address [team.example.com:7321]:
 Server started at team.example.com:7321.
@@ -405,7 +404,7 @@ Alice creates one seat for Bob. The example token is shortened and is not a
 real token.
 
 ```text
-alice@team:~$ mux invite
+alice@team:~$ seer invite
 Seat ready. It works once and expires in 1 hour.
 Send this invitation through a private channel:
 
@@ -417,7 +416,7 @@ name at this first join. A successful join saves his device credential and
 opens his own tree.
 
 ```text
-bob@mac:~$ mux join
+bob@mac:~$ seer join
 Invitation: [hidden]
 Server: team.example.com:7321
 Server identity: SHA256:4f:91:...:2c
@@ -428,7 +427,7 @@ Joined as bob. Attaching...
 Bob detaches. His server-side panes continue to run.
 
 ```text
-bob@mac:~$ mux detach
+bob@mac:~$ seer detach
 Detached from team.example.com. Your panes are still running.
 ```
 
@@ -436,11 +435,11 @@ Bob checks state and attaches again. No address, user name, token, socket path,
 or flag is required.
 
 ```text
-bob@mac:~$ mux list
+bob@mac:~$ seer list
 SERVER            YOU   STATE      PEOPLE
 team.example.com  bob   detached   alice, bob
 
-bob@mac:~$ mux attach
+bob@mac:~$ seer attach
 Attached to team.example.com as bob.
 ```
 
@@ -448,7 +447,7 @@ Alice opens one read-only view of Bob's active workspace. The view has a fixed
 banner and cannot send input.
 
 ```text
-alice@team:~$ mux peek bob
+alice@team:~$ seer peek bob
 PEEK: bob - READ ONLY
 Workspace: bob/current
 ```

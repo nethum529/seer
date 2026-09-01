@@ -1,0 +1,257 @@
+use super::*;
+use seer_core::SplitDirection;
+use std::thread;
+use std::time::{Duration, Instant};
+
+const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[test]
+fn creates_a_workspace_tab_and_shell_pane() {
+    let mut session = UserSession::new("alice", "sh");
+
+    let messages = session
+        .apply(ClientMsg::CreateTab)
+        .expect("tab creation must succeed");
+
+    let tree = message_tree(&messages);
+    assert_eq!(session.user, "alice");
+    assert_eq!(tree.workspaces[0].name, "main");
+    assert_eq!(tree.workspaces[0].tabs[0].panes[0].size, session.viewport);
+    assert!(wait_for_cells(&mut session, |_| true).is_some());
+    close_all_panes(&mut session);
+}
+
+#[test]
+fn splits_and_resizes_both_panes() {
+    let mut session = session_with_tab();
+    session
+        .apply(ClientMsg::Resize { cols: 81, rows: 25 })
+        .expect("resize must succeed");
+
+    let messages = session
+        .apply(ClientMsg::SplitPane {
+            direction: SplitDirection::Right,
+        })
+        .expect("split must succeed");
+
+    let panes = &message_tree(&messages).workspaces[0].tabs[0].panes;
+    assert_eq!(panes.len(), 2);
+    assert_eq!(panes[0].size, PaneSize { cols: 41, rows: 25 });
+    assert_eq!(panes[1].size, PaneSize { cols: 40, rows: 25 });
+    close_all_panes(&mut session);
+}
+
+#[test]
+fn writes_input_to_the_focused_pane_and_polls_cells() {
+    let mut session = session_with_tab();
+    let _ = session.poll();
+
+    let messages = session
+        .apply(ClientMsg::Input {
+            pane: "w1:p1".into(),
+            bytes: b"printf session-input\\n".to_vec(),
+        })
+        .expect("input must succeed");
+
+    assert!(messages.is_empty());
+    assert!(wait_for_cells(&mut session, |text| text.contains("session-input")).is_some());
+    close_all_panes(&mut session);
+}
+
+#[test]
+fn poll_omits_a_quiet_pane() {
+    let mut session = session_with_tab();
+    assert!(wait_for_cells(&mut session, |_| true).is_some());
+
+    assert!(session.poll().is_empty());
+    close_all_panes(&mut session);
+}
+
+#[test]
+fn closes_a_pane_and_kills_its_process() {
+    let mut session = session_with_tab();
+    session
+        .apply(ClientMsg::SplitPane {
+            direction: SplitDirection::Down,
+        })
+        .expect("split must succeed");
+    assert!(session.pane_hosts.contains_key("w1:p2"));
+    let pid_file = std::env::temp_dir().join(format!("seer-runtime-close-{}", std::process::id()));
+    session
+        .apply(ClientMsg::Input {
+            pane: "w1:p2".into(),
+            bytes: format!("echo $$ > {}\n", pid_file.display()).into_bytes(),
+        })
+        .expect("PID command must succeed");
+    let shell_pid = wait_for_pid(&pid_file).expect("shell PID must be valid");
+
+    let messages = session
+        .apply(ClientMsg::ClosePane {
+            pane: "w1:p2".into(),
+        })
+        .expect("close must succeed");
+
+    assert!(!session.pane_hosts.contains_key("w1:p2"));
+    assert!(wait_for_process_stop(shell_pid));
+    std::fs::remove_file(pid_file).expect("PID file must be removed");
+    assert_eq!(message_tree(&messages).workspaces[0].tabs[0].panes.len(), 1);
+    assert_eq!(
+        session.tree.workspaces[0].tabs[0].panes[0].size,
+        PaneSize { cols: 80, rows: 24 }
+    );
+    close_all_panes(&mut session);
+}
+
+#[test]
+fn focuses_a_pane_and_ignores_deferred_messages() {
+    let mut session = session_with_tab();
+    session
+        .apply(ClientMsg::SplitPane {
+            direction: SplitDirection::Right,
+        })
+        .expect("split must succeed");
+
+    let messages = session
+        .apply(ClientMsg::FocusPane {
+            pane: "w1:p1".into(),
+        })
+        .expect("focus must succeed");
+    assert_eq!(
+        message_tree(&messages).workspaces[0].tabs[0]
+            .layout
+            .focused
+            .as_deref(),
+        Some("w1:p1")
+    );
+
+    let deferred = [
+        ClientMsg::Hello {
+            user: "alice".into(),
+            token: "secret".into(),
+        },
+        ClientMsg::Peek {
+            user: "bob".into(),
+            workspace: "w1".into(),
+        },
+        ClientMsg::StopPeek,
+        ClientMsg::Detach,
+    ];
+    for message in deferred {
+        assert!(
+            session
+                .apply(message)
+                .expect("message must succeed")
+                .is_empty()
+        );
+    }
+    close_all_panes(&mut session);
+}
+
+#[test]
+fn resize_before_tab_creation_is_stored() {
+    let mut session = UserSession::new("alice", "sh");
+
+    let messages = session
+        .apply(ClientMsg::Resize { cols: 90, rows: 30 })
+        .expect("resize must succeed");
+    assert!(message_tree(&messages).workspaces.is_empty());
+
+    let messages = session
+        .apply(ClientMsg::CreateTab)
+        .expect("tab creation must succeed");
+    assert_eq!(
+        message_tree(&messages).workspaces[0].tabs[0].panes[0].size,
+        PaneSize { cols: 90, rows: 30 }
+    );
+    close_all_panes(&mut session);
+}
+
+fn session_with_tab() -> UserSession {
+    let mut session = UserSession::new("alice", "sh");
+    session
+        .apply(ClientMsg::CreateTab)
+        .expect("tab creation must succeed");
+    session
+}
+
+fn message_tree(messages: &[ServerMsg]) -> &Tree {
+    assert_eq!(messages.len(), 1);
+    match &messages[0] {
+        ServerMsg::Tree { tree } => tree,
+        message => panic!("expected tree message, got {message:?}"),
+    }
+}
+
+fn wait_for_cells(
+    session: &mut UserSession,
+    matches: impl Fn(&str) -> bool,
+) -> Option<Vec<ServerMsg>> {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    let mut matched_messages = None;
+    while Instant::now() < deadline {
+        let messages = session.poll();
+        if messages.is_empty() && matched_messages.is_some() {
+            return matched_messages;
+        }
+        let text = cells_text(&messages);
+        if !messages.is_empty() && matches(&text) {
+            matched_messages = Some(messages);
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    None
+}
+
+fn wait_for_pid(path: &std::path::Path) -> Option<u32> {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while Instant::now() < deadline {
+        if path.is_file()
+            && let Ok(contents) = std::fs::read_to_string(path)
+            && !contents.trim().is_empty()
+            && let Ok(pid) = contents.trim().parse::<u32>()
+        {
+            return Some(pid);
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    None
+}
+
+fn wait_for_process_stop(pid: u32) -> bool {
+    let status = format!("/proc/{pid}/status");
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while Instant::now() < deadline {
+        match std::fs::read_to_string(&status) {
+            Ok(contents) if contents.lines().any(|line| line.starts_with("State:\tZ")) => {
+                return true;
+            }
+            Ok(_) => thread::sleep(POLL_INTERVAL),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => return true,
+            Err(_) => return false,
+        }
+    }
+    false
+}
+
+fn cells_text(messages: &[ServerMsg]) -> String {
+    messages
+        .iter()
+        .filter_map(|message| match message {
+            ServerMsg::Cells { rows, .. } => Some(rows),
+            _ => None,
+        })
+        .flatten()
+        .flatten()
+        .map(|cell| cell.character)
+        .collect()
+}
+
+fn close_all_panes(session: &mut UserSession) {
+    let pane_ids: Vec<String> = session.pane_hosts.keys().cloned().collect();
+    for pane in pane_ids {
+        session
+            .apply(ClientMsg::ClosePane { pane })
+            .expect("pane close must succeed");
+    }
+}
