@@ -118,6 +118,7 @@ fn fake_broker_process() {
     };
     if std::env::var_os("SEER_FAKE_NO_CREDENTIAL").is_none() {
         thread::sleep(Duration::from_millis(250));
+        println!("broker-output");
         println!("owner-credential: owner-secret");
         std::io::stdout()
             .flush()
@@ -187,6 +188,32 @@ fn prompt_defaults_create_config_and_owner_store() {
     assert_eq!(
         mode(directory.config_home().join("seer/servers.toml")),
         0o600
+    );
+    let log = fs::read_to_string(directory.state_dir().join("broker.log"))
+        .expect("broker log must be read");
+    assert!(log.contains("broker-output"));
+    assert!(!log.contains("owner-credential"));
+}
+
+#[test]
+fn published_port_sets_the_listen_port() {
+    let _serial = PROCESS_TEST.lock().expect("process test lock must work");
+    let directory = TestDirectory::new();
+    let port = unused_address().port();
+    let executable = install_binaries(&directory);
+
+    let output = run_start(
+        &executable,
+        &directory,
+        &format!("\nhost.test:{port}\n"),
+        &[],
+    );
+
+    assert!(output.status.success(), "{}", output.stderr);
+    let broker: toml::Value = read_toml(directory.config_home().join("seer/broker.toml"));
+    assert_eq!(
+        broker["listen"].as_str(),
+        Some(format!("0.0.0.0:{port}").as_str())
     );
 }
 
