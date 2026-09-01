@@ -8,6 +8,7 @@ use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
 use crate::capsule;
 use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
+use crate::tailscale;
 use crate::tui;
 
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -62,10 +63,14 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
     };
     let capsule = capsule::parse(&invitation).map_err(CommandError::system)?;
     println!("Server: {}", capsule.endpoint);
+    tailscale::check(&capsule.endpoint).map_err(|error| match error {
+        tailscale::CheckError::Action(message) => CommandError::usage(message),
+        tailscale::CheckError::System(error) => CommandError::system(error),
+    })?;
 
     loop {
         let name = prompt::visible("Name: ").map_err(CommandError::system)?;
-        let mut stream = connect(&capsule.endpoint).map_err(CommandError::system)?;
+        let mut stream = connect(&capsule.endpoint)?;
         let join = ClientMsg::Join {
             seat_token: capsule.token.clone(),
             name,
@@ -376,7 +381,7 @@ fn pick_server(
 }
 
 fn authenticate(server: &ServerEntry) -> Result<(TcpStream, Tree), CommandError> {
-    let mut stream = connect(&server.endpoint).map_err(CommandError::system)?;
+    let mut stream = connect(&server.endpoint)?;
     let hello = ClientMsg::Hello {
         user_id: server.user_id.clone(),
         credential: server.credential.clone(),
@@ -408,10 +413,18 @@ fn welcome_tree(reply: ServerMsg) -> Result<Tree, CommandError> {
     }
 }
 
-fn connect(endpoint: &str) -> io::Result<TcpStream> {
-    let stream = TcpStream::connect(endpoint)?;
-    stream.set_read_timeout(Some(NETWORK_TIMEOUT))?;
-    stream.set_write_timeout(Some(NETWORK_TIMEOUT))?;
+fn connect(endpoint: &str) -> Result<TcpStream, CommandError> {
+    let stream = TcpStream::connect(endpoint).map_err(|_| {
+        CommandError::usage(format!(
+            "Cannot reach {endpoint}. Check that the server is running and that you are on the same network."
+        ))
+    })?;
+    stream
+        .set_read_timeout(Some(NETWORK_TIMEOUT))
+        .map_err(CommandError::system)?;
+    stream
+        .set_write_timeout(Some(NETWORK_TIMEOUT))
+        .map_err(CommandError::system)?;
     Ok(stream)
 }
 
