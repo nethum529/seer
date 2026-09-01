@@ -1,9 +1,4 @@
 listen = "127.0.0.1:7321"
-
-[[users]]
-user = "alice"
-token = "replace-with-alice-token"
-
-[[users]]
-user = "bob"
-token = "replace-with-bob-token"
+published_addr = "seer.example.com:7321"
+state_dir = "/var/lib/seer"
+owner_name = "owner"

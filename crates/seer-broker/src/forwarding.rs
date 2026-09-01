@@ -7,16 +7,15 @@ use std::thread::{self, JoinHandle};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
-use crate::UserConfig;
-use crate::runtime::RuntimeManager;
+use crate::registry::PersonRecord;
+use crate::server::BrokerState;
 
 pub(crate) fn forward(
     client: TcpStream,
-    owner: &str,
-    users: &[UserConfig],
-    runtimes: &RuntimeManager,
+    owner: &PersonRecord,
+    broker: &BrokerState,
 ) -> io::Result<()> {
-    let mut coordinator = Coordinator::new(client, owner, users, runtimes)?;
+    let mut coordinator = Coordinator::new(client, owner, broker)?;
     let result = coordinator.run();
     result.and(coordinator.close())
 }
@@ -25,8 +24,8 @@ struct Coordinator<'a> {
     client: TcpStream,
     client_reader: Option<JoinHandle<()>>,
     owner: &'a str,
-    users: &'a [UserConfig],
-    runtimes: &'a RuntimeManager,
+    owner_is_admin: bool,
+    broker: &'a BrokerState,
     event_sender: Sender<Event>,
     events: Receiver<Event>,
     runtime: Option<RuntimeConnection>,
@@ -36,20 +35,19 @@ struct Coordinator<'a> {
 impl<'a> Coordinator<'a> {
     fn new(
         client: TcpStream,
-        owner: &'a str,
-        users: &'a [UserConfig],
-        runtimes: &'a RuntimeManager,
+        owner: &'a PersonRecord,
+        broker: &'a BrokerState,
     ) -> io::Result<Self> {
         let (event_sender, events) = mpsc::channel();
         let client_reader = client.try_clone()?;
-        let runtime = connect_runtime(runtimes, owner, None, &event_sender)?;
+        let runtime = connect_runtime(broker, &owner.user_id, None, &event_sender)?;
         let client_reader = spawn_client_reader(client_reader, event_sender.clone());
         Ok(Self {
             client,
             client_reader: Some(client_reader),
-            owner,
-            users,
-            runtimes,
+            owner: &owner.user_id,
+            owner_is_admin: owner.is_owner,
+            broker,
             event_sender,
             events,
             runtime: Some(runtime),
@@ -84,7 +82,21 @@ impl<'a> Coordinator<'a> {
 
     fn handle_client_message(&mut self, message: ClientMsg) -> io::Result<Action> {
         match message {
-            ClientMsg::Peek { ref user, .. } if self.user_exists(user) => {
+            ClientMsg::Invite if self.owner_is_admin => {
+                codec::encode(&mut self.client, &self.broker.invite()?)?;
+            }
+            ClientMsg::Invite => {
+                codec::encode(
+                    &mut self.client,
+                    &ServerMsg::Refused {
+                        reason: "owner access required".into(),
+                    },
+                )?;
+            }
+            ClientMsg::ListPeople => {
+                codec::encode(&mut self.client, &self.broker.people()?)?;
+            }
+            ClientMsg::Peek { ref user, .. } if self.user_exists(user)? => {
                 self.switch_runtime(user, Some(&message))?;
                 self.peeking = true;
             }
@@ -122,8 +134,8 @@ impl<'a> Coordinator<'a> {
         }
     }
 
-    fn user_exists(&self, user: &str) -> bool {
-        self.users.iter().any(|entry| entry.user == user)
+    fn user_exists(&self, user_id: &str) -> io::Result<bool> {
+        self.broker.registry().person_exists(user_id)
     }
 
     fn runtime_is(&self, identity: &Arc<()>) -> bool {
@@ -148,7 +160,7 @@ impl<'a> Coordinator<'a> {
     fn switch_runtime(&mut self, user: &str, first: Option<&ClientMsg>) -> io::Result<()> {
         self.close_runtime()?;
         self.runtime = Some(connect_runtime(
-            self.runtimes,
+            self.broker,
             user,
             first,
             &self.event_sender,
@@ -181,12 +193,12 @@ struct RuntimeConnection {
 }
 
 fn connect_runtime(
-    runtimes: &RuntimeManager,
+    broker: &BrokerState,
     user: &str,
     first: Option<&ClientMsg>,
     sender: &Sender<Event>,
 ) -> io::Result<RuntimeConnection> {
-    let mut stream = runtimes.connect(user)?;
+    let mut stream = broker.runtimes().connect(user)?;
     if let Some(message) = first {
         codec::encode(&mut stream, message)?;
     }
@@ -280,229 +292,4 @@ fn join_reader(reader: JoinHandle<()>) -> io::Result<()> {
 }
 
 #[cfg(test)]
-mod tests {
-    use std::io::Read;
-    use std::net::{TcpListener, TcpStream};
-    use std::os::unix::net::UnixStream;
-    use std::sync::Arc;
-    use std::sync::mpsc;
-    use std::thread;
-    use std::time::{Duration, Instant};
-
-    use seer_core::proto::{ClientMsg, codec};
-
-    use super::{Action, Coordinator, RuntimeConnection, join_reader, spawn_client_reader};
-    use crate::runtime::RuntimeManager;
-
-    const WAIT_TIMEOUT: Duration = Duration::from_secs(1);
-
-    #[test]
-    fn stop_peek_does_nothing_in_normal_mode() {
-        let runtimes = RuntimeManager::new("sh".into()).expect("runtime manager must initialize");
-        let (client, _peer) = tcp_pair();
-        let mut coordinator = coordinator(client, &runtimes);
-        let _runtime_peer = attach_runtime(&mut coordinator);
-        let identity = Arc::clone(
-            &coordinator
-                .runtime
-                .as_ref()
-                .expect("runtime connection must exist")
-                .identity,
-        );
-
-        let action = coordinator
-            .handle_client_message(ClientMsg::StopPeek)
-            .expect("StopPeek must succeed");
-
-        assert!(action == Action::Continue);
-        assert!(coordinator.runtime_is(&identity));
-    }
-
-    #[test]
-    fn runtime_connection_close_shuts_down_its_reader() {
-        let (stream, peer) = UnixStream::pair().expect("runtime pair must open");
-        peer.set_read_timeout(Some(WAIT_TIMEOUT))
-            .expect("read timeout must set");
-        let (sender, _events) = mpsc::channel();
-        let identity = Arc::new(());
-        let reader = super::spawn_runtime_reader(
-            stream.try_clone().expect("runtime stream must clone"),
-            Arc::clone(&identity),
-            sender,
-        );
-        let runtime = RuntimeConnection {
-            stream,
-            identity,
-            reader,
-        };
-
-        runtime.close().expect("runtime must close");
-
-        assert_unix_closed(peer);
-    }
-
-    #[test]
-    fn coordinator_closes_only_once() {
-        let runtimes = RuntimeManager::new("sh".into()).expect("runtime manager must initialize");
-        let (client, peer) = tcp_pair();
-        let mut coordinator = coordinator(client, &runtimes);
-        let runtime_peer = attach_runtime(&mut coordinator);
-
-        coordinator.close().expect("coordinator must close");
-
-        assert_tcp_closed(peer);
-        assert_unix_closed(runtime_peer);
-    }
-
-    #[test]
-    fn close_runtime_removes_and_closes_the_connection() {
-        let runtimes = RuntimeManager::new("sh".into()).expect("runtime manager must initialize");
-        let (client, _peer) = tcp_pair();
-        let mut coordinator = coordinator(client, &runtimes);
-        let runtime_peer = attach_runtime(&mut coordinator);
-
-        coordinator
-            .close_runtime()
-            .expect("runtime connection must close");
-
-        assert!(coordinator.runtime.is_none());
-        assert_unix_closed(runtime_peer);
-    }
-
-    #[test]
-    fn dropping_coordinator_closes_the_runtime_connection() {
-        let runtimes = RuntimeManager::new("sh".into()).expect("runtime manager must initialize");
-        let (client, _peer) = tcp_pair();
-        let mut coordinator = coordinator(client, &runtimes);
-        let runtime_peer = attach_runtime(&mut coordinator);
-
-        drop(coordinator);
-
-        assert_unix_closed(runtime_peer);
-    }
-
-    #[test]
-    fn client_reader_stops_if_the_event_receiver_is_gone() {
-        let (server, mut client) = tcp_pair();
-        let (sender, events) = mpsc::channel();
-        drop(events);
-        let reader = spawn_client_reader(server, sender);
-
-        codec::encode(&mut client, &ClientMsg::CreateTab).expect("message must encode");
-        let stopped = wait_for_thread(&reader);
-        if !stopped {
-            let _ = client.shutdown(std::net::Shutdown::Both);
-        }
-        reader.join().expect("reader must not panic");
-
-        assert!(stopped);
-    }
-
-    #[test]
-    fn runtime_reader_stops_after_the_connection_ends() {
-        let (stream, peer) = UnixStream::pair().expect("runtime pair must open");
-        let (sender, events) = mpsc::channel();
-        let reader = super::spawn_runtime_reader(stream, Arc::new(()), sender);
-        drop(peer);
-
-        let stopped = wait_for_thread(&reader);
-        drop(events);
-        reader.join().expect("reader must not panic");
-
-        assert!(stopped);
-    }
-
-    #[test]
-    fn join_reader_reports_a_panic() {
-        let reader = thread::spawn(|| panic!("test panic"));
-
-        assert!(join_reader(reader).is_err());
-    }
-
-    fn coordinator<'a>(client: TcpStream, runtimes: &'a RuntimeManager) -> Coordinator<'a> {
-        let (event_sender, events) = mpsc::channel();
-        Coordinator {
-            client,
-            client_reader: None,
-            owner: "alice",
-            users: &[],
-            runtimes,
-            event_sender,
-            events,
-            runtime: None,
-            peeking: false,
-        }
-    }
-
-    fn attach_runtime(coordinator: &mut Coordinator<'_>) -> UnixStream {
-        let (stream, peer) = UnixStream::pair().expect("runtime pair must open");
-        peer.set_read_timeout(Some(WAIT_TIMEOUT))
-            .expect("read timeout must set");
-        let identity = Arc::new(());
-        let reader = super::spawn_runtime_reader(
-            stream.try_clone().expect("runtime stream must clone"),
-            Arc::clone(&identity),
-            coordinator.event_sender.clone(),
-        );
-        coordinator.runtime = Some(RuntimeConnection {
-            stream,
-            identity,
-            reader,
-        });
-        peer
-    }
-
-    fn tcp_pair() -> (TcpStream, TcpStream) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-        let address = listener.local_addr().expect("listener must have address");
-        let client = TcpStream::connect(address).expect("client must connect");
-        let (server, _) = listener.accept().expect("server must accept");
-        client
-            .set_read_timeout(Some(WAIT_TIMEOUT))
-            .expect("read timeout must set");
-        (server, client)
-    }
-
-    fn assert_tcp_closed(mut stream: TcpStream) {
-        let mut byte = [0];
-        match stream.read(&mut byte) {
-            Ok(0) => {}
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::ConnectionReset
-                        | std::io::ErrorKind::ConnectionAborted
-                        | std::io::ErrorKind::BrokenPipe
-                        | std::io::ErrorKind::UnexpectedEof
-                ) => {}
-            result => panic!("TCP stream must close: {result:?}"),
-        }
-    }
-
-    fn assert_unix_closed(mut stream: UnixStream) {
-        let mut byte = [0];
-        match stream.read(&mut byte) {
-            Ok(0) => {}
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::ConnectionReset
-                        | std::io::ErrorKind::ConnectionAborted
-                        | std::io::ErrorKind::BrokenPipe
-                        | std::io::ErrorKind::UnexpectedEof
-                ) => {}
-            result => panic!("Unix stream must close: {result:?}"),
-        }
-    }
-
-    fn wait_for_thread(thread: &thread::JoinHandle<()>) -> bool {
-        let deadline = Instant::now() + WAIT_TIMEOUT;
-        while Instant::now() < deadline {
-            if thread.is_finished() {
-                return true;
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-        false
-    }
-}
+mod tests;
