@@ -201,7 +201,7 @@ mod tests {
     #[test]
     fn retries_until_socket_is_ready() {
         let temporary = temporary_directory("retry");
-        let socket = temporary.join("runtime.sock");
+        let socket = temporary.join("r.sock");
         let listener_path = socket.clone();
         let worker = thread::spawn(move || {
             thread::sleep(Duration::from_millis(30));
@@ -219,7 +219,7 @@ mod tests {
     #[test]
     fn retry_returns_last_connection_error() {
         let temporary = temporary_directory("timeout");
-        let socket = temporary.join("missing.sock");
+        let socket = temporary.join("m.sock");
 
         connect_with_retry(&socket, 2).expect_err("missing socket must fail");
         fs::remove_dir_all(temporary).expect("temporary directory must be removed");
@@ -229,11 +229,10 @@ mod tests {
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time must be after the Unix epoch")
-            .as_nanos();
-        let path = std::env::temp_dir().join(format!(
-            "mux-broker-{name}-{}-{timestamp}",
-            std::process::id()
-        ));
+            .as_nanos()
+            % 1_000_000_000;
+        let path =
+            std::env::temp_dir().join(format!("mb-{name}-{}-{timestamp}", std::process::id()));
         fs::create_dir(&path).expect("temporary directory must be created");
         path
     }

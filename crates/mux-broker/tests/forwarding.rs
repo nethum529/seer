@@ -1,11 +1,11 @@
 #![cfg(target_os = "linux")]
 
 use std::fs;
-use std::io;
+use std::io::{self, Read};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -24,50 +24,142 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     let _broker = ProcessGuard::new(broker);
     let mut first = connect_when_ready(address);
 
-    assert!(!temporary.pid_file.is_file());
-    send_hello(&mut first);
-    assert_welcome(read_message(&mut first));
+    assert!(!temporary.pid_file("alice").is_file());
+    send_hello(&mut first, "alice", "alice-secret");
+    assert_welcome(read_message(&mut first), "alice");
     codec::encode(&mut first, &ClientMsg::CreateTab).expect("CreateTab must encode");
-    assert!(wait_for_tree_with_tab(&mut first));
+    wait_for_tree_with_tab(&mut first);
     assert!(wait_for_cells(&mut first));
-    let runtime_pid = temporary.runtime_pid();
-    temporary.assert_runtime_arguments();
+    let runtime_pid = temporary.runtime_pid("alice");
+    temporary.assert_runtime_arguments("alice");
     temporary.assert_socket_directory();
 
     drop(first);
 
     let mut second = connect_when_ready(address);
-    send_hello(&mut second);
-    assert_welcome(read_message(&mut second));
+    send_hello(&mut second, "alice", "alice-secret");
+    assert_welcome(read_message(&mut second), "alice");
     assert_tree_has_one_tab(read_message(&mut second));
-    assert_eq!(temporary.runtime_pid(), runtime_pid);
+    assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
 
     drop(second);
-    temporary.terminate_runtime(runtime_pid);
+    temporary.terminate_runtime("alice");
 }
 
-fn send_hello(stream: &mut TcpStream) {
+#[test]
+fn routes_peek_and_restores_the_owners_runtime() {
+    let temporary = TestFiles::new();
+    let address = unused_address();
+    temporary.write_config(address);
+    temporary.write_runtime_wrapper();
+    let broker = temporary.start_broker();
+    let _broker = ProcessGuard::new(broker);
+
+    let mut alice = connect_when_ready(address);
+    send_hello(&mut alice, "alice", "alice-secret");
+    assert_welcome(read_message(&mut alice), "alice");
+    send(&mut alice, &ClientMsg::CreateTab);
+    let alice_tree = wait_for_tree_with_tab(&mut alice);
+    assert!(wait_for_cells(&mut alice));
+    let workspace = alice_tree.workspaces[0].id.clone();
+    let pane = alice_tree.workspaces[0].tabs[0].panes[0].id.clone();
+
+    let mut bob = connect_when_ready(address);
+    send_hello(&mut bob, "bob", "bob-secret");
+    assert_welcome(read_message(&mut bob), "bob");
+    assert_tree_is_empty(read_message(&mut bob));
+
+    send(
+        &mut bob,
+        &ClientMsg::Peek {
+            user: "charlie".into(),
+            workspace: workspace.clone(),
+        },
+    );
+    send(&mut bob, &ClientMsg::Resize { cols: 90, rows: 30 });
+    assert_tree_is_empty(read_message(&mut bob));
+    assert!(!temporary.pid_file("charlie").is_file());
+
+    send(
+        &mut bob,
+        &ClientMsg::Peek {
+            user: "alice".into(),
+            workspace,
+        },
+    );
+    assert_eq!(wait_for_tree_with_tab(&mut bob), alice_tree);
+    send_input(&mut alice, &pane, "printf 'alice-before\\n'\n");
+    assert!(wait_for_cells_containing(&mut alice, "alice-before").contains("alice-before"));
+    assert!(wait_for_cells_containing(&mut bob, "alice-before").contains("alice-before"));
+
+    send_input(&mut bob, &pane, "printf 'bob-write\\n'\n");
+    send_input(&mut alice, &pane, "printf 'alice-after\\n'\n");
+    let alice_cells = wait_for_cells_containing(&mut alice, "alice-after");
+    let bob_cells = wait_for_cells_containing(&mut bob, "alice-after");
+    assert!(!alice_cells.contains("bob-write"));
+    assert!(!bob_cells.contains("bob-write"));
+
+    send(&mut bob, &ClientMsg::StopPeek);
+    assert_tree_is_empty(read_message(&mut bob));
+    temporary.assert_log_contains("broker dropped Peek for unknown user: charlie");
+    temporary.assert_log_contains("broker dropped Input while user bob peeks");
+    temporary.assert_log_excludes("runtime dropped read-only message");
+
+    send(
+        &mut bob,
+        &ClientMsg::Peek {
+            user: "alice".into(),
+            workspace: "w1".into(),
+        },
+    );
+    wait_for_tree_with_tab(&mut bob);
+    wait_for_tree_with_tab(&mut bob);
+    temporary.terminate_runtime("alice");
+    assert_tree_is_empty(read_message(&mut bob));
+    let mut byte = [0];
+    assert_eq!(alice.read(&mut byte).expect("Alice must disconnect"), 0);
+
+    drop(alice);
+    drop(bob);
+    temporary.terminate_runtime("bob");
+}
+
+fn send_hello(stream: &mut TcpStream, user: &str, token: &str) {
     codec::encode(
         stream,
         &ClientMsg::Hello {
-            user: "alice".into(),
-            token: "alice-secret".into(),
+            user: user.into(),
+            token: token.into(),
         },
     )
     .expect("Hello must encode");
 }
 
-fn assert_welcome(message: ServerMsg) {
+fn send(stream: &mut TcpStream, message: &ClientMsg) {
+    codec::encode(stream, message).expect("client message must encode");
+}
+
+fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
+    send(
+        stream,
+        &ClientMsg::Input {
+            pane: pane.into(),
+            bytes: input.as_bytes().into(),
+        },
+    );
+}
+
+fn assert_welcome(message: ServerMsg, expected_user: &str) {
     match message {
         ServerMsg::Welcome { user, tree } => {
-            assert_eq!(user, "alice");
+            assert_eq!(user, expected_user);
             assert!(tree.workspaces.is_empty());
         }
         other => panic!("expected Welcome, got {other:?}"),
     }
 }
 
-fn wait_for_tree_with_tab(stream: &mut TcpStream) -> bool {
+fn wait_for_tree_with_tab(stream: &mut TcpStream) -> mux_core::Tree {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while Instant::now() < deadline {
         if let ServerMsg::Tree { tree } = read_message(stream)
@@ -76,10 +168,10 @@ fn wait_for_tree_with_tab(stream: &mut TcpStream) -> bool {
                 .first()
                 .is_some_and(|workspace| workspace.tabs.len() == 1)
         {
-            return true;
+            return tree;
         }
     }
-    false
+    panic!("Tree with a tab was not received");
 }
 
 fn wait_for_cells(stream: &mut TcpStream) -> bool {
@@ -100,6 +192,30 @@ fn assert_tree_has_one_tab(message: ServerMsg) {
         }
         other => panic!("expected Tree, got {other:?}"),
     }
+}
+
+fn assert_tree_is_empty(message: ServerMsg) {
+    match message {
+        ServerMsg::Tree { tree } => assert!(tree.workspaces.is_empty()),
+        other => panic!("expected Tree, got {other:?}"),
+    }
+}
+
+fn wait_for_cells_containing(stream: &mut TcpStream, expected: &str) -> String {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while Instant::now() < deadline {
+        if let ServerMsg::Cells { rows, .. } = read_message(stream) {
+            let text = rows
+                .iter()
+                .flatten()
+                .map(|cell| cell.character)
+                .collect::<String>();
+            if text.contains(expected) {
+                return text;
+            }
+        }
+    }
+    panic!("Cells did not contain {expected}");
 }
 
 fn read_message(stream: &mut TcpStream) -> ServerMsg {
@@ -133,8 +249,7 @@ struct TestFiles {
     root: PathBuf,
     config: PathBuf,
     wrapper: PathBuf,
-    pid_file: PathBuf,
-    arguments_file: PathBuf,
+    broker_log: PathBuf,
     xdg_runtime_dir: PathBuf,
 }
 
@@ -152,8 +267,7 @@ impl TestFiles {
         Self {
             config: root.join("broker.toml"),
             wrapper: root.join("runtime-wrapper"),
-            pid_file: root.join("runtime.pid"),
-            arguments_file: root.join("runtime.args"),
+            broker_log: root.join("broker.log"),
             xdg_runtime_dir: root.join("run"),
             root,
         }
@@ -161,49 +275,54 @@ impl TestFiles {
 
     fn write_config(&self, address: SocketAddr) {
         let contents = format!(
-            "listen = \"{address}\"\nshell = \"sh\"\n\n[[users]]\nuser = \"alice\"\ntoken = \"alice-secret\"\n"
+            "listen = \"{address}\"\nshell = \"sh\"\n\n[[users]]\nuser = \"alice\"\ntoken = \"alice-secret\"\n\n[[users]]\nuser = \"bob\"\ntoken = \"bob-secret\"\n"
         );
         fs::write(&self.config, contents).expect("broker config must write");
     }
 
     fn write_runtime_wrapper(&self) {
-        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$MUX_TEST_PID_FILE\"\nprintf '%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" > \"$MUX_TEST_ARGS_FILE\"\nexec \"$MUX_TEST_RUNTIME_BIN\" \"$@\"\n";
+        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$MUX_TEST_FILES/$2.pid\"\nprintf '%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" > \"$MUX_TEST_FILES/$2.args\"\nexec \"$MUX_TEST_RUNTIME_BIN\" \"$@\"\n";
         fs::write(&self.wrapper, script).expect("runtime wrapper must write");
         fs::set_permissions(&self.wrapper, fs::Permissions::from_mode(0o700))
             .expect("runtime wrapper mode must set");
     }
 
     fn start_broker(&self) -> Child {
+        let log = fs::File::create(&self.broker_log).expect("broker log must open");
         Command::new(env!("CARGO_BIN_EXE_mux-broker"))
             .arg(&self.config)
             .env("XDG_RUNTIME_DIR", &self.xdg_runtime_dir)
             .env("MUX_RUNTIME_BIN", &self.wrapper)
             .env("MUX_TEST_RUNTIME_BIN", runtime_binary())
-            .env("MUX_TEST_PID_FILE", &self.pid_file)
-            .env("MUX_TEST_ARGS_FILE", &self.arguments_file)
+            .env("MUX_TEST_FILES", &self.root)
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
+            .stderr(Stdio::from(log))
             .spawn()
             .expect("broker must start")
     }
 
-    fn runtime_pid(&self) -> u32 {
-        assert!(wait_for_file(&self.pid_file));
-        fs::read_to_string(&self.pid_file)
+    fn pid_file(&self, user: &str) -> PathBuf {
+        self.root.join(format!("{user}.pid"))
+    }
+
+    fn runtime_pid(&self, user: &str) -> u32 {
+        let pid_file = self.pid_file(user);
+        assert!(wait_for_file(&pid_file));
+        fs::read_to_string(pid_file)
             .expect("runtime PID must be readable")
             .trim()
             .parse()
             .expect("runtime PID must be valid")
     }
 
-    fn assert_runtime_arguments(&self) {
-        assert!(wait_for_file(&self.arguments_file));
-        let arguments =
-            fs::read_to_string(&self.arguments_file).expect("runtime arguments must be readable");
-        let expected_socket = self.xdg_runtime_dir.join("mux/alice.sock");
+    fn assert_runtime_arguments(&self, user: &str) {
+        let arguments_file = self.root.join(format!("{user}.args"));
+        assert!(wait_for_file(&arguments_file));
+        let arguments = fs::read_to_string(arguments_file).expect("runtime arguments must read");
+        let expected_socket = self.xdg_runtime_dir.join(format!("mux/{user}.sock"));
         assert_eq!(
             arguments.lines().collect::<Vec<_>>(),
-            [expected_socket.to_string_lossy().as_ref(), "alice", "sh"]
+            [expected_socket.to_string_lossy().as_ref(), user, "sh"]
         );
     }
 
@@ -217,18 +336,39 @@ impl TestFiles {
         assert_eq!(mode, 0o700);
     }
 
-    fn terminate_runtime(&self, pid: u32) {
+    fn terminate_runtime(&self, user: &str) {
+        let pid = self.runtime_pid(user);
         terminate_process(pid);
-        fs::remove_file(&self.pid_file).expect("runtime PID file must be removed");
+        fs::remove_file(self.pid_file(user)).expect("runtime PID file must be removed");
+    }
+
+    fn assert_log_contains(&self, expected: &str) {
+        let deadline = Instant::now() + WAIT_TIMEOUT;
+        while Instant::now() < deadline {
+            if fs::read_to_string(&self.broker_log)
+                .is_ok_and(|contents| contents.contains(expected))
+            {
+                return;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+        panic!("broker log did not contain {expected}");
+    }
+
+    fn assert_log_excludes(&self, unexpected: &str) {
+        let contents = fs::read_to_string(&self.broker_log).expect("broker log must read");
+        assert!(!contents.contains(unexpected));
     }
 }
 
 impl Drop for TestFiles {
     fn drop(&mut self) {
-        if let Ok(contents) = fs::read_to_string(&self.pid_file)
-            && let Ok(pid) = contents.trim().parse()
-        {
-            try_terminate_process(pid);
+        for user in ["alice", "bob"] {
+            if let Ok(contents) = fs::read_to_string(self.pid_file(user))
+                && let Ok(pid) = contents.trim().parse()
+            {
+                try_terminate_process(pid);
+            }
         }
         if let Err(error) = fs::remove_dir_all(&self.root)
             && error.kind() != io::ErrorKind::NotFound
@@ -249,11 +389,16 @@ fn runtime_binary() -> PathBuf {
 
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let manifest_directory = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let status = Command::new(cargo)
+    let mut child = Command::new(cargo)
         .args(["build", "-p", "mux-runtime", "--bin", "mux-runtime"])
         .current_dir(manifest_directory)
-        .status()
+        .spawn()
         .expect("runtime binary must build");
+    let status = wait_for_child(&mut child, Duration::from_secs(60)).unwrap_or_else(|| {
+        let _ = child.kill();
+        assert!(wait_for_child(&mut child, Duration::from_secs(2)).is_some());
+        panic!("runtime binary build timed out");
+    });
     assert!(status.success(), "runtime binary must build");
 
     manifest_directory.join("../../target/debug/mux-runtime")
@@ -289,13 +434,18 @@ fn terminate_child(child: &mut Child) {
         return;
     }
     let _ = child.kill();
-    let deadline = Instant::now() + Duration::from_secs(2);
+    assert!(wait_for_child(child, Duration::from_secs(2)).is_some());
+}
+
+fn wait_for_child(child: &mut Child, timeout: Duration) -> Option<ExitStatus> {
+    let deadline = Instant::now() + timeout;
     while Instant::now() < deadline {
-        if matches!(child.try_wait(), Ok(Some(_))) {
-            return;
+        if let Ok(Some(status)) = child.try_wait() {
+            return Some(status);
         }
         thread::sleep(POLL_INTERVAL);
     }
+    None
 }
 
 fn terminate_process(pid: u32) {
@@ -308,22 +458,28 @@ fn terminate_process(pid: u32) {
 }
 
 fn try_terminate_process(pid: u32) {
-    let _ = Command::new("kill")
-        .args(["-TERM", &pid.to_string()])
-        .status();
+    let _ = run_kill(pid, "TERM");
     if !wait_for_process_stop(pid) {
-        let _ = Command::new("kill")
-            .args(["-KILL", &pid.to_string()])
-            .status();
+        let _ = run_kill(pid, "KILL");
     }
 }
 
 fn send_signal(pid: u32, signal: &str) {
-    let status = Command::new("kill")
-        .args([format!("-{signal}"), pid.to_string()])
-        .status()
-        .expect("kill command must run");
+    let status = run_kill(pid, signal).expect("kill command must finish");
     assert!(status.success());
+}
+
+fn run_kill(pid: u32, signal: &str) -> Option<ExitStatus> {
+    let mut child = Command::new("kill")
+        .args([format!("-{signal}"), pid.to_string()])
+        .spawn()
+        .expect("kill command must run");
+    let status = wait_for_child(&mut child, Duration::from_secs(2));
+    if status.is_none() {
+        let _ = child.kill();
+        assert!(wait_for_child(&mut child, Duration::from_secs(2)).is_some());
+    }
+    status
 }
 
 fn wait_for_process_stop(pid: u32) -> bool {
