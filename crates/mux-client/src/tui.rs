@@ -10,6 +10,7 @@ use crossterm::execute;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
 };
+use mux_core::SplitDirection::{Down, Right};
 use mux_core::proto::{ClientMsg, ServerMsg, codec};
 use mux_core::{Cell, Color, Tree};
 use ratatui::Terminal;
@@ -182,6 +183,16 @@ fn handle_key(
     }
     if *command_pending {
         *command_pending = false;
+        let command = match key.code {
+            KeyCode::Char('c') => Some(ClientMsg::CreateTab),
+            KeyCode::Char('%') => Some(ClientMsg::SplitPane { direction: Right }),
+            KeyCode::Char('"') => Some(ClientMsg::SplitPane { direction: Down }),
+            _ => None,
+        };
+        if let Some(command) = command {
+            send(stream, &command)?;
+            return Ok(LoopControl::Continue);
+        }
         if let KeyCode::Char(number @ '1'..='9') = key.code {
             let index = number.to_digit(10).map_or(0, |value| value as usize);
             if let Some(pane) = state.focus_number(index) {
@@ -311,7 +322,7 @@ mod tests {
 
     use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
     use mux_core::proto::{ClientMsg, codec};
-    use mux_core::{PaneSize, Tree};
+    use mux_core::{PaneSize, SplitDirection, Tree};
 
     use super::{LoopControl, handle_event, set_view_only};
     use crate::state::ClientState;
@@ -324,6 +335,12 @@ mod tests {
         set_view_only(true);
         let events = [
             Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+            Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+            Event::Key(KeyEvent::new(KeyCode::Char('%'), KeyModifiers::SHIFT)),
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+            Event::Key(KeyEvent::new(KeyCode::Char('"'), KeyModifiers::SHIFT)),
             Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
             Event::Key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE)),
             Event::Resize(120, 40),
@@ -346,56 +363,47 @@ mod tests {
         let mut state = state_with_pane();
         let mut command_pending = false;
         set_view_only(false);
-
-        handle_event(
+        let events = [
             Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("input key must be handled");
-        handle_event(
             Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("command prefix must be handled");
-        handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('c'), KeyModifiers::NONE)),
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+            Event::Key(KeyEvent::new(KeyCode::Char('%'), KeyModifiers::SHIFT)),
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+            Event::Key(KeyEvent::new(KeyCode::Char('"'), KeyModifiers::SHIFT)),
+            Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
             Event::Key(KeyEvent::new(KeyCode::Char('1'), KeyModifiers::NONE)),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("focus key must be handled");
-        handle_event(
             Event::Resize(120, 40),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("resize must be handled");
+        ];
 
-        assert_eq!(
-            decode(&mut server),
+        for event in events {
+            handle_event(event, &mut client, &mut state, &mut command_pending)
+                .expect("active event must be handled");
+        }
+
+        let expected = [
             ClientMsg::Input {
                 pane: "w1:p1".into(),
                 bytes: b"a".to_vec(),
-            }
-        );
-        assert_eq!(
-            decode(&mut server),
+            },
+            ClientMsg::CreateTab,
+            ClientMsg::SplitPane {
+                direction: SplitDirection::Right,
+            },
+            ClientMsg::SplitPane {
+                direction: SplitDirection::Down,
+            },
             ClientMsg::FocusPane {
                 pane: "w1:p1".into(),
-            }
-        );
-        assert_eq!(
-            decode(&mut server),
+            },
             ClientMsg::Resize {
                 cols: 120,
                 rows: 40,
-            }
-        );
+            },
+        ];
+        for message in expected {
+            assert_eq!(decode(&mut server), message);
+        }
     }
 
     #[test]
