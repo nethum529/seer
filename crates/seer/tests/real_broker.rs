@@ -248,14 +248,14 @@ impl Drop for BrokerProcess {
 }
 
 fn broker_binary() -> PathBuf {
-    sibling_binary("seer-broker", "seer-broker")
+    sibling_binary("seer-broker")
 }
 
 fn runtime_binary() -> PathBuf {
-    sibling_binary("seer-runtime", "seer-runtime")
+    sibling_binary("seer-runtime")
 }
 
-fn sibling_binary(package: &str, binary: &str) -> PathBuf {
+fn sibling_binary(binary: &str) -> PathBuf {
     let sibling = Path::new(env!("CARGO_BIN_EXE_seer"))
         .parent()
         .expect("seer binary must have a parent")
@@ -263,7 +263,7 @@ fn sibling_binary(package: &str, binary: &str) -> PathBuf {
     let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
     let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
     let mut build = Command::new(cargo)
-        .args(["build", "-p", package, "--bin", binary])
+        .args(["build", "-p", "seer", "--bin", binary])
         .current_dir(manifest)
         .spawn()
         .expect("sibling binary must build");

@@ -2,7 +2,6 @@ use std::fs;
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
-use std::process::Command;
 use std::sync::Once;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
@@ -12,6 +11,9 @@ use seer_broker::{Config, serve};
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use sha2::{Digest, Sha256};
+
+#[path = "support/binary.rs"]
+mod binary;
 
 static NEXT_STATE_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 static RUNTIME_BINARY: Once = Once::new();
@@ -219,26 +221,7 @@ fn install_runtime_binary() {
             }
         })
         .expect("old runtime binary must remove");
-    fs::copy(runtime_binary(), target).expect("runtime binary must install");
-}
-
-fn runtime_binary() -> PathBuf {
-    let sibling = Path::new(env!("CARGO_BIN_EXE_seer-broker"))
-        .parent()
-        .expect("broker binary must have a parent")
-        .join("seer-runtime");
-    if sibling.is_file() {
-        return sibling;
-    }
-
-    let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
-        .args(["build", "-p", "seer-runtime", "--bin", "seer-runtime"])
-        .current_dir(env!("CARGO_MANIFEST_DIR"))
-        .status()
-        .expect("runtime binary must build");
-    assert!(status.success(), "runtime binary must build");
-
-    Path::new(env!("CARGO_MANIFEST_DIR")).join("../../target/debug/seer-runtime")
+    fs::copy(binary::build("seer-runtime"), target).expect("runtime binary must install");
 }
 
 fn remove_state_directory(state_dir: &Path) {

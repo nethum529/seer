@@ -7,6 +7,8 @@ use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
+#[path = "support/binary.rs"]
+mod binary;
 #[path = "forwarding/support.rs"]
 mod support;
 
