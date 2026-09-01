@@ -1,9 +1,9 @@
 [workspace]
 members = [
-    "crates/mux-broker",
-    "crates/mux-client",
-    "crates/mux-core",
-    "crates/mux-runtime",
+    "crates/seer-broker",
+    "crates/seer-client",
+    "crates/seer-core",
+    "crates/seer-runtime",
 ]
 resolver = "3"
 

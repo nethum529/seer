@@ -1,4 +1,4 @@
-# placeholder-herdrlike
+# Seer
 
 A Rust terminal runtime for coding agents, in the style of herdr and luvus,
 with multiplayer as the long term goal.

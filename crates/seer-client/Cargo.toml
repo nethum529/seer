@@ -1,0 +1,9 @@
+[package]
+name = "seer-client"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+crossterm = "0.29"
+seer-core = { path = "../seer-core" }
+ratatui = "0.30"
