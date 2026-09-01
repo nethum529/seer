@@ -89,7 +89,17 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
                 name: "bob".into(),
             },
         );
-        send_welcome(&mut second, "user-bob", "bob");
+        drop(second);
+
+        let mut attached = accept(&listener);
+        assert_eq!(
+            receive(&mut attached),
+            ClientMsg::Hello {
+                user_id: "user-bob".into(),
+                credential: "device-secret".into(),
+            }
+        );
+        send_welcome(&mut attached, "user-bob", "bob");
     });
     let capsule = format!(
         "SEER1-127.0.0.1-{}-seat-token\nalice\nbob\n",

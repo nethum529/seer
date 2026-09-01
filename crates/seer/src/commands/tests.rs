@@ -1,11 +1,14 @@
 use std::io::{self, Cursor};
 use std::net::{TcpListener, TcpStream};
+use std::thread;
+use std::time::{Duration, Instant};
 
-use seer_core::Tree;
-use seer_core::proto::{Person, ServerMsg};
+use seer_core::proto::{Person, ServerMsg, codec};
+use seer_core::{Cell, Tree};
 
 use super::{
-    edit_distance_at_most_one, finish_session, is_close, people_reply, pick_server, welcome_tree,
+    edit_distance_at_most_one, finish_session, is_close, people_reply, pick_server,
+    receive_reply_before, welcome_tree,
 };
 use crate::store::ServerEntry;
 
@@ -111,6 +114,54 @@ fn terminal_session_configures_peek_and_runs() {
         Err(io::Error::other("runner must not be called"))
     });
     assert!(result.is_ok());
+}
+
+#[test]
+fn command_reply_skips_all_stream_messages() {
+    let (mut client, mut server) = socket_pair();
+    let writer = thread::spawn(move || {
+        for message in [
+            ServerMsg::Tree { tree: Tree::new() },
+            ServerMsg::Frame {
+                pane: "p1".into(),
+                bytes: vec![1],
+            },
+            ServerMsg::Cells {
+                pane: "p1".into(),
+                rows: vec![Vec::<Cell>::new()],
+            },
+            ServerMsg::Seat {
+                capsule: "seat".into(),
+                expires_in_secs: 1,
+            },
+        ] {
+            codec::encode(&mut server, &message).expect("message must encode");
+        }
+    });
+
+    let reply = receive_reply_before(&mut client, Instant::now() + Duration::from_secs(1))
+        .expect("command reply must decode");
+
+    assert!(matches!(reply, ServerMsg::Seat { .. }));
+    writer.join().expect("writer must finish");
+}
+
+#[test]
+fn command_reply_has_one_deadline_for_all_messages() {
+    let (mut client, mut server) = socket_pair();
+    let writer = thread::spawn(move || {
+        codec::encode(&mut server, &ServerMsg::Tree { tree: Tree::new() })
+            .expect("Tree must encode");
+        thread::sleep(Duration::from_millis(100));
+    });
+    let started = Instant::now();
+
+    let error = receive_reply_before(&mut client, started + Duration::from_millis(20))
+        .expect_err("silent command reply must time out");
+
+    assert_eq!(error.code, 2);
+    assert!(started.elapsed() < Duration::from_millis(90));
+    writer.join().expect("writer must finish");
 }
 
 fn socket_pair() -> (TcpStream, TcpStream) {
