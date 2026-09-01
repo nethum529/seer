@@ -2,12 +2,10 @@ use std::collections::HashMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, Permissions};
-use std::io;
+use std::io::{self, PipeWriter};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
-use std::os::unix::io::{AsRawFd, FromRawFd, OwnedFd, RawFd};
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
 use std::sync::Mutex;
@@ -17,11 +15,9 @@ use std::time::Duration;
 const CONNECT_RETRIES: usize = 500;
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const MAX_SOCKET_PATH_BYTES: usize = 99;
-const LIFELINE_FD_ENV: &str = "SEER_BROKER_LIFELINE_FD";
-
 struct RuntimeProcess {
     child: Child,
-    _lifeline: OwnedFd,
+    _lifeline: PipeWriter,
 }
 
 pub(crate) struct RuntimeManager {
@@ -88,63 +84,19 @@ impl RuntimeManager {
         state_directory: &Path,
         user_id: &str,
     ) -> io::Result<RuntimeProcess> {
-        let (reader, writer) = lifeline_pipe()?;
-        let reader_fd = reader.as_raw_fd();
-        let mut command = Command::new(&self.binary);
-        command
+        let (reader, writer) = io::pipe()?;
+        let child = Command::new(&self.binary)
             .arg(socket_path)
             .arg(user_id)
             .arg(&self.shell)
             .current_dir(state_directory)
-            .env(LIFELINE_FD_ENV, reader_fd.to_string())
-            .stdin(Stdio::null());
-        // SAFETY: The closure only calls fcntl, which is async-signal-safe after fork.
-        unsafe {
-            command.pre_exec(move || clear_close_on_exec(reader_fd));
-        }
-        let child = command.spawn()?;
-        drop(reader);
+            .stdin(Stdio::from(reader))
+            .spawn()?;
         Ok(RuntimeProcess {
             child,
             _lifeline: writer,
         })
     }
-}
-
-fn lifeline_pipe() -> io::Result<(OwnedFd, OwnedFd)> {
-    let mut descriptors = [0; 2];
-    // SAFETY: descriptors points to space for the two file descriptors written by pipe.
-    if unsafe { libc::pipe(descriptors.as_mut_ptr()) } == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: pipe returned two new owned file descriptors on success.
-    let reader = unsafe { OwnedFd::from_raw_fd(descriptors[0]) };
-    // SAFETY: pipe returned two new owned file descriptors on success.
-    let writer = unsafe { OwnedFd::from_raw_fd(descriptors[1]) };
-    set_close_on_exec(reader.as_raw_fd())?;
-    set_close_on_exec(writer.as_raw_fd())?;
-    Ok((reader, writer))
-}
-
-fn set_close_on_exec(fd: RawFd) -> io::Result<()> {
-    // SAFETY: fd is open for the duration of this call, and fcntl does not retain it.
-    let flags = unsafe { libc::fcntl(fd, libc::F_GETFD) };
-    if flags == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    // SAFETY: fd is open for the duration of this call, and fcntl does not retain it.
-    if unsafe { libc::fcntl(fd, libc::F_SETFD, flags | libc::FD_CLOEXEC) } == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
-}
-
-fn clear_close_on_exec(fd: RawFd) -> io::Result<()> {
-    // SAFETY: fd is open in the child, and fcntl does not retain it.
-    if unsafe { libc::fcntl(fd, libc::F_SETFD, 0) } == -1 {
-        return Err(io::Error::last_os_error());
-    }
-    Ok(())
 }
 
 fn runtime_socket_path(user: &str) -> io::Result<PathBuf> {

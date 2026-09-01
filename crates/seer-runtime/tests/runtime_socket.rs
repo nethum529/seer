@@ -158,7 +158,9 @@ fn rejects_wrong_argument_counts() {
 }
 
 fn runtime_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_seer-runtime"))
+    let mut command = Command::new(env!("CARGO_BIN_EXE_seer-runtime"));
+    command.stdin(Stdio::piped());
+    command
 }
 
 fn connect_when_ready(path: &Path) -> UnixStream {
