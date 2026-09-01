@@ -20,8 +20,6 @@ On the owner's Linux machine, run these commands from the repository:
 
 ```sh
 cargo install --path crates/seer
-cargo install --path crates/seer-broker
-cargo install --path crates/seer-runtime
 seer start
 ```
 

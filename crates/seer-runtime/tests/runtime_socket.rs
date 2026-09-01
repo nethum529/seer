@@ -5,6 +5,7 @@ use std::io::{self, Read};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::OnceLock;
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -14,6 +15,7 @@ const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(2);
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(5);
+static RUNTIME_BINARY: OnceLock<PathBuf> = OnceLock::new();
 
 #[test]
 fn serves_cells_and_preserves_the_tree_after_disconnect() {
@@ -158,9 +160,22 @@ fn rejects_wrong_argument_counts() {
 }
 
 fn runtime_command() -> Command {
-    let mut command = Command::new(env!("CARGO_BIN_EXE_seer-runtime"));
+    let mut command = Command::new(runtime_binary());
     command.stdin(Stdio::piped());
     command
+}
+
+fn runtime_binary() -> &'static Path {
+    RUNTIME_BINARY.get_or_init(|| {
+        let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
+        let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .args(["build", "-p", "seer", "--bin", "seer-runtime"])
+            .current_dir(manifest)
+            .status()
+            .expect("runtime binary must build");
+        assert!(status.success(), "runtime binary must build");
+        manifest.join("../../target/debug/seer-runtime")
+    })
 }
 
 fn connect_when_ready(path: &Path) -> UnixStream {

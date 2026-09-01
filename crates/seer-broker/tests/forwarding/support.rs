@@ -4,15 +4,20 @@ use std::net::SocketAddr;
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use sha2::{Digest, Sha256};
 
+use super::binary;
+
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+static BROKER_BINARY: OnceLock<PathBuf> = OnceLock::new();
+static RUNTIME_BINARY: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct TestFiles {
     root: PathBuf,
@@ -71,11 +76,14 @@ impl TestFiles {
 
     pub fn start_broker(&self) -> Child {
         let log = fs::File::create(&self.broker_log).expect("broker log must open");
-        Command::new(env!("CARGO_BIN_EXE_seer-broker"))
+        Command::new(BROKER_BINARY.get_or_init(|| binary::build("seer-broker")))
             .arg(&self.config)
             .env("XDG_RUNTIME_DIR", &self.xdg_runtime_dir)
             .env("SEER_RUNTIME_BIN", &self.wrapper)
-            .env("SEER_TEST_RUNTIME_BIN", runtime_binary())
+            .env(
+                "SEER_TEST_RUNTIME_BIN",
+                RUNTIME_BINARY.get_or_init(|| binary::build("seer-runtime")),
+            )
             .env("SEER_TEST_FILES", &self.root)
             .stdout(Stdio::null())
             .stderr(Stdio::from(log))
@@ -212,32 +220,6 @@ fn hash(value: &str) -> String {
         .iter()
         .map(|byte| format!("{byte:02x}"))
         .collect()
-}
-
-fn runtime_binary() -> PathBuf {
-    let sibling = Path::new(env!("CARGO_BIN_EXE_seer-broker"))
-        .parent()
-        .expect("broker binary must have a parent")
-        .join("seer-runtime");
-    if sibling.is_file() {
-        return sibling;
-    }
-
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let manifest_directory = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut child = Command::new(cargo)
-        .args(["build", "-p", "seer-runtime", "--bin", "seer-runtime"])
-        .current_dir(manifest_directory)
-        .spawn()
-        .expect("runtime binary must build");
-    let status = wait_for_child(&mut child, Duration::from_secs(60)).unwrap_or_else(|| {
-        let _ = child.kill();
-        assert!(wait_for_child(&mut child, Duration::from_secs(2)).is_some());
-        panic!("runtime binary build timed out");
-    });
-    assert!(status.success(), "runtime binary must build");
-
-    manifest_directory.join("../../target/debug/seer-runtime")
 }
 
 fn wait_for_file(path: &Path) -> bool {

@@ -3,6 +3,7 @@ use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
+use std::sync::OnceLock;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
@@ -11,7 +12,11 @@ use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use sha2::{Digest, Sha256};
 
+#[path = "support/binary.rs"]
+mod binary;
+
 static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+static BROKER_BINARY: OnceLock<PathBuf> = OnceLock::new();
 
 #[test]
 fn requires_config_path() {
@@ -114,7 +119,7 @@ fn start_broker(config: &TemporaryConfig, output: &PathBuf) -> Child {
 }
 
 fn broker_command() -> Command {
-    Command::new(env!("CARGO_BIN_EXE_seer-broker"))
+    Command::new(BROKER_BINARY.get_or_init(|| binary::build("seer-broker")))
 }
 
 fn stderr(output: &Output) -> String {
