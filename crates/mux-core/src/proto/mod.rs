@@ -1,15 +1,8 @@
 pub mod codec;
-mod tree;
 
 use serde::{Deserialize, Serialize};
 
-pub use tree::Tree;
-
-#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub enum SplitDirection {
-    Right,
-    Down,
-}
+use crate::{SplitDirection, Tree};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ClientMsg {
@@ -40,7 +33,8 @@ mod tests {
 
     use serde::{Serialize, de::DeserializeOwned};
 
-    use super::{ClientMsg, ServerMsg, SplitDirection, Tree, codec};
+    use super::{ClientMsg, ServerMsg, codec};
+    use crate::{PaneSize, SplitDirection, Tree};
 
     fn assert_round_trip<T>(message: &T)
     where
@@ -50,6 +44,24 @@ mod tests {
         codec::encode(&mut bytes, message).expect("message must encode");
         let decoded = codec::decode(&mut bytes.as_slice()).expect("message must decode");
         assert_eq!(message, &decoded);
+    }
+
+    fn tree_with_two_panes() -> Tree {
+        let mut tree = Tree::new();
+        tree.create_workspace("main")
+            .expect("workspace must be created");
+        tree.create_tab(
+            "w1",
+            "shell",
+            PaneSize {
+                cols: 120,
+                rows: 40,
+            },
+        )
+        .expect("tab must be created");
+        tree.split_pane("w1:p1", SplitDirection::Right)
+            .expect("pane must be split");
+        tree
     }
 
     #[test]
@@ -95,15 +107,16 @@ mod tests {
 
     #[test]
     fn server_messages_round_trip() {
+        let tree = tree_with_two_panes();
         let messages = [
             ServerMsg::Welcome {
                 user: "alice".into(),
-                tree: Tree,
+                tree: tree.clone(),
             },
             ServerMsg::Refused {
                 reason: "invalid token".into(),
             },
-            ServerMsg::Tree { tree: Tree },
+            ServerMsg::Tree { tree },
             ServerMsg::Frame {
                 pane: "w1:p1".into(),
                 bytes: vec![0, 1, 255],
