@@ -127,8 +127,17 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
 
     let deferred = [
         ClientMsg::Hello {
-            user: "alice".into(),
-            token: "secret".into(),
+            user_id: "alice".into(),
+            credential: "secret".into(),
+        },
+        ClientMsg::Join {
+            seat_token: "seat".into(),
+            name: "alice".into(),
+        },
+        ClientMsg::Invite,
+        ClientMsg::ListPeople,
+        ClientMsg::DetachClient {
+            client_id: "client-1".into(),
         },
         ClientMsg::Peek {
             user: "bob".into(),

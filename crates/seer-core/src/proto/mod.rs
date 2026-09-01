@@ -6,7 +6,11 @@ use crate::{Cell, SplitDirection, Tree};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ClientMsg {
-    Hello { user: String, token: String },
+    Hello { user_id: String, credential: String },
+    Join { seat_token: String, name: String },
+    Invite,
+    ListPeople,
+    DetachClient { client_id: String },
     CreateTab,
     SplitPane { direction: SplitDirection },
     ClosePane { pane: String },
@@ -20,12 +24,58 @@ pub enum ClientMsg {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ServerMsg {
-    Welcome { user: String, tree: Tree },
-    Refused { reason: String },
-    Tree { tree: Tree },
-    Frame { pane: String, bytes: Vec<u8> },
-    Cells { pane: String, rows: Vec<Vec<Cell>> },
-    Bye { reason: String },
+    Welcome {
+        user_id: String,
+        name: String,
+        client_id: String,
+        tree: Tree,
+    },
+    Joined {
+        user_id: String,
+        credential: String,
+        name: String,
+    },
+    Seat {
+        capsule: String,
+        expires_in_secs: u64,
+    },
+    People {
+        people: Vec<Person>,
+    },
+    Clients {
+        clients: Vec<ClientInfo>,
+    },
+    Refused {
+        reason: String,
+    },
+    Tree {
+        tree: Tree,
+    },
+    Frame {
+        pane: String,
+        bytes: Vec<u8>,
+    },
+    Cells {
+        pane: String,
+        rows: Vec<Vec<Cell>>,
+    },
+    Bye {
+        reason: String,
+    },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct Person {
+    pub user_id: String,
+    pub name: String,
+    pub attached_clients: u32,
+    pub peekable: bool,
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct ClientInfo {
+    pub client_id: String,
+    pub connected_secs: u64,
 }
 
 #[cfg(test)]
@@ -34,7 +84,7 @@ mod tests {
 
     use serde::{Serialize, de::DeserializeOwned};
 
-    use super::{ClientMsg, ServerMsg, codec};
+    use super::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
     use crate::{Cell, Color, PaneSize, SplitDirection, Tree};
 
     fn assert_round_trip<T>(message: &T)
@@ -69,8 +119,17 @@ mod tests {
     fn client_messages_round_trip() {
         let messages = [
             ClientMsg::Hello {
-                user: "alice".into(),
-                token: "secret".into(),
+                user_id: "user-1".into(),
+                credential: "credential-1".into(),
+            },
+            ClientMsg::Join {
+                seat_token: "seat-1".into(),
+                name: "Alice".into(),
+            },
+            ClientMsg::Invite,
+            ClientMsg::ListPeople,
+            ClientMsg::DetachClient {
+                client_id: "client-1".into(),
             },
             ClientMsg::CreateTab,
             ClientMsg::SplitPane {
@@ -111,8 +170,33 @@ mod tests {
         let tree = tree_with_two_panes();
         let messages = [
             ServerMsg::Welcome {
-                user: "alice".into(),
+                user_id: "user-1".into(),
+                name: "Alice".into(),
+                client_id: "client-1".into(),
                 tree: tree.clone(),
+            },
+            ServerMsg::Joined {
+                user_id: "user-2".into(),
+                credential: "credential-2".into(),
+                name: "Bob".into(),
+            },
+            ServerMsg::Seat {
+                capsule: "capsule-1".into(),
+                expires_in_secs: 3_600,
+            },
+            ServerMsg::People {
+                people: vec![Person {
+                    user_id: "user-1".into(),
+                    name: "Alice".into(),
+                    attached_clients: 2,
+                    peekable: true,
+                }],
+            },
+            ServerMsg::Clients {
+                clients: vec![ClientInfo {
+                    client_id: "client-1".into(),
+                    connected_secs: 60,
+                }],
             },
             ServerMsg::Refused {
                 reason: "invalid token".into(),

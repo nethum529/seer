@@ -128,8 +128,8 @@ fn send_hello(stream: &mut TcpStream, user: &str, token: &str) {
     codec::encode(
         stream,
         &ClientMsg::Hello {
-            user: user.into(),
-            token: token.into(),
+            user_id: user.into(),
+            credential: token.into(),
         },
     )
     .expect("Hello must encode");
@@ -151,8 +151,15 @@ fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
 
 fn assert_welcome(message: ServerMsg, expected_user: &str) {
     match message {
-        ServerMsg::Welcome { user, tree } => {
-            assert_eq!(user, expected_user);
+        ServerMsg::Welcome {
+            user_id,
+            name,
+            client_id,
+            tree,
+        } => {
+            assert_eq!(user_id, expected_user);
+            assert_eq!(name, expected_user);
+            assert!(client_id.is_empty());
             assert!(tree.workspaces.is_empty());
         }
         other => panic!("expected Welcome, got {other:?}"),

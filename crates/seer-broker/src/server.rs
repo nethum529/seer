@@ -70,7 +70,10 @@ fn handshake(
     };
 
     match message {
-        ClientMsg::Hello { user, token } => authenticate(stream, users, &user, &token),
+        ClientMsg::Hello {
+            user_id,
+            credential,
+        } => authenticate(stream, users, &user_id, &credential),
         _ => refuse(stream, EXPECTED_HELLO).map(|()| None),
     }
 }
@@ -94,7 +97,9 @@ fn authenticate(
         codec::encode(
             stream,
             &ServerMsg::Welcome {
-                user: user.to_owned(),
+                user_id: user.to_owned(),
+                name: user.to_owned(),
+                client_id: String::new(),
                 tree: Tree::new(),
             },
         )?;

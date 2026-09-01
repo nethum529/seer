@@ -19,14 +19,16 @@ fn handles_required_handshake_outcomes() {
     let (_, welcome) = exchange(
         address,
         &ClientMsg::Hello {
-            user: "alice".into(),
-            token: "alice-secret".into(),
+            user_id: "alice".into(),
+            credential: "alice-secret".into(),
         },
     );
     assert_eq!(
         welcome,
         ServerMsg::Welcome {
-            user: "alice".into(),
+            user_id: "alice".into(),
+            name: "alice".into(),
+            client_id: String::new(),
             tree: Tree::new(),
         }
     );
@@ -34,8 +36,8 @@ fn handles_required_handshake_outcomes() {
     let (bad_token_stream, bad_token) = exchange(
         address,
         &ClientMsg::Hello {
-            user: "alice".into(),
-            token: "wrong".into(),
+            user_id: "alice".into(),
+            credential: "wrong".into(),
         },
     );
     assert_refused_and_closed(bad_token_stream, bad_token, "invalid credentials");
@@ -57,8 +59,8 @@ fn handles_a_second_connection_while_the_first_is_silent() {
     let (stream, response) = exchange(
         address,
         &ClientMsg::Hello {
-            user: "alice".into(),
-            token: "wrong".into(),
+            user_id: "alice".into(),
+            credential: "wrong".into(),
         },
     );
 

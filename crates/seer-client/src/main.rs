@@ -23,12 +23,12 @@ fn main() -> ExitCode {
     };
 
     match connect(&arguments) {
-        Ok((stream, ServerMsg::Welcome { user, tree })) => {
+        Ok((stream, ServerMsg::Welcome { name, tree, .. })) => {
             if io::stdout().is_terminal() {
                 tui::set_view_only(arguments.peek.is_some());
                 run_tui(stream, tree)
             } else {
-                println!("connected as {user}");
+                println!("connected as {name}");
                 ExitCode::SUCCESS
             }
         }
@@ -72,8 +72,8 @@ fn parse_arguments(mut arguments: impl Iterator<Item = String>) -> Option<Argume
 fn connect(arguments: &Arguments) -> io::Result<(TcpStream, ServerMsg)> {
     let mut stream = TcpStream::connect(&arguments.addr)?;
     let hello = ClientMsg::Hello {
-        user: arguments.user.clone(),
-        token: arguments.token.clone(),
+        user_id: arguments.user.clone(),
+        credential: arguments.token.clone(),
     };
     codec::encode(&mut stream, &hello)?;
     let reply = codec::decode(&mut stream)?;
