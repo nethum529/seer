@@ -104,10 +104,15 @@ mod tests {
 
     #[test]
     fn rejects_missing_and_extra_arguments() {
+        assert_eq!(
+            parse(strings(&["join", "invitation"])),
+            Ok(Command::JoinWithInvitation("invitation".into()))
+        );
+
         for arguments in [
             Vec::new(),
             vec!["unknown"],
-            vec!["join", "extra"],
+            vec!["join", "invitation", "extra"],
             vec!["peek"],
             vec!["peek", "alice", "extra"],
             vec!["--help", "extra"],
