@@ -27,7 +27,7 @@ pub(crate) fn check(endpoint: &str) -> Result<(), CheckError> {
     if status.get("BackendState").and_then(Value::as_str) != Some("Running") {
         return Err(CheckError::Action(CONNECT_MESSAGE));
     }
-    if !peer_addresses(&status).any(|peer| peer == address) {
+    if !known_addresses(&status).any(|known| known == address) {
         return Err(CheckError::Action(INVITE_MESSAGE));
     }
     Ok(())
@@ -50,14 +50,22 @@ fn tailscale_address(endpoint: &str) -> Option<Ipv4Addr> {
     (octets[0] == 100 && (64..=127).contains(&octets[1])).then_some(address)
 }
 
-fn peer_addresses(status: &Value) -> impl Iterator<Item = Ipv4Addr> + '_ {
-    status
+fn known_addresses(status: &Value) -> impl Iterator<Item = Ipv4Addr> + '_ {
+    let own_addresses = status
+        .get("Self")
+        .and_then(|own| own.get("TailscaleIPs"))
+        .and_then(Value::as_array)
+        .into_iter()
+        .flatten();
+    let peer_addresses = status
         .get("Peer")
         .and_then(Value::as_object)
         .into_iter()
         .flat_map(|peers| peers.values())
         .filter_map(|peer| peer.get("TailscaleIPs").and_then(Value::as_array))
-        .flatten()
+        .flatten();
+    own_addresses
+        .chain(peer_addresses)
         .filter_map(Value::as_str)
         .filter_map(|address| address.parse().ok())
 }
