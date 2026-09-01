@@ -84,12 +84,7 @@ fn closes_a_pane_and_kills_its_process() {
             bytes: format!("echo $$ > {}\n", pid_file.display()).into_bytes(),
         })
         .expect("PID command must succeed");
-    assert!(wait_for_file(&pid_file));
-    let shell_pid = std::fs::read_to_string(&pid_file)
-        .expect("PID file must be readable")
-        .trim()
-        .parse::<u32>()
-        .expect("shell PID must be valid");
+    let shell_pid = wait_for_pid(&pid_file).expect("shell PID must be valid");
 
     let messages = session
         .apply(ClientMsg::ClosePane {
@@ -208,15 +203,19 @@ fn wait_for_cells(
     None
 }
 
-fn wait_for_file(path: &std::path::Path) -> bool {
+fn wait_for_pid(path: &std::path::Path) -> Option<u32> {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while Instant::now() < deadline {
-        if path.is_file() {
-            return true;
+        if path.is_file()
+            && let Ok(contents) = std::fs::read_to_string(path)
+            && !contents.trim().is_empty()
+            && let Ok(pid) = contents.trim().parse::<u32>()
+        {
+            return Some(pid);
         }
         thread::sleep(POLL_INTERVAL);
     }
-    false
+    None
 }
 
 fn wait_for_process_stop(pid: u32) -> bool {
