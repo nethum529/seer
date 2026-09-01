@@ -394,6 +394,9 @@ fn accept(listener: &TcpListener) -> TcpStream {
         match listener.accept() {
             Ok((stream, _)) => {
                 stream
+                    .set_nonblocking(false)
+                    .expect("accepted stream must become blocking");
+                stream
                     .set_read_timeout(Some(Duration::from_millis(100)))
                     .expect("read timeout must be set");
                 stream

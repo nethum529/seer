@@ -10,6 +10,11 @@ use std::time::{Duration, Instant};
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
+#[path = "support/server_io.rs"]
+mod server_io;
+
+use server_io::receive;
+
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
@@ -49,7 +54,7 @@ fn join_hides_the_invitation_on_a_terminal() {
         .port();
     let server = thread::spawn(move || {
         let mut stream = accept(&listener);
-        let join: ClientMsg = codec::decode(&mut stream).expect("Join must decode");
+        let join = receive(&mut stream);
         assert_eq!(
             join,
             ClientMsg::Join {
@@ -102,7 +107,7 @@ fn run_join(reply: ServerMsg) -> Output {
         .port();
     let server = thread::spawn(move || {
         let mut stream = accept(&listener);
-        let message: ClientMsg = codec::decode(&mut stream).expect("Join must decode");
+        let message = receive(&mut stream);
         assert!(matches!(message, ClientMsg::Join { .. }));
         codec::encode(&mut stream, &reply).expect("reply must encode");
     });
@@ -122,7 +127,7 @@ fn run_invite(reply: ServerMsg) -> Output {
     write_store(&config.root, port);
     let server = thread::spawn(move || {
         let mut stream = accept(&listener);
-        let hello: ClientMsg = codec::decode(&mut stream).expect("Hello must decode");
+        let hello = receive(&mut stream);
         assert!(matches!(hello, ClientMsg::Hello { .. }));
         codec::encode(
             &mut stream,
@@ -134,7 +139,7 @@ fn run_invite(reply: ServerMsg) -> Output {
             },
         )
         .expect("Welcome must encode");
-        let invite: ClientMsg = codec::decode(&mut stream).expect("Invite must decode");
+        let invite = receive(&mut stream);
         assert_eq!(invite, ClientMsg::Invite);
         codec::encode(&mut stream, &reply).expect("reply must encode");
     });
@@ -152,8 +157,14 @@ fn accept(listener: &TcpListener) -> TcpStream {
         match listener.accept() {
             Ok((stream, _)) => {
                 stream
-                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .set_nonblocking(false)
+                    .expect("accepted stream must become blocking");
+                stream
+                    .set_read_timeout(Some(Duration::from_millis(100)))
                     .expect("read timeout must be set");
+                stream
+                    .set_write_timeout(Some(Duration::from_secs(5)))
+                    .expect("write timeout must be set");
                 return stream;
             }
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
