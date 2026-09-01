@@ -2,7 +2,7 @@
 
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
-use std::net::{SocketAddr, TcpListener};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Command, ExitStatus, Stdio};
@@ -11,6 +11,8 @@ use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use seer_core::Tree;
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use serde::Deserialize;
 
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(7);
@@ -130,7 +132,7 @@ fn fake_broker_process() {
     let deadline = Instant::now() + Duration::from_secs(10);
     while Instant::now() < deadline {
         match listener.accept() {
-            Ok(_) => {}
+            Ok((stream, _)) => serve_fake_client(stream),
             Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(10));
             }
@@ -145,6 +147,35 @@ fn fake_broker_process() {
     }
 }
 
+fn serve_fake_client(mut stream: TcpStream) {
+    stream
+        .set_nonblocking(false)
+        .expect("fake client stream must be blocking");
+    let Ok(ClientMsg::Hello { .. }) = codec::decode(&mut stream) else {
+        return;
+    };
+    codec::encode(
+        &mut stream,
+        &ServerMsg::Welcome {
+            user_id: "owner-id".into(),
+            name: "alice".into(),
+            client_id: "client-id".into(),
+            tree: Tree::new(),
+        },
+    )
+    .expect("fake welcome must write");
+    let request: ClientMsg = codec::decode(&mut stream).expect("fake invite request must read");
+    assert_eq!(request, ClientMsg::Invite);
+    codec::encode(
+        &mut stream,
+        &ServerMsg::Seat {
+            capsule: "SEER1-127.0.0.1-7321-seat-token".into(),
+            expires_in_secs: 3_600,
+        },
+    )
+    .expect("fake seat must write");
+}
+
 #[test]
 fn prompt_defaults_create_config_and_owner_store() {
     let _serial = PROCESS_TEST.lock().expect("process test lock must work");
@@ -153,7 +184,7 @@ fn prompt_defaults_create_config_and_owner_store() {
     let executable = install_binaries(&directory);
     write_existing_servers(&directory);
 
-    let output = run_start(&executable, &directory, "\n\n", &[]);
+    let output = run_start(&executable, &directory, "\n127.0.0.1:7321\n", &[]);
 
     assert!(output.status.success(), "{}", output.stderr);
     assert!(output.stdout.contains("Your name [alice]: "));
@@ -165,11 +196,11 @@ fn prompt_defaults_create_config_and_owner_store() {
     assert!(
         output
             .stdout
-            .contains("Server started at host.test:7321.\nYou are alice.\n")
+            .contains("Server started at 127.0.0.1:7321.\nYou are alice.\n")
     );
     let broker: toml::Value = read_toml(directory.config_home().join("seer/broker.toml"));
     assert_eq!(broker["listen"].as_str(), Some("0.0.0.0:7321"));
-    assert_eq!(broker["published_addr"].as_str(), Some("host.test:7321"));
+    assert_eq!(broker["published_addr"].as_str(), Some("127.0.0.1:7321"));
     assert_eq!(broker["owner_name"].as_str(), Some("alice"));
     assert_eq!(broker["state_dir"].as_str(), directory.state_dir().to_str());
     let servers: toml::Value = read_toml(directory.config_home().join("seer/servers.toml"));
@@ -177,8 +208,8 @@ fn prompt_defaults_create_config_and_owner_store() {
     assert_eq!(owner["endpoint"].as_str(), Some("other.test:8000"));
     assert_eq!(owner["current"].as_bool(), Some(false));
     let local = &servers["servers"][1];
-    assert_eq!(local["endpoint"].as_str(), Some("host.test:7321"));
-    assert_eq!(local["alias"].as_str(), Some("host.test"));
+    assert_eq!(local["endpoint"].as_str(), Some("127.0.0.1:7321"));
+    assert_eq!(local["alias"].as_str(), Some("127.0.0.1"));
     assert_eq!(local["user_id"].as_str(), Some("owner-id"));
     assert_eq!(local["name"].as_str(), Some("alice"));
     assert_eq!(local["credential"].as_str(), Some("owner-secret"));
@@ -205,7 +236,7 @@ fn published_port_sets_the_listen_port() {
     let output = run_start(
         &executable,
         &directory,
-        &format!("\nhost.test:{port}\n"),
+        &format!("\n127.0.0.1:{port}\n"),
         &[],
     );
 
@@ -421,7 +452,7 @@ fn write_existing_servers(directory: &TestDirectory) {
     fs::create_dir_all(&config_dir).expect("config directory must be created");
     fs::write(
         config_dir.join("servers.toml"),
-        "[[servers]]\nendpoint = \"host.test:7321\"\nalias = \"old\"\nuser_id = \"old-id\"\nname = \"old\"\ncredential = \"old-secret\"\ncurrent = true\n\n[[servers]]\nendpoint = \"other.test:8000\"\nalias = \"other.test\"\nuser_id = \"other-id\"\nname = \"bob\"\ncredential = \"other-secret\"\ncurrent = false\n",
+        "[[servers]]\nendpoint = \"127.0.0.1:7321\"\nalias = \"old\"\nuser_id = \"old-id\"\nname = \"old\"\ncredential = \"old-secret\"\ncurrent = true\n\n[[servers]]\nendpoint = \"other.test:8000\"\nalias = \"other.test\"\nuser_id = \"other-id\"\nname = \"bob\"\ncredential = \"other-secret\"\ncurrent = false\n",
     )
     .expect("existing servers must be written");
 }

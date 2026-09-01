@@ -293,7 +293,7 @@ fn start_broker(
     }
     println!("Server started at {}.", config.published_addr);
     println!("You are {}.", config.owner_name);
-    Ok(())
+    crate::commands::first_invite(first_start).map_err(|error| io::Error::other(error.message))
 }
 
 #[cfg(target_os = "linux")]

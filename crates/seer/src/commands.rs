@@ -55,8 +55,11 @@ pub(crate) fn detach() -> Result<(), CommandError> {
     Ok(())
 }
 
-pub(crate) fn join() -> Result<(), CommandError> {
-    let invitation = prompt::hidden("Invitation: ").map_err(CommandError::system)?;
+pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
+    let invitation = match invitation {
+        Some(invitation) => invitation.to_owned(),
+        None => prompt::hidden("Invitation: ").map_err(CommandError::system)?,
+    };
     let capsule = capsule::parse(&invitation).map_err(CommandError::system)?;
     println!("Server: {}", capsule.endpoint);
 
@@ -132,14 +135,17 @@ pub(crate) fn invite() -> Result<(), CommandError> {
     send(&mut stream, &ClientMsg::Invite)?;
     match receive_reply(&mut stream)? {
         ServerMsg::Seat { capsule, .. } => {
-            println!("Seat ready. It works once and expires in 1 hour.");
-            println!("Send this invitation through a private channel:\n");
-            println!("{capsule}");
+            println!("Send this to a friend:");
+            println!("seer join {capsule}");
             Ok(())
         }
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
         _ => Err(unexpected_reply()),
     }
+}
+
+pub(crate) fn first_invite(first_start: bool) -> Result<(), CommandError> {
+    if first_start { invite() } else { Ok(()) }
 }
 
 pub(crate) fn list() -> Result<(), CommandError> {
