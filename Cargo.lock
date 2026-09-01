@@ -1320,8 +1320,12 @@ name = "seer-client"
 version = "0.1.0"
 dependencies = [
  "crossterm",
+ "libc",
  "ratatui",
  "seer-core",
+ "serde",
+ "serde_json",
+ "toml",
 ]
 
 [[package]]
