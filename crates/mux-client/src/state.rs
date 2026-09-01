@@ -1,6 +1,6 @@
 use std::collections::HashMap;
 
-use mux_core::{Cell, LayoutNode, SplitDirection, Tab, Tree};
+use mux_core::{Cell, Tab, Tree};
 use ratatui::layout::Rect;
 
 #[derive(Debug)]
@@ -74,66 +74,29 @@ fn preferred_focus(tree: &Tree) -> Option<String> {
         .or_else(|| tab.panes.first().map(|pane| pane.id.clone()))
 }
 
-// TODO: Replace this function with mux_core::layout::rects after issue 41 merges.
 pub(crate) fn pane_rects(tab: &Tab, area: Rect) -> Vec<(String, Rect)> {
-    let mut rects = Vec::new();
-    if let Some(root) = &tab.layout.root {
-        collect_rects(root, area, &mut rects);
-    }
-    rects
-}
-
-fn collect_rects(node: &LayoutNode, area: Rect, rects: &mut Vec<(String, Rect)>) {
-    match node {
-        LayoutNode::Pane { pane } => rects.push((pane.clone(), area)),
-        LayoutNode::Split {
-            direction,
-            first,
-            second,
-        } => {
-            let (first_area, second_area) = split_area(area, *direction);
-            collect_rects(first, first_area, rects);
-            collect_rects(second, second_area, rects);
-        }
-    }
-}
-
-fn split_area(area: Rect, direction: SplitDirection) -> (Rect, Rect) {
-    match direction {
-        SplitDirection::Right => {
-            let first_width = area.width / 2 + area.width % 2;
-            let second_width = area.width / 2;
+    mux_core::layout::rects(tab, area.width, area.height)
+        .into_iter()
+        .map(|rect| {
             (
-                Rect::new(area.x, area.y, first_width, area.height),
+                rect.pane,
                 Rect::new(
-                    area.x.saturating_add(first_width),
-                    area.y,
-                    second_width,
-                    area.height,
+                    area.x.saturating_add(rect.x),
+                    area.y.saturating_add(rect.y),
+                    rect.cols,
+                    rect.rows,
                 ),
             )
-        }
-        SplitDirection::Down => {
-            let first_height = area.height / 2 + area.height % 2;
-            let second_height = area.height / 2;
-            (
-                Rect::new(area.x, area.y, area.width, first_height),
-                Rect::new(
-                    area.x,
-                    area.y.saturating_add(first_height),
-                    area.width,
-                    second_height,
-                ),
-            )
-        }
-    }
+        })
+        .collect()
 }
 
 #[cfg(test)]
 mod tests {
-    use mux_core::{Cell, Color, PaneSize, Tree};
+    use mux_core::{Cell, Color, PaneSize, SplitDirection, Tree};
+    use ratatui::layout::Rect;
 
-    use super::ClientState;
+    use super::{ClientState, pane_rects};
 
     #[test]
     fn cells_replace_the_pane_buffer() {
@@ -160,5 +123,28 @@ mod tests {
 
         assert_eq!(state.pane_rows("w1:p1"), rows);
         assert!(state.pane_rows("w1:p2").is_empty());
+    }
+
+    #[test]
+    fn pane_rects_use_shared_layout_with_area_offsets() {
+        let mut tree = Tree::new();
+        tree.create_workspace("main")
+            .expect("workspace must be created");
+        tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
+            .expect("tab must be created");
+        tree.split_pane("w1:p1", SplitDirection::Right)
+            .expect("first split must be created");
+        let tab = tree
+            .split_pane("w1:p2", SplitDirection::Down)
+            .expect("second split must be created");
+
+        assert_eq!(
+            pane_rects(&tab, Rect::new(10, 20, 81, 25)),
+            vec![
+                ("w1:p1".into(), Rect::new(10, 20, 41, 25)),
+                ("w1:p2".into(), Rect::new(51, 20, 40, 13)),
+                ("w1:p3".into(), Rect::new(51, 33, 40, 12)),
+            ]
+        );
     }
 }
