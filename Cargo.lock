@@ -219,6 +219,9 @@ version = "0.1.0"
 [[package]]
 name = "mux-client"
 version = "0.1.0"
+dependencies = [
+ "mux-core",
+]
 
 [[package]]
 name = "mux-core"
