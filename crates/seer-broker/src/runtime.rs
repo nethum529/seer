@@ -3,6 +3,7 @@ use std::env;
 use std::ffi::OsString;
 use std::fs::{self, DirBuilder, Permissions};
 use std::io;
+use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
@@ -13,24 +14,33 @@ use std::time::Duration;
 
 const CONNECT_RETRIES: usize = 500;
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+const MAX_SOCKET_PATH_BYTES: usize = 99;
 
 pub(crate) struct RuntimeManager {
     binary: PathBuf,
     shell: String,
+    state_dir: PathBuf,
     processes: Mutex<HashMap<String, Child>>,
 }
 
 impl RuntimeManager {
-    pub(crate) fn new(shell: String) -> io::Result<Self> {
+    pub(crate) fn new(shell: String, state_dir: PathBuf) -> io::Result<Self> {
         Ok(Self {
             binary: runtime_binary()?,
             shell,
+            state_dir,
             processes: Mutex::new(HashMap::new()),
         })
     }
 
-    pub(crate) fn connect(&self, user: &str) -> io::Result<UnixStream> {
-        let socket_path = runtime_socket_path(user)?;
+    pub(crate) fn connect(&self, user_id: &str) -> io::Result<UnixStream> {
+        self.connect_with_retries(user_id, CONNECT_RETRIES)
+    }
+
+    fn connect_with_retries(&self, user_id: &str, retries: usize) -> io::Result<UnixStream> {
+        let socket_path = runtime_socket_path(user_id)?;
+        let state_directory = self.user_state_directory(user_id);
+        create_private_directory(&state_directory)?;
         let mut processes = self
             .processes
             .lock()
@@ -40,25 +50,41 @@ impl RuntimeManager {
             return Ok(stream);
         }
 
-        let process_is_running = match processes.get_mut(user) {
+        let process_is_running = match processes.get_mut(user_id) {
             Some(process) => process.try_wait()?.is_none(),
             None => false,
         };
         if !process_is_running {
-            processes.remove(user);
-            let process = self.spawn(&socket_path, user)?;
-            processes.insert(user.to_owned(), process);
+            processes.remove(user_id);
+            let process = self.spawn(&socket_path, &state_directory, user_id)?;
+            processes.insert(user_id.to_owned(), process);
         }
 
         drop(processes);
-        connect_with_retry(&socket_path, CONNECT_RETRIES)
+        connect_with_retry(&socket_path, retries)
     }
 
-    fn spawn(&self, socket_path: &Path, user: &str) -> io::Result<Child> {
+    pub(crate) fn is_running(&self, user_id: &str) -> bool {
+        runtime_socket_path(user_id)
+            .and_then(UnixStream::connect)
+            .is_ok()
+    }
+
+    fn user_state_directory(&self, user_id: &str) -> PathBuf {
+        self.state_dir.join("users").join(user_id)
+    }
+
+    fn spawn(
+        &self,
+        socket_path: &Path,
+        state_directory: &Path,
+        user_id: &str,
+    ) -> io::Result<Child> {
         Command::new(&self.binary)
             .arg(socket_path)
-            .arg(user)
+            .arg(user_id)
             .arg(&self.shell)
+            .current_dir(state_directory)
             .stdin(Stdio::null())
             .spawn()
     }
@@ -73,7 +99,24 @@ fn runtime_socket_path(user: &str) -> io::Result<PathBuf> {
     };
     let directory = runtime_directory_path(xdg_runtime_dir, uid);
     create_private_directory(&directory)?;
-    Ok(directory.join(format!("{user}.sock")))
+    let path = directory.join(format!("{user}.sock"));
+    validate_socket_path(&path)?;
+    Ok(path)
+}
+
+#[cfg(test)]
+pub(crate) fn runtime_socket_path_for_test(user: &str) -> io::Result<PathBuf> {
+    runtime_socket_path(user)
+}
+
+fn validate_socket_path(path: &Path) -> io::Result<()> {
+    if path.as_os_str().as_bytes().len() > MAX_SOCKET_PATH_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "runtime socket path exceeds 99 bytes",
+        ));
+    }
+    Ok(())
 }
 
 fn runtime_directory_path(xdg_runtime_dir: Option<OsString>, uid: u32) -> PathBuf {
@@ -136,18 +179,23 @@ fn connect_with_retry(path: &Path, retries: usize) -> io::Result<UnixStream> {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::HashMap;
     use std::ffi::OsString;
     use std::fs;
     use std::os::unix::fs::PermissionsExt;
     use std::os::unix::net::UnixListener;
     use std::path::Path;
     use std::process::Command;
+    use std::sync::Mutex;
     use std::thread;
-    use std::time::{Duration, SystemTime, UNIX_EPOCH};
+    use std::time::Duration;
 
     use super::{
-        connect_with_retry, create_private_directory, current_uid, runtime_binary_next_to,
-        runtime_directory_path,
+        RuntimeManager, connect_with_retry, create_private_directory, current_uid,
+        runtime_binary_next_to, runtime_directory_path, validate_socket_path,
+    };
+    use crate::test_support::{
+        remove_directory, temporary_directory as create_temporary_directory,
     };
 
     #[test]
@@ -162,7 +210,7 @@ mod tests {
         assert_eq!(fallback, Path::new("/tmp/seer-123"));
         assert_eq!(mode(&xdg), 0o700);
 
-        fs::remove_dir_all(temporary).expect("temporary directory must be removed");
+        remove_directory(&temporary, "temporary directory must be removed");
     }
 
     #[test]
@@ -213,7 +261,7 @@ mod tests {
 
         drop(stream);
         worker.join().expect("listener thread must finish");
-        fs::remove_dir_all(temporary).expect("temporary directory must be removed");
+        remove_directory(&temporary, "temporary directory must be removed");
     }
 
     #[test]
@@ -222,19 +270,55 @@ mod tests {
         let socket = temporary.join("m.sock");
 
         connect_with_retry(&socket, 2).expect_err("missing socket must fail");
-        fs::remove_dir_all(temporary).expect("temporary directory must be removed");
+        remove_directory(&temporary, "temporary directory must be removed");
+    }
+
+    #[test]
+    fn records_a_spawned_runtime_process() {
+        let temporary = temporary_directory("spawn");
+        let binary = temporary.join("runtime-test");
+        fs::write(&binary, "#!/bin/sh\nwhile :; do :; done\n")
+            .expect("test runtime must be written");
+        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
+            .expect("test runtime must be executable");
+        let manager = RuntimeManager {
+            binary,
+            shell: "sh".into(),
+            state_dir: temporary.clone(),
+            processes: Mutex::new(HashMap::new()),
+        };
+
+        manager
+            .connect_with_retries("spawn-test", 0)
+            .expect_err("exited runtime must not open a socket");
+        let mut processes = manager.processes.lock().expect("process lock must work");
+        let child = processes
+            .get_mut("spawn-test")
+            .expect("spawned process must be recorded");
+        wait_or_kill(child, Duration::from_millis(20));
+        wait_or_kill(child, Duration::from_millis(20));
+        drop(processes);
+        remove_directory(&temporary, "temporary directory must be removed");
+    }
+
+    #[test]
+    fn limits_socket_paths_to_less_than_one_hundred_bytes() {
+        let allowed = Path::new("a").join("b".repeat(97));
+        let rejected = Path::new("a").join("b".repeat(98));
+
+        assert_eq!(allowed.as_os_str().len(), 99);
+        validate_socket_path(&allowed).expect("99-byte socket path must be valid");
+        assert_eq!(rejected.as_os_str().len(), 100);
+        assert_eq!(
+            validate_socket_path(&rejected)
+                .expect_err("100-byte socket path must be invalid")
+                .kind(),
+            std::io::ErrorKind::InvalidInput
+        );
     }
 
     fn temporary_directory(name: &str) -> std::path::PathBuf {
-        let timestamp = SystemTime::now()
-            .duration_since(UNIX_EPOCH)
-            .expect("system time must be after the Unix epoch")
-            .as_nanos()
-            % 1_000_000_000;
-        let path =
-            std::env::temp_dir().join(format!("mb-{name}-{}-{timestamp}", std::process::id()));
-        fs::create_dir(&path).expect("temporary directory must be created");
-        path
+        create_temporary_directory(&format!("mb-{name}"))
     }
 
     fn mode(path: &Path) -> u32 {
@@ -243,5 +327,17 @@ mod tests {
             .permissions()
             .mode()
             & 0o777
+    }
+
+    fn wait_or_kill(child: &mut std::process::Child, timeout: Duration) {
+        let deadline = std::time::Instant::now() + timeout;
+        while std::time::Instant::now() < deadline {
+            if child.try_wait().expect("child status must load").is_some() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(1));
+        }
+        child.kill().expect("late child must stop");
+        child.wait().expect("stopped child must be reaped");
     }
 }

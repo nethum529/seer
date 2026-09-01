@@ -1345,8 +1345,11 @@ name = "seer-broker"
 version = "0.1.0"
 dependencies = [
  "constant_time_eq",
+ "getrandom 0.3.4",
  "seer-core",
  "serde",
+ "serde_json",
+ "sha2",
  "toml",
 ]
 

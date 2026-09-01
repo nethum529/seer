@@ -1,26 +1,40 @@
 use std::fs;
 use std::io;
 use std::net::SocketAddr;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 
 use serde::Deserialize;
 
 #[derive(Clone, Deserialize)]
 pub struct Config {
     pub listen: SocketAddr,
+    pub published_addr: String,
+    #[serde(default = "default_state_dir")]
+    pub state_dir: PathBuf,
+    pub owner_name: String,
     #[serde(default = "default_shell")]
     pub shell: String,
-    pub users: Vec<UserConfig>,
-}
-
-#[derive(Clone, Deserialize)]
-pub struct UserConfig {
-    pub user: String,
-    pub token: String,
 }
 
 fn default_shell() -> String {
     "sh".to_owned()
+}
+
+fn default_state_dir() -> PathBuf {
+    state_dir_from(std::env::var_os("XDG_STATE_HOME"), std::env::var_os("HOME"))
+}
+
+fn state_dir_from(
+    xdg_state_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> PathBuf {
+    if let Some(root) = xdg_state_home.filter(|value| !value.is_empty()) {
+        return PathBuf::from(root).join("seer");
+    }
+    home.filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from("."))
+        .join(".local/state/seer")
 }
 
 impl Config {
@@ -47,21 +61,32 @@ mod tests {
         let config = Config::load(path).expect("example config must load");
 
         assert_eq!(config.listen.to_string(), "127.0.0.1:7321");
+        assert_eq!(config.published_addr, "seer.example.com:7321");
+        assert_eq!(config.state_dir, Path::new("/var/lib/seer"));
+        assert_eq!(config.owner_name, "owner");
         assert_eq!(config.shell, "sh");
-        assert_eq!(config.users.len(), 2);
-        assert_eq!(config.users[0].user, "alice");
-        assert_eq!(config.users[0].token, "replace-with-alice-token");
-        assert_eq!(config.users[1].user, "bob");
-        assert_eq!(config.users[1].token, "replace-with-bob-token");
     }
 
     #[test]
     fn loads_configured_shell() {
-        let config =
-            toml::from_str::<Config>("listen = \"127.0.0.1:7321\"\nshell = \"bash\"\nusers = []\n")
-                .expect("config must load");
+        let config = toml::from_str::<Config>(
+            "listen = \"127.0.0.1:7321\"\npublished_addr = \"host:7321\"\nowner_name = \"owner\"\nshell = \"bash\"\n",
+        )
+        .expect("config must load");
 
         assert_eq!(config.shell, "bash");
+        assert!(config.state_dir.ends_with(".local/state/seer"));
+    }
+
+    #[test]
+    fn selects_the_default_state_directory() {
+        let xdg = super::state_dir_from(Some("/xdg".into()), Some("/home/user".into()));
+        let empty_xdg = super::state_dir_from(Some("".into()), Some("/home/user".into()));
+        let no_home = super::state_dir_from(None, Some("".into()));
+
+        assert_eq!(xdg, Path::new("/xdg/seer"));
+        assert_eq!(empty_xdg, Path::new("/home/user/.local/state/seer"));
+        assert_eq!(no_home, Path::new("./.local/state/seer"));
     }
 
     #[test]
