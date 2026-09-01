@@ -433,10 +433,10 @@ mod tests {
             Ok(seer_core::proto::ServerMsg::Joined { .. })
         ));
 
-        let (mut closed_server, closed_client) = tcp_pair();
-        closed_client
-            .shutdown(std::net::Shutdown::Both)
-            .expect("client must close");
+        let (mut closed_server, _closed_client) = tcp_pair();
+        closed_server
+            .shutdown(std::net::Shutdown::Write)
+            .expect("server writes must close");
         assert!(
             super::authenticate(&mut closed_server, &registry, &owner.user_id, &credential)
                 .is_err()
