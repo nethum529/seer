@@ -6,12 +6,13 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
-use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use mux_core::proto::{ClientMsg, ServerMsg, codec};
 
 const CONNECT_ATTEMPTS: usize = 100;
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+const PROCESS_TIMEOUT: Duration = Duration::from_secs(2);
 const MESSAGE_TIMEOUT: Duration = Duration::from_secs(5);
 
 #[test]
@@ -74,10 +75,13 @@ fn rejects_wrong_argument_counts() {
     ];
 
     for arguments in cases {
-        let output = runtime_command()
+        let child = runtime_command()
             .args(*arguments)
-            .output()
-            .expect("runtime must run");
+            .stdout(Stdio::piped())
+            .stderr(Stdio::piped())
+            .spawn()
+            .expect("runtime must start");
+        let output = wait_for_output(child);
         assert_usage_error(&output);
     }
 }
@@ -124,6 +128,27 @@ fn assert_usage_error(output: &Output) {
         String::from_utf8_lossy(&output.stderr)
             .contains("usage: mux-runtime <socket-path> <user> <shell>")
     );
+}
+
+fn wait_for_output(mut child: Child) -> Output {
+    let start = Instant::now();
+    loop {
+        if child
+            .try_wait()
+            .expect("runtime status must be available")
+            .is_some()
+        {
+            return child
+                .wait_with_output()
+                .expect("runtime output must be available");
+        }
+        if start.elapsed() >= PROCESS_TIMEOUT {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("runtime did not exit within 2 seconds");
+        }
+        thread::sleep(RETRY_INTERVAL);
+    }
 }
 
 struct TemporaryDirectory {
