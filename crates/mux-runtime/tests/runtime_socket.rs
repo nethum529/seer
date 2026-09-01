@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::io::{self, Read};
-use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -21,9 +20,6 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let stale_listener = UnixListener::bind(&socket_path).expect("stale socket must bind");
-    let stale_inode = fs::metadata(&socket_path)
-        .expect("stale socket metadata must exist")
-        .ino();
     drop(stale_listener);
 
     let runtime = runtime_command()
@@ -33,7 +29,7 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
         .spawn()
         .expect("runtime must start");
     let _runtime = RuntimeProcess::new(runtime);
-    let mut stream = connect_after_replacement(&socket_path, stale_inode);
+    let mut stream = connect_when_ready(&socket_path);
     stream
         .set_read_timeout(Some(MESSAGE_TIMEOUT))
         .expect("read timeout must set");
@@ -179,26 +175,6 @@ fn connect_when_ready(path: &Path) -> UnixStream {
         thread::sleep(RETRY_INTERVAL);
     }
     panic!("runtime did not listen: {last_error:?}");
-}
-
-fn connect_after_replacement(path: &Path, stale_inode: u64) -> UnixStream {
-    let mut last_error = None;
-    let deadline = Instant::now() + CONNECT_TIMEOUT;
-    loop {
-        match fs::metadata(path) {
-            Ok(metadata) if metadata.ino() != stale_inode => match UnixStream::connect(path) {
-                Ok(stream) => return stream,
-                Err(error) => last_error = Some(error),
-            },
-            Ok(_) => {}
-            Err(error) => last_error = Some(error),
-        }
-        if Instant::now() >= deadline {
-            break;
-        }
-        thread::sleep(RETRY_INTERVAL);
-    }
-    panic!("runtime did not replace stale socket: {last_error:?}");
 }
 
 fn connect_with_timeout(path: &Path) -> UnixStream {
