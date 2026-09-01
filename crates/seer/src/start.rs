@@ -136,6 +136,9 @@ fn prompt_config() -> io::Result<BrokerConfig> {
 }
 #[cfg(target_os = "linux")]
 fn published_host() -> String {
+    if env::var_os("HOSTNAME").is_some() {
+        return host_name();
+    }
     let host = host_name();
     Command::new("tailscale")
         .args(["ip", "-4"])
