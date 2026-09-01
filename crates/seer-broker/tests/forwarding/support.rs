@@ -14,7 +14,7 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
-pub(super) struct TestFiles {
+pub struct TestFiles {
     root: PathBuf,
     state_dir: PathBuf,
     config: PathBuf,
@@ -24,7 +24,7 @@ pub(super) struct TestFiles {
 }
 
 impl TestFiles {
-    pub(super) fn new() -> Self {
+    pub fn new() -> Self {
         let counter = NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -46,7 +46,7 @@ impl TestFiles {
         }
     }
 
-    pub(super) fn write_config(&self, address: SocketAddr) {
+    pub fn write_config(&self, address: SocketAddr) {
         fs::create_dir(&self.state_dir).expect("state directory must be created");
         let alice_hash = hash("alice-secret");
         let bob_hash = hash("bob-secret");
@@ -62,14 +62,14 @@ impl TestFiles {
         fs::write(&self.config, contents).expect("broker config must write");
     }
 
-    pub(super) fn write_runtime_wrapper(&self) {
+    pub fn write_runtime_wrapper(&self) {
         let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
         fs::write(&self.wrapper, script).expect("runtime wrapper must write");
         fs::set_permissions(&self.wrapper, fs::Permissions::from_mode(0o700))
             .expect("runtime wrapper mode must set");
     }
 
-    pub(super) fn start_broker(&self) -> Child {
+    pub fn start_broker(&self) -> Child {
         let log = fs::File::create(&self.broker_log).expect("broker log must open");
         Command::new(env!("CARGO_BIN_EXE_seer-broker"))
             .arg(&self.config)
@@ -83,11 +83,11 @@ impl TestFiles {
             .expect("broker must start")
     }
 
-    pub(super) fn pid_file(&self, user: &str) -> PathBuf {
+    pub fn pid_file(&self, user: &str) -> PathBuf {
         self.root.join(format!("{user}.pid"))
     }
 
-    pub(super) fn runtime_pid(&self, user: &str) -> u32 {
+    pub fn runtime_pid(&self, user: &str) -> u32 {
         let pid_file = self.pid_file(user);
         assert!(wait_for_file(&pid_file));
         fs::read_to_string(pid_file)
@@ -97,7 +97,23 @@ impl TestFiles {
             .expect("runtime PID must be valid")
     }
 
-    pub(super) fn assert_runtime_arguments(&self, user: &str) {
+    pub fn pane_pid(&self, user: &str) -> u32 {
+        let pid_file = self.root.join(format!("{user}-pane.pid"));
+        assert!(wait_for_file(&pid_file));
+        fs::read_to_string(pid_file)
+            .expect("pane PID must be readable")
+            .trim()
+            .parse()
+            .expect("pane PID must be valid")
+    }
+
+    pub fn assert_process_running(&self, pid: u32) {
+        let status = fs::read_to_string(format!("/proc/{pid}/status"))
+            .expect("process status must be readable");
+        assert!(!status.lines().any(|line| line.starts_with("State:\tZ")));
+    }
+
+    pub fn assert_runtime_arguments(&self, user: &str) {
         let arguments_file = self.root.join(format!("{user}.args"));
         assert!(wait_for_file(&arguments_file));
         let arguments = fs::read_to_string(arguments_file).expect("runtime arguments must read");
@@ -114,7 +130,7 @@ impl TestFiles {
         );
     }
 
-    pub(super) fn assert_socket_directory(&self) {
+    pub fn assert_socket_directory(&self) {
         let directory = self.xdg_runtime_dir.join("seer");
         let mode = fs::metadata(directory)
             .expect("socket directory metadata must load")
@@ -124,13 +140,13 @@ impl TestFiles {
         assert_eq!(mode, 0o700);
     }
 
-    pub(super) fn terminate_runtime(&self, user: &str) {
+    pub fn terminate_runtime(&self, user: &str) {
         let pid = self.runtime_pid(user);
         terminate_process(pid);
         fs::remove_file(self.pid_file(user)).expect("runtime PID file must be removed");
     }
 
-    pub(super) fn assert_log_contains(&self, expected: &str) {
+    pub fn assert_log_contains(&self, expected: &str) {
         let deadline = Instant::now() + WAIT_TIMEOUT;
         while Instant::now() < deadline {
             if fs::read_to_string(&self.broker_log)
@@ -143,7 +159,7 @@ impl TestFiles {
         panic!("broker log did not contain {expected}");
     }
 
-    pub(super) fn assert_log_excludes(&self, unexpected: &str) {
+    pub fn assert_log_excludes(&self, unexpected: &str) {
         let contents = fs::read_to_string(&self.broker_log).expect("broker log must read");
         assert!(!contents.contains(unexpected));
     }
@@ -177,10 +193,10 @@ fn remove_temporary_directory(directory: &Path) {
     panic!("temporary directory must be removed: {last_error:?}");
 }
 
-pub(super) struct ProcessGuard(Child);
+pub struct ProcessGuard(Child);
 
 impl ProcessGuard {
-    pub(super) fn new(child: Child) -> Self {
+    pub fn new(child: Child) -> Self {
         Self(child)
     }
 }

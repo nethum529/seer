@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 use seer_core::Tree;
-use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
 
 use crate::capsule;
 use crate::prompt;
@@ -35,7 +35,24 @@ impl CommandError {
 }
 
 pub(crate) fn detach() -> Result<(), CommandError> {
-    Err(CommandError::usage("no attached client in this shell"))
+    let server = selected_server()?;
+    let (mut stream, _) = authenticate(&server)?;
+    send(
+        &mut stream,
+        &ClientMsg::DetachClient {
+            client_id: String::new(),
+        },
+    )?;
+    let clients = receive_clients(&mut stream)?;
+    let client = select_client(&clients)?;
+    send(
+        &mut stream,
+        &ClientMsg::DetachClient {
+            client_id: client.client_id,
+        },
+    )?;
+    print_detached(&server.alias);
+    Ok(())
 }
 
 pub(crate) fn join() -> Result<(), CommandError> {
@@ -85,14 +102,28 @@ fn complete_join(
     store.save().map_err(CommandError::system)?;
     println!("Joined as {name}. Attaching...");
     let (stream, tree) = authenticate(&server)?;
-    finish_session(io::stdout().is_terminal(), stream, tree, None, tui::run)
+    finish_session(
+        io::stdout().is_terminal(),
+        stream,
+        tree,
+        None,
+        &capsule.alias,
+        tui::run,
+    )
 }
 
 pub(crate) fn attach() -> Result<(), CommandError> {
     let server = selected_server()?;
     let (stream, tree) = authenticate(&server)?;
     println!("Attached to {} as {}.", server.alias, server.name);
-    finish_session(io::stdout().is_terminal(), stream, tree, None, tui::run)
+    finish_session(
+        io::stdout().is_terminal(),
+        stream,
+        tree,
+        None,
+        &server.alias,
+        tui::run,
+    )
 }
 
 pub(crate) fn invite() -> Result<(), CommandError> {
@@ -166,8 +197,72 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
         stream,
         tree,
         Some(&person.name),
+        &server.alias,
         tui::run,
     )
+}
+
+fn receive_clients(stream: &mut TcpStream) -> Result<Vec<ClientInfo>, CommandError> {
+    match receive_reply(stream)? {
+        ServerMsg::Clients { clients } => Ok(clients),
+        ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
+        _ => Err(unexpected_reply()),
+    }
+}
+
+fn select_client(clients: &[ClientInfo]) -> Result<ClientInfo, CommandError> {
+    match clients {
+        [] => Err(CommandError::usage("no attached client")),
+        [client] => Ok(client.clone()),
+        _ => {
+            let stdin = io::stdin();
+            let mut input = stdin.lock();
+            let stdout = io::stdout();
+            let mut output = stdout.lock();
+            pick_client(clients, &mut input, &mut output)
+        }
+    }
+}
+
+fn pick_client(
+    clients: &[ClientInfo],
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<ClientInfo, CommandError> {
+    writeln!(output, "Select a client:").map_err(CommandError::system)?;
+    for (index, client) in clients.iter().enumerate() {
+        writeln!(
+            output,
+            "  {}. {} (connected {} seconds)",
+            index + 1,
+            client.client_id,
+            client.connected_secs
+        )
+        .map_err(CommandError::system)?;
+    }
+    write!(output, "Client: ").map_err(CommandError::system)?;
+    output.flush().map_err(CommandError::system)?;
+    let mut selection = String::new();
+    if input
+        .read_line(&mut selection)
+        .map_err(CommandError::system)?
+        == 0
+    {
+        return Err(CommandError::usage("no client selected"));
+    }
+    let index = selection
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| CommandError::usage("no client selected"))?;
+    index
+        .checked_sub(1)
+        .and_then(|index| clients.get(index))
+        .cloned()
+        .ok_or_else(|| CommandError::usage("no client selected"))
+}
+
+fn print_detached(alias: &str) {
+    println!("Detached from {alias}. Your panes are still running.");
 }
 
 fn print_close_names(target: &str, people: &[Person]) {
@@ -363,7 +458,8 @@ fn finish_session(
     stream: TcpStream,
     tree: Tree,
     peek_person: Option<&str>,
-    run: impl FnOnce(TcpStream, Tree) -> io::Result<()>,
+    alias: &str,
+    run: impl FnOnce(TcpStream, Tree) -> io::Result<tui::SessionExit>,
 ) -> Result<(), CommandError> {
     if !terminal {
         return Ok(());
@@ -372,7 +468,11 @@ fn finish_session(
         .set_read_timeout(None)
         .map_err(CommandError::system)?;
     tui::set_peek_person(peek_person);
-    run(stream, tree).map_err(CommandError::system)
+    let exit = run(stream, tree).map_err(CommandError::system)?;
+    if exit == tui::SessionExit::Detached {
+        print_detached(alias);
+    }
+    Ok(())
 }
 
 fn unexpected_reply() -> CommandError {

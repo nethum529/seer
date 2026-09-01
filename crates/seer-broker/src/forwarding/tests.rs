@@ -281,8 +281,10 @@ fn join_reader_reports_a_panic() {
 fn coordinator<'a>(client: TcpStream, broker: &'a BrokerState) -> Coordinator<'a> {
     let (event_sender, events) = mpsc::channel();
     Coordinator {
-        client,
+        client: Arc::new(std::sync::Mutex::new(client)),
         client_reader: None,
+        attachment: None,
+        client_id: "current-client".into(),
         owner: "alice",
         owner_is_admin: true,
         broker,

@@ -54,15 +54,20 @@ fn loads_config_and_listens() {
     .expect("Hello must encode");
     let response: ServerMsg = codec::decode(&mut stream).expect("Welcome must decode");
 
-    assert_eq!(
-        response,
-        ServerMsg::Welcome {
-            user_id: "alice".into(),
-            name: "Alice".into(),
-            client_id: String::new(),
-            tree: Tree::new(),
-        }
-    );
+    let ServerMsg::Welcome {
+        user_id,
+        name,
+        client_id,
+        tree,
+    } = response
+    else {
+        panic!("expected Welcome");
+    };
+    assert_eq!(user_id, "alice");
+    assert_eq!(name, "Alice");
+    assert_eq!(client_id.len(), 32);
+    assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert_eq!(tree, Tree::new());
 }
 
 #[test]
