@@ -2,7 +2,7 @@ use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system}
 use std::collections::VecDeque;
 use std::fmt::Display;
 use std::io::{self, Read, Write};
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 const OUTPUT_LIMIT: usize = 1024 * 1024;
@@ -12,7 +12,13 @@ pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     writer: Box<dyn Write + Send>,
-    output: Arc<Mutex<VecDeque<u8>>>,
+    output: Arc<Mutex<OutputBuffers>>,
+}
+
+#[derive(Default)]
+struct OutputBuffers {
+    snapshot: VecDeque<u8>,
+    pending: VecDeque<u8>,
 }
 
 impl PtySession {
@@ -22,7 +28,7 @@ impl PtySession {
             .map_err(to_io_error)?;
         let reader = pair.master.try_clone_reader().map_err(to_io_error)?;
         let writer = pair.master.take_writer().map_err(to_io_error)?;
-        let output = Arc::new(Mutex::new(VecDeque::new()));
+        let output = Arc::new(Mutex::new(OutputBuffers::default()));
         let reader_output = Arc::clone(&output);
 
         let _reader_task = thread::Builder::new()
@@ -57,11 +63,13 @@ impl PtySession {
     }
 
     pub fn snapshot(&self) -> Vec<u8> {
-        let output = match self.output.lock() {
-            Ok(output) => output,
-            Err(poisoned) => poisoned.into_inner(),
-        };
-        output.iter().copied().collect()
+        let output = lock_output(&self.output);
+        output.snapshot.iter().copied().collect()
+    }
+
+    pub fn drain_output(&self) -> Vec<u8> {
+        let mut output = lock_output(&self.output);
+        output.pending.drain(..).collect()
     }
 }
 
@@ -74,7 +82,7 @@ fn pty_size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
-fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<VecDeque<u8>>) {
+fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<OutputBuffers>) {
     let mut bytes = [0; READ_BUFFER_SIZE];
 
     loop {
@@ -87,14 +95,19 @@ fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<VecDeque<u8>>) {
     }
 }
 
-fn append_output(output: &Mutex<VecDeque<u8>>, bytes: &[u8]) {
-    let mut output = match output.lock() {
+fn append_output(output: &Mutex<OutputBuffers>, bytes: &[u8]) {
+    let mut output = lock_output(output);
+    output.snapshot.extend(bytes);
+    output.pending.extend(bytes);
+    let excess = output.snapshot.len().saturating_sub(OUTPUT_LIMIT);
+    output.snapshot.drain(..excess);
+}
+
+fn lock_output(output: &Mutex<OutputBuffers>) -> MutexGuard<'_, OutputBuffers> {
+    match output.lock() {
         Ok(output) => output,
         Err(poisoned) => poisoned.into_inner(),
-    };
-    output.extend(bytes);
-    let excess = output.len().saturating_sub(OUTPUT_LIMIT);
-    output.drain(..excess);
+    }
 }
 
 fn to_io_error(error: impl Display) -> io::Error {
@@ -116,6 +129,14 @@ mod tests {
         let mut session = PtySession::start(command, 80, 24).expect("PTY must start");
 
         assert!(wait_for_output(&session, b"hello"));
+        assert!(
+            session
+                .drain_output()
+                .windows(5)
+                .any(|bytes| bytes == b"hello")
+        );
+        assert!(session.drain_output().is_empty());
+        assert!(session.snapshot().windows(5).any(|bytes| bytes == b"hello"));
         session
             .write_input(b"input text\n")
             .expect("input write must succeed");
@@ -129,15 +150,22 @@ mod tests {
 
     #[test]
     fn output_buffer_keeps_last_mebibyte() {
-        let output = Mutex::new(VecDeque::new());
+        let output = Mutex::new(OutputBuffers::default());
         let bytes: Vec<u8> = (0..=OUTPUT_LIMIT)
             .map(|index| (index % usize::from(u8::MAX)) as u8)
             .collect();
         append_output(&output, &bytes);
 
         let output = output.into_inner().expect("output lock must be valid");
-        assert_eq!(output.len(), OUTPUT_LIMIT);
-        assert!(output.iter().copied().eq(bytes[1..].iter().copied()));
+        assert_eq!(output.snapshot.len(), OUTPUT_LIMIT);
+        assert!(
+            output
+                .snapshot
+                .iter()
+                .copied()
+                .eq(bytes[1..].iter().copied())
+        );
+        assert!(output.pending.iter().copied().eq(bytes));
     }
 
     fn wait_for_output(session: &PtySession, expected: &[u8]) -> bool {
