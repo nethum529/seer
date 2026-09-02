@@ -879,7 +879,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "39cab71617ae0d63f51a36d69f866391735b51691dbda63cf6f96d042b63efeb"
 dependencies = [
  "libc",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -1699,8 +1699,7 @@ dependencies = [
 [[package]]
 name = "iroh-base"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "3ccf4cde68a02ef03c0095ab2c031c6adfe508f3bc8e7c258558a027ebe64a8e"
+source = "git+https://github.com/nethum529/iroh?rev=ef5001a3b3331ef0c82f8f16da92bb779a8f06c1#ef5001a3b3331ef0c82f8f16da92bb779a8f06c1"
 dependencies = [
  "curve25519-dalek",
  "data-encoding",
@@ -1718,8 +1717,7 @@ dependencies = [
 [[package]]
 name = "iroh-dns"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "9a41224eb0140a5c519935d4073fc6b236d174080be401f9bf7da126b2ee3aa4"
+source = "git+https://github.com/nethum529/iroh?rev=ef5001a3b3331ef0c82f8f16da92bb779a8f06c1#ef5001a3b3331ef0c82f8f16da92bb779a8f06c1"
 dependencies = [
  "arc-swap",
  "cfg_aliases 0.2.2",
@@ -1769,8 +1767,7 @@ dependencies = [
 [[package]]
 name = "iroh-relay"
 version = "1.1.0"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "1b5f6f07e2c9b0c4bc82e2864be09f4aea4320165d5316e668616dbc822f428a"
+source = "git+https://github.com/nethum529/iroh?rev=ef5001a3b3331ef0c82f8f16da92bb779a8f06c1#ef5001a3b3331ef0c82f8f16da92bb779a8f06c1"
 dependencies = [
  "blake3",
  "bytes",
@@ -2436,7 +2433,7 @@ version = "0.50.3"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "7957b9740744892f114936ab4a57b3f487491bbeafaf8083688b16841a4240e5"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3340,7 +3337,7 @@ dependencies = [
  "errno",
  "libc",
  "linux-raw-sys",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -3409,7 +3406,7 @@ dependencies = [
  "security-framework",
  "security-framework-sys",
  "webpki-root-certs",
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]
@@ -4812,7 +4809,7 @@ version = "0.1.11"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "c2a7b1c03c876122aa43f3020e6c3c3ee5c05081c9a00739faf7503aeba10d22"
 dependencies = [
- "windows-sys 0.61.2",
+ "windows-sys 0.59.0",
 ]
 
 [[package]]

@@ -11,3 +11,8 @@ resolver = "3"
 [workspace.package]
 edition = "2024"
 version = "0.1.1"
+
+[patch.crates-io]
+iroh-base = { git = "https://github.com/nethum529/iroh", rev = "ef5001a3b3331ef0c82f8f16da92bb779a8f06c1" }
+iroh-dns = { git = "https://github.com/nethum529/iroh", rev = "ef5001a3b3331ef0c82f8f16da92bb779a8f06c1" }
+iroh-relay = { git = "https://github.com/nethum529/iroh", rev = "ef5001a3b3331ef0c82f8f16da92bb779a8f06c1" }

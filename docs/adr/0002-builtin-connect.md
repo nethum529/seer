@@ -102,11 +102,9 @@ iroh), WireGuard libraries (wrong boundary, no traversal).
 
 - Linux x86_64 builds on the owner PC with cargo-zigbuild as
   before.
-- iroh links two Apple frameworks (SystemConfiguration and
-  CoreFoundation) that cargo-zigbuild cannot find without an Apple
-  SDK. The macOS build path is open. Options: an Apple SDK on the
-  Linux PC, or a macOS build machine. The owner decides. Until
-  then, macOS binaries are built where an Apple SDK exists.
+- macOS builds now work from Linux through the iroh patch fork at
+  nethum529/iroh. The patch fork branch is
+  seer/no-system-config-macos.
 
 ### Version
 
