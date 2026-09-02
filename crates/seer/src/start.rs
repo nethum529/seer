@@ -6,7 +6,7 @@ use std::{
     env,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
-    net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream, UdpSocket},
+    net::{IpAddr, Ipv4Addr, SocketAddr, TcpStream},
     os::unix::{
         fs::{OpenOptionsExt, PermissionsExt},
         process::CommandExt,
@@ -27,6 +27,8 @@ const POLL_INTERVAL: Duration = Duration::from_millis(25);
 struct BrokerConfig {
     listen: SocketAddr,
     published_addr: String,
+    #[serde(default = "remote_enabled")]
+    remote: bool,
     owner_name: String,
     state_dir: PathBuf,
 }
@@ -119,37 +121,19 @@ fn prompt_config() -> io::Result<BrokerConfig> {
     let login = env::var("USER")
         .or_else(|_| env::var("LOGNAME"))
         .unwrap_or_else(|_| "owner".to_owned());
-    let host = published_host();
     let owner_name = prompt("Your name", &login)?;
-    let published_addr = prompt("Published address", &format!("{host}:{PORT}"))?;
-    let port = published_addr
-        .rsplit_once(':')
-        .map_or("", |parts| parts.1)
-        .parse()
-        .map_err(invalid_data)?;
+    let listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), PORT);
     Ok(BrokerConfig {
-        listen: SocketAddr::new(IpAddr::V4(Ipv4Addr::UNSPECIFIED), port),
-        published_addr,
+        listen,
+        published_addr: listen.to_string(),
+        remote: true,
         owner_name,
         state_dir: state_dir()?,
     })
 }
 #[cfg(target_os = "linux")]
-fn published_host() -> String {
-    if env::var_os("HOSTNAME").is_some() {
-        return host_name();
-    }
-    let host = host_name();
-    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok();
-    socket
-        .and_then(|socket| {
-            socket.connect((Ipv4Addr::new(192, 0, 2, 1), PORT)).ok()?;
-            match socket.local_addr().ok()?.ip() {
-                IpAddr::V4(ip) if !ip.is_loopback() => Some(ip),
-                _ => None,
-            }
-        })
-        .map_or(host, |ip| ip.to_string())
+fn remote_enabled() -> bool {
+    true
 }
 #[cfg(target_os = "linux")]
 fn host_name() -> String {
@@ -458,22 +442,13 @@ fn save_owner(config_dir: &Path, config: &BrokerConfig, credential: String) -> i
         .retain(|server| server.endpoint != config.published_addr);
     store.servers.push(ServerEntry {
         endpoint: config.published_addr.clone(),
-        alias: endpoint_alias(&config.published_addr),
+        alias: host_name(),
         user_id: owner_user_id(&config.state_dir).unwrap_or_else(|| config.owner_name.clone()),
         name: config.owner_name.clone(),
         credential,
         current: true,
     });
     write_private(&path, toml_text(&store)?.as_bytes())
-}
-
-#[cfg(target_os = "linux")]
-fn endpoint_alias(endpoint: &str) -> String {
-    endpoint
-        .rsplit_once(':')
-        .map_or(endpoint, |(host, _)| host)
-        .trim_matches(['[', ']'])
-        .to_owned()
 }
 
 #[cfg(target_os = "linux")]

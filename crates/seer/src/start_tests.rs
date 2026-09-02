@@ -18,6 +18,7 @@ fn running_check_rejects_a_pid_that_does_not_own_the_port() {
     let config = BrokerConfig {
         listen,
         published_addr: listen.to_string(),
+        remote: false,
         owner_name: "alice".to_owned(),
         state_dir: directory.clone(),
     };
@@ -43,6 +44,7 @@ fn owner_save_creates_a_missing_store() {
     let config = BrokerConfig {
         listen: "127.0.0.1:7321".parse().expect("test address must parse"),
         published_addr: "host.test:7321".to_owned(),
+        remote: false,
         owner_name: "alice".to_owned(),
         state_dir: directory.join("state"),
     };

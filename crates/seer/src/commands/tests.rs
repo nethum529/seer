@@ -147,7 +147,7 @@ fn terminal_session_configures_peek_and_runs() {
     let (client, _server) = socket_pair();
     let result = finish_session(
         true,
-        client,
+        client.into(),
         Tree::new(),
         Some("alice"),
         "team",
@@ -159,14 +159,14 @@ fn terminal_session_configures_peek_and_runs() {
     assert!(result.is_ok());
 
     let (client, _server) = socket_pair();
-    let error = finish_session(true, client, Tree::new(), None, "team", |_, _| {
+    let error = finish_session(true, client.into(), Tree::new(), None, "team", |_, _| {
         Err(io::Error::other("TUI failed"))
     })
     .expect_err("TUI failure must propagate");
     assert_eq!(error.message, "error: TUI failed");
 
     let (client, _server) = socket_pair();
-    let result = finish_session(false, client, Tree::new(), None, "team", |_, _| {
+    let result = finish_session(false, client.into(), Tree::new(), None, "team", |_, _| {
         Err(io::Error::other("runner must not be called"))
     });
     assert!(result.is_ok());
