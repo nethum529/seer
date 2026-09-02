@@ -73,7 +73,7 @@ case ":${PATH:-}:" in
 esac
 
 if [ "$#" -gt 0 ]; then
-    if [ -r /dev/tty ]; then
+    if (exec < /dev/tty) 2>/dev/null; then
         exec "$install_dir/seer" join "$1" < /dev/tty
     fi
     exec "$install_dir/seer" join "$1"
