@@ -14,37 +14,42 @@ Research notes live in docs/research/.
 ## Quickstart
 
 This example uses one owner on Linux and one friend on macOS or Linux. The
-private repository must give the friend collaborator access.
+friend needs a terminal and a Tailscale invite. The friend does not need Rust,
+Git, or a GitHub account.
 
-On the owner's Linux machine, run these commands from the repository:
+On the owner's Linux machine, install Seer:
 
 ```sh
-cargo install --path crates/seer
+curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh
+```
+
+Restart the terminal if the installer asks you to. Then start Seer:
+
+```sh
 seer start
 ```
 
-All three land in `~/.cargo/bin`, which must be on `PATH`.
+Seer prints a message in this format:
 
-Copy the printed `seer join <capsule>` line and send it to the friend through
-a private channel.
+```text
+Send this to a friend:
 
-On the friend's machine, install Rust and log in to GitHub for Git:
+1. Accept the Tailscale invite I sent you.
+2. Paste this in Terminal:
+curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- <capsule>
 
-```sh
-curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs | sh
-gh auth login
-cargo install --git https://github.com/nethum529/placeholder-herdrlike seer
+Invite them to Tailscale first: https://login.tailscale.com/admin/users
 ```
 
-The friend can use an SSH key instead of `gh auth login`. Paste the full
-`seer join <capsule>` line, then type a name when Seer asks for it.
+Use the admin link to invite the friend to Tailscale. Send the printed message
+to the friend. The friend accepts the Tailscale invite and pastes the install
+line in Terminal. The installer joins the session and opens a shell. The friend
+presses Enter to use the default name or types a different name.
 
-Use these commands after both people join:
+## Build from source
+
+Developers with Rust can build all workspace packages from the repository:
 
 ```sh
-seer peek <name>
-seer detach
-seer attach
+cargo build --workspace
 ```
-
-Seer uses plain TCP and has no TLS yet. Use Tailscale or a LAN.
