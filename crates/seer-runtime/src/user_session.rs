@@ -68,6 +68,18 @@ impl UserSession {
             .collect()
     }
 
+    pub(crate) fn ensure_first_shell(&mut self) -> io::Result<()> {
+        if self
+            .tree
+            .workspaces
+            .iter()
+            .any(|workspace| !workspace.tabs.is_empty())
+        {
+            return Ok(());
+        }
+        self.create_tab().map(|_| ())
+    }
+
     fn create_tab(&mut self) -> io::Result<Vec<ServerMsg>> {
         let workspace_id = self.ensure_workspace()?;
         let tab = self

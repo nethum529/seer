@@ -41,10 +41,9 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
         .set_read_timeout(Some(MESSAGE_TIMEOUT))
         .expect("read timeout must set");
 
-    assert!(tree(read_message(&mut stream)).workspaces.is_empty());
-    codec::encode(&mut stream, &ClientMsg::CreateTab).expect("CreateTab must encode");
     let created_tree = tree(read_message(&mut stream));
     assert_eq!(created_tree.workspaces[0].tabs.len(), 1);
+    assert_eq!(created_tree.workspaces[0].tabs[0].panes.len(), 1);
     assert!(wait_for_cells(&mut stream));
 
     drop(stream);
@@ -89,9 +88,9 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     let mut runtime = RuntimeProcess::new(runtime);
 
     let mut owner = connect_with_timeout(&socket_path);
-    assert!(tree(read_message(&mut owner)).workspaces.is_empty());
-    send(&mut owner, &ClientMsg::CreateTab);
     let created = tree(read_message(&mut owner));
+    assert_eq!(created.workspaces[0].tabs.len(), 1);
+    assert_eq!(created.workspaces[0].tabs[0].panes.len(), 1);
     let pane = created.workspaces[0].tabs[0].panes[0].id.clone();
 
     let mut viewer = connect_with_timeout(&socket_path);

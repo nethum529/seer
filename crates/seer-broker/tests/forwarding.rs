@@ -30,7 +30,6 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     assert!(!temporary.pid_file("alice").is_file());
     send_hello(&mut first, "alice", "alice-secret");
     assert_welcome(read_message(&mut first), "alice");
-    codec::encode(&mut first, &ClientMsg::CreateTab).expect("CreateTab must encode");
     let tree = wait_for_tree_with_tab(&mut first);
     assert!(wait_for_cells(&mut first));
     let pane = &tree.workspaces[0].tabs[0].panes[0].id;
@@ -97,7 +96,6 @@ fn routes_peek_and_restores_the_owners_runtime() {
     let mut alice = connect_when_ready(address);
     send_hello(&mut alice, "alice", "alice-secret");
     assert_welcome(read_message(&mut alice), "alice");
-    send(&mut alice, &ClientMsg::CreateTab);
     let alice_tree = wait_for_tree_with_tab(&mut alice);
     assert!(wait_for_cells(&mut alice));
     let workspace = alice_tree.workspaces[0].id.clone();
@@ -106,7 +104,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
     let mut bob = connect_when_ready(address);
     send_hello(&mut bob, "bob", "bob-secret");
     assert_welcome(read_message(&mut bob), "bob");
-    wait_for_empty_tree(&mut bob);
+    wait_for_tree_with_tab(&mut bob);
     send(&mut bob, &ClientMsg::Invite);
     assert_eq!(
         wait_for_refused(&mut bob),
@@ -123,7 +121,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
         },
     );
     send(&mut bob, &ClientMsg::Resize { cols: 90, rows: 30 });
-    wait_for_empty_tree(&mut bob);
+    wait_for_tree_with_tab(&mut bob);
     assert!(!temporary.pid_file("charlie").is_file());
 
     send(
@@ -146,7 +144,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
     assert!(!bob_cells.contains("bob-write"));
 
     send(&mut bob, &ClientMsg::StopPeek);
-    wait_for_empty_tree(&mut bob);
+    wait_for_tree_with_tab(&mut bob);
     temporary.assert_log_contains("broker dropped Peek for unknown user: charlie");
     temporary.assert_log_contains("broker dropped Input while user bob peeks");
     temporary.assert_log_excludes("runtime dropped read-only message");
@@ -161,7 +159,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
     wait_for_tree_with_tab(&mut bob);
     wait_for_tree_with_tab(&mut bob);
     temporary.terminate_runtime("alice");
-    wait_for_empty_tree(&mut bob);
+    wait_for_tree_with_tab(&mut bob);
     wait_for_disconnect(&mut alice);
 
     drop(alice);
@@ -246,18 +244,6 @@ fn assert_tree_has_one_tab(message: ServerMsg) {
         }
         other => panic!("expected Tree, got {other:?}"),
     }
-}
-
-fn wait_for_empty_tree(stream: &mut TcpStream) {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    while Instant::now() < deadline {
-        if let ServerMsg::Tree { tree } = read_message(stream)
-            && tree.workspaces.is_empty()
-        {
-            return;
-        }
-    }
-    panic!("empty Tree was not received");
 }
 
 fn wait_for_seat(stream: &mut TcpStream) -> ServerMsg {
