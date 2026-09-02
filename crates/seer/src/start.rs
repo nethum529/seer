@@ -140,15 +140,9 @@ fn published_host() -> String {
         return host_name();
     }
     let host = host_name();
-    Command::new("tailscale")
-        .args(["ip", "-4"])
-        .output()
-        .ok()
-        .filter(|output| output.status.success())
-        .and_then(|output| String::from_utf8(output.stdout).ok())
-        .and_then(|output| output.trim().parse::<Ipv4Addr>().ok())
-        .or_else(|| {
-            let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok()?;
+    let socket = UdpSocket::bind((Ipv4Addr::UNSPECIFIED, 0)).ok();
+    socket
+        .and_then(|socket| {
             socket.connect((Ipv4Addr::new(192, 0, 2, 1), PORT)).ok()?;
             match socket.local_addr().ok()?.ip() {
                 IpAddr::V4(ip) if !ip.is_loopback() => Some(ip),
