@@ -64,13 +64,13 @@ fn invitation_from(output: &[u8]) -> String {
     let output = text(output);
     let lines: Vec<&str> = output.lines().collect();
     assert_eq!(lines.first(), Some(&"Send this to a friend:"));
-    let join = lines.get(4).expect("install command must print");
+    let join = lines.get(3).expect("install command must print");
     let invitation = join
         .strip_prefix(
             "curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- ",
         )
         .expect("install command must include the invitation");
-    assert_eq!(lines.len(), 7);
+    assert_eq!(lines.len(), 4);
     assert!(invitation.starts_with("SEER1-127.0.0.1-"));
     invitation.to_owned()
 }

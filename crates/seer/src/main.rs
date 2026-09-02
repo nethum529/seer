@@ -8,7 +8,6 @@ mod prompt;
 mod start;
 mod state;
 mod store;
-mod tailscale;
 mod tui;
 mod update;
 
