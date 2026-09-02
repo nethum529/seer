@@ -1,6 +1,6 @@
 use std::cell::{Cell as ModeCell, RefCell};
 use std::io::{self, Stdout};
-use std::net::{Shutdown, TcpStream};
+use std::net::Shutdown;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
@@ -18,6 +18,7 @@ use ratatui::style::{Modifier, Style};
 use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{Cell, Color, Tree};
+use seer_net::{Socket, Stream};
 
 use crate::input::key_to_bytes;
 use crate::state::{ClientState, pane_rects};
@@ -47,9 +48,9 @@ pub(crate) enum SessionExit {
     Detached,
 }
 
-pub(crate) fn run(mut stream: TcpStream, tree: Tree) -> io::Result<SessionExit> {
+pub(crate) fn run(mut stream: Socket, tree: Tree) -> io::Result<SessionExit> {
     let mut terminal = TerminalSession::start()?;
-    let reader = stream.try_clone()?;
+    let reader = stream.clone();
     let (receiver, reader_thread) = spawn_reader(reader);
     let loop_result = run_loop(&mut terminal.terminal, &mut stream, &receiver, tree);
     drop(terminal);
@@ -61,7 +62,7 @@ pub(crate) fn run(mut stream: TcpStream, tree: Tree) -> io::Result<SessionExit> 
     })
 }
 
-fn spawn_reader(mut stream: TcpStream) -> (Receiver<ReaderEvent>, JoinHandle<()>) {
+fn spawn_reader(mut stream: Socket) -> (Receiver<ReaderEvent>, JoinHandle<()>) {
     let (sender, receiver) = mpsc::channel();
     let handle = thread::spawn(move || {
         loop {
@@ -87,9 +88,9 @@ fn join_reader(reader: JoinHandle<()>) -> io::Result<()> {
         .map_err(|_| io::Error::other("socket reader thread panicked"))
 }
 
-fn run_loop(
+fn run_loop<S: Stream>(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
-    stream: &mut TcpStream,
+    stream: &mut S,
     receiver: &Receiver<ReaderEvent>,
     tree: Tree,
 ) -> io::Result<LoopControl> {
@@ -168,9 +169,9 @@ fn apply_server_message(message: ServerMsg, state: &mut ClientState) -> io::Resu
     Ok(LoopControl::Continue)
 }
 
-fn handle_event(
+fn handle_event<S: Stream>(
     event: Event,
-    stream: &mut TcpStream,
+    stream: &mut S,
     state: &mut ClientState,
     command_pending: &mut bool,
 ) -> io::Result<LoopControl> {
@@ -186,9 +187,9 @@ fn handle_event(
     }
 }
 
-fn handle_key(
+fn handle_key<S: Stream>(
     key: KeyEvent,
-    stream: &mut TcpStream,
+    stream: &mut S,
     state: &mut ClientState,
     command_pending: &mut bool,
 ) -> io::Result<LoopControl> {
@@ -250,7 +251,7 @@ fn peek_person() -> Option<String> {
     PEEK_PERSON.with_borrow(Clone::clone)
 }
 
-fn send(stream: &mut TcpStream, message: &ClientMsg) -> io::Result<()> {
+fn send(stream: &mut impl Stream, message: &ClientMsg) -> io::Result<()> {
     codec::encode(stream, message)
 }
 

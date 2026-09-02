@@ -1,9 +1,11 @@
 use std::io::{self, BufRead, IsTerminal, Read, Write};
 use std::net::TcpStream;
+use std::os::unix::fs::PermissionsExt;
 use std::time::{Duration, Instant};
 
 use seer_core::Tree;
 use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
+use seer_net::{Socket, Stream};
 
 use crate::capsule;
 use crate::capsule::Endpoint;
@@ -65,7 +67,7 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
     };
     let capsule = capsule::parse(&invitation).map_err(CommandError::system)?;
     println!("Server: {}", capsule.endpoint);
-    let endpoint = tcp_endpoint(&capsule.endpoint)?;
+    let endpoint = capsule.endpoint.to_string();
 
     let default_name = std::env::var("USER")
         .ok()
@@ -79,7 +81,7 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
     loop {
         let name = prompt::visible_with_default("Name", default_name.as_deref())
             .map_err(CommandError::system)?;
-        let mut stream = connect(endpoint)?;
+        let mut stream = connect(&endpoint)?;
         let join = ClientMsg::Join {
             seat_token: capsule.token.clone(),
             name,
@@ -225,7 +227,7 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
     )
 }
 
-fn receive_clients(stream: &mut TcpStream) -> Result<Vec<ClientInfo>, CommandError> {
+fn receive_clients(stream: &mut impl Stream) -> Result<Vec<ClientInfo>, CommandError> {
     match receive_reply(stream)? {
         ServerMsg::Clients { clients } => Ok(clients),
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
@@ -392,7 +394,7 @@ fn pick_server(
         .ok_or_else(|| CommandError::usage("no server selected"))
 }
 
-fn authenticate(server: &ServerEntry) -> Result<(TcpStream, Tree), CommandError> {
+fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
     let mut stream = connect(&server.endpoint)?;
     let hello = ClientMsg::Hello {
         user_id: server.user_id.clone(),
@@ -426,12 +428,14 @@ fn welcome_tree(reply: ServerMsg) -> Result<Tree, CommandError> {
     }
 }
 
-fn connect(endpoint: &str) -> Result<TcpStream, CommandError> {
-    let stream = TcpStream::connect(endpoint).map_err(|_| {
-        CommandError::usage(format!(
-            "Cannot reach {endpoint}. Check that the server is running and that you are on the same network."
-        ))
-    })?;
+fn connect(endpoint: &str) -> Result<Socket, CommandError> {
+    let parsed = capsule::parse_endpoint(endpoint).ok_or_else(|| tcp_failure(endpoint))?;
+    let stream = match parsed {
+        Endpoint::Tcp(address) => {
+            Socket::from(TcpStream::connect(&address).map_err(|_| tcp_failure(endpoint))?)
+        }
+        Endpoint::Iroh(id) => connect_iroh(&id)?,
+    };
     stream
         .set_read_timeout(Some(NETWORK_TIMEOUT))
         .map_err(CommandError::system)?;
@@ -441,29 +445,43 @@ fn connect(endpoint: &str) -> Result<TcpStream, CommandError> {
     Ok(stream)
 }
 
-fn tcp_endpoint(endpoint: &Endpoint) -> Result<&str, CommandError> {
-    match endpoint {
-        Endpoint::Tcp(endpoint) => Ok(endpoint),
-        Endpoint::Iroh(_) => Err(CommandError::usage(
-            "This invitation needs a newer seer. Run: seer update",
-        )),
-    }
+fn connect_iroh(id: &str) -> Result<Socket, CommandError> {
+    let directory = crate::store::config_dir().map_err(CommandError::system)?;
+    std::fs::create_dir_all(&directory).map_err(CommandError::system)?;
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+        .map_err(CommandError::system)?;
+    let secret_key = seer_net::load_or_create_secret_key(&directory.join("device.key"))
+        .map_err(CommandError::system)?;
+    let endpoint_id = seer_net::decode_endpoint_id(id).map_err(CommandError::system)?;
+    seer_net::dial(secret_key, endpoint_id)
+        .map(Socket::from)
+        .map_err(|_| {
+            CommandError::usage(
+                "Cannot reach the server. Check that the owner ran seer start and that you both have internet.",
+            )
+        })
 }
 
-fn send(stream: &mut TcpStream, message: &ClientMsg) -> Result<(), CommandError> {
+fn tcp_failure(endpoint: &str) -> CommandError {
+    CommandError::usage(format!(
+        "Cannot reach {endpoint}. Check that the server is running and that you are on the same network."
+    ))
+}
+
+fn send(stream: &mut impl Stream, message: &ClientMsg) -> Result<(), CommandError> {
     codec::encode(stream, message).map_err(CommandError::system)
 }
 
-fn receive(stream: &mut TcpStream) -> Result<ServerMsg, CommandError> {
+fn receive(stream: &mut impl Stream) -> Result<ServerMsg, CommandError> {
     codec::decode(stream).map_err(CommandError::system)
 }
 
-fn receive_reply(stream: &mut TcpStream) -> Result<ServerMsg, CommandError> {
+fn receive_reply(stream: &mut impl Stream) -> Result<ServerMsg, CommandError> {
     receive_reply_before(stream, Instant::now() + NETWORK_TIMEOUT)
 }
 
-fn receive_reply_before(
-    stream: &mut TcpStream,
+fn receive_reply_before<S: Stream>(
+    stream: &mut S,
     deadline: Instant,
 ) -> Result<ServerMsg, CommandError> {
     loop {
@@ -478,12 +496,12 @@ fn receive_reply_before(
     }
 }
 
-struct DeadlineReader<'a> {
-    stream: &'a mut TcpStream,
+struct DeadlineReader<'a, S> {
+    stream: &'a mut S,
     deadline: Instant,
 }
 
-impl Read for DeadlineReader<'_> {
+impl<S: Stream> Read for DeadlineReader<'_, S> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let remaining = self
             .deadline
@@ -496,11 +514,11 @@ impl Read for DeadlineReader<'_> {
 
 fn finish_session(
     terminal: bool,
-    stream: TcpStream,
+    stream: Socket,
     tree: Tree,
     peek_person: Option<&str>,
     alias: &str,
-    run: impl FnOnce(TcpStream, Tree) -> io::Result<tui::SessionExit>,
+    run: impl FnOnce(Socket, Tree) -> io::Result<tui::SessionExit>,
 ) -> Result<(), CommandError> {
     if !terminal {
         return Ok(());
