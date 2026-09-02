@@ -303,7 +303,7 @@ fn invite_prints_the_worked_example_block() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
         output.stdout,
-        b"Send this to a friend:\nseer join SEER1-team.example.com-7321-A7K4Q9P2\n"
+        b"Send this to a friend:\n\n1. Accept the Tailscale invite I sent you.\n2. Paste this in Terminal:\ncurl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- SEER1-team.example.com-7321-A7K4Q9P2\n\nInvite them to Tailscale first: https://login.tailscale.com/admin/users\n"
     );
     assert!(output.stderr.is_empty());
     server.join().expect("server must finish");

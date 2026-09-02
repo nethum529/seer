@@ -12,6 +12,8 @@ use crate::tailscale;
 use crate::tui;
 
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
+const INSTALL_URL: &str =
+    "https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh";
 
 #[derive(Debug)]
 pub(crate) struct CommandError {
@@ -141,7 +143,12 @@ pub(crate) fn invite() -> Result<(), CommandError> {
     match receive_reply(&mut stream)? {
         ServerMsg::Seat { capsule, .. } => {
             println!("Send this to a friend:");
-            println!("seer join {capsule}");
+            println!();
+            println!("1. Accept the Tailscale invite I sent you.");
+            println!("2. Paste this in Terminal:");
+            println!("curl -fsSL {INSTALL_URL} | sh -s -- {capsule}");
+            println!();
+            println!("Invite them to Tailscale first: https://login.tailscale.com/admin/users");
             Ok(())
         }
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
