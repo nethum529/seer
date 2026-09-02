@@ -3518,6 +3518,7 @@ dependencies = [
  "constant_time_eq",
  "getrandom 0.3.4",
  "seer-core",
+ "seer-net",
  "serde",
  "serde_json",
  "sha2 0.10.9",

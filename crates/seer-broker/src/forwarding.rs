@@ -1,5 +1,4 @@
 use std::io;
-use std::net::TcpStream;
 use std::os::unix::net::UnixStream;
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex};
@@ -7,16 +6,16 @@ use std::thread::{self, JoinHandle};
 
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_net::Stream;
 
 use crate::attachments::{AttachmentGuard, ClientWriter, lock_writer};
 use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 
-pub(crate) fn forward(
-    client: TcpStream,
-    owner: &PersonRecord,
-    broker: &BrokerState,
-) -> io::Result<()> {
+pub(crate) fn forward<S>(client: S, owner: &PersonRecord, broker: &BrokerState) -> io::Result<()>
+where
+    S: Stream + Clone,
+{
     let mut coordinator = Coordinator::new(client, owner, broker)?;
     let result = coordinator.run();
     result.and(coordinator.close())
@@ -37,14 +36,13 @@ struct Coordinator<'a> {
 }
 
 impl<'a> Coordinator<'a> {
-    fn new(
-        client: TcpStream,
-        owner: &'a PersonRecord,
-        broker: &'a BrokerState,
-    ) -> io::Result<Self> {
+    fn new<S>(client: S, owner: &'a PersonRecord, broker: &'a BrokerState) -> io::Result<Self>
+    where
+        S: Stream + Clone,
+    {
         let (event_sender, events) = mpsc::channel();
-        let client_reader = client.try_clone()?;
-        let client = Arc::new(Mutex::new(client));
+        let client_reader = client.clone();
+        let client = Arc::new(Mutex::new(Box::new(client) as Box<dyn Stream>));
         let attachment = broker.attach_client(&owner.user_id, Arc::clone(&client))?;
         let client_id = attachment.client_id().to_owned();
         write_client(
@@ -276,7 +274,7 @@ enum Action {
     Stop,
 }
 
-fn spawn_client_reader(mut stream: TcpStream, sender: Sender<Event>) -> JoinHandle<()> {
+fn spawn_client_reader<S: Stream>(mut stream: S, sender: Sender<Event>) -> JoinHandle<()> {
     thread::spawn(move || {
         loop {
             match codec::decode(&mut stream) {

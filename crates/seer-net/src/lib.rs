@@ -10,7 +10,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+mod stream;
+
 pub use iroh::{EndpointId, SecretKey};
+pub use stream::Stream;
 
 pub const ALPN: &[u8] = b"seer/1";
 

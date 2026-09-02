@@ -8,6 +8,7 @@ mod forwarding;
 mod registry;
 mod runtime;
 mod server;
+mod stream;
 #[cfg(test)]
 mod test_support;
 

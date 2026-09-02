@@ -1,14 +1,15 @@
 use std::collections::HashMap;
 use std::io;
-use std::net::{Shutdown, TcpStream};
+use std::net::Shutdown;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::Instant;
 
 use seer_core::proto::{ClientInfo, ServerMsg, codec};
+use seer_net::Stream;
 
 use crate::registry::random_hex;
 
-pub(crate) type ClientWriter = Arc<Mutex<TcpStream>>;
+pub(crate) type ClientWriter = Arc<Mutex<Box<dyn Stream>>>;
 
 #[derive(Default)]
 pub(crate) struct Attachments(Mutex<HashMap<String, HashMap<String, Attachment>>>);
@@ -142,7 +143,7 @@ struct Attachment {
     writer: ClientWriter,
 }
 
-pub(crate) fn lock_writer(writer: &ClientWriter) -> io::Result<MutexGuard<'_, TcpStream>> {
+pub(crate) fn lock_writer(writer: &ClientWriter) -> io::Result<MutexGuard<'_, Box<dyn Stream>>> {
     writer
         .lock()
         .map_err(|_| io::Error::other("client writer lock is poisoned"))
@@ -164,10 +165,16 @@ mod tests {
         let (first, _first_peer) = tcp_pair();
         let (second, _second_peer) = tcp_pair();
         let first = attachments
-            .attach("alice", Arc::new(Mutex::new(first)))
+            .attach(
+                "alice",
+                Arc::new(Mutex::new(Box::new(first) as Box<dyn seer_net::Stream>)),
+            )
             .expect("first client must attach");
         let second = attachments
-            .attach("alice", Arc::new(Mutex::new(second)))
+            .attach(
+                "alice",
+                Arc::new(Mutex::new(Box::new(second) as Box<dyn seer_net::Stream>)),
+            )
             .expect("second client must attach");
 
         assert_eq!(attachments.count("alice"), 2);
@@ -196,7 +203,10 @@ mod tests {
         let attachments = Attachments::default();
         let (stream, mut peer) = tcp_pair();
         let guard = attachments
-            .attach("alice", Arc::new(Mutex::new(stream)))
+            .attach(
+                "alice",
+                Arc::new(Mutex::new(Box::new(stream) as Box<dyn seer_net::Stream>)),
+            )
             .expect("client must attach");
 
         assert!(

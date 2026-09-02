@@ -61,7 +61,7 @@ impl TestFiles {
         fs::write(self.state_dir.join("people.json"), people).expect("people registry must write");
         fs::write(self.state_dir.join("seats.json"), "[]\n").expect("seat registry must write");
         let contents = format!(
-            "listen = \"{address}\"\npublished_addr = \"host:7321\"\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
+            "listen = \"{address}\"\npublished_addr = \"host:7321\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
             self.state_dir.display()
         );
         fs::write(&self.config, contents).expect("broker config must write");
