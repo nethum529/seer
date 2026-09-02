@@ -6,6 +6,7 @@ use seer_core::Tree;
 use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
 
 use crate::capsule;
+use crate::capsule::Endpoint;
 use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
@@ -64,6 +65,7 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
     };
     let capsule = capsule::parse(&invitation).map_err(CommandError::system)?;
     println!("Server: {}", capsule.endpoint);
+    let endpoint = tcp_endpoint(&capsule.endpoint)?;
 
     let default_name = std::env::var("USER")
         .ok()
@@ -77,7 +79,7 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
     loop {
         let name = prompt::visible_with_default("Name", default_name.as_deref())
             .map_err(CommandError::system)?;
-        let mut stream = connect(&capsule.endpoint)?;
+        let mut stream = connect(endpoint)?;
         let join = ClientMsg::Join {
             seat_token: capsule.token.clone(),
             name,
@@ -106,7 +108,7 @@ fn complete_join(
 ) -> Result<(), CommandError> {
     let mut store = ServerStore::load().map_err(CommandError::system)?;
     let server = ServerEntry {
-        endpoint: capsule.endpoint.clone(),
+        endpoint: capsule.endpoint.to_string(),
         alias: capsule.alias.clone(),
         user_id,
         name: name.clone(),
@@ -437,6 +439,15 @@ fn connect(endpoint: &str) -> Result<TcpStream, CommandError> {
         .set_write_timeout(Some(NETWORK_TIMEOUT))
         .map_err(CommandError::system)?;
     Ok(stream)
+}
+
+fn tcp_endpoint(endpoint: &Endpoint) -> Result<&str, CommandError> {
+    match endpoint {
+        Endpoint::Tcp(endpoint) => Ok(endpoint),
+        Endpoint::Iroh(_) => Err(CommandError::usage(
+            "This invitation needs a newer seer. Run: seer update",
+        )),
+    }
 }
 
 fn send(stream: &mut TcpStream, message: &ClientMsg) -> Result<(), CommandError> {
