@@ -5,14 +5,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
-use seer_net::{EndpointId, Listener, Stream, load_or_create_secret_key};
+use seer_net::{EndpointId, Listener, Socket, Stream, load_or_create_secret_key};
 
 use crate::Config;
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
 use crate::registry::{PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
-use crate::stream::BrokerStream;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INVALID_CREDENTIALS: &str = "invalid credentials";
@@ -31,7 +30,7 @@ pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
         spawn_remote_accept_loop(remote_listener, Arc::clone(&broker));
     }
     for connection in listener.incoming() {
-        let stream = BrokerStream::from(connection?);
+        let stream = Socket::from(connection?);
         let broker = Arc::clone(&broker);
         thread::spawn(move || report_connection(handle_connection(stream, &broker)));
     }
@@ -166,7 +165,7 @@ fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
             match listener.accept() {
                 Ok((_remote, stream)) => {
                     let broker = Arc::clone(&broker);
-                    let stream = BrokerStream::from(stream);
+                    let stream = Socket::from(stream);
                     thread::spawn(move || {
                         report_connection(handle_connection(stream, &broker));
                     });

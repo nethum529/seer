@@ -121,12 +121,8 @@ fn coordinator_new_uses_the_authenticated_owner() {
         std::os::unix::net::UnixListener::bind(&socket).expect("runtime listener must bind");
     let (client, peer) = tcp_pair();
 
-    let mut coordinator = Coordinator::new(
-        crate::stream::BrokerStream::from(client),
-        &owner,
-        &broker.state,
-    )
-    .expect("coordinator must initialize");
+    let mut coordinator = Coordinator::new(seer_net::Socket::from(client), &owner, &broker.state)
+        .expect("coordinator must initialize");
     let (runtime_peer, _) = listener.accept().expect("runtime must connect");
 
     assert_eq!(coordinator.owner, owner.user_id);
