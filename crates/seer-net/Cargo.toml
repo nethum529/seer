@@ -1,0 +1,8 @@
+[package]
+name = "seer-net"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+iroh = "1"
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread"] }
