@@ -6,6 +6,7 @@ const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start          Start t
 
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
+    Bare,
     Help,
     Start,
     Invite,
@@ -25,7 +26,22 @@ pub(crate) fn run(arguments: impl Iterator<Item = String>) -> ExitCode {
             return ExitCode::from(2);
         }
     };
+    execute(command)
+}
+
+pub(crate) fn run_bare() -> ExitCode {
+    execute(Command::Bare)
+}
+
+fn execute(command: Command) -> ExitCode {
     let result = match command {
+        Command::Bare => match commands::attach() {
+            Err(error) if error.message == "run seer join first" => {
+                eprintln!("Paste the line the owner sent you.");
+                return ExitCode::from(2);
+            }
+            result => result,
+        },
         Command::Help => {
             print!("{HELP}");
             Ok(())

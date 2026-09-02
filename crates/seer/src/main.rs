@@ -12,5 +12,10 @@ mod tailscale;
 mod tui;
 
 fn main() -> ExitCode {
-    cli::run(std::env::args().skip(1))
+    let mut arguments = std::env::args().skip(1).peekable();
+    if arguments.peek().is_none() {
+        cli::run_bare()
+    } else {
+        cli::run(arguments)
+    }
 }
