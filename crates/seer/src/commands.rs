@@ -68,8 +68,18 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
         tailscale::CheckError::System(error) => CommandError::system(error),
     })?;
 
+    let default_name = std::env::var("USER")
+        .ok()
+        .filter(|name| !name.is_empty())
+        .or_else(|| {
+            std::env::var("LOGNAME")
+                .ok()
+                .filter(|name| !name.is_empty())
+        });
+
     loop {
-        let name = prompt::visible("Name: ").map_err(CommandError::system)?;
+        let name = prompt::visible_with_default("Name", default_name.as_deref())
+            .map_err(CommandError::system)?;
         let mut stream = connect(&capsule.endpoint)?;
         let join = ClientMsg::Join {
             seat_token: capsule.token.clone(),
