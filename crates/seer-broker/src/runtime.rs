@@ -285,13 +285,8 @@ mod tests {
     #[test]
     fn records_a_spawned_runtime_process() {
         let temporary = temporary_directory("spawn");
-        let binary = temporary.join("runtime-test");
-        fs::write(&binary, "#!/bin/sh\nwhile :; do :; done\n")
-            .expect("test runtime must be written");
-        fs::set_permissions(&binary, fs::Permissions::from_mode(0o700))
-            .expect("test runtime must be executable");
         let manager = RuntimeManager {
-            binary,
+            binary: "true".into(),
             shell: "sh".into(),
             state_dir: temporary.clone(),
             processes: Mutex::new(HashMap::new()),
