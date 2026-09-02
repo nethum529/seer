@@ -9,7 +9,6 @@ use crate::capsule;
 use crate::capsule::Endpoint;
 use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
-use crate::tailscale;
 use crate::tui;
 
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -67,10 +66,6 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
     let capsule = capsule::parse(&invitation).map_err(CommandError::system)?;
     println!("Server: {}", capsule.endpoint);
     let endpoint = tcp_endpoint(&capsule.endpoint)?;
-    tailscale::check(endpoint).map_err(|error| match error {
-        tailscale::CheckError::Action(message) => CommandError::usage(message),
-        tailscale::CheckError::System(error) => CommandError::system(error),
-    })?;
 
     let default_name = std::env::var("USER")
         .ok()
@@ -156,11 +151,8 @@ pub(crate) fn invite() -> Result<(), CommandError> {
         ServerMsg::Seat { capsule, .. } => {
             println!("Send this to a friend:");
             println!();
-            println!("1. Accept the Tailscale invite I sent you.");
-            println!("2. Paste this in Terminal:");
+            println!("Paste this in Terminal:");
             println!("curl -fsSL {INSTALL_URL} | sh -s -- {capsule}");
-            println!();
-            println!("Invite them to Tailscale first: https://login.tailscale.com/admin/users");
             Ok(())
         }
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
