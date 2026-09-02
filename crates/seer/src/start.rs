@@ -50,7 +50,7 @@ pub fn run() -> ExitCode {
     #[cfg(target_os = "macos")]
     {
         eprintln!("the server runs on Linux only");
-        return ExitCode::FAILURE;
+        ExitCode::FAILURE
     }
 
     #[cfg(target_os = "linux")]
