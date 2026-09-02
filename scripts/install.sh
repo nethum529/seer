@@ -63,14 +63,19 @@ case ":${PATH:-}:" in
                 mkdir -p "$HOME/.config/fish" 2>/dev/null || fail "Cannot update the fish config. Add $install_dir to PATH."
                 path_line='set -gx PATH "$HOME/.local/bin" $PATH'
                 ;;
-            *) fail "Cannot detect zsh, bash, or fish. Add $install_dir to PATH and run seer join again." ;;
+            *) printf '%s\n' "Add $install_dir to PATH to use seer later." ;;
         esac
-        printf '%s\n' "$path_line" >> "$rc_file" 2>/dev/null || fail "Cannot update $rc_file. Add $install_dir to PATH."
-        printf '%s\n' "Restart the terminal to use seer later."
+        if [ -n "${rc_file:-}" ]; then
+            printf '%s\n' "$path_line" >> "$rc_file" 2>/dev/null || fail "Cannot update $rc_file. Add $install_dir to PATH."
+            printf '%s\n' "Restart the terminal to use seer later."
+        fi
         ;;
 esac
 
 if [ "$#" -gt 0 ]; then
+    if [ -r /dev/tty ]; then
+        exec "$install_dir/seer" join "$1" < /dev/tty
+    fi
     exec "$install_dir/seer" join "$1"
 fi
 
