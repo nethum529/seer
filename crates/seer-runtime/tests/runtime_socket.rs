@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::io::{self, Read};
+use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
@@ -22,6 +23,9 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let stale_listener = UnixListener::bind(&socket_path).expect("stale socket must bind");
+    let stale_inode = fs::metadata(&socket_path)
+        .expect("stale socket metadata must load")
+        .ino();
     drop(stale_listener);
 
     let runtime = runtime_command()
@@ -31,6 +35,7 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
         .spawn()
         .expect("runtime must start");
     let _runtime = RuntimeProcess::new(runtime);
+    wait_for_socket_replacement(&socket_path, stale_inode);
     let mut stream = connect_when_ready(&socket_path);
     stream
         .set_read_timeout(Some(MESSAGE_TIMEOUT))
@@ -192,6 +197,23 @@ fn connect_when_ready(path: &Path) -> UnixStream {
         thread::sleep(RETRY_INTERVAL);
     }
     panic!("runtime did not listen: {last_error:?}");
+}
+
+fn wait_for_socket_replacement(path: &Path, stale_inode: u64) {
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    loop {
+        match fs::metadata(path) {
+            Ok(metadata) if metadata.ino() != stale_inode => return,
+            Ok(_) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => panic!("runtime socket metadata must load: {error}"),
+        }
+        assert!(
+            Instant::now() < deadline,
+            "runtime did not replace stale socket"
+        );
+        thread::sleep(RETRY_INTERVAL);
+    }
 }
 
 fn connect_with_timeout(path: &Path) -> UnixStream {
