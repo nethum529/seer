@@ -9,3 +9,4 @@ Each file breaks one system into components, then compares.
 - 12-tailscale-anatomy.md
 - 13-open-source-mesh-comparison.md
 - 15-relays-and-rendezvous.md
+- 16-service-only-security.md
