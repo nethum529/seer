@@ -105,10 +105,9 @@ iroh), WireGuard libraries (wrong boundary, no traversal).
 - iroh links Apple frameworks (SystemConfiguration, Security,
   Foundation) through its macOS network monitoring code. A cross
   build from Linux is not possible without an Apple SDK. Decision
-  (2026-09-02): macOS binaries are built on a Mac. The path (a
-  GitHub Actions macOS runner in seer-releases, or a Mac at hand)
-  is tracked in issue 172. scripts/release.sh builds Linux only
-  until that path exists.
+  (2026-09-02, issue 172): a GitHub Actions macOS runner in
+  seer-releases builds the darwin assets. scripts/release.sh
+  triggers the workflow after it publishes the Linux asset.
 
 ### Version
 
