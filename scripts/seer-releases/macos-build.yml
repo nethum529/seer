@@ -1,0 +1,36 @@
+name: macOS build
+
+on:
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: Release tag
+        required: true
+        type: string
+      ref:
+        description: Source repository ref
+        required: true
+        type: string
+
+jobs:
+  build:
+    runs-on: macos-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: nethum529/placeholder-herdrlike
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.SEER_SOURCE_DEPLOY_KEY }}
+      - run: rustup target add x86_64-apple-darwin
+      - run: cargo build --release --package seer --target aarch64-apple-darwin
+      - run: cargo build --release --package seer --target x86_64-apple-darwin
+      - name: Create archives
+        run: |
+          tar -C target/aarch64-apple-darwin/release -czf seer-darwin-arm64.tar.gz seer seer-broker seer-runtime
+          tar -C target/x86_64-apple-darwin/release -czf seer-darwin-x86_64.tar.gz seer seer-broker seer-runtime
+      - name: Upload release assets
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "${{ inputs.tag }}" seer-darwin-arm64.tar.gz seer-darwin-x86_64.tar.gz --repo nethum529/seer-releases --clobber
