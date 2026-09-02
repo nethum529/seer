@@ -156,7 +156,8 @@ impl SharedSession {
     }
 
     fn add_connection(&self, id: u64, mut stream: UnixStream) -> io::Result<()> {
-        let session = lock(&self.session)?;
+        let mut session = lock(&self.session)?;
+        session.ensure_first_shell()?;
         let mut connections = lock(&self.connections)?;
         write_messages(
             &mut stream,

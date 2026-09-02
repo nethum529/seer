@@ -29,7 +29,6 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
     let mut alice = connect_when_ready(address);
     send_hello(&mut alice, "alice", "alice-secret");
     let alice_client = welcome_client_id(read_message(&mut alice), "alice");
-    send(&mut alice, &ClientMsg::CreateTab);
     wait_for_tree_with_tab(&mut alice);
     wait_for_cells(&mut alice);
     send(
