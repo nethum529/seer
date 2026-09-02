@@ -85,7 +85,7 @@ fn prints_the_owner_credential_only_on_first_start() {
         let first = start_broker(&config, &first_log);
         let _first = BrokerProcess(first);
         drop(connect_when_ready(address));
-        assert!(wait_for_file(&config.directory.join("state/people.json")));
+        assert!(wait_for_file(&first_log));
     }
     let first_output = fs::read_to_string(&first_log).expect("first output must read");
     let credential = first_output
@@ -202,7 +202,7 @@ fn hash(value: &str) -> String {
 fn wait_for_file(path: &Path) -> bool {
     let deadline = Instant::now() + Duration::from_secs(2);
     while Instant::now() < deadline {
-        if path.is_file() {
+        if fs::read_to_string(path).is_ok_and(|contents| contents.ends_with('\n')) {
             return true;
         }
         thread::sleep(Duration::from_millis(10));
