@@ -1549,7 +1549,7 @@ checksum = "94143f37725109f92c262ed2cf5e59bce7498c01bcc1502d7b9afe439a4e9f49"
 
 [[package]]
 name = "seer"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "crossterm",
  "libc",
@@ -1566,7 +1566,7 @@ dependencies = [
 
 [[package]]
 name = "seer-broker"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "constant_time_eq",
  "getrandom 0.3.4",
@@ -1579,7 +1579,7 @@ dependencies = [
 
 [[package]]
 name = "seer-core"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "serde",
  "serde_json",
@@ -1587,7 +1587,7 @@ dependencies = [
 
 [[package]]
 name = "seer-runtime"
-version = "0.1.0"
+version = "0.1.1"
 dependencies = [
  "alacritty_terminal",
  "portable-pty",
