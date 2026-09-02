@@ -46,6 +46,18 @@ to the friend. The friend accepts the Tailscale invite and pastes the install
 line in Terminal. The installer joins the session and opens a shell. The friend
 presses Enter to use the default name or types a different name.
 
+Use these commands after both people join:
+
+```sh
+seer
+seer peek <name>
+seer detach
+```
+
+Bare seer attaches again after a detach.
+
+Seer uses plain TCP and has no TLS yet. Use Tailscale or a LAN.
+
 ## Build from source
 
 Developers with Rust can build all workspace packages from the repository:
