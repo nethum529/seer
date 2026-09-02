@@ -166,6 +166,7 @@ pub(crate) fn invite() -> Result<(), CommandError> {
     }
 }
 
+#[cfg(target_os = "linux")]
 pub(crate) fn first_invite(first_start: bool) -> Result<(), CommandError> {
     if first_start { invite() } else { Ok(()) }
 }
