@@ -175,6 +175,7 @@ fn send_hello(stream: &mut TcpStream, user: &str, token: &str) {
         &ClientMsg::Hello {
             user_id: user.into(),
             credential: token.into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         },
     )
     .expect("Hello must encode");

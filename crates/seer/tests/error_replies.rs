@@ -81,6 +81,7 @@ fn join_hides_the_invitation_on_a_terminal() {
             ClientMsg::Hello {
                 user_id: "user-bob".into(),
                 credential: "secret".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
             }
         );
         codec::encode(

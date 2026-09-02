@@ -97,6 +97,7 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
             ClientMsg::Hello {
                 user_id: "user-bob".into(),
                 credential: "device-secret".into(),
+                version: env!("CARGO_PKG_VERSION").into(),
             }
         );
         send_welcome(&mut attached, "user-bob", "bob");
@@ -362,6 +363,7 @@ fn assert_hello(stream: &mut TcpStream) {
         ClientMsg::Hello {
             user_id: "user-bob".into(),
             credential: "device-secret".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         }
     );
 }

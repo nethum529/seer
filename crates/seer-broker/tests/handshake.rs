@@ -32,6 +32,7 @@ fn handles_required_handshake_outcomes() {
         &ClientMsg::Hello {
             user_id: "u-alice".into(),
             credential: "alice-secret".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         },
     );
     let ServerMsg::Welcome {
@@ -53,6 +54,7 @@ fn handles_required_handshake_outcomes() {
         &ClientMsg::Hello {
             user_id: "u-alice".into(),
             credential: "wrong".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         },
     );
     assert_refused_and_closed(bad_token_stream, bad_token, "invalid credentials");
@@ -77,6 +79,7 @@ fn handles_a_second_connection_while_the_first_is_silent() {
         &ClientMsg::Hello {
             user_id: "u-alice".into(),
             credential: "wrong".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         },
     );
 

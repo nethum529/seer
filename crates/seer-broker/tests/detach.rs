@@ -123,6 +123,7 @@ fn send_hello(stream: &mut TcpStream, user: &str, credential: &str) {
         &ClientMsg::Hello {
             user_id: user.into(),
             credential: credential.into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         },
     );
 }

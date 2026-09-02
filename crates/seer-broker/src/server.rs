@@ -165,10 +165,26 @@ fn handshake(
         ClientMsg::Hello {
             user_id,
             credential,
-        } => authenticate(stream, broker.registry(), &user_id, &credential),
+            version,
+        } => {
+            let server_version = env!("CARGO_PKG_VERSION");
+            if major_minor(&version) != major_minor(server_version) {
+                let reason = format!(
+                    "version mismatch: server {server_version}, client {version}. Run: seer update"
+                );
+                return refuse(stream, &reason).map(|()| None);
+            }
+            authenticate(stream, broker.registry(), &user_id, &credential)
+        }
         ClientMsg::Join { seat_token, name } => join(stream, broker.registry(), &seat_token, &name),
         _ => refuse(stream, EXPECTED_HELLO).map(|()| None),
     }
+}
+
+fn major_minor(version: &str) -> Option<(&str, &str)> {
+    let (major, remainder) = version.split_once('.')?;
+    let (minor, _) = remainder.split_once('.')?;
+    Some((major, minor))
 }
 
 fn read_message(stream: &mut TcpStream, deadline: Instant) -> io::Result<ClientMsg> {
