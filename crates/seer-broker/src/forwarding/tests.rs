@@ -121,8 +121,8 @@ fn coordinator_new_uses_the_authenticated_owner() {
         std::os::unix::net::UnixListener::bind(&socket).expect("runtime listener must bind");
     let (client, peer) = tcp_pair();
 
-    let mut coordinator =
-        Coordinator::new(client, &owner, &broker.state).expect("coordinator must initialize");
+    let mut coordinator = Coordinator::new(seer_net::Socket::from(client), &owner, &broker.state)
+        .expect("coordinator must initialize");
     let (runtime_peer, _) = listener.accept().expect("runtime must connect");
 
     assert_eq!(coordinator.owner, owner.user_id);
@@ -281,7 +281,9 @@ fn join_reader_reports_a_panic() {
 fn coordinator<'a>(client: TcpStream, broker: &'a BrokerState) -> Coordinator<'a> {
     let (event_sender, events) = mpsc::channel();
     Coordinator {
-        client: Arc::new(std::sync::Mutex::new(client)),
+        client: Arc::new(std::sync::Mutex::new(
+            Box::new(client) as Box<dyn seer_net::Stream>
+        )),
         client_reader: None,
         attachment: None,
         client_id: "current-client".into(),
@@ -378,6 +380,7 @@ impl TestBroker {
         let config = crate::Config {
             listen: "127.0.0.1:0".parse().expect("address must parse"),
             published_addr: "host:7321".into(),
+            remote: false,
             state_dir: directory.clone(),
             owner_name: "Owner".into(),
             shell: "sh".into(),

@@ -10,7 +10,10 @@ use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 
+mod stream;
+
 pub use iroh::{EndpointId, SecretKey};
+pub use stream::{Socket, Stream};
 
 pub const ALPN: &[u8] = b"seer/1";
 
@@ -72,6 +75,7 @@ impl Listener {
     }
 
     pub fn accept(&self) -> AcceptedStream {
+        // Only a stopped listener makes accept return an error.
         self.accepted
             .recv()
             .map_err(|_| io::Error::other("listener stopped"))?
@@ -194,25 +198,16 @@ async fn bind_endpoint(secret_key: SecretKey) -> io::Result<Endpoint> {
 async fn handle_incoming(incoming: Incoming, accepted: Sender<AcceptedStream>) {
     let connection = match incoming.await {
         Ok(connection) => connection,
-        Err(_) => {
-            let _ = accepted.send(Err(io::Error::other("could not accept connection")));
-            return;
-        }
+        Err(_) => return,
     };
     let remote = connection.remote_id();
     let (send, recv) = match connection.accept_bi().await {
         Ok(streams) => streams,
-        Err(_) => {
-            let _ = accepted.send(Err(io::Error::other("could not accept stream")));
-            return;
-        }
+        Err(_) => return,
     };
     let (caller_stream, bridge_stream) = match stream_pair() {
         Ok(streams) => streams,
-        Err(error) => {
-            let _ = accepted.send(Err(error));
-            return;
-        }
+        Err(_) => return,
     };
     if accepted.send(Ok((remote, caller_stream))).is_ok() {
         let _ = bridge(send, recv, bridge_stream).await;

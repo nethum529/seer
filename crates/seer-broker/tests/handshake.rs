@@ -201,6 +201,7 @@ fn test_config(listen: SocketAddr) -> (Config, PathBuf) {
         Config {
             listen,
             published_addr: "host:7321".into(),
+            remote: false,
             state_dir: state_dir.clone(),
             owner_name: "Owner".into(),
             shell: "sh".into(),
