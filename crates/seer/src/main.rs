@@ -10,12 +10,13 @@ mod state;
 mod store;
 mod tailscale;
 mod tui;
+mod update;
 
 fn main() -> ExitCode {
-    let mut arguments = std::env::args().skip(1).peekable();
-    if arguments.peek().is_none() {
-        cli::run_bare()
-    } else {
-        cli::run(arguments)
+    let mut arguments = std::env::args().skip(1);
+    match arguments.next() {
+        None => cli::run_bare(),
+        Some(command) if command == "update" && arguments.next().is_none() => update::run(),
+        Some(command) => cli::run(std::iter::once(command).chain(arguments)),
     }
 }
