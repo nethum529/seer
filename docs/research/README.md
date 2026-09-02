@@ -7,4 +7,5 @@ Each file breaks one system into components, then compares.
 - 03-luvus-architecture.md
 - 04-comparison-and-gpui.md
 - 12-tailscale-anatomy.md
+- 13-open-source-mesh-comparison.md
 - 15-relays-and-rendezvous.md
