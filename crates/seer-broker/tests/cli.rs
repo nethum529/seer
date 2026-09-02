@@ -54,6 +54,7 @@ fn loads_config_and_listens() {
         &ClientMsg::Hello {
             user_id: "alice".into(),
             credential: "alice-secret".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         },
     )
     .expect("Hello must encode");

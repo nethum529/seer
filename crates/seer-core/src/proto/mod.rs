@@ -6,18 +6,42 @@ use crate::{Cell, SplitDirection, Tree};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ClientMsg {
-    Hello { user_id: String, credential: String },
-    Join { seat_token: String, name: String },
+    Hello {
+        user_id: String,
+        credential: String,
+        version: String,
+    },
+    Join {
+        seat_token: String,
+        name: String,
+    },
     Invite,
     ListPeople,
-    DetachClient { client_id: String },
+    DetachClient {
+        client_id: String,
+    },
     CreateTab,
-    SplitPane { direction: SplitDirection },
-    ClosePane { pane: String },
-    FocusPane { pane: String },
-    Input { pane: String, bytes: Vec<u8> },
-    Resize { cols: u16, rows: u16 },
-    Peek { user: String, workspace: String },
+    SplitPane {
+        direction: SplitDirection,
+    },
+    ClosePane {
+        pane: String,
+    },
+    FocusPane {
+        pane: String,
+    },
+    Input {
+        pane: String,
+        bytes: Vec<u8>,
+    },
+    Resize {
+        cols: u16,
+        rows: u16,
+    },
+    Peek {
+        user: String,
+        workspace: String,
+    },
     StopPeek,
     Detach,
 }
@@ -121,6 +145,7 @@ mod tests {
             ClientMsg::Hello {
                 user_id: "user-1".into(),
                 credential: "credential-1".into(),
+                version: "0.1.0".into(),
             },
             ClientMsg::Join {
                 seat_token: "seat-1".into(),

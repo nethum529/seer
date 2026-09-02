@@ -76,6 +76,7 @@ fn serve_detach(listener: TcpListener, clients: Vec<ClientInfo>, expected_client
         ClientMsg::Hello {
             user_id: "user-bob".into(),
             credential: "device-secret".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
         }
     );
     send(

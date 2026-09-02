@@ -395,6 +395,7 @@ fn authenticate(server: &ServerEntry) -> Result<(TcpStream, Tree), CommandError>
     let hello = ClientMsg::Hello {
         user_id: server.user_id.clone(),
         credential: server.credential.clone(),
+        version: env!("CARGO_PKG_VERSION").into(),
     };
     send(&mut stream, &hello)?;
     let tree = welcome_tree(receive_reply(&mut stream)?)?;

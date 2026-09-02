@@ -129,6 +129,7 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
         ClientMsg::Hello {
             user_id: "alice".into(),
             credential: "secret".into(),
+            version: "0.1.0".into(),
         },
         ClientMsg::Join {
             seat_token: "seat".into(),

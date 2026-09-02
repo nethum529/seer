@@ -268,6 +268,7 @@ mod tests {
             ClientMsg::Hello {
                 user_id: "alice".into(),
                 credential: "token".into(),
+                version: "0.1.0".into(),
             },
             ClientMsg::Join {
                 seat_token: "seat".into(),
