@@ -10,3 +10,4 @@ Each file breaks one system into components, then compares.
 - 13-open-source-mesh-comparison.md
 - 15-relays-and-rendezvous.md
 - 16-service-only-security.md
+- 17-terminal-sharing-prior-art.md
