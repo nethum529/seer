@@ -8,6 +8,7 @@ const INSTALL_MESSAGE: &str = "This server is on Tailscale. Install Tailscale fr
 const CONNECT_MESSAGE: &str =
     "Tailscale is installed but not connected. Run tailscale up, then run this command again.";
 const INVITE_MESSAGE: &str = "Tailscale is connected but cannot see this server. Ask the owner to invite you to their Tailscale network, then run this command again.";
+const MACOS_TAILSCALE: &str = "/Applications/Tailscale.app/Contents/MacOS/Tailscale";
 
 pub(crate) enum CheckError {
     Action(&'static str),
@@ -21,6 +22,15 @@ pub(crate) fn check(endpoint: &str) -> Result<(), CheckError> {
     let output = Command::new("tailscale")
         .args(["status", "--json"])
         .output()
+        .or_else(|error| {
+            if error.kind() == io::ErrorKind::NotFound {
+                Command::new(MACOS_TAILSCALE)
+                    .args(["status", "--json"])
+                    .output()
+            } else {
+                Err(error)
+            }
+        })
         .map_err(command_error)?;
     let status: Value = serde_json::from_slice(&output.stdout)
         .map_err(|error| CheckError::System(error.to_string()))?;
