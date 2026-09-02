@@ -160,23 +160,33 @@ main() {
     run mkdir -p "${assets_directory}"
 
     build_target build x86_64-unknown-linux-gnu
-    build_target zigbuild aarch64-apple-darwin
-    build_target zigbuild x86_64-apple-darwin
+    if [[ "${SEER_MACOS_BUILD:-}" == 1 ]]; then
+        build_target zigbuild aarch64-apple-darwin
+        build_target zigbuild x86_64-apple-darwin
+    else
+        printf 'Skipping macOS targets, see issue 172\n'
+    fi
 
     local linux_asset="seer-linux-x86_64.tar.gz"
     local darwin_arm_asset="seer-darwin-arm64.tar.gz"
     local darwin_x86_asset="seer-darwin-x86_64.tar.gz"
     make_archive x86_64-unknown-linux-gnu "${linux_asset}" "${assets_directory}"
-    make_archive aarch64-apple-darwin "${darwin_arm_asset}" "${assets_directory}"
-    make_archive x86_64-apple-darwin "${darwin_x86_asset}" "${assets_directory}"
+
+    local release_assets=("${assets_directory}/${linux_asset}")
+    if [[ "${SEER_MACOS_BUILD:-}" == 1 ]]; then
+        make_archive aarch64-apple-darwin "${darwin_arm_asset}" "${assets_directory}"
+        make_archive x86_64-apple-darwin "${darwin_x86_asset}" "${assets_directory}"
+        release_assets+=(
+            "${assets_directory}/${darwin_arm_asset}"
+            "${assets_directory}/${darwin_x86_asset}"
+        )
+    fi
 
     run git clone --branch main --single-branch "${RELEASE_REPOSITORY_URL}" "${release_checkout}"
     update_install_script "${release_checkout}"
 
     run gh release create "${tag}" \
-        "${assets_directory}/${linux_asset}" \
-        "${assets_directory}/${darwin_arm_asset}" \
-        "${assets_directory}/${darwin_x86_asset}" \
+        "${release_assets[@]}" \
         --repo "${RELEASE_REPOSITORY}" \
         --title "${tag}" \
         --generate-notes
