@@ -63,12 +63,12 @@ impl PtySession {
     }
 
     pub fn snapshot(&self) -> Vec<u8> {
-        let output = lock_output(&self.output);
+        let output = lock_mutex(&self.output);
         output.snapshot.iter().copied().collect()
     }
 
     pub fn drain_output(&self) -> Vec<u8> {
-        let mut output = lock_output(&self.output);
+        let mut output = lock_mutex(&self.output);
         output.pending.drain(..).collect()
     }
 }
@@ -96,7 +96,7 @@ fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<OutputBuffers>) 
 }
 
 fn append_output(output: &Mutex<OutputBuffers>, bytes: &[u8]) {
-    let mut output = lock_output(output);
+    let mut output = lock_mutex(output);
     append_bounded(&mut output.snapshot, bytes);
     append_bounded(&mut output.pending, bytes);
 }
@@ -108,9 +108,9 @@ fn append_bounded(output: &mut VecDeque<u8>, bytes: &[u8]) {
     output.drain(..excess);
 }
 
-fn lock_output(output: &Mutex<OutputBuffers>) -> MutexGuard<'_, OutputBuffers> {
-    match output.lock() {
-        Ok(output) => output,
+pub(crate) fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(value) => value,
         Err(poisoned) => poisoned.into_inner(),
     }
 }

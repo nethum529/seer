@@ -12,10 +12,11 @@ use seer_core::{
     MouseTracking, TERMINAL_PROTOCOL_VERSION, TerminalFrame, TerminalInput, TerminalModes,
 };
 use std::io;
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::input::{encode_key, encode_mouse};
+use crate::pty::lock_mutex;
 
 const SCROLLBACK_LINES: usize = 1_000;
 
@@ -202,22 +203,15 @@ struct TerminalReplies {
 
 impl TerminalReplies {
     fn take(&self) -> Vec<u8> {
-        std::mem::take(&mut *lock_recover(&self.bytes))
+        std::mem::take(&mut *lock_mutex(&self.bytes))
     }
 }
 
 impl EventListener for TerminalReplies {
     fn send_event(&self, event: Event) {
         if let Event::PtyWrite(reply) = event {
-            lock_recover(&self.bytes).extend(reply.into_bytes());
+            lock_mutex(&self.bytes).extend(reply.into_bytes());
         }
-    }
-}
-
-fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
-    match mutex.lock() {
-        Ok(value) => value,
-        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
