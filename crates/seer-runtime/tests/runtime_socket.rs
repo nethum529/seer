@@ -139,6 +139,7 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
     );
     assert_eq!(read_until_tree(&mut viewer), created);
@@ -149,6 +150,7 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
     );
     assert_eq!(read_until_tree(&mut viewer), created);
@@ -266,6 +268,8 @@ fn send_input(stream: &mut UnixStream, pane: &str, input: &str) {
     send(
         stream,
         &ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: pane.into(),
             bytes: input.as_bytes().into(),
         },

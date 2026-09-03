@@ -14,7 +14,7 @@ use std::time::Duration;
 
 const CONNECT_RETRIES: usize = 500;
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
-const SUPERVISOR_INTERVAL: Duration = Duration::from_millis(10);
+const SUPERVISOR_INTERVAL: Duration = Duration::from_millis(250);
 const MAX_SOCKET_PATH_BYTES: usize = 99;
 struct RuntimeProcess {
     child: Child,
