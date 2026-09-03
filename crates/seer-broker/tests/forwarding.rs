@@ -43,7 +43,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     let runtime_pid = temporary.runtime_pid("alice");
     temporary.assert_runtime_arguments("alice");
     temporary.assert_socket_directory();
-    send(&mut first, &ClientMsg::Invite);
+    send(&mut first, &ClientMsg::Invite { hours: None });
     match wait_for_seat(&mut first) {
         ServerMsg::Seat {
             capsule,
@@ -106,7 +106,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
     send_hello(&mut bob, "bob", "bob-secret");
     assert_welcome(read_message(&mut bob), "bob");
     wait_for_tree_with_tab(&mut bob);
-    send(&mut bob, &ClientMsg::Invite);
+    send(&mut bob, &ClientMsg::Invite { hours: None });
     assert_eq!(
         wait_for_refused(&mut bob),
         ServerMsg::Refused {
@@ -119,9 +119,18 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "charlie".into(),
             workspace: workspace.clone(),
+            tab: "w1:t1".into(),
         },
     );
-    send(&mut bob, &ClientMsg::Resize { cols: 90, rows: 30 });
+    send(
+        &mut bob,
+        &ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            cols: 90,
+            rows: 30,
+        },
+    );
     wait_for_tree_with_tab(&mut bob);
     assert!(!temporary.pid_file("charlie").is_file());
 
@@ -130,6 +139,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace,
+            tab: "w1:t1".into(),
         },
     );
     assert_eq!(wait_for_tree_with_tab(&mut bob), alice_tree);
@@ -155,6 +165,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
     );
     wait_for_tree_with_tab(&mut bob);
@@ -228,6 +239,8 @@ fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
     send(
         stream,
         &ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: pane.into(),
             bytes: input.as_bytes().into(),
         },

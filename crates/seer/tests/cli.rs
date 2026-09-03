@@ -289,7 +289,7 @@ fn invite_prints_the_worked_example_block() {
         let mut stream = accept(&listener);
         assert_hello(&mut stream);
         send_welcome(&mut stream, "user-bob", "bob");
-        assert_eq!(receive(&mut stream), ClientMsg::Invite);
+        assert_eq!(receive(&mut stream), ClientMsg::Invite { hours: None });
         send(
             &mut stream,
             &ServerMsg::Seat {
@@ -304,7 +304,7 @@ fn invite_prints_the_worked_example_block() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
         output.stdout,
-        b"Send this to a friend:\n\nPaste this in Terminal:\ncurl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- SEER1-team.example.com-7321-A7K4Q9P2\n"
+        b"Seat ready. It works once and expires in 1 hour.\nSend this to a friend:\n\nPaste this in Terminal:\ncurl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- SEER1-team.example.com-7321-A7K4Q9P2\n"
     );
     assert!(output.stderr.is_empty());
     server.join().expect("server must finish");
@@ -336,6 +336,7 @@ fn peek_requires_an_exact_name_and_sends_the_user_id() {
                     ClientMsg::Peek {
                         user: "user-alice".into(),
                         workspace: "w1".into(),
+                        tab: "w1:t1".into(),
                     }
                 );
             }
@@ -351,7 +352,7 @@ fn peek_requires_an_exact_name_and_sends_the_user_id() {
     assert_eq!(exact.status.code(), Some(0));
     assert_eq!(
         exact.stdout,
-        b"PEEK: alice - READ ONLY\nWorkspace: alice/current\n"
+        b"PEEK: alice - READ ONLY\nWorkspace: alice/w1\n"
     );
     assert!(exact.stderr.is_empty());
     server.join().expect("server must finish");

@@ -76,6 +76,8 @@ fn active_events_send_input_focus_and_resize() {
     assert_eq!(
         decode(&mut server),
         ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: "w1:p1".into(),
             bytes: b"a".to_vec(),
         }
@@ -83,12 +85,16 @@ fn active_events_send_input_focus_and_resize() {
     assert_eq!(
         decode(&mut server),
         ClientMsg::FocusPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: "w1:p1".into(),
         }
     );
     assert_eq!(
         decode(&mut server),
         ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             cols: 120,
             rows: 40,
         }
@@ -181,7 +187,7 @@ fn peek_banner_is_fixed_above_the_tree() {
     let first_line: String = (0..40).map(|x| buffer[(x, 0)].symbol()).collect();
     let second_line: String = (0..40).map(|x| buffer[(x, 1)].symbol()).collect();
     assert_eq!(first_line.trim_end(), "PEEK: alice - READ ONLY");
-    assert_eq!(second_line.trim_end(), "Workspace: alice/current");
+    assert_eq!(second_line.trim_end(), "Workspace: alice/w1");
     set_peek_person(None);
 }
 

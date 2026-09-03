@@ -54,6 +54,7 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
         .expect("read timeout must set");
     let reattached_tree = tree(read_message(&mut reattached));
     assert_eq!(reattached_tree.workspaces[0].tabs.len(), 1);
+    assert!(wait_for_cells(&mut reattached));
 
     codec::encode(&mut reattached, &ClientMsg::Detach).expect("Detach must encode");
     let mut byte = [0];
@@ -76,6 +77,36 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
 }
 
 #[test]
+fn restores_idle_cells_after_reattach() {
+    let temporary = TemporaryDirectory::new();
+    let socket_path = temporary.path.join("runtime.sock");
+    let runtime = runtime_command()
+        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("runtime must start");
+    let _runtime = RuntimeProcess::new(runtime);
+
+    let mut attached = connect_with_timeout(&socket_path);
+    let created = tree(read_message(&mut attached));
+    let pane = created.workspaces[0].tabs[0].panes[0].id.clone();
+    send_input(
+        &mut attached,
+        &pane,
+        "printf '\\033[2J\\033[Hidle-reattach'; sleep 60\n",
+    );
+    let before_detach = wait_for_cells_containing(&mut attached, "idle-reattach");
+    thread::sleep(Duration::from_millis(100));
+    drop(attached);
+
+    let mut reattached = connect_with_timeout(&socket_path);
+    assert_eq!(tree(read_message(&mut reattached)), created);
+    let after_reattach = wait_for_cells_containing(&mut reattached, "idle-reattach");
+    assert_eq!(after_reattach, before_detach);
+}
+
+#[test]
 fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
@@ -92,10 +123,12 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     assert_eq!(created.workspaces[0].tabs.len(), 1);
     assert_eq!(created.workspaces[0].tabs[0].panes.len(), 1);
     let pane = created.workspaces[0].tabs[0].panes[0].id.clone();
+    assert!(wait_for_cells(&mut owner));
 
     let mut viewer = connect_with_timeout(&socket_path);
     let viewer_tree = tree(read_message(&mut viewer));
     assert_eq!(viewer_tree, created);
+    assert!(wait_for_cells(&mut viewer));
 
     send_input(&mut owner, &pane, "printf 'owner-one\\n'\n");
     assert_cells_contain(&mut owner, "owner-one");
@@ -106,18 +139,22 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
     );
     assert_eq!(read_until_tree(&mut viewer), created);
+    assert!(wait_for_cells(&mut viewer));
     send_input(&mut viewer, &pane, "printf 'viewer-input\\n'\n");
     send(
         &mut viewer,
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
     );
     assert_eq!(read_until_tree(&mut viewer), created);
+    assert!(wait_for_cells(&mut viewer));
 
     send_input(&mut owner, &pane, "printf 'owner-two\\n'\n");
     let owner_cells = wait_for_cells_containing(&mut owner, "owner-two");
@@ -231,6 +268,8 @@ fn send_input(stream: &mut UnixStream, pane: &str, input: &str) {
     send(
         stream,
         &ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: pane.into(),
             bytes: input.as_bytes().into(),
         },

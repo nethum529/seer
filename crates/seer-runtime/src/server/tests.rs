@@ -1,4 +1,5 @@
 use std::os::unix::net::UnixStream;
+use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
@@ -11,16 +12,35 @@ use crate::UserSession;
 fn identifies_only_mutating_messages() {
     let mutating = [
         ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: "p1".into(),
             bytes: Vec::new(),
         },
-        ClientMsg::CreateTab,
+        ClientMsg::CreateTab {
+            workspace: "w1".into(),
+        },
         ClientMsg::SplitPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             direction: seer_core::SplitDirection::Right,
         },
-        ClientMsg::ClosePane { pane: "p1".into() },
-        ClientMsg::FocusPane { pane: "p1".into() },
-        ClientMsg::Resize { cols: 80, rows: 24 },
+        ClientMsg::ClosePane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            pane: "p1".into(),
+        },
+        ClientMsg::FocusPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            pane: "p1".into(),
+        },
+        ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            cols: 80,
+            rows: 24,
+        },
     ];
     let deferred = [
         ClientMsg::Hello {
@@ -32,7 +52,7 @@ fn identifies_only_mutating_messages() {
             seat_token: "seat".into(),
             name: "alice".into(),
         },
-        ClientMsg::Invite,
+        ClientMsg::Invite { hours: None },
         ClientMsg::ListPeople,
         ClientMsg::DetachClient {
             client_id: "client-1".into(),
@@ -40,6 +60,7 @@ fn identifies_only_mutating_messages() {
         ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
         ClientMsg::StopPeek,
         ClientMsg::Detach,
@@ -51,7 +72,19 @@ fn identifies_only_mutating_messages() {
 
 #[test]
 fn removes_only_the_requested_connection() {
-    let shared = SharedSession::new(UserSession::new("alice", "sh"));
+    let mut session = UserSession::new("alice", "sh");
+    session
+        .ensure_first_shell()
+        .expect("first shell must start");
+    session
+        .apply(ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            cols: 1,
+            rows: 1,
+        })
+        .expect("session must resize");
+    let shared = SharedSession::new(session);
     let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
     let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
     shared
@@ -70,6 +103,107 @@ fn removes_only_the_requested_connection() {
 }
 
 #[test]
+fn polls_output_without_connections() {
+    let mut session = UserSession::new("alice", "sh");
+    session
+        .ensure_first_shell()
+        .expect("first shell must start");
+    let shared = SharedSession::new(session);
+    shared
+        .apply_and_broadcast(ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            pane: "w1:p1".into(),
+            bytes: b"printf detached-output\\n".to_vec(),
+        })
+        .expect("input must succeed");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let mut updated = false;
+    while Instant::now() < deadline {
+        let (messages, has_connections) = shared
+            .poll_and_broadcast()
+            .expect("session poll must succeed");
+        assert!(!has_connections);
+        updated = messages.iter().any(|message| match message {
+            ServerMsg::Cells { rows, .. } => rows
+                .iter()
+                .flatten()
+                .map(|cell| cell.character)
+                .collect::<String>()
+                .contains("detached-output"),
+            _ => false,
+        });
+        if updated {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+
+    assert!(updated);
+    shared
+        .apply_and_broadcast(ClientMsg::ClosePane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            pane: "w1:p1".into(),
+        })
+        .expect("pane close must succeed");
+}
+
+#[test]
+fn evicts_stalled_connection_without_blocking_other_client() {
+    let shared = SharedSession::new(UserSession::new("alice", "sh"));
+    let (stalled_server, _stalled_client) =
+        UnixStream::pair().expect("stalled stream pair must open");
+    let (healthy_server, mut healthy_client) =
+        UnixStream::pair().expect("healthy stream pair must open");
+    healthy_client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .expect("read timeout must set");
+    shared
+        .add_connection(1, stalled_server)
+        .expect("stalled connection must be added");
+    shared
+        .add_connection(2, healthy_server)
+        .expect("healthy connection must be added");
+    let _: seer_core::proto::ServerMsg =
+        seer_core::proto::codec::decode(&mut healthy_client).expect("initial tree must decode");
+
+    let reader = thread::spawn(move || {
+        loop {
+            let message: seer_core::proto::ServerMsg =
+                seer_core::proto::codec::decode(&mut healthy_client)
+                    .expect("healthy output must decode");
+            if matches!(message, seer_core::proto::ServerMsg::Frame { pane, .. } if pane == "recovered")
+            {
+                return;
+            }
+        }
+    });
+    let large = seer_core::proto::ServerMsg::Frame {
+        pane: "fill".into(),
+        bytes: vec![b'x'; 256 * 1024],
+    };
+    for _ in 0..68 {
+        shared
+            .broadcast(std::slice::from_ref(&large))
+            .expect("large output must broadcast");
+        if shared.connection_count() == 1 {
+            break;
+        }
+    }
+
+    assert_eq!(shared.connection_count(), 1);
+    shared
+        .broadcast(&[seer_core::proto::ServerMsg::Frame {
+            pane: "recovered".into(),
+            bytes: Vec::new(),
+        }])
+        .expect("recovery output must broadcast");
+    reader.join().expect("healthy reader must finish");
+}
+
+#[test]
 #[cfg(target_os = "linux")]
 fn size_lease_governs_per_client_resize_control() {
     let shared = SharedSession::new(UserSession::new("alice", "sh"));
@@ -83,11 +217,8 @@ fn size_lease_governs_per_client_resize_control() {
         .expect("owner must attach");
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
-        pane_size_of(&read_tree(&mut owner_client)),
-        PaneSize {
-            cols: 80,
-            rows: 24
-        }
+        pane_size_of(&read_until_tree(&mut owner_client)),
+        size(80, 24)
     );
 
     // A second full attachment does not take the lease.
@@ -96,11 +227,8 @@ fn size_lease_governs_per_client_resize_control() {
         .expect("peer must attach");
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
-        pane_size_of(&read_tree(&mut peer_client)),
-        PaneSize {
-            cols: 80,
-            rows: 24
-        }
+        pane_size_of(&read_until_tree(&mut peer_client)),
+        size(80, 24)
     );
 
     // A resize from the owner applies to the shared geometry.
@@ -108,31 +236,24 @@ fn size_lease_governs_per_client_resize_control() {
         &shared,
         1,
         ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             cols: 120,
             rows: 40,
         },
     )
     .expect("owner resize must apply");
     assert_eq!(
-        pane_size_of(&read_tree(&mut owner_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        pane_size_of(&read_until_tree(&mut owner_client)),
+        size(120, 40)
     );
     assert_eq!(
-        pane_size_of(&read_tree(&mut peer_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        pane_size_of(&read_until_tree(&mut peer_client)),
+        size(120, 40)
     );
     assert_eq!(
         session_pane_size(&shared),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        size(120, 40)
     );
 
     // A resize from the peer is denied, but its own viewport is recorded.
@@ -140,6 +261,8 @@ fn size_lease_governs_per_client_resize_control() {
         &shared,
         2,
         ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             cols: 100,
             rows: 30,
         },
@@ -148,24 +271,15 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
         viewport_of(&shared, 2),
-        Some(PaneSize {
-            cols: 100,
-            rows: 30
-        })
+        Some(size(100, 30))
     );
     assert_eq!(
         viewport_of(&shared, 1),
-        Some(PaneSize {
-            cols: 120,
-            rows: 40
-        })
+        Some(size(120, 40))
     );
     assert_eq!(
         session_pane_size(&shared),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        size(120, 40)
     );
 
     // A peek attachment cannot resize the shared geometry.
@@ -173,11 +287,8 @@ fn size_lease_governs_per_client_resize_control() {
         .add_connection(3, peek_server)
         .expect("peek viewer must attach");
     assert_eq!(
-        pane_size_of(&read_tree(&mut peek_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        pane_size_of(&read_until_tree(&mut peek_client)),
+        size(120, 40)
     );
     handle_message(
         &shared,
@@ -185,21 +296,21 @@ fn size_lease_governs_per_client_resize_control() {
         ClientMsg::Peek {
             user: "bob".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
     )
     .expect("peek must start");
     assert!(read_only_of(&shared, 3));
     assert_eq!(
-        pane_size_of(&read_tree(&mut peek_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        pane_size_of(&read_until_tree(&mut peek_client)),
+        size(120, 40)
     );
     handle_message(
         &shared,
         3,
         ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             cols: 200,
             rows: 50,
         },
@@ -209,10 +320,7 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
         session_pane_size(&shared),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        size(120, 40)
     );
 
     // A peek disconnect does not move the lease.
@@ -234,6 +342,8 @@ fn size_lease_governs_per_client_resize_control() {
         &shared,
         2,
         ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             cols: 90,
             rows: 30,
         },
@@ -242,24 +352,15 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(2));
     assert_eq!(
         session_pane_size(&shared),
-        PaneSize {
-            cols: 90,
-            rows: 30
-        }
+        size(90, 30)
     );
     assert_eq!(
-        pane_size_of(&read_tree(&mut owner_client)),
-        PaneSize {
-            cols: 90,
-            rows: 30
-        }
+        pane_size_of(&read_until_tree(&mut owner_client)),
+        size(90, 30)
     );
     assert_eq!(
-        pane_size_of(&read_tree(&mut peer_client)),
-        PaneSize {
-            cols: 90,
-            rows: 30
-        }
+        pane_size_of(&read_until_tree(&mut peer_client)),
+        size(90, 30)
     );
 
     // The former owner is denied while the new owner stays active.
@@ -267,6 +368,8 @@ fn size_lease_governs_per_client_resize_control() {
         &shared,
         1,
         ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             cols: 110,
             rows: 40,
         },
@@ -275,17 +378,11 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(2));
     assert_eq!(
         viewport_of(&shared, 1),
-        Some(PaneSize {
-            cols: 110,
-            rows: 40
-        })
+        Some(size(110, 40))
     );
     assert_eq!(
         session_pane_size(&shared),
-        PaneSize {
-            cols: 90,
-            rows: 30
-        }
+        size(90, 30)
     );
 
     // Owner disconnect releases the lease to the surviving attachment,
@@ -296,10 +393,7 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
         session_pane_size(&shared),
-        PaneSize {
-            cols: 110,
-            rows: 40
-        }
+        size(110, 40)
     );
 
     // The surviving attachment resizes normally.
@@ -307,6 +401,8 @@ fn size_lease_governs_per_client_resize_control() {
         &shared,
         1,
         ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             cols: 130,
             rows: 45,
         },
@@ -315,17 +411,11 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
         session_pane_size(&shared),
-        PaneSize {
-            cols: 130,
-            rows: 45
-        }
+        size(130, 45)
     );
     assert_eq!(
-        pane_size_of(&read_tree(&mut owner_client)),
-        PaneSize {
-            cols: 130,
-            rows: 45
-        }
+        pane_size_of(&read_until_tree(&mut owner_client)),
+        size(130, 45)
     );
 }
 
@@ -358,13 +448,19 @@ fn session_pane_size(shared: &SharedSession) -> PaneSize {
     pane_size_of(&session.tree)
 }
 
-fn read_tree(stream: &mut UnixStream) -> Tree {
-    match codec::decode(stream).expect("tree must decode") {
-        ServerMsg::Tree { tree } => tree,
-        other => panic!("expected Tree, got {other:?}"),
+fn read_until_tree(stream: &mut UnixStream) -> Tree {
+    loop {
+        match codec::decode(stream).expect("server message must decode") {
+            ServerMsg::Tree { tree } => return tree,
+            _ => {}
+        }
     }
 }
 
 fn pane_size_of(tree: &Tree) -> PaneSize {
     tree.workspaces[0].tabs[0].panes[0].size
+}
+
+fn size(cols: u16, rows: u16) -> PaneSize {
+    PaneSize { cols, rows }
 }

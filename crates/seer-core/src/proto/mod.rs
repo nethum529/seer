@@ -15,32 +15,47 @@ pub enum ClientMsg {
         seat_token: String,
         name: String,
     },
-    Invite,
+    Invite {
+        hours: Option<u32>,
+    },
     ListPeople,
     DetachClient {
         client_id: String,
     },
-    CreateTab,
+    CreateTab {
+        workspace: String,
+    },
     SplitPane {
+        workspace: String,
+        tab: String,
         direction: SplitDirection,
     },
     ClosePane {
+        workspace: String,
+        tab: String,
         pane: String,
     },
     FocusPane {
+        workspace: String,
+        tab: String,
         pane: String,
     },
     Input {
+        workspace: String,
+        tab: String,
         pane: String,
         bytes: Vec<u8>,
     },
     Resize {
+        workspace: String,
+        tab: String,
         cols: u16,
         rows: u16,
     },
     Peek {
         user: String,
         workspace: String,
+        tab: String,
     },
     StopPeek,
     Detach,
@@ -151,35 +166,50 @@ mod tests {
                 seat_token: "seat-1".into(),
                 name: "Alice".into(),
             },
-            ClientMsg::Invite,
+            ClientMsg::Invite { hours: None },
             ClientMsg::ListPeople,
             ClientMsg::DetachClient {
                 client_id: "client-1".into(),
             },
-            ClientMsg::CreateTab,
+            ClientMsg::CreateTab {
+                workspace: "w1".into(),
+            },
             ClientMsg::SplitPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 direction: SplitDirection::Right,
             },
             ClientMsg::SplitPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 direction: SplitDirection::Down,
             },
             ClientMsg::ClosePane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 pane: "w1:p1".into(),
             },
             ClientMsg::FocusPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 pane: "w1:p2".into(),
             },
             ClientMsg::Input {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 pane: "w1:p1".into(),
                 bytes: vec![0, 1, 255],
             },
             ClientMsg::Resize {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 cols: 120,
                 rows: 40,
             },
             ClientMsg::Peek {
                 user: "bob".into(),
                 workspace: "w1".into(),
+                tab: "w1:t1".into(),
             },
             ClientMsg::StopPeek,
             ClientMsg::Detach,

@@ -4,6 +4,7 @@ use std::net::TcpListener;
 
 mod attachments;
 mod config;
+mod connection_limit;
 mod forwarding;
 mod registry;
 mod runtime;
