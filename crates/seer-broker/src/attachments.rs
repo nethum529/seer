@@ -9,6 +9,8 @@ use seer_net::Stream;
 
 use crate::registry::random_hex;
 
+const MAX_ATTACHMENTS_PER_USER: usize = 8;
+
 pub(crate) type ClientWriter = Arc<Mutex<Box<dyn Stream>>>;
 
 #[derive(Default)]
@@ -21,8 +23,12 @@ impl Attachments {
         writer: ClientWriter,
     ) -> io::Result<AttachmentGuard<'_>> {
         let mut people = self.lock()?;
+        let clients = people.entry(user_id.to_owned()).or_default();
+        if clients.len() >= MAX_ATTACHMENTS_PER_USER {
+            return Err(io::Error::other("per-user attachment limit reached"));
+        }
         let client_id = random_hex::<16>()?;
-        people.entry(user_id.to_owned()).or_default().insert(
+        clients.insert(
             client_id.clone(),
             Attachment {
                 connected_at: Instant::now(),

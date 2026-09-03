@@ -182,7 +182,7 @@ fn runtime_connection_close_shuts_down_its_reader() {
     let (stream, peer) = UnixStream::pair().expect("runtime pair must open");
     peer.set_read_timeout(Some(WAIT_TIMEOUT))
         .expect("read timeout must set");
-    let (sender, _events) = mpsc::channel();
+    let (sender, _events) = mpsc::sync_channel(4);
     let identity = Arc::new(());
     let reader = super::spawn_runtime_reader(
         stream.try_clone().expect("runtime stream must clone"),
@@ -243,12 +243,12 @@ fn dropping_coordinator_closes_the_runtime_connection() {
 #[test]
 fn client_reader_stops_if_the_event_receiver_is_gone() {
     let (server, mut client) = tcp_pair();
-    let (sender, events) = mpsc::channel();
+    let (sender, events) = mpsc::sync_channel(4);
     drop(events);
     let reader = spawn_client_reader(server, sender);
 
     codec::encode(&mut client, &ClientMsg::CreateTab).expect("message must encode");
-    let stopped = wait_for_thread(&reader);
+    let stopped = wait_for_thread(&reader.thread);
     if !stopped {
         let _ = client.shutdown(std::net::Shutdown::Both);
     }
@@ -260,11 +260,11 @@ fn client_reader_stops_if_the_event_receiver_is_gone() {
 #[test]
 fn runtime_reader_stops_after_the_connection_ends() {
     let (stream, peer) = UnixStream::pair().expect("runtime pair must open");
-    let (sender, events) = mpsc::channel();
+    let (sender, events) = mpsc::sync_channel(4);
     let reader = super::spawn_runtime_reader(stream, Arc::new(()), sender);
     drop(peer);
 
-    let stopped = wait_for_thread(&reader);
+    let stopped = wait_for_thread(&reader.thread);
     drop(events);
     reader.join().expect("reader must not panic");
 
@@ -279,7 +279,7 @@ fn join_reader_reports_a_panic() {
 }
 
 fn coordinator<'a>(client: TcpStream, broker: &'a BrokerState) -> Coordinator<'a> {
-    let (event_sender, events) = mpsc::channel();
+    let (event_sender, events) = mpsc::sync_channel(4);
     Coordinator {
         client: Arc::new(std::sync::Mutex::new(
             Box::new(client) as Box<dyn seer_net::Stream>
