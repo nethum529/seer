@@ -6,6 +6,7 @@
 //! restores the same topology with replacement shells, and a corrupt or
 //! unsupported snapshot file makes the runtime start a safe default session.
 
+// The runtime PTY shells run on Linux only.
 #![cfg(target_os = "linux")]
 
 use std::fs;
