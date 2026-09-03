@@ -201,8 +201,8 @@ impl SharedSession {
 
     fn send_snapshot(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
         let session = lock(&self.session)?;
-        session.selected_tree(workspace, tab)?;
-        let messages = session.snapshot();
+        let tree = session.selected_tree(workspace, tab)?;
+        let messages = session.snapshot_for(tree);
         drop(session);
         let mut connections = lock(&self.connections)?;
         let position = connections
