@@ -44,9 +44,13 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     assert_eq!(initial.workspaces[0].tabs[0].panes.len(), 1);
     assert!(snapshot_path.exists(), "first shell must be saved");
 
+    let workspace = initial.workspaces[0].id.clone();
+    let tab = initial.workspaces[0].tabs[0].id.clone();
     send(
         &mut owner,
         &ClientMsg::Resize {
+            workspace: workspace.clone(),
+            tab: tab.clone(),
             cols: 81,
             rows: 25,
         },
@@ -55,6 +59,8 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     send(
         &mut owner,
         &ClientMsg::SplitPane {
+            workspace: workspace.clone(),
+            tab: tab.clone(),
             direction: SplitDirection::Right,
         },
     );
@@ -64,15 +70,18 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     let second_pane = split_tree.workspaces[0].tabs[0].panes[1].id.clone();
     assert_ne!(first_pane, second_pane);
 
-    let first_pid = marked_pid(&mut owner, &first_pane).expect("first shell PID must be read");
-    let second_pid = marked_pid(&mut owner, &second_pane).expect("second shell PID must be read");
+    let first_pid =
+        marked_pid(&mut owner, &workspace, &tab, &first_pane).expect("first shell PID must be read");
+    let second_pid = marked_pid(&mut owner, &workspace, &tab, &second_pane)
+        .expect("second shell PID must be read");
     assert_ne!(first_pid, second_pid, "each pane must have its own shell");
 
     drop(owner);
     let mut reattached = connect_with_timeout(&socket_path);
     let live_tree = read_tree(&mut reattached);
     assert_eq!(live_tree, split_tree, "live reattach must keep the tree");
-    let live_pid = marked_pid(&mut reattached, &first_pane).expect("live PID must be read");
+    let live_pid =
+        marked_pid(&mut reattached, &workspace, &tab, &first_pane).expect("live PID must be read");
     assert_eq!(
         live_pid, first_pid,
         "live detach and reattach must keep the original shell"
@@ -87,9 +96,9 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
         restored, split_tree,
         "cold restart must restore the saved topology without duplicates"
     );
-    let restored_first = marked_pid(&mut restored_client, &first_pane)
+    let restored_first = marked_pid(&mut restored_client, &workspace, &tab, &first_pane)
         .expect("restored first shell PID must be read");
-    let restored_second = marked_pid(&mut restored_client, &second_pane)
+    let restored_second = marked_pid(&mut restored_client, &workspace, &tab, &second_pane)
         .expect("restored second shell PID must be read");
     assert_ne!(restored_first, first_pid, "restored shell must be a fresh process");
     assert_ne!(restored_second, second_pid, "restored shell must be a fresh process");
@@ -223,10 +232,12 @@ fn wait_for_cells(stream: &mut UnixStream) -> bool {
     }
 }
 
-fn marked_pid(stream: &mut UnixStream, pane: &str) -> Option<u32> {
+fn marked_pid(stream: &mut UnixStream, workspace: &str, tab: &str, pane: &str) -> Option<u32> {
     send(
         stream,
         &ClientMsg::Input {
+            workspace: workspace.into(),
+            tab: tab.into(),
             pane: pane.into(),
             bytes: b"printf 'MARK:%s\\n' $$\n".to_vec(),
         },

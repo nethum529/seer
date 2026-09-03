@@ -30,7 +30,6 @@ pub(crate) struct Snapshot {
     user: String,
     shell: String,
     pub(crate) viewport: PaneSize,
-    pub(crate) focused_tab: Option<String>,
     pub(crate) tree: Tree,
 }
 
@@ -41,7 +40,6 @@ impl Snapshot {
         user: &str,
         shell: &str,
         viewport: PaneSize,
-        focused_tab: Option<&str>,
         tree: &Tree,
     ) -> Self {
         Self {
@@ -51,7 +49,6 @@ impl Snapshot {
             user: user.to_owned(),
             shell: shell.to_owned(),
             viewport,
-            focused_tab: focused_tab.map(str::to_owned),
             tree: tree.clone(),
         }
     }
@@ -69,7 +66,7 @@ impl Snapshot {
         if self.viewport.cols == 0 || self.viewport.rows == 0 {
             return Err("snapshot viewport is empty".into());
         }
-        validate_tree(&self.tree, self.focused_tab.as_deref())
+        validate_tree(&self.tree)
     }
 }
 
@@ -146,11 +143,10 @@ fn unix_seconds() -> u64 {
         .unwrap_or(0)
 }
 
-fn validate_tree(tree: &Tree, focused_tab: Option<&str>) -> Result<(), String> {
+fn validate_tree(tree: &Tree) -> Result<(), String> {
     let mut workspace_ids = HashSet::new();
     let mut tab_ids = HashSet::new();
     let mut pane_ids = HashSet::new();
-    let mut tabs_have_panes = false;
 
     for workspace in &tree.workspaces {
         if workspace.id.is_empty() || !workspace_ids.insert(workspace.id.as_str()) {
@@ -160,21 +156,10 @@ fn validate_tree(tree: &Tree, focused_tab: Option<&str>) -> Result<(), String> {
             if tab.id.is_empty() || !tab_ids.insert(tab.id.as_str()) {
                 return Err(format!("tab id is empty or repeated: {}", tab.id));
             }
-            if !tab.panes.is_empty() {
-                tabs_have_panes = true;
-            }
             validate_tab(tab, &mut pane_ids)?;
         }
     }
-
-    match focused_tab {
-        Some(id) if !tab_ids.contains(id) => {
-            Err(format!("focused tab is missing from the tree: {id}"))
-        }
-        Some(_) => Ok(()),
-        None if tabs_have_panes => Err("session has panes but no focused tab".into()),
-        None => Ok(()),
-    }
+    Ok(())
 }
 
 fn validate_tab<'a>(tab: &'a seer_core::Tab, pane_ids: &mut HashSet<&'a str>) -> Result<(), String> {
