@@ -6,7 +6,9 @@ use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::{PaneSize, Tree};
+use seer_core::{
+    InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, PaneSize, TerminalInput, Tree,
+};
 
 use super::{
     LoopControl, apply_server_message, draw, handle_event, set_peek_person, set_view_only,
@@ -75,11 +77,14 @@ fn active_events_send_input_focus_and_resize() {
 
     assert_eq!(
         decode(&mut server),
-        ClientMsg::Input {
+        ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: "w1:p1".into(),
-            bytes: b"a".to_vec(),
+            input: TerminalInput::new(InputEvent::Key(KeyInput {
+                code: CoreKeyCode::Char('a'),
+                modifiers: Modifiers::default(),
+            })),
         }
     );
     assert_eq!(
@@ -176,11 +181,11 @@ fn detached_bye_has_a_distinct_exit() {
 #[test]
 fn peek_banner_is_fixed_above_the_tree() {
     let mut terminal = Terminal::new(TestBackend::new(40, 5)).expect("terminal must start");
-    let state = state_with_pane();
+    let mut state = state_with_pane();
     set_peek_person(Some("alice"));
 
     terminal
-        .draw(|frame| draw(frame, &state))
+        .draw(|frame| draw(frame, &mut state))
         .expect("frame must draw");
 
     let buffer = terminal.backend().buffer();

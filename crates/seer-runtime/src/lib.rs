@@ -3,6 +3,7 @@ use std::io::{self, Read};
 use std::path::Path;
 use std::thread;
 
+mod input;
 pub mod pane_grid;
 mod pane_host;
 mod pty;

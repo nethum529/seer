@@ -2,7 +2,9 @@ use crate::PaneHost;
 use portable_pty::CommandBuilder;
 use seer_core::layout::{PaneRect, rects};
 use seer_core::proto::{ClientMsg, ServerMsg};
-use seer_core::{PaneSize, Tab, Tree, TreeError};
+use seer_core::{
+    PaneSize, TERMINAL_PROTOCOL_VERSION, Tab, TerminalCapabilities, TerminalInput, Tree, TreeError,
+};
 use std::collections::BTreeMap;
 use std::io;
 
@@ -52,12 +54,15 @@ impl UserSession {
                 tab,
                 pane,
             } => self.focus_pane(&workspace, &tab, &pane),
-            ClientMsg::Input {
+            ClientMsg::TerminalCapabilities { capabilities } => {
+                validate_capabilities(capabilities).map(|()| Vec::new())
+            }
+            ClientMsg::TerminalInput {
                 workspace,
                 tab,
                 pane,
-                bytes,
-            } => self.write_input(&workspace, &tab, &pane, &bytes),
+                input,
+            } => self.terminal_input(&workspace, &tab, &pane, &input),
             ClientMsg::Resize {
                 workspace,
                 tab,
@@ -78,10 +83,10 @@ impl UserSession {
     pub fn poll(&mut self) -> io::Result<Vec<ServerMsg>> {
         let mut messages = Vec::new();
         for (pane, host) in &mut self.pane_hosts {
-            if host.poll()? > 0 {
+            if host.poll()? {
                 messages.push(ServerMsg::Cells {
                     pane: pane.clone(),
-                    rows: host.cells(),
+                    frame: host.frame(),
                 });
             }
         }
@@ -103,7 +108,7 @@ impl UserSession {
             .filter_map(|pane| {
                 self.pane_hosts.get(&pane.id).map(|host| ServerMsg::Cells {
                     pane: pane.id.clone(),
-                    rows: host.cells(),
+                    frame: host.frame(),
                 })
             })
             .collect::<Vec<_>>();
@@ -203,19 +208,26 @@ impl UserSession {
         Ok(self.tree_message())
     }
 
-    fn write_input(
+    fn terminal_input(
         &mut self,
         workspace: &str,
         tab: &str,
         pane: &str,
-        bytes: &[u8],
+        input: &TerminalInput,
     ) -> io::Result<Vec<ServerMsg>> {
         self.validate_pane(workspace, tab, pane)?;
-        self.pane_hosts
+        let host = self
+            .pane_hosts
             .get_mut(pane)
-            .ok_or_else(|| pane_host_not_found(pane))?
-            .write_input(bytes)?;
-        Ok(Vec::new())
+            .ok_or_else(|| pane_host_not_found(pane))?;
+        let changed = host.handle_input(input)?;
+        Ok(changed
+            .then(|| ServerMsg::Cells {
+                pane: pane.to_owned(),
+                frame: host.frame(),
+            })
+            .into_iter()
+            .collect())
     }
 
     fn resize(
@@ -267,11 +279,10 @@ impl UserSession {
     }
 
     fn start_host(&self, pane_rect: &PaneRect) -> io::Result<PaneHost> {
-        PaneHost::start(
-            CommandBuilder::new(&self.shell),
-            pane_rect.cols,
-            pane_rect.rows,
-        )
+        let mut command = CommandBuilder::new(&self.shell);
+        command.env("TERM", "xterm-256color");
+        command.env("COLORTERM", "truecolor");
+        PaneHost::start(command, pane_rect.cols, pane_rect.rows)
     }
 
     fn focused_pane(&self, workspace: &str, tab: &str) -> io::Result<&str> {
@@ -365,6 +376,17 @@ fn invalid_data(message: &'static str) -> io::Error {
 
 fn invalid_input(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
+    if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "unsupported terminal capability version",
+        ))
+    }
 }
 
 #[cfg(all(test, target_os = "linux"))]
