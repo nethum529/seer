@@ -1,5 +1,4 @@
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::PaneSize;
 use std::fs;
 use std::io::{self, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -88,8 +87,7 @@ fn handle_message(
     connection_id: u64,
     message: ClientMsg,
 ) -> io::Result<bool> {
-    shared.touch_connection(connection_id)?;
-    let read_only = shared.is_read_only(connection_id)?;
+    let read_only = shared.refresh_read_only(connection_id)?;
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
         ClientMsg::Peek { workspace, tab, .. } => {
@@ -194,12 +192,17 @@ impl SharedSession {
             return Err(connection_closed());
         }
         let mut connections = lock(&self.connections)?;
-        let now = Instant::now();
-        let owner_stale = connections
-            .iter()
-            .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= now);
-        let lease_vacant = !connections.iter().any(|c| c.size_owner);
-        connection.size_owner = lease_vacant || owner_stale;
+        let owner_stale = connections.iter().any(|c| {
+            c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now()
+        });
+        if owner_stale {
+            for owner in connections.iter_mut() {
+                owner.size_owner = false;
+            }
+            connection.size_owner = true;
+        } else {
+            connection.size_owner = !connections.iter().any(|c| c.size_owner);
+        }
         connections.push(connection);
         Ok(())
     }
@@ -212,31 +215,24 @@ impl SharedSession {
                 .any(|connection| connection.id == id && connection.size_owner);
             connections.retain(|connection| connection.id != id);
             if removed_owner {
-                grant_next_owner(&mut connections)
+                grant_next_owner(&mut *connections)
             } else {
                 None
             }
         };
-        if let Some(size) = adopt {
-            self.adopt_viewport(size)?;
+        if let Some(viewport) = adopt {
+            self.adopt_viewport(viewport)?;
         }
         Ok(())
     }
 
-    fn touch_connection(&self, id: u64) -> io::Result<()> {
+    fn refresh_read_only(&self, id: u64) -> io::Result<bool> {
         let mut connections = lock(&self.connections)?;
-        if let Some(connection) = connections.iter_mut().find(|connection| connection.id == id) {
-            connection.last_active = Instant::now();
-        }
-        Ok(())
-    }
-
-    fn is_read_only(&self, id: u64) -> io::Result<bool> {
-        let connections = lock(&self.connections)?;
-        Ok(connections
-            .iter()
-            .find(|connection| connection.id == id)
-            .is_some_and(|connection| connection.read_only))
+        let Some(connection) = connections.iter_mut().find(|c| c.id == id) else {
+            return Ok(false);
+        };
+        connection.last_active = Instant::now();
+        Ok(connection.read_only)
     }
 
     fn client_resize(
@@ -256,19 +252,19 @@ impl SharedSession {
                 eprintln!("runtime dropped read-only resize: {cols}x{rows}");
                 return Ok(false);
             }
-            connections[position].viewport = Some(PaneSize { cols, rows });
-            let is_owner = connections[position].size_owner;
-            let now = Instant::now();
+            connections[position].viewport = Some(ReportedViewport {
+                workspace: workspace.to_owned(),
+                tab: tab.to_owned(),
+                cols,
+                rows,
+            });
             let lease_vacant = !connections.iter().any(|c| c.size_owner);
-            let owner_stale = connections
-                .iter()
-                .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= now);
-            if !is_owner && !lease_vacant && !owner_stale {
+            let owner_stale = connections.iter().any(|c| {
+                c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now()
+            });
+            if !connections[position].size_owner && !lease_vacant && !owner_stale {
                 eprintln!("runtime denied resize for connection {id}: {cols}x{rows}");
                 return Ok(false);
-            }
-            if owner_stale && !is_owner {
-                eprintln!("runtime size lease expired; connection {id} took ownership");
             }
             for connection in connections.iter_mut() {
                 connection.size_owner = connection.id == id;
@@ -304,34 +300,23 @@ impl SharedSession {
                 None
             } else {
                 connections[position].size_owner = false;
-                grant_next_owner(&mut connections)
+                grant_next_owner(&mut *connections)
             }
         };
-        if let Some(size) = adopt {
-            self.adopt_viewport(size)?;
+        if let Some(viewport) = adopt {
+            self.adopt_viewport(viewport)?;
         }
         Ok(())
     }
 
-    fn adopt_viewport(&self, size: PaneSize) -> io::Result<()> {
-        let target = {
-            let session = lock(&self.session)?;
-            session
-                .tree
-                .workspaces
-                .first()
-                .and_then(|workspace| workspace.tabs.first().map(|tab| (workspace.id.clone(), tab.id.clone())))
-        };
-        let Some((workspace, tab)) = target else {
-            return Ok(());
-        };
-        let _messages = lock(&self.session)?.apply(ClientMsg::Resize {
-            workspace,
-            tab,
-            cols: size.cols,
-            rows: size.rows,
+    fn adopt_viewport(&self, viewport: ReportedViewport) -> io::Result<()> {
+        let messages = lock(&self.session)?.apply(ClientMsg::Resize {
+            workspace: viewport.workspace,
+            tab: viewport.tab,
+            cols: viewport.cols,
+            rows: viewport.rows,
         })?;
-        Ok(())
+        self.broadcast(&messages)
     }
 
     fn send_snapshot(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
@@ -401,12 +386,21 @@ impl SharedSession {
     }
 }
 
+/// The workspace, tab, and size of the last resize an attachment sent.
+#[derive(Clone)]
+struct ReportedViewport {
+    workspace: String,
+    tab: String,
+    cols: u16,
+    rows: u16,
+}
+
 struct Connection {
     id: u64,
     output: SyncSender<Arc<[u8]>>,
     stream: UnixStream,
-    /// The terminal size the attachment last reported.
-    viewport: Option<PaneSize>,
+    /// The last resize the attachment reported, with its selected tab.
+    viewport: Option<ReportedViewport>,
     /// The attachment is a read-only peek viewer.
     read_only: bool,
     /// The attachment holds the size lease for the shared session.
@@ -469,12 +463,12 @@ fn write_output(id: u64, stream: &mut UnixStream, output: &Receiver<Arc<[u8]>>) 
     let _ = stream.shutdown(std::net::Shutdown::Both);
 }
 
-fn grant_next_owner(connections: &mut Vec<Connection>) -> Option<PaneSize> {
+fn grant_next_owner(connections: &mut [Connection]) -> Option<ReportedViewport> {
     let position = connections
         .iter()
         .position(|connection| !connection.read_only)?;
     connections[position].size_owner = true;
-    connections[position].viewport
+    connections[position].viewport.clone()
 }
 
 fn encode_message(message: &ServerMsg) -> io::Result<Arc<[u8]>> {
