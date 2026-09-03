@@ -8,8 +8,8 @@ use alacritty_terminal::vte::ansi::{
 };
 pub use seer_core::{Cell, Color};
 use seer_core::{
-    Cursor, CursorShape, InputEvent, KeyCode, KeyInput, Modifiers, MouseKind, MouseProtocol,
-    MouseTracking, TERMINAL_PROTOCOL_VERSION, TerminalFrame, TerminalInput, TerminalModes,
+    Cursor, CursorShape, InputEvent, KeyCode, KeyInput, Modifiers, MouseKind, MouseTracking,
+    TERMINAL_PROTOCOL_VERSION, TerminalFrame, TerminalInput, TerminalModes,
 };
 use std::io;
 use std::sync::{Arc, Mutex};
@@ -68,7 +68,6 @@ impl PaneGrid {
             rows,
             cursor: self.cursor(display_offset),
             modes: self.modes(),
-            scrollback_offset: grid.display_offset() as u32,
         }
     }
 
@@ -141,11 +140,6 @@ impl PaneGrid {
     fn modes(&self) -> TerminalModes {
         let mode = self.terminal.mode();
         TerminalModes {
-            alternate_screen: mode.contains(TermMode::ALT_SCREEN),
-            application_cursor: mode.contains(TermMode::APP_CURSOR),
-            bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
-            focus_events: mode.contains(TermMode::FOCUS_IN_OUT),
-            mouse_protocol: mouse_protocol(*mode),
             mouse_tracking: mouse_tracking(*mode),
         }
     }
@@ -226,18 +220,6 @@ fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
 fn focus_bytes(focused: bool, mode: TermMode) -> Option<Vec<u8>> {
     mode.contains(TermMode::FOCUS_IN_OUT)
         .then(|| if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec())
-}
-
-fn mouse_protocol(mode: TermMode) -> MouseProtocol {
-    if !mode.intersects(TermMode::MOUSE_MODE) {
-        MouseProtocol::None
-    } else if mode.contains(TermMode::SGR_MOUSE) {
-        MouseProtocol::Sgr
-    } else if mode.contains(TermMode::UTF8_MOUSE) {
-        MouseProtocol::Utf8
-    } else {
-        MouseProtocol::Normal
-    }
 }
 
 fn mouse_tracking(mode: TermMode) -> MouseTracking {

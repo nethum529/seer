@@ -5,20 +5,8 @@ use crate::Cell;
 pub const TERMINAL_PROTOCOL_VERSION: u16 = 1;
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub enum ColorDepth {
-    Indexed16,
-    Indexed256,
-    TrueColor,
-}
-
-#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalCapabilities {
     pub protocol_version: u16,
-    pub color_depth: ColorDepth,
-    pub mouse: bool,
-    pub bracketed_paste: bool,
-    pub focus_events: bool,
-    pub synchronized_output: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -118,26 +106,11 @@ pub struct TerminalFrame {
     pub rows: Vec<Vec<Cell>>,
     pub cursor: Cursor,
     pub modes: TerminalModes,
-    pub scrollback_offset: u32,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalModes {
-    pub alternate_screen: bool,
-    pub application_cursor: bool,
-    pub bracketed_paste: bool,
-    pub focus_events: bool,
-    pub mouse_protocol: MouseProtocol,
     pub mouse_tracking: MouseTracking,
-}
-
-#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub enum MouseProtocol {
-    #[default]
-    None,
-    Normal,
-    Utf8,
-    Sgr,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
