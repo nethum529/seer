@@ -10,8 +10,8 @@ use ratatui::backend::TestBackend;
 use ratatui::layout::Rect;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{
-    Cursor, InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, MouseProtocol, MouseTracking,
-    PaneSize, TerminalFrame, TerminalInput, TerminalModes, Tree,
+    Cursor, InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, MouseTracking, PaneSize,
+    TerminalFrame, TerminalInput, TerminalModes, Tree,
 };
 
 use super::{
@@ -149,11 +149,8 @@ fn mouse_move_without_tracking_sends_no_message() {
             rows: Vec::new(),
             cursor: Cursor::default(),
             modes: TerminalModes {
-                mouse_protocol: MouseProtocol::Sgr,
                 mouse_tracking: MouseTracking::Click,
-                ..TerminalModes::default()
             },
-            scrollback_offset: 0,
         },
     );
 

@@ -188,7 +188,6 @@ fn command_reply_skips_all_stream_messages() {
                     rows: vec![Vec::<Cell>::new()],
                     cursor: TerminalCursor::default(),
                     modes: TerminalModes::default(),
-                    scrollback_offset: 0,
                 },
             },
             ServerMsg::Seat {
