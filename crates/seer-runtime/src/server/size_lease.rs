@@ -14,7 +14,6 @@ fn size_lease_governs_per_client_resize_control() {
     let (peer_server, mut peer_client) = UnixStream::pair().expect("stream pair must open");
     let (peek_server, mut peek_client) = UnixStream::pair().expect("stream pair must open");
 
-    // The first full attachment acquires the size lease.
     shared
         .add_connection(1, owner_server)
         .expect("owner must attach");
@@ -24,7 +23,6 @@ fn size_lease_governs_per_client_resize_control() {
         PaneSize { cols: 80, rows: 24 }
     );
 
-    // A second full attachment does not take the lease.
     shared
         .add_connection(2, peer_server)
         .expect("peer must attach");
@@ -34,7 +32,6 @@ fn size_lease_governs_per_client_resize_control() {
         PaneSize { cols: 80, rows: 24 }
     );
 
-    // A resize from the owner applies to the shared geometry.
     handle_message(
         &shared,
         1,
@@ -68,7 +65,6 @@ fn size_lease_governs_per_client_resize_control() {
         }
     );
 
-    // A resize from the peer is denied, but its own viewport is recorded.
     handle_message(
         &shared,
         2,
@@ -103,7 +99,6 @@ fn size_lease_governs_per_client_resize_control() {
         }
     );
 
-    // A peek attachment cannot resize the shared geometry.
     shared
         .add_connection(3, peek_server)
         .expect("peek viewer must attach");
@@ -153,13 +148,11 @@ fn size_lease_governs_per_client_resize_control() {
         }
     );
 
-    // A peek disconnect does not move the lease.
     shared
         .remove_connection(3)
         .expect("peek viewer must detach");
     assert_eq!(owner_id(&shared), Some(1));
 
-    // An owner silent past the timeout loses the lease to the resizing peer.
     {
         let mut connections = lock(&shared.connections).expect("connections must lock");
         let owner = connections
@@ -190,7 +183,6 @@ fn size_lease_governs_per_client_resize_control() {
         PaneSize { cols: 90, rows: 30 }
     );
 
-    // The former owner is denied while the new owner stays active.
     handle_message(
         &shared,
         1,
@@ -212,8 +204,6 @@ fn size_lease_governs_per_client_resize_control() {
     );
     assert_eq!(session_pane_size(&shared), PaneSize { cols: 90, rows: 30 });
 
-    // Owner disconnect releases the lease to the surviving attachment,
-    // which adopts its recorded viewport and broadcasts the new geometry.
     shared.remove_connection(2).expect("owner must detach");
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
@@ -231,7 +221,6 @@ fn size_lease_governs_per_client_resize_control() {
         }
     );
 
-    // The surviving attachment resizes normally.
     handle_message(
         &shared,
         1,

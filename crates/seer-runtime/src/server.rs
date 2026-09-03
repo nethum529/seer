@@ -91,7 +91,9 @@ fn handle_message(
     connection_id: u64,
     message: ClientMsg,
 ) -> io::Result<bool> {
-    let read_only = shared.refresh_read_only(connection_id)?;
+    let Some(read_only) = shared.refresh_read_only(connection_id)? else {
+        return Ok(true);
+    };
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
         ClientMsg::Peek { workspace, tab, .. } => {
@@ -262,13 +264,13 @@ impl SharedSession {
         self.flush_messages(&messages)
     }
 
-    fn refresh_read_only(&self, id: u64) -> io::Result<bool> {
+    fn refresh_read_only(&self, id: u64) -> io::Result<Option<bool>> {
         let mut connections = lock(&self.connections)?;
         let Some(connection) = connections.iter_mut().find(|c| c.id == id) else {
-            return Ok(false);
+            return Ok(None);
         };
         connection.last_active = Instant::now();
-        Ok(connection.read_only)
+        Ok(Some(connection.read_only))
     }
 
     fn client_resize(
