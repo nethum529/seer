@@ -20,7 +20,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
-          repository: nethum529/placeholder-herdrlike
+          repository: nethum529/seer
           ref: ${{ inputs.ref }}
           ssh-key: ${{ secrets.SEER_SOURCE_DEPLOY_KEY }}
       - run: rustup target add x86_64-apple-darwin
