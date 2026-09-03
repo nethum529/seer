@@ -43,14 +43,17 @@ impl PaneGrid {
         }
     }
 
-    pub fn feed(&mut self, bytes: &[u8]) -> (bool, Vec<u8>) {
-        let changed = if bytes.is_empty() {
+    pub fn feed(&mut self, bytes: &[u8]) -> bool {
+        if bytes.is_empty() {
             self.finish_expired_sync()
         } else {
             self.parser.advance(&mut self.terminal, bytes);
             self.parser.sync_bytes_count() == 0
-        };
-        (changed, self.replies.take())
+        }
+    }
+
+    pub(crate) fn take_replies(&self) -> Vec<u8> {
+        self.replies.take()
     }
 
     #[must_use]

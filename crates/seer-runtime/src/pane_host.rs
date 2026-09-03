@@ -18,7 +18,8 @@ impl PaneHost {
 
     pub fn poll(&mut self) -> io::Result<bool> {
         let output = self.session.drain_output();
-        let (changed, replies) = self.grid.feed(&output);
+        let changed = self.grid.feed(&output);
+        let replies = self.grid.take_replies();
         if !replies.is_empty() {
             self.session.write_input(&replies)?;
         }
