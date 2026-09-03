@@ -5,9 +5,7 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crossterm::event::{
-    self, Event, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind,
-};
+use crossterm::event::{self, Event, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
@@ -23,8 +21,8 @@ use crate::render::PaneCells;
 use crate::state::{ClientState, pane_rects};
 use crate::terminal_session::{TerminalSession, ignore_setup_disconnect, set_cursor_style};
 use crate::tui_navigation::{
-    closes_last_tab, initialize, pane_in_direction, select_tab, show_hint,
-    show_last_tab_status, status, update_tree,
+    closes_last_tab, initialize, pane_in_direction, select_tab, show_hint, show_last_tab_status,
+    status, update_tree,
 };
 
 const EVENT_WAIT: Duration = Duration::from_millis(25);

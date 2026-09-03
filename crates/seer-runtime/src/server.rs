@@ -458,9 +458,7 @@ mod tests {
                 workspace: "w1".into(),
                 tab: "w1:t1".into(),
                 pane: "w1:p1".into(),
-                input: TerminalInput::new(InputEvent::Text(
-                    "printf detached-output\\n".into(),
-                )),
+                input: TerminalInput::new(InputEvent::Text("printf detached-output\\n".into())),
             })
             .expect("input must succeed");
 

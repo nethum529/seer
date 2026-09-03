@@ -69,10 +69,7 @@ pub(crate) fn closes_last_tab(state: &ClientState) -> bool {
         })
 }
 
-pub(crate) fn pane_in_direction(
-    state: &ClientState,
-    direction: FocusDirection,
-) -> Option<String> {
+pub(crate) fn pane_in_direction(state: &ClientState, direction: FocusDirection) -> Option<String> {
     let tab = state.visible_tab()?;
     let focused = state.focused()?;
     let rects = pane_rects(tab, Rect::new(0, 0, 1_000, 1_000));
