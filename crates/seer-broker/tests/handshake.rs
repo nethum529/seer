@@ -204,7 +204,7 @@ fn test_config(listen: SocketAddr) -> (Config, PathBuf) {
             remote: false,
             state_dir: state_dir.clone(),
             owner_name: "Owner".into(),
-            shell: "sh".into(),
+            os_users: std::collections::HashMap::new(),
         },
         state_dir,
     )

@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::net::SocketAddr;
@@ -14,16 +15,12 @@ pub struct Config {
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
     pub owner_name: String,
-    #[serde(default = "default_shell")]
-    pub shell: String,
+    #[serde(default)]
+    pub os_users: HashMap<String, String>,
 }
 
 fn default_remote() -> bool {
     true
-}
-
-fn default_shell() -> String {
-    "sh".to_owned()
 }
 
 fn default_state_dir() -> PathBuf {
@@ -70,17 +67,20 @@ mod tests {
         assert_eq!(config.published_addr, "seer.example.com:7321");
         assert_eq!(config.state_dir, Path::new("/var/lib/seer"));
         assert_eq!(config.owner_name, "owner");
-        assert_eq!(config.shell, "sh");
+        assert_eq!(
+            config.os_users.get("owner").map(String::as_str),
+            Some("owner")
+        );
     }
 
     #[test]
-    fn loads_configured_shell() {
+    fn loads_default_state_directory() {
         let config = toml::from_str::<Config>(
-            "listen = \"127.0.0.1:7321\"\npublished_addr = \"host:7321\"\nowner_name = \"owner\"\nshell = \"bash\"\n",
+            "listen = \"127.0.0.1:7321\"\npublished_addr = \"host:7321\"\nowner_name = \"owner\"\n",
         )
         .expect("config must load");
 
-        assert_eq!(config.shell, "bash");
+        assert!(config.os_users.is_empty());
         assert!(config.state_dir.ends_with(".local/state/seer"));
     }
 

@@ -1,6 +1,6 @@
 use std::fs;
-use std::io;
-use std::net::SocketAddr;
+use std::io::{self, Read};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use sha2::{Digest, Sha256};
 
 use super::binary;
@@ -19,17 +20,124 @@ static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 static BROKER_BINARY: OnceLock<PathBuf> = OnceLock::new();
 static RUNTIME_BINARY: OnceLock<PathBuf> = OnceLock::new();
 
-pub struct TestFiles {
-    root: PathBuf,
-    state_dir: PathBuf,
-    config: PathBuf,
-    wrapper: PathBuf,
-    broker_log: PathBuf,
-    xdg_runtime_dir: PathBuf,
+pub(crate) fn unused_address() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("port probe must bind");
+    listener
+        .local_addr()
+        .expect("port probe must have an address")
+}
+
+pub(crate) fn connect_when_ready(address: SocketAddr) -> TcpStream {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    let mut last_error = None;
+    while Instant::now() < deadline {
+        match TcpStream::connect(address) {
+            Ok(stream) => return stream,
+            Err(error) => last_error = Some(error),
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!("broker did not listen: {last_error:?}");
+}
+
+pub(crate) fn send_hello(stream: &mut TcpStream, user: &str, credential: &str) {
+    codec::encode(
+        stream,
+        &ClientMsg::Hello {
+            user_id: user.into(),
+            credential: credential.into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+        },
+    )
+    .expect("hello must encode");
+}
+
+pub(crate) fn welcome_client_id(message: ServerMsg, expected_user: &str) -> String {
+    let ServerMsg::Welcome {
+        user_id,
+        name,
+        client_id,
+        tree,
+    } = message
+    else {
+        panic!("expected Welcome");
+    };
+    assert_eq!(user_id, expected_user);
+    assert_eq!(name, expected_user);
+    assert_eq!(client_id.len(), 32);
+    assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert!(tree.workspaces.is_empty());
+    client_id
+}
+
+pub(crate) fn read_message(stream: &mut TcpStream) -> ServerMsg {
+    stream
+        .set_read_timeout(Some(WAIT_TIMEOUT))
+        .expect("read timeout must set");
+    codec::decode(stream).expect("server message must decode")
+}
+
+pub(crate) fn wait_for_tree_with_tab(stream: &mut TcpStream) -> seer_core::Tree {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while Instant::now() < deadline {
+        if let ServerMsg::Tree { tree } = read_message(stream)
+            && tree
+                .workspaces
+                .first()
+                .is_some_and(|workspace| workspace.tabs.len() == 1)
+        {
+            return tree;
+        }
+    }
+    panic!("Tree with a tab was not received");
+}
+
+pub(crate) fn wait_for_disconnect(stream: &mut TcpStream) {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    let mut bytes = [0; 1_024];
+    while Instant::now() < deadline {
+        match stream.read(&mut bytes) {
+            Ok(0) => return,
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::ConnectionAborted
+                        | io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                return;
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => panic!("client disconnect failed: {error}"),
+        }
+    }
+    panic!("client did not disconnect");
+}
+
+pub(crate) struct TestFiles {
+    pub(crate) root: PathBuf,
+    pub(crate) state_dir: PathBuf,
+    pub(crate) config: PathBuf,
+    pub(crate) wrapper: PathBuf,
+    pub(crate) broker_log: PathBuf,
+    pub(crate) xdg_runtime_dir: PathBuf,
+}
+
+impl Default for TestFiles {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestFiles {
-    pub fn new() -> Self {
+    pub(crate) fn new() -> Self {
         let counter = NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -51,7 +159,12 @@ impl TestFiles {
         }
     }
 
-    pub fn write_config(&self, address: SocketAddr) {
+    pub(crate) fn write_config_with_os_users(
+        &self,
+        address: SocketAddr,
+        alice_os_user: &str,
+        bob_os_user: &str,
+    ) {
         fs::create_dir(&self.state_dir).expect("state directory must be created");
         let alice_hash = hash("alice-secret");
         let bob_hash = hash("bob-secret");
@@ -61,20 +174,20 @@ impl TestFiles {
         fs::write(self.state_dir.join("people.json"), people).expect("people registry must write");
         fs::write(self.state_dir.join("seats.json"), "[]\n").expect("seat registry must write");
         let contents = format!(
-            "listen = \"{address}\"\npublished_addr = \"host:7321\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
-            self.state_dir.display()
+            "listen = \"{address}\"\npublished_addr = \"host:7321\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\n\n[os_users]\nalice = \"{alice_os_user}\"\nbob = \"{bob_os_user}\"\n",
+            self.state_dir.display(),
         );
         fs::write(&self.config, contents).expect("broker config must write");
     }
 
-    pub fn write_runtime_wrapper(&self) {
-        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
+    pub(crate) fn write_runtime_wrapper(&self) {
+        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nprintf '%s\\n%s\\n%s\\n' \"$(id -u)\" \"$HOME\" \"$SHELL\" > \"$SEER_TEST_FILES/$2.identity\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
         fs::write(&self.wrapper, script).expect("runtime wrapper must write");
         fs::set_permissions(&self.wrapper, fs::Permissions::from_mode(0o700))
             .expect("runtime wrapper mode must set");
     }
 
-    pub fn start_broker(&self) -> Child {
+    pub(crate) fn start_broker(&self) -> Child {
         let log = fs::File::create(&self.broker_log).expect("broker log must open");
         Command::new(BROKER_BINARY.get_or_init(|| binary::build("seer-broker")))
             .arg(&self.config)
@@ -91,11 +204,11 @@ impl TestFiles {
             .expect("broker must start")
     }
 
-    pub fn pid_file(&self, user: &str) -> PathBuf {
+    pub(crate) fn pid_file(&self, user: &str) -> PathBuf {
         self.root.join(format!("{user}.pid"))
     }
 
-    pub fn runtime_pid(&self, user: &str) -> u32 {
+    pub(crate) fn runtime_pid(&self, user: &str) -> u32 {
         let pid_file = self.pid_file(user);
         assert!(wait_for_file(&pid_file));
         fs::read_to_string(pid_file)
@@ -105,73 +218,28 @@ impl TestFiles {
             .expect("runtime PID must be valid")
     }
 
-    pub fn pane_pid(&self, user: &str) -> u32 {
-        let pid_file = self.root.join(format!("{user}-pane.pid"));
-        assert!(wait_for_file(&pid_file));
-        fs::read_to_string(pid_file)
-            .expect("pane PID must be readable")
-            .trim()
-            .parse()
-            .expect("pane PID must be valid")
-    }
-
-    pub fn assert_process_running(&self, pid: u32) {
-        let status = fs::read_to_string(format!("/proc/{pid}/status"))
-            .expect("process status must be readable");
-        assert!(!status.lines().any(|line| line.starts_with("State:\tZ")));
-    }
-
-    pub fn assert_runtime_arguments(&self, user: &str) {
-        let arguments_file = self.root.join(format!("{user}.args"));
-        assert!(wait_for_file(&arguments_file));
-        let arguments = fs::read_to_string(arguments_file).expect("runtime arguments must read");
-        let expected_socket = self.xdg_runtime_dir.join(format!("seer/{user}.sock"));
-        let expected_state = self.state_dir.join("users").join(user);
-        assert_eq!(
-            arguments.lines().collect::<Vec<_>>(),
-            [
-                expected_socket.to_string_lossy().as_ref(),
-                user,
-                "sh",
-                expected_state.to_string_lossy().as_ref()
-            ]
-        );
-    }
-
-    pub fn assert_socket_directory(&self) {
-        let directory = self.xdg_runtime_dir.join("seer");
-        let mode = fs::metadata(directory)
-            .expect("socket directory metadata must load")
-            .permissions()
-            .mode()
-            & 0o777;
-        assert_eq!(mode, 0o700);
-    }
-
-    pub fn terminate_runtime(&self, user: &str) -> PathBuf {
+    pub(crate) fn terminate_runtime(&self, user: &str) -> PathBuf {
         let pid = self.runtime_pid(user);
         terminate_process(pid);
         fs::remove_file(self.pid_file(user)).expect("runtime PID file must be removed");
         self.xdg_runtime_dir.join(format!("seer/{user}.sock"))
     }
+}
 
-    pub fn assert_log_contains(&self, expected: &str) {
-        let deadline = Instant::now() + WAIT_TIMEOUT;
-        while Instant::now() < deadline {
-            if fs::read_to_string(&self.broker_log)
-                .is_ok_and(|contents| contents.contains(expected))
-            {
-                return;
-            }
-            thread::sleep(POLL_INTERVAL);
-        }
-        panic!("broker log did not contain {expected}");
-    }
+pub(crate) fn current_os_user() -> String {
+    command_output("id", &["-un"])
+}
 
-    pub fn assert_log_excludes(&self, unexpected: &str) {
-        let contents = fs::read_to_string(&self.broker_log).expect("broker log must read");
-        assert!(!contents.contains(unexpected));
-    }
+pub(crate) fn command_output(program: &str, arguments: &[&str]) -> String {
+    let output = Command::new(program)
+        .args(arguments)
+        .output()
+        .expect("account command must run");
+    assert!(output.status.success(), "account command must succeed");
+    String::from_utf8(output.stdout)
+        .expect("account output must be UTF-8")
+        .trim()
+        .to_owned()
 }
 
 impl Drop for TestFiles {
@@ -202,10 +270,10 @@ fn remove_temporary_directory(directory: &Path) {
     panic!("temporary directory must be removed: {last_error:?}");
 }
 
-pub struct ProcessGuard(Child);
+pub(crate) struct ProcessGuard(Child);
 
 impl ProcessGuard {
-    pub fn new(child: Child) -> Self {
+    pub(crate) fn new(child: Child) -> Self {
         Self(child)
     }
 }
@@ -223,7 +291,7 @@ fn hash(value: &str) -> String {
         .collect()
 }
 
-fn wait_for_file(path: &Path) -> bool {
+pub(crate) fn wait_for_file(path: &Path) -> bool {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while Instant::now() < deadline {
         if path.is_file() {
