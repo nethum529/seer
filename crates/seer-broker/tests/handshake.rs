@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Read;
+use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::sync::Once;
@@ -26,6 +26,7 @@ fn handles_required_handshake_outcomes() {
         .expect("listener must have an address");
     let (config, state_dir) = test_config(address);
     let _server = thread::spawn(move || serve(listener, &config));
+    let _silent = TcpStream::connect(address).expect("silent client must connect");
 
     let (_, welcome) = exchange(
         address,
@@ -61,29 +62,16 @@ fn handles_required_handshake_outcomes() {
 
     let (non_hello_stream, non_hello) = exchange(address, &ClientMsg::Detach);
     assert_refused_and_closed(non_hello_stream, non_hello, "expected Hello");
-    remove_state_directory(&state_dir);
-}
 
-#[test]
-fn handles_a_second_connection_while_the_first_is_silent() {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-    let address = listener
-        .local_addr()
-        .expect("listener must have an address");
-    let (config, state_dir) = test_config(address);
-    let _server = thread::spawn(move || serve(listener, &config));
-    let _silent = TcpStream::connect(address).expect("silent client must connect");
-
-    let (stream, response) = exchange(
-        address,
-        &ClientMsg::Hello {
-            user_id: "u-alice".into(),
-            credential: "wrong".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        },
-    );
-
-    assert_refused_and_closed(stream, response, "invalid credentials");
+    let mut malformed_stream = TcpStream::connect(address).expect("client must connect");
+    malformed_stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("read timeout must set");
+    malformed_stream
+        .write_all(&[0, 0, 0, 1, b'{'])
+        .expect("invalid frame must send");
+    let malformed = codec::decode(&mut malformed_stream).expect("refusal must decode");
+    assert_refused_and_closed(malformed_stream, malformed, "invalid message");
     remove_state_directory(&state_dir);
 }
 
@@ -135,6 +123,14 @@ fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
     );
     assert_refused_and_closed(expired_stream, expired, "invalid seat");
 
+    let (invalid_name_stream, invalid_name) = exchange(
+        address,
+        &ClientMsg::Join {
+            seat_token: "seat-two".into(),
+            name: "bad name".into(),
+        },
+    );
+    assert_refused_and_closed(invalid_name_stream, invalid_name, "invalid name");
     let (collision_stream, collision) = exchange(
         address,
         &ClientMsg::Join {

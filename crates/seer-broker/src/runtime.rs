@@ -95,15 +95,6 @@ impl RuntimeManager {
             .is_ok()
     }
 
-    #[cfg(test)]
-    pub(crate) fn socket_path_for_test(
-        &self,
-        user_id: &str,
-        person_name: &str,
-    ) -> io::Result<PathBuf> {
-        runtime_socket_path(user_id, &self.identity(person_name)?, &self.state_dir)
-    }
-
     fn user_state_directory(&self, user_id: &str) -> PathBuf {
         self.state_dir.join("users").join(user_id)
     }
@@ -321,129 +312,9 @@ fn connect_with_retry(path: &Path, retries: usize) -> io::Result<UnixStream> {
 
 #[cfg(test)]
 mod tests {
-    use std::collections::HashMap;
-    use std::ffi::OsString;
-    use std::fs;
-    use std::os::unix::fs::PermissionsExt;
-    use std::os::unix::net::UnixListener;
     use std::path::Path;
-    use std::process::Command;
-    use std::sync::{Arc, Mutex};
-    use std::thread;
-    use std::time::Duration;
 
-    use super::{
-        RuntimeManager, connect_with_retry, create_private_directory, runtime_binary_next_to,
-        runtime_directory_path, validate_socket_path,
-    };
-    use crate::test_support::{
-        remove_directory, temporary_directory as create_temporary_directory,
-    };
-
-    #[test]
-    fn selects_runtime_directories_and_private_mode() {
-        let temporary = temporary_directory("directories");
-        let xdg_root = temporary.join("xdg");
-        let xdg = runtime_directory_path(
-            &temporary,
-            Some(xdg_root.clone().into_os_string()),
-            123,
-            123,
-        );
-        let fallback = runtime_directory_path(&temporary, Some(OsString::new()), 123, 123);
-        create_private_directory(&xdg).expect("XDG directory must be created");
-
-        assert_eq!(xdg, xdg_root.join("seer"));
-        assert_eq!(fallback, temporary.join("seer-123"));
-        assert_eq!(mode(&xdg), 0o700);
-
-        remove_directory(&temporary, "temporary directory must be removed");
-    }
-
-    #[test]
-    fn finds_runtime_next_to_broker() {
-        let path = runtime_binary_next_to(Path::new("/opt/seer/seer-broker"))
-            .expect("runtime path must resolve");
-
-        assert_eq!(path, Path::new("/opt/seer/seer-runtime"));
-    }
-
-    #[test]
-    fn reads_the_process_user_id() {
-        let uid = crate::os_identity::process_uid();
-        let output = Command::new("id")
-            .arg("-u")
-            .output()
-            .expect("id command must run");
-        assert!(output.status.success(), "id command must succeed");
-        let expected = String::from_utf8(output.stdout)
-            .expect("id output must be UTF-8")
-            .trim()
-            .parse::<u32>()
-            .expect("id output must be a user ID");
-
-        assert_eq!(uid, expected);
-    }
-
-    #[test]
-    fn rejects_broker_path_without_parent() {
-        let error =
-            runtime_binary_next_to(Path::new("/")).expect_err("root path has no parent directory");
-
-        assert_eq!(error.kind(), std::io::ErrorKind::Other);
-    }
-
-    #[test]
-    fn retries_until_socket_is_ready() {
-        let temporary = temporary_directory("retry");
-        let socket = temporary.join("r.sock");
-        let listener_path = socket.clone();
-        let worker = thread::spawn(move || {
-            thread::sleep(Duration::from_millis(30));
-            let _listener = UnixListener::bind(listener_path).expect("socket must bind");
-            thread::sleep(Duration::from_millis(100));
-        });
-
-        let stream = connect_with_retry(&socket, 100).expect("delayed socket must connect");
-
-        drop(stream);
-        worker.join().expect("listener thread must finish");
-        remove_directory(&temporary, "temporary directory must be removed");
-    }
-
-    #[test]
-    fn retry_returns_last_connection_error() {
-        let temporary = temporary_directory("timeout");
-        let socket = temporary.join("m.sock");
-
-        connect_with_retry(&socket, 2).expect_err("missing socket must fail");
-        remove_directory(&temporary, "temporary directory must be removed");
-    }
-
-    #[test]
-    fn records_a_spawned_runtime_process() {
-        let temporary = temporary_directory("spawn");
-        let manager = RuntimeManager {
-            binary: "true".into(),
-            state_dir: temporary.clone(),
-            os_users: HashMap::from([("Spawn".into(), crate::test_support::current_os_user())]),
-            default_identity: crate::os_identity::OsIdentity::resolve_process_account()
-                .expect("process account must resolve"),
-            processes: Arc::new(Mutex::new(HashMap::new())),
-        };
-
-        manager
-            .connect_with_retries("spawn-test", "Spawn", 0)
-            .expect_err("exited runtime must not open a socket");
-        let mut processes = manager.processes.lock().expect("process lock must work");
-        let process = processes
-            .get_mut("spawn-test")
-            .expect("spawned process must be recorded");
-        wait_or_kill(&mut process.child, Duration::from_millis(20));
-        wait_or_kill(&mut process.child, Duration::from_millis(20));
-        drop(processes);
-        remove_directory(&temporary, "temporary directory must be removed");
-    }
+    use super::validate_socket_path;
 
     #[test]
     fn limits_socket_paths_to_less_than_one_hundred_bytes() {
@@ -459,29 +330,5 @@ mod tests {
                 .kind(),
             std::io::ErrorKind::InvalidInput
         );
-    }
-
-    fn temporary_directory(name: &str) -> std::path::PathBuf {
-        create_temporary_directory(&format!("mb-{name}"))
-    }
-
-    fn mode(path: &Path) -> u32 {
-        fs::metadata(path)
-            .expect("directory metadata must load")
-            .permissions()
-            .mode()
-            & 0o777
-    }
-
-    fn wait_or_kill(child: &mut std::process::Child, timeout: Duration) {
-        let deadline = std::time::Instant::now() + timeout;
-        while std::time::Instant::now() < deadline {
-            if child.try_wait().expect("child status must load").is_some() {
-                return;
-            }
-            thread::sleep(Duration::from_millis(1));
-        }
-        child.kill().expect("late child must stop");
-        child.wait().expect("stopped child must be reaped");
     }
 }

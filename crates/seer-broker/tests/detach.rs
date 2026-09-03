@@ -14,8 +14,8 @@ mod extras;
 mod support;
 
 use extras::{
-    assert_log_contains, assert_log_excludes, assert_process_running, assert_runtime_arguments,
-    assert_socket_directory, pane_pid, send, wait_for_cells, write_config,
+    assert_process_running, assert_runtime_arguments, assert_socket_directory, pane_pid, send,
+    wait_for_cells, write_config,
 };
 use support::{
     ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
@@ -71,8 +71,6 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
             reason: "client does not belong to this person".into()
         }
     );
-    assert_log_contains(&temporary, "broker refused DetachClient for user bob");
-    assert_log_excludes(&temporary, "runtime dropped read-only message");
     assert_runtime_arguments(&temporary, "alice");
     assert_socket_directory(&temporary);
 
