@@ -145,12 +145,27 @@ pub(crate) fn attach() -> Result<(), CommandError> {
     )
 }
 
-pub(crate) fn invite() -> Result<(), CommandError> {
+pub(crate) fn invite(hours: Option<&str>) -> Result<(), CommandError> {
+    let hours = hours
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .ok()
+                .filter(|hours| (1..=168).contains(hours))
+                .ok_or_else(|| CommandError::usage("hours must be from 1 to 168"))
+        })
+        .transpose()?;
     let server = selected_server()?;
     let (mut stream, _) = authenticate(&server)?;
-    send(&mut stream, &ClientMsg::Invite)?;
+    send(&mut stream, &ClientMsg::Invite { hours })?;
     match receive_reply(&mut stream)? {
-        ServerMsg::Seat { capsule, .. } => {
+        ServerMsg::Seat {
+            capsule,
+            expires_in_secs,
+        } => {
+            let hours = expires_in_secs / 3_600;
+            let unit = if hours == 1 { "hour" } else { "hours" };
+            println!("Seat ready. It works once and expires in {hours} {unit}.");
             println!("Send this to a friend:");
             println!();
             println!("Paste this in Terminal:");
@@ -164,7 +179,7 @@ pub(crate) fn invite() -> Result<(), CommandError> {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn first_invite(first_start: bool) -> Result<(), CommandError> {
-    if first_start { invite() } else { Ok(()) }
+    if first_start { invite(None) } else { Ok(()) }
 }
 
 pub(crate) fn list() -> Result<(), CommandError> {

@@ -161,7 +161,7 @@ fn run_invite(reply: ServerMsg) -> Output {
         )
         .expect("Welcome must encode");
         let invite = receive(&mut stream);
-        assert_eq!(invite, ClientMsg::Invite);
+        assert_eq!(invite, ClientMsg::Invite { hours: None });
         codec::encode(&mut stream, &reply).expect("reply must encode");
     });
     let output = run(&config, "invite", "");

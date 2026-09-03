@@ -45,7 +45,7 @@ fn owner_can_invite_and_list_people() {
     let mut coordinator = coordinator(client, &broker.state);
 
     coordinator
-        .handle_client_message(ClientMsg::Invite)
+        .handle_client_message(ClientMsg::Invite { hours: None })
         .expect("Invite must succeed");
     let seat: ServerMsg = codec::decode(&mut peer).expect("Seat must decode");
     match seat {
@@ -82,7 +82,7 @@ fn non_owner_invite_is_refused() {
     coordinator.owner_is_admin = false;
 
     coordinator
-        .handle_client_message(ClientMsg::Invite)
+        .handle_client_message(ClientMsg::Invite { hours: None })
         .expect("Invite refusal must send");
 
     assert_eq!(
@@ -105,7 +105,7 @@ fn non_owner_invite_reports_a_closed_client() {
 
     assert!(
         coordinator
-            .handle_client_message(ClientMsg::Invite)
+            .handle_client_message(ClientMsg::Invite { hours: None })
             .is_err()
     );
 }
