@@ -28,10 +28,7 @@ fn join_reports_refused_and_unexpected_replies() {
     let unexpected = run_join(ServerMsg::Tree { tree: Tree::new() });
     assert_eq!(unexpected.status.code(), Some(2));
     assert_eq!(unexpected.stderr, b"error: unexpected server reply\n");
-}
 
-#[test]
-fn invite_reports_refused_and_unexpected_replies() {
     let refused = run_invite(ServerMsg::Refused {
         reason: "owner only".into(),
     });

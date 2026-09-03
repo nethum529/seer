@@ -341,10 +341,6 @@ mod tests {
             };
             assert_eq!(key.code, expected);
         }
-    }
-
-    #[test]
-    fn ignores_non_terminal_keys() {
         assert_eq!(key_to_input(key(KeyCode::CapsLock)), None);
     }
 

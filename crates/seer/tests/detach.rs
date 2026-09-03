@@ -31,10 +31,7 @@ fn detach_reports_zero_clients_and_detaches_one_client() {
         b"Detached from team.example.com. Your panes are still running.\n"
     );
     assert!(one.stderr.is_empty());
-}
 
-#[test]
-fn detach_picker_selects_one_of_several_clients() {
     let output = run_detach(
         vec![client("client-one", 4), client("client-two", 9)],
         "2\n",
