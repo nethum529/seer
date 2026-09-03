@@ -3,13 +3,14 @@ use std::fs;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
 
 use crate::UserSession;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
 
 pub fn bind(path: &Path) -> io::Result<UnixListener> {
     remove_stale_socket(path)?;
@@ -121,29 +122,25 @@ fn start_poll_driver(shared: Arc<SharedSession>) -> io::Result<()> {
 
 fn poll_driver(shared: &SharedSession) {
     loop {
-        let connections = shared.connections.lock().ok().and_then(|connections| {
-            shared
-                .connection_opened
-                .wait_while(connections, |connections| connections.is_empty())
-                .ok()
-        });
-        let Some(connections) = connections else {
-            eprintln!("runtime poll error: {}", lock_poisoned());
-            return;
+        let has_connections = match shared.poll_and_broadcast() {
+            Ok((_, has_connections)) => has_connections,
+            Err(error) => {
+                eprintln!("runtime poll error: {error}");
+                return;
+            }
         };
-        drop(connections);
-        thread::sleep(POLL_INTERVAL);
-        if let Err(error) = shared.poll_and_broadcast() {
-            eprintln!("runtime poll error: {error}");
-            return;
-        }
+        let interval = if has_connections {
+            POLL_INTERVAL
+        } else {
+            DETACHED_POLL_INTERVAL
+        };
+        thread::sleep(interval);
     }
 }
 
 struct SharedSession {
     session: Mutex<UserSession>,
     connections: Mutex<Vec<Connection>>,
-    connection_opened: Condvar,
 }
 
 impl SharedSession {
@@ -151,7 +148,6 @@ impl SharedSession {
         Self {
             session: Mutex::new(session),
             connections: Mutex::new(Vec::new()),
-            connection_opened: Condvar::new(),
         }
     }
 
@@ -166,7 +162,6 @@ impl SharedSession {
             }],
         )?;
         connections.push(Connection { id, stream });
-        self.connection_opened.notify_one();
         Ok(())
     }
 
@@ -198,15 +193,15 @@ impl SharedSession {
         self.broadcast(&messages)
     }
 
-    fn poll_and_broadcast(&self) -> io::Result<()> {
+    fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {
         let mut session = lock(&self.session)?;
-        let mut connections = lock(&self.connections)?;
-        if connections.is_empty() {
-            return Ok(());
-        }
         let messages = session.poll();
-        broadcast(&mut connections, &messages);
-        Ok(())
+        let mut connections = lock(&self.connections)?;
+        let has_connections = !connections.is_empty();
+        if has_connections {
+            broadcast(&mut connections, &messages);
+        }
+        Ok((messages, has_connections))
     }
 
     fn broadcast(&self, messages: &[ServerMsg]) -> io::Result<()> {
@@ -246,9 +241,10 @@ fn connection_closed() -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use super::{ClientMsg, SharedSession, is_mutating, lock};
+    use super::{ClientMsg, ServerMsg, SharedSession, is_mutating};
     use crate::UserSession;
-    use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn identifies_only_mutating_messages() {
@@ -293,22 +289,46 @@ mod tests {
     }
 
     #[test]
-    fn removes_only_the_requested_connection() {
-        let shared = SharedSession::new(UserSession::new("alice", "sh"));
-        let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
-        let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
+    fn polls_output_without_connections() {
+        let mut session = UserSession::new("alice", "sh");
+        session
+            .ensure_first_shell()
+            .expect("first shell must start");
+        let shared = SharedSession::new(session);
         shared
-            .add_connection(1, first_server)
-            .expect("first connection must be added");
-        shared
-            .add_connection(2, second_server)
-            .expect("second connection must be added");
+            .apply_and_broadcast(ClientMsg::Input {
+                pane: "w1:p1".into(),
+                bytes: b"printf detached-output\\n".to_vec(),
+            })
+            .expect("input must succeed");
 
+        let deadline = Instant::now() + Duration::from_secs(5);
+        let mut updated = false;
+        while Instant::now() < deadline {
+            let (messages, has_connections) = shared
+                .poll_and_broadcast()
+                .expect("session poll must succeed");
+            assert!(!has_connections);
+            updated = messages.iter().any(|message| match message {
+                ServerMsg::Cells { rows, .. } => rows
+                    .iter()
+                    .flatten()
+                    .map(|cell| cell.character)
+                    .collect::<String>()
+                    .contains("detached-output"),
+                _ => false,
+            });
+            if updated {
+                break;
+            }
+            thread::sleep(Duration::from_millis(10));
+        }
+
+        assert!(updated);
         shared
-            .remove_connection(1)
-            .expect("connection must be removed");
-        let connections = lock(&shared.connections).expect("connections must lock");
-        assert_eq!(connections.len(), 1);
-        assert_eq!(connections[0].id, 2);
+            .apply_and_broadcast(ClientMsg::ClosePane {
+                pane: "w1:p1".into(),
+            })
+            .expect("pane close must succeed");
     }
 }
