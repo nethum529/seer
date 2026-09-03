@@ -344,3 +344,25 @@ fn take_id(next_id: &mut u64) -> Result<u64, TreeError> {
 
 #[cfg(test)]
 mod tests;
+
+impl Tree {
+    /// Returns the number the tree will assign to the next workspace.
+    #[must_use]
+    pub fn next_workspace_id(&self) -> u64 {
+        self.next_workspace_id
+    }
+}
+
+impl Workspace {
+    /// Returns the number the workspace will assign to the next tab.
+    #[must_use]
+    pub fn next_tab_id(&self) -> u64 {
+        self.next_tab_id
+    }
+
+    /// Returns the number the workspace will assign to the next pane.
+    #[must_use]
+    pub fn next_pane_id(&self) -> u64 {
+        self.next_pane_id
+    }
+}

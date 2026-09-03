@@ -6,6 +6,7 @@ use std::thread;
 mod input;
 pub mod pane_grid;
 mod pane_host;
+mod persistence;
 mod pty;
 mod server;
 mod snapshot;
@@ -25,7 +26,7 @@ pub fn run() -> io::Result<()> {
     start_lifeline_watch()?;
     let listener = bind(Path::new(&socket_path))?;
     let snapshot_dir = snapshot_directory();
-    let session = UserSession::load_or_new(user, shell, snapshot_dir.as_deref());
+    let session = persistence::load_session(user, shell, snapshot_dir.as_deref())?;
     serve(listener, session)
 }
 

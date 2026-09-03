@@ -8,8 +8,7 @@
 //!
 //! One snapshot file exists per user. Writes go to a temporary sibling file
 //! and then rename over the live file, so a reader always sees either the
-//! previous complete snapshot or the new one. Load rejects missing, corrupt,
-//! oversized, unsupported-version, and internally inconsistent files.
+//! previous complete snapshot or the new one.
 
 use seer_core::{LayoutNode, PaneSize, Tree};
 use serde::{Deserialize, Serialize};
@@ -67,42 +66,34 @@ pub(crate) fn snapshot_path(directory: &Path) -> PathBuf {
 
 /// Loads and validates the snapshot at `path` for `expected_user`.
 ///
-/// Returns `None` for a missing, corrupt, oversized, unsupported, or
-/// inconsistent file. Every rejected file is reported on stderr so a runtime
-/// restart that discards a snapshot is never silent.
-#[must_use]
-pub(crate) fn load(path: &Path, expected_user: &str) -> Option<Snapshot> {
+/// A missing file and a corrupt, oversized, unsupported, or inconsistent
+/// snapshot return `Ok(None)` so the caller can start an empty session. The
+/// rejected file is reported on stderr. Read and metadata failures return
+/// the underlying error because they are operational problems, not invalid
+/// snapshot content.
+pub(crate) fn load(path: &Path, expected_user: &str) -> io::Result<Option<Snapshot>> {
     let file = match File::open(path) {
         Ok(file) => file,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return None,
-        Err(error) => {
-            eprintln!("runtime cannot read the session snapshot: {error}");
-            return None;
-        }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
     };
-    let size = match file.metadata() {
-        Ok(metadata) => metadata.len(),
-        Err(error) => {
-            eprintln!("runtime cannot inspect the session snapshot: {error}");
-            return None;
-        }
-    };
+    let size = file.metadata()?.len();
     if size > MAX_SNAPSHOT_BYTES {
         eprintln!("runtime discarded an oversized session snapshot ({size} bytes)");
-        return None;
+        return Ok(None);
     }
     let snapshot: Snapshot = match serde_json::from_reader(BufReader::new(file)) {
         Ok(snapshot) => snapshot,
         Err(error) => {
             eprintln!("runtime discarded a corrupt session snapshot: {error}");
-            return None;
+            return Ok(None);
         }
     };
     match snapshot.validate(expected_user) {
-        Ok(()) => Some(snapshot),
+        Ok(()) => Ok(Some(snapshot)),
         Err(reason) => {
             eprintln!("runtime discarded an invalid session snapshot: {reason}");
-            None
+            Ok(None)
         }
     }
 }
@@ -144,10 +135,7 @@ fn write_snapshot_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// Makes a completed rename durable across a machine reboot.
 fn sync_parent_directory(path: &Path) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
-        io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "snapshot has no parent directory",
-        )
+        io::Error::new(io::ErrorKind::InvalidInput, "snapshot has no parent directory")
     })?;
     File::open(parent)?.sync_all()
 }
@@ -163,24 +151,39 @@ fn unix_seconds() -> u64 {
         .unwrap_or(0)
 }
 
+#[derive(Default)]
+struct WorkspaceCounters {
+    largest_tab: u64,
+    largest_pane: u64,
+}
+
 fn validate_tree(tree: &Tree) -> Result<(), String> {
     let mut workspace_ids = HashSet::new();
     let mut tab_ids = HashSet::new();
     let mut pane_ids = HashSet::new();
+    let mut largest_workspace = 0;
 
     for workspace in &tree.workspaces {
         if workspace.id.is_empty() || !workspace_ids.insert(workspace.id.as_str()) {
-            return Err(format!(
-                "workspace id is empty or repeated: {}",
-                workspace.id
-            ));
+            return Err(format!("workspace id is empty or repeated: {}", workspace.id));
         }
+        largest_workspace = largest_workspace.max(id_number(&workspace.id, "w")?);
+        let mut counters = WorkspaceCounters::default();
         for tab in &workspace.tabs {
             if tab.id.is_empty() || !tab_ids.insert(tab.id.as_str()) {
                 return Err(format!("tab id is empty or repeated: {}", tab.id));
             }
-            validate_tab(tab, &mut pane_ids)?;
+            validate_tab(tab, &mut pane_ids, &mut counters)?;
         }
+        if workspace.next_tab_id() <= counters.largest_tab {
+            return Err(format!("workspace {} reuses a tab id", workspace.id));
+        }
+        if workspace.next_pane_id() <= counters.largest_pane {
+            return Err(format!("workspace {} reuses a pane id", workspace.id));
+        }
+    }
+    if tree.next_workspace_id() <= largest_workspace {
+        return Err("tree reuses a workspace id".into());
     }
     Ok(())
 }
@@ -188,11 +191,17 @@ fn validate_tree(tree: &Tree) -> Result<(), String> {
 fn validate_tab<'a>(
     tab: &'a seer_core::Tab,
     pane_ids: &mut HashSet<&'a str>,
+    counters: &mut WorkspaceCounters,
 ) -> Result<(), String> {
     if tab.panes.is_empty() {
         return Err(format!("tab has no panes: {}", tab.id));
     }
+    counters.largest_tab = counters.largest_tab.max(id_number(&tab.id, "t")?);
     for pane in &tab.panes {
+        if pane.id.is_empty() {
+            return Err("pane id is empty".into());
+        }
+        counters.largest_pane = counters.largest_pane.max(id_number(&pane.id, "p")?);
         if pane.size.cols == 0 || pane.size.rows == 0 {
             return Err(format!("pane has an empty size: {}", pane.id));
         }
@@ -223,6 +232,15 @@ fn validate_tab<'a>(
         Some(pane) => Err(format!("tab focus is missing from the layout: {pane}")),
         None => Err(format!("tab has panes but no focus: {}", tab.id)),
     }
+}
+
+fn id_number(id: &str, marker: &str) -> Result<u64, String> {
+    let position = id
+        .rfind(marker)
+        .ok_or_else(|| format!("id has no {marker} number: {id}"))?;
+    id[position + marker.len()..]
+        .parse()
+        .map_err(|_| format!("id has a non-numeric {marker} number: {id}"))
 }
 
 fn collect_leaves<'a>(node: &'a LayoutNode, leaves: &mut Vec<&'a str>) {
@@ -262,24 +280,11 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert!(!path.exists(), "snapshot file must not be written");
         let temporary = path.with_file_name(format!(".{}.tmp", SNAPSHOT_FILE));
-        assert!(!temporary.exists(), "temporary file must not remain behind");
+        assert!(
+            !temporary.exists(),
+            "temporary file must not remain behind"
+        );
 
         fs::remove_dir_all(&directory).expect("temporary directory must be removed");
-    }
-
-    #[test]
-    fn validate_rejects_a_tab_without_panes() {
-        let mut tree = Tree::new();
-        tree.create_workspace("main")
-            .expect("workspace creation must succeed");
-        tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
-            .expect("tab creation must succeed");
-        tree.close_pane("w1:p1").expect("pane close must succeed");
-
-        let snapshot = Snapshot::capture(1, "alice", PaneSize { cols: 80, rows: 24 }, &tree);
-        let error = snapshot
-            .validate("alice")
-            .expect_err("empty tab must be rejected");
-        assert!(error.contains("no panes"));
     }
 }

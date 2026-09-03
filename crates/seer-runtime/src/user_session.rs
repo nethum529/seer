@@ -1,5 +1,5 @@
+use crate::persistence::{self, Store};
 use crate::PaneHost;
-use crate::snapshot::{self, Snapshot};
 use portable_pty::CommandBuilder;
 use seer_core::layout::{PaneRect, rects};
 use seer_core::proto::{ClientMsg, ServerMsg};
@@ -7,9 +7,7 @@ use seer_core::{
     PaneSize, TERMINAL_PROTOCOL_VERSION, Tab, TerminalCapabilities, TerminalInput, Tree, TreeError,
 };
 use std::collections::BTreeMap;
-use std::fs;
 use std::io;
-use std::path::{Path, PathBuf};
 
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
@@ -19,11 +17,10 @@ const DEFAULT_TAB_TITLE: &str = "shell";
 pub struct UserSession {
     pub user: String,
     pub tree: Tree,
-    shell: String,
-    viewport: PaneSize,
-    pane_hosts: BTreeMap<String, PaneHost>,
-    snapshot_path: Option<PathBuf>,
-    revision: u64,
+    pub(crate) shell: String,
+    pub(crate) viewport: PaneSize,
+    pub(crate) pane_hosts: BTreeMap<String, PaneHost>,
+    pub(crate) store: Option<Store>,
 }
 
 impl UserSession {
@@ -38,50 +35,8 @@ impl UserSession {
                 rows: DEFAULT_ROWS,
             },
             pane_hosts: BTreeMap::new(),
-            snapshot_path: None,
-            revision: 0,
+            store: None,
         }
-    }
-
-    /// Loads the session snapshot from `snapshot_dir`, or starts an empty
-    /// session when the directory is absent or the snapshot is unusable.
-    ///
-    /// A valid snapshot is restored with replacement shells. A missing,
-    /// corrupt, unsupported, or inconsistent snapshot always starts a safe
-    /// empty session instead of failing the runtime. The empty session keeps
-    /// the snapshot path, so the first shell it creates is persisted.
-    #[must_use]
-    pub fn load_or_new(
-        user: impl Into<String>,
-        shell: impl Into<String>,
-        snapshot_dir: Option<&Path>,
-    ) -> Self {
-        let user = user.into();
-        let shell = shell.into();
-        let Some(directory) = snapshot_dir else {
-            return Self::new(user, shell);
-        };
-        if let Err(error) = fs::create_dir_all(directory) {
-            eprintln!("runtime cannot open the snapshot directory: {error}");
-            return Self::new(user, shell);
-        }
-        let path = snapshot::snapshot_path(directory);
-        match snapshot::load(&path, &user) {
-            Some(snapshot) => match Self::from_snapshot(&user, &shell, path.clone(), snapshot) {
-                Ok(session) => session,
-                Err(error) => {
-                    eprintln!("runtime cannot restore the session snapshot: {error}");
-                    Self::with_snapshot_path(user, shell, path)
-                }
-            },
-            None => Self::with_snapshot_path(user, shell, path),
-        }
-    }
-
-    fn with_snapshot_path(user: String, shell: String, path: PathBuf) -> Self {
-        let mut session = Self::new(user, shell);
-        session.snapshot_path = Some(path);
-        session
     }
 
     pub fn apply(&mut self, msg: ClientMsg) -> io::Result<Vec<ServerMsg>> {
@@ -192,7 +147,7 @@ impl UserSession {
         let host = self.start_host(&pane_rect)?;
 
         self.pane_hosts.insert(pane.to_owned(), host);
-        self.persist();
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
@@ -229,7 +184,7 @@ impl UserSession {
         let host = self.start_host(&pane_rect)?;
         self.pane_hosts.insert(new_pane.to_owned(), host);
         self.resize_tab(workspace, &tab.id)?;
-        self.persist();
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
@@ -249,14 +204,14 @@ impl UserSession {
         } else {
             self.resize_tab(workspace, tab)?;
         }
-        self.persist();
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
     fn focus_pane(&mut self, workspace: &str, tab: &str, pane: &str) -> io::Result<Vec<ServerMsg>> {
         self.validate_pane(workspace, tab, pane)?;
         self.tree.focus_pane(pane).map_err(tree_error)?;
-        self.persist();
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
@@ -292,7 +247,7 @@ impl UserSession {
         self.tab(workspace, tab)?;
         self.viewport = PaneSize { cols, rows };
         self.resize_tab(workspace, tab)?;
-        self.persist();
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
@@ -331,78 +286,11 @@ impl UserSession {
         Ok(())
     }
 
-    fn start_host(&self, pane_rect: &PaneRect) -> io::Result<PaneHost> {
+    pub(crate) fn start_host(&self, pane_rect: &PaneRect) -> io::Result<PaneHost> {
         let mut command = CommandBuilder::new(&self.shell);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         PaneHost::start(command, pane_rect.cols, pane_rect.rows)
-    }
-
-    fn from_snapshot(
-        user: &str,
-        shell: &str,
-        path: PathBuf,
-        snapshot: Snapshot,
-    ) -> io::Result<Self> {
-        let mut session = Self {
-            user: user.to_owned(),
-            tree: snapshot.tree,
-            shell: shell.to_owned(),
-            viewport: snapshot.viewport,
-            pane_hosts: BTreeMap::new(),
-            snapshot_path: Some(path),
-            revision: snapshot.revision,
-        };
-        session.restore_hosts()?;
-        Ok(session)
-    }
-
-    /// Spawns one replacement shell per restored pane.
-    ///
-    /// The snapshot file is validated before this runs, so every pane id is
-    /// unique and every pane has a usable size. Each shell is started through
-    /// `start_host`, so restored panes receive the same environment as live
-    /// panes. Restoring never calls `create_tab`, so it cannot add a
-    /// duplicate first pane.
-    fn restore_hosts(&mut self) -> io::Result<()> {
-        let launches = self.pane_launches();
-        for (pane, size) in launches {
-            let pane_rect = PaneRect {
-                pane: pane.clone(),
-                cols: size.cols,
-                rows: size.rows,
-                x: 0,
-                y: 0,
-            };
-            let host = self.start_host(&pane_rect)?;
-            self.pane_hosts.insert(pane, host);
-        }
-        Ok(())
-    }
-
-    fn pane_launches(&self) -> Vec<(String, PaneSize)> {
-        self.tree
-            .workspaces
-            .iter()
-            .flat_map(|workspace| &workspace.tabs)
-            .flat_map(|tab| &tab.panes)
-            .map(|pane| (pane.id.clone(), pane.size))
-            .collect()
-    }
-
-    /// Writes the current session to the snapshot file.
-    ///
-    /// Persistence is best effort: a failed write must never break a live
-    /// mutation, so the error is only reported on stderr.
-    fn persist(&mut self) {
-        let Some(path) = &self.snapshot_path else {
-            return;
-        };
-        self.revision = self.revision.saturating_add(1);
-        let snapshot = Snapshot::capture(self.revision, &self.user, self.viewport, &self.tree);
-        if let Err(error) = snapshot::store(path, &snapshot) {
-            eprintln!("runtime snapshot save failed: {error}");
-        }
     }
 
     fn focused_pane(&self, workspace: &str, tab: &str) -> io::Result<&str> {
