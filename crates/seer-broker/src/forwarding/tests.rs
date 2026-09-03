@@ -114,7 +114,10 @@ fn non_owner_invite_reports_a_closed_client() {
 fn coordinator_new_uses_the_authenticated_owner() {
     let broker = TestBroker::new();
     let owner = broker.state.registry().people().expect("people must load")[0].clone();
-    let socket = crate::runtime::runtime_socket_path_for_test(&owner.user_id)
+    let socket = broker
+        .state
+        .runtimes()
+        .socket_path_for_test(&owner.user_id, &owner.name)
         .expect("runtime socket path must resolve");
     let _ = fs::remove_file(&socket);
     let listener =
@@ -140,7 +143,11 @@ fn peek_reports_registry_and_runtime_errors() {
     let (client, _peer) = tcp_pair();
     let mut coordinator = coordinator(client, &broker.state);
     let long_user = "u".repeat(100);
-    assert!(coordinator.switch_runtime(&long_user, None).is_err());
+    assert!(
+        coordinator
+            .switch_runtime(&long_user, "Owner", None)
+            .is_err()
+    );
 
     let poison = std::panic::catch_unwind(std::panic::AssertUnwindSafe(|| {
         broker.state.registry().poison_for_test();
@@ -168,13 +175,15 @@ fn coordinator_resolves_registered_user_ids() {
 
     assert!(
         coordinator
-            .user_exists(&owner_id)
+            .person(&owner_id)
             .expect("lookup must finish")
+            .is_some()
     );
     assert!(
-        !coordinator
-            .user_exists("missing")
+        coordinator
+            .person("missing")
             .expect("lookup must finish")
+            .is_none()
     );
 }
 
@@ -295,6 +304,7 @@ fn coordinator<'a>(client: TcpStream, broker: &'a BrokerState) -> Coordinator<'a
         attachment: None,
         client_id: "current-client".into(),
         owner: "alice",
+        owner_name: "Owner",
         owner_is_admin: true,
         broker,
         event_sender,
@@ -390,7 +400,10 @@ impl TestBroker {
             remote: false,
             state_dir: directory.clone(),
             owner_name: "Owner".into(),
-            shell: "sh".into(),
+            os_users: std::collections::HashMap::from([(
+                "Owner".into(),
+                crate::test_support::current_os_user(),
+            )]),
         };
         let (state, _) = BrokerState::new(&config).expect("broker state must initialize");
         Self { state, directory }

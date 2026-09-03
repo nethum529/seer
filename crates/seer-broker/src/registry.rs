@@ -112,12 +112,13 @@ impl Registry {
         Ok(self.lock()?.people.clone())
     }
 
-    pub(crate) fn person_exists(&self, user_id: &str) -> io::Result<bool> {
-        Ok(self
-            .lock()?
+    pub(crate) fn person(&self, user_id: &str) -> io::Result<Option<PersonRecord>> {
+        let data = self.lock()?;
+        Ok(data
             .people
             .iter()
-            .any(|person| person.user_id == user_id))
+            .find(|person| person.user_id == user_id)
+            .cloned())
     }
 
     pub(crate) fn create_seat(&self, lifetime_secs: u64) -> io::Result<String> {
@@ -303,13 +304,9 @@ mod tests {
         assert!(directory.join("seats.json").is_file());
         assert!(
             registry
-                .person_exists(&owner.user_id)
+                .person("missing")
                 .expect("lookup must finish")
-        );
-        assert!(
-            !registry
-                .person_exists("missing")
-                .expect("lookup must finish")
+                .is_none()
         );
         assert!(
             registry

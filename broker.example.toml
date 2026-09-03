@@ -2,3 +2,6 @@ listen = "127.0.0.1:7321"
 published_addr = "seer.example.com:7321"
 state_dir = "/var/lib/seer"
 owner_name = "owner"
+
+[os_users]
+owner = "owner"

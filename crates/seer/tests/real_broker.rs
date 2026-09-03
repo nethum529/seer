@@ -184,8 +184,8 @@ impl TestFiles {
 
     fn write_broker_files(&self, address: SocketAddr) {
         let config = format!(
-            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
-            self.state_dir.display()
+            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\n",
+            self.state_dir.display(),
         );
         fs::write(&self.broker_config, config).expect("broker config must write");
         let wrapper = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_ROOT/runtime-$2.pid\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
