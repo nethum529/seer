@@ -47,7 +47,7 @@ pub(crate) struct BrokerState {
 impl BrokerState {
     pub(crate) fn new(config: &Config) -> io::Result<(Self, Option<String>)> {
         let published = PublishedAddress::parse(&config.published_addr)?;
-        let runtimes = RuntimeManager::new(config.shell.clone(), config.state_dir.clone())?;
+        let runtimes = RuntimeManager::new(config.state_dir.clone(), config.os_users.clone())?;
         let (registry, owner_credential) = Registry::open(&config.state_dir, &config.owner_name)?;
         Ok((
             Self {
@@ -93,7 +93,7 @@ impl BrokerState {
             .into_iter()
             .map(|person| Person {
                 attached_clients: self.attachments.count(&person.user_id),
-                peekable: self.runtimes.is_running(&person.user_id),
+                peekable: self.runtimes.is_running(&person.user_id, &person.name),
                 user_id: person.user_id,
                 name: person.name,
             })
@@ -473,7 +473,7 @@ mod tests {
             remote: false,
             state_dir: PathBuf::from("/tmp/not-created-by-invalid-config"),
             owner_name: "Owner".into(),
-            shell: "sh".into(),
+            os_users: std::collections::HashMap::new(),
         };
         assert!(super::BrokerState::new(&config).is_err());
 
