@@ -128,9 +128,9 @@ mod tests {
 
     use super::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
     use crate::{
-        Cell, Color, ColorDepth, Cursor, InputEvent, KeyCode, KeyInput, Modifiers, PaneSize,
-        SplitDirection, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame,
-        TerminalInput, TerminalModes, Tree,
+        Cell, Color, Cursor, InputEvent, KeyCode, KeyInput, Modifiers, PaneSize, SplitDirection,
+        TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, TerminalInput,
+        TerminalModes, Tree,
     };
 
     fn assert_round_trip<T>(message: &T)
@@ -204,11 +204,6 @@ mod tests {
             ClientMsg::TerminalCapabilities {
                 capabilities: TerminalCapabilities {
                     protocol_version: TERMINAL_PROTOCOL_VERSION,
-                    color_depth: ColorDepth::TrueColor,
-                    mouse: true,
-                    bracketed_paste: true,
-                    focus_events: true,
-                    synchronized_output: true,
                 },
             },
             ClientMsg::TerminalInput {
@@ -316,7 +311,6 @@ mod tests {
                     ],
                     cursor: Cursor::default(),
                     modes: TerminalModes::default(),
-                    scrollback_offset: 0,
                 },
             },
             ServerMsg::Bye {
