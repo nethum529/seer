@@ -1,5 +1,5 @@
-use crate::snapshot::{self, Snapshot};
 use crate::PaneHost;
+use crate::snapshot::{self, Snapshot};
 use portable_pty::CommandBuilder;
 use seer_core::layout::{PaneRect, rects};
 use seer_core::proto::{ClientMsg, ServerMsg};
@@ -349,12 +349,21 @@ impl UserSession {
     /// Spawns one replacement shell per restored pane.
     ///
     /// The snapshot file is validated before this runs, so every pane id is
-    /// unique and every pane has a usable size. Restoring never calls
-    /// `create_tab`, so it cannot add a duplicate first pane.
+    /// unique and every pane has a usable size. Each shell is started through
+    /// `start_host`, so restored panes receive the same environment as live
+    /// panes. Restoring never calls `create_tab`, so it cannot add a
+    /// duplicate first pane.
     fn restore_hosts(&mut self) -> io::Result<()> {
         let launches = self.pane_launches();
         for (pane, size) in launches {
-            let host = PaneHost::start(CommandBuilder::new(&self.shell), size.cols, size.rows)?;
+            let pane_rect = PaneRect {
+                pane: pane.clone(),
+                cols: size.cols,
+                rows: size.rows,
+                x: 0,
+                y: 0,
+            };
+            let host = self.start_host(&pane_rect)?;
             self.pane_hosts.insert(pane, host);
         }
         Ok(())
@@ -379,13 +388,7 @@ impl UserSession {
             return;
         };
         self.revision = self.revision.saturating_add(1);
-        let snapshot = Snapshot::capture(
-            self.revision,
-            &self.user,
-            &self.shell,
-            self.viewport,
-            &self.tree,
-        );
+        let snapshot = Snapshot::capture(self.revision, &self.user, self.viewport, &self.tree);
         if let Err(error) = snapshot::store(path, &snapshot) {
             eprintln!("runtime snapshot save failed: {error}");
         }

@@ -1,9 +1,10 @@
 //! Versioned, atomic, bounded persistence for one user session.
 //!
-//! A snapshot stores the workspace tree, pane sizes, focus, launch context,
-//! and restart metadata. It is a declarative image only: it never contains a
-//! live process or a PTY descriptor. A cold restart replays the image by
-//! spawning replacement shells.
+//! A snapshot stores the workspace tree with its pane sizes and per-tab
+//! focus, the session viewport, and restart metadata. It is a declarative
+//! image only: it never contains a live process or a PTY descriptor. A cold
+//! restart replays the image by spawning replacement shells through the
+//! normal pane start path.
 //!
 //! One snapshot file exists per user. Writes go to a temporary sibling file
 //! and then rename over the live file, so a reader always sees either the
@@ -28,26 +29,18 @@ pub(crate) struct Snapshot {
     pub(crate) revision: u64,
     saved_at: u64,
     user: String,
-    shell: String,
     pub(crate) viewport: PaneSize,
     pub(crate) tree: Tree,
 }
 
 impl Snapshot {
     #[must_use]
-    pub(crate) fn capture(
-        revision: u64,
-        user: &str,
-        shell: &str,
-        viewport: PaneSize,
-        tree: &Tree,
-    ) -> Self {
+    pub(crate) fn capture(revision: u64, user: &str, viewport: PaneSize, tree: &Tree) -> Self {
         Self {
             version: CURRENT_VERSION,
             revision,
             saved_at: unix_seconds(),
             user: user.to_owned(),
-            shell: shell.to_owned(),
             viewport,
             tree: tree.clone(),
         }
@@ -59,9 +52,6 @@ impl Snapshot {
         }
         if self.user != expected_user {
             return Err("snapshot belongs to another user".into());
-        }
-        if self.shell.trim().is_empty() {
-            return Err("snapshot shell is empty".into());
         }
         if self.viewport.cols == 0 || self.viewport.rows == 0 {
             return Err("snapshot viewport is empty".into());
@@ -162,7 +152,10 @@ fn validate_tree(tree: &Tree) -> Result<(), String> {
     Ok(())
 }
 
-fn validate_tab<'a>(tab: &'a seer_core::Tab, pane_ids: &mut HashSet<&'a str>) -> Result<(), String> {
+fn validate_tab<'a>(
+    tab: &'a seer_core::Tab,
+    pane_ids: &mut HashSet<&'a str>,
+) -> Result<(), String> {
     for pane in &tab.panes {
         if pane.size.cols == 0 || pane.size.rows == 0 {
             return Err(format!("pane has an empty size: {}", pane.id));
