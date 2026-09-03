@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{PaneSize, Tree};
 
-use super::{SharedSession, SIZE_LEASE_TIMEOUT, handle_message, is_mutating, lock};
+use super::{SIZE_LEASE_TIMEOUT, SharedSession, handle_message, is_mutating, lock};
 use crate::UserSession;
 
 #[test]
@@ -211,7 +211,9 @@ fn size_lease_governs_per_client_resize_control() {
     let (peek_server, mut peek_client) = UnixStream::pair().expect("stream pair must open");
 
     // The first full attachment acquires the size lease.
-    shared.add_connection(1, owner_server).expect("owner must attach");
+    shared
+        .add_connection(1, owner_server)
+        .expect("owner must attach");
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
         pane_size_of(&read_until_tree(&mut owner_client)),
@@ -219,7 +221,9 @@ fn size_lease_governs_per_client_resize_control() {
     );
 
     // A second full attachment does not take the lease.
-    shared.add_connection(2, peer_server).expect("peer must attach");
+    shared
+        .add_connection(2, peer_server)
+        .expect("peer must attach");
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
         pane_size_of(&read_until_tree(&mut peer_client)),
@@ -240,13 +244,25 @@ fn size_lease_governs_per_client_resize_control() {
     .expect("owner resize must apply");
     assert_eq!(
         pane_size_of(&read_until_tree(&mut owner_client)),
-        PaneSize { cols: 120, rows: 40 }
+        PaneSize {
+            cols: 120,
+            rows: 40
+        }
     );
     assert_eq!(
         pane_size_of(&read_until_tree(&mut peer_client)),
-        PaneSize { cols: 120, rows: 40 }
+        PaneSize {
+            cols: 120,
+            rows: 40
+        }
     );
-    assert_eq!(session_pane_size(&shared), PaneSize { cols: 120, rows: 40 });
+    assert_eq!(
+        session_pane_size(&shared),
+        PaneSize {
+            cols: 120,
+            rows: 40
+        }
+    );
 
     // A resize from the peer is denied, but its own viewport is recorded.
     handle_message(
@@ -263,19 +279,36 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
         viewport_of(&shared, 2),
-        Some(PaneSize { cols: 100, rows: 30 })
+        Some(PaneSize {
+            cols: 100,
+            rows: 30
+        })
     );
     assert_eq!(
         viewport_of(&shared, 1),
-        Some(PaneSize { cols: 120, rows: 40 })
+        Some(PaneSize {
+            cols: 120,
+            rows: 40
+        })
     );
-    assert_eq!(session_pane_size(&shared), PaneSize { cols: 120, rows: 40 });
+    assert_eq!(
+        session_pane_size(&shared),
+        PaneSize {
+            cols: 120,
+            rows: 40
+        }
+    );
 
     // A peek attachment cannot resize the shared geometry.
-    shared.add_connection(3, peek_server).expect("peek viewer must attach");
+    shared
+        .add_connection(3, peek_server)
+        .expect("peek viewer must attach");
     assert_eq!(
         pane_size_of(&read_until_tree(&mut peek_client)),
-        PaneSize { cols: 120, rows: 40 }
+        PaneSize {
+            cols: 120,
+            rows: 40
+        }
     );
     handle_message(
         &shared,
@@ -290,7 +323,10 @@ fn size_lease_governs_per_client_resize_control() {
     assert!(read_only_of(&shared, 3));
     assert_eq!(
         pane_size_of(&read_until_tree(&mut peek_client)),
-        PaneSize { cols: 120, rows: 40 }
+        PaneSize {
+            cols: 120,
+            rows: 40
+        }
     );
     handle_message(
         &shared,
@@ -305,10 +341,18 @@ fn size_lease_governs_per_client_resize_control() {
     .expect("peek resize must be dropped");
     assert_eq!(viewport_of(&shared, 3), None);
     assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(session_pane_size(&shared), PaneSize { cols: 120, rows: 40 });
+    assert_eq!(
+        session_pane_size(&shared),
+        PaneSize {
+            cols: 120,
+            rows: 40
+        }
+    );
 
     // A peek disconnect does not move the lease.
-    shared.remove_connection(3).expect("peek viewer must detach");
+    shared
+        .remove_connection(3)
+        .expect("peek viewer must detach");
     assert_eq!(owner_id(&shared), Some(1));
 
     // An owner silent past the timeout loses the lease to the resizing peer.
@@ -357,7 +401,10 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(2));
     assert_eq!(
         viewport_of(&shared, 1),
-        Some(PaneSize { cols: 110, rows: 40 })
+        Some(PaneSize {
+            cols: 110,
+            rows: 40
+        })
     );
     assert_eq!(session_pane_size(&shared), PaneSize { cols: 90, rows: 30 });
 
@@ -367,9 +414,18 @@ fn size_lease_governs_per_client_resize_control() {
     assert_eq!(owner_id(&shared), Some(1));
     assert_eq!(
         pane_size_of(&read_until_tree(&mut owner_client)),
-        PaneSize { cols: 110, rows: 40 }
+        PaneSize {
+            cols: 110,
+            rows: 40
+        }
     );
-    assert_eq!(session_pane_size(&shared), PaneSize { cols: 110, rows: 40 });
+    assert_eq!(
+        session_pane_size(&shared),
+        PaneSize {
+            cols: 110,
+            rows: 40
+        }
+    );
 
     // The surviving attachment resizes normally.
     handle_message(
@@ -384,10 +440,19 @@ fn size_lease_governs_per_client_resize_control() {
     )
     .expect("survivor resize must apply");
     assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(session_pane_size(&shared), PaneSize { cols: 130, rows: 45 });
+    assert_eq!(
+        session_pane_size(&shared),
+        PaneSize {
+            cols: 130,
+            rows: 45
+        }
+    );
     assert_eq!(
         pane_size_of(&read_until_tree(&mut owner_client)),
-        PaneSize { cols: 130, rows: 45 }
+        PaneSize {
+            cols: 130,
+            rows: 45
+        }
     );
 }
 

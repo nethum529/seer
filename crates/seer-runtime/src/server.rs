@@ -192,9 +192,9 @@ impl SharedSession {
             return Err(connection_closed());
         }
         let mut connections = lock(&self.connections)?;
-        let owner_stale = connections.iter().any(|c| {
-            c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now()
-        });
+        let owner_stale = connections
+            .iter()
+            .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
         if owner_stale {
             for owner in connections.iter_mut() {
                 owner.size_owner = false;
@@ -259,9 +259,9 @@ impl SharedSession {
                 rows,
             });
             let lease_vacant = !connections.iter().any(|c| c.size_owner);
-            let owner_stale = connections.iter().any(|c| {
-                c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now()
-            });
+            let owner_stale = connections
+                .iter()
+                .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
             if !connections[position].size_owner && !lease_vacant && !owner_stale {
                 eprintln!("runtime denied resize for connection {id}: {cols}x{rows}");
                 return Ok(false);
