@@ -10,10 +10,16 @@ use seer_core::{InputEvent, TerminalInput};
 mod binary;
 #[path = "forwarding/support.rs"]
 mod support;
+#[path = "forwarding/extras.rs"]
+mod extras;
 
 use support::{
-    ProcessGuard, TestFiles, connect_when_ready, read_message, send, send_hello, unused_address,
-    wait_for_cells, wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
+    ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
+    wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
+};
+use extras::{
+    assert_log_contains, assert_log_excludes, assert_process_running, assert_runtime_arguments,
+    assert_socket_directory, pane_pid, send, wait_for_cells, write_config,
 };
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -22,7 +28,7 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
     let temporary = TestFiles::new();
     let address = unused_address();
-    temporary.write_config(address);
+    write_config(&temporary, address);
     temporary.write_runtime_wrapper();
     let broker = temporary.start_broker();
     let _broker = ProcessGuard::new(broker);
@@ -43,7 +49,7 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
             )),
         },
     );
-    let pane_pid = temporary.pane_pid("alice");
+    let pane_pid = pane_pid(&temporary, "alice");
     let runtime_pid = temporary.runtime_pid("alice");
 
     let mut bob = connect_when_ready(address);
@@ -65,10 +71,10 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
             reason: "client does not belong to this person".into()
         }
     );
-    temporary.assert_log_contains("broker refused DetachClient for user bob");
-    temporary.assert_log_excludes("runtime dropped read-only message");
-    temporary.assert_runtime_arguments("alice");
-    temporary.assert_socket_directory();
+    assert_log_contains(&temporary, "broker refused DetachClient for user bob");
+    assert_log_excludes(&temporary, "runtime dropped read-only message");
+    assert_runtime_arguments(&temporary, "alice");
+    assert_socket_directory(&temporary);
 
     let mut controller = connect_when_ready(address);
     send_hello(&mut controller, "alice", "alice-secret");
@@ -106,13 +112,13 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
     wait_for_disconnect(&mut alice);
 
     assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
-    temporary.assert_process_running(pane_pid);
+    assert_process_running(pane_pid);
     let mut reattached = connect_when_ready(address);
     send_hello(&mut reattached, "alice", "alice-secret");
     welcome_client_id(read_message(&mut reattached), "alice");
     drop(wait_for_tree_with_tab(&mut reattached));
     assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
-    temporary.assert_process_running(pane_pid);
+    assert_process_running(pane_pid);
 
     drop(reattached);
     drop(controller);

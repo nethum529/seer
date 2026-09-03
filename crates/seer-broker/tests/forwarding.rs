@@ -12,10 +12,16 @@ use seer_core::{InputEvent, TerminalInput};
 mod binary;
 #[path = "forwarding/support.rs"]
 mod support;
+#[path = "forwarding/extras.rs"]
+mod extras;
 
 use support::{
-    ProcessGuard, TestFiles, connect_when_ready, read_message, send, send_hello, unused_address,
-    wait_for_cells, wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
+    ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
+    wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
+};
+use extras::{
+    assert_log_contains, assert_log_excludes, assert_process_running, assert_runtime_arguments,
+    assert_socket_directory, pane_pid, send, wait_for_cells, write_config,
 };
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
@@ -25,7 +31,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     let temporary = TestFiles::new();
     let address = unused_address();
-    temporary.write_config(address);
+    write_config(&temporary, address);
     temporary.write_runtime_wrapper();
     let broker = temporary.start_broker();
     let _broker = ProcessGuard::new(broker);
@@ -42,10 +48,10 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
         pane,
         "sh -c 'printf \"%s\\n\" \"$PPID\" > \"$SEER_TEST_FILES/alice-pane.pid\"'\n",
     );
-    temporary.assert_process_running(temporary.pane_pid("alice"));
+    assert_process_running(pane_pid(&temporary, "alice"));
     let runtime_pid = temporary.runtime_pid("alice");
-    temporary.assert_runtime_arguments("alice");
-    temporary.assert_socket_directory();
+    assert_runtime_arguments(&temporary, "alice");
+    assert_socket_directory(&temporary);
     send(&mut first, &ClientMsg::Invite { hours: None });
     match wait_for_seat(&mut first) {
         ServerMsg::Seat {
@@ -92,7 +98,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
 fn routes_peek_and_restores_the_owners_runtime() {
     let temporary = TestFiles::new();
     let address = unused_address();
-    temporary.write_config(address);
+    write_config(&temporary, address);
     temporary.write_runtime_wrapper();
     let broker = temporary.start_broker();
     let _broker = ProcessGuard::new(broker);
@@ -159,9 +165,9 @@ fn routes_peek_and_restores_the_owners_runtime() {
 
     send(&mut bob, &ClientMsg::StopPeek);
     wait_for_tree_with_tab(&mut bob);
-    temporary.assert_log_contains("broker dropped Peek for unknown user: charlie");
-    temporary.assert_log_contains("broker dropped Input while user bob peeks");
-    temporary.assert_log_excludes("runtime dropped read-only message");
+    assert_log_contains(&temporary, "broker dropped Peek for unknown user: charlie");
+    assert_log_contains(&temporary, "broker dropped Input while user bob peeks");
+    assert_log_excludes(&temporary, "runtime dropped read-only message");
 
     send(
         &mut bob,
@@ -186,7 +192,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
 fn supervises_an_exited_runtime_and_starts_a_replacement() {
     let temporary = TestFiles::new();
     let address = unused_address();
-    temporary.write_config(address);
+    write_config(&temporary, address);
     temporary.write_runtime_wrapper();
     let broker = temporary.start_broker();
     let _broker = ProcessGuard::new(broker);
@@ -206,14 +212,14 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
     let alice_socket = temporary.terminate_runtime("alice");
     assert_path_removed(format!("/proc/{alice_pid}/status"));
     assert_path_removed(&alice_socket);
-    temporary.assert_process_running(bob_pid);
+    assert_process_running(bob_pid);
 
     let mut replacement = connect_when_ready(address);
     send_hello(&mut replacement, "alice", "alice-secret");
     drop(welcome_client_id(read_message(&mut replacement), "alice"));
     wait_for_tree_with_tab(&mut replacement);
     assert_ne!(temporary.runtime_pid("alice"), alice_pid);
-    temporary.assert_process_running(bob_pid);
+    assert_process_running(bob_pid);
 
     drop(alice);
     drop(bob);
