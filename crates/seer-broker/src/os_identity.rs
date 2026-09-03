@@ -318,6 +318,7 @@ fn set_supplementary_groups(groups: &[u32]) -> io::Result<()> {
     syscall_result(unsafe { setgroups(count, groups.as_ptr()) })
 }
 
+// Safety: These declarations match the target libc ABI.
 unsafe extern "C" {
     fn geteuid() -> u32;
     fn getegid() -> u32;
@@ -326,11 +327,13 @@ unsafe extern "C" {
 }
 
 #[cfg(target_os = "linux")]
+// Safety: These declarations match the target libc ABI.
 unsafe extern "C" {
     fn setgroups(size: usize, list: *const u32) -> c_int;
 }
 
 #[cfg(target_os = "macos")]
+// Safety: These declarations match the target libc ABI.
 unsafe extern "C" {
     fn setgroups(size: c_int, list: *const u32) -> c_int;
 }

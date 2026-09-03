@@ -1,11 +1,3 @@
-//! Forwarding and detach test helpers that are not part of the
-//! identity test support module.
-//!
-//! These helpers are included only by the forwarding and detach
-//! integration test crates. The identity test crate includes
-//! forwarding/support.rs alone, so nothing here can live in that
-//! shared module without causing dead code.
-
 use std::fs;
 use std::net::{SocketAddr, TcpStream};
 use std::os::unix::fs::PermissionsExt;
