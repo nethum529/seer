@@ -89,6 +89,7 @@ impl RuntimeManager {
             .arg(socket_path)
             .arg(user_id)
             .arg(&self.shell)
+            .env("SEER_SNAPSHOT_DIR", state_directory)
             .current_dir(state_directory)
             .stdin(Stdio::from(reader))
             .spawn()?;

@@ -1,12 +1,13 @@
 use std::env;
 use std::io::{self, Read};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::thread;
 
 pub mod pane_grid;
 mod pane_host;
 mod pty;
 mod server;
+mod snapshot;
 mod user_session;
 
 pub use pane_grid::{Cell, Color, PaneGrid};
@@ -16,12 +17,21 @@ pub use server::{bind, serve};
 pub use user_session::UserSession;
 
 const USAGE: &str = "usage: seer-runtime <socket-path> <user> <shell>";
+const SNAPSHOT_DIRECTORY_VAR: &str = "SEER_SNAPSHOT_DIR";
 
 pub fn run() -> io::Result<()> {
     let (socket_path, user, shell) = arguments()?;
     start_lifeline_watch()?;
     let listener = bind(Path::new(&socket_path))?;
-    serve(listener, UserSession::new(user, shell))
+    let snapshot_dir = snapshot_directory();
+    let session = UserSession::load_or_new(user, shell, snapshot_dir.as_deref());
+    serve(listener, session)
+}
+
+fn snapshot_directory() -> Option<PathBuf> {
+    env::var_os(SNAPSHOT_DIRECTORY_VAR)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
 }
 
 fn start_lifeline_watch() -> io::Result<()> {
