@@ -1,4 +1,4 @@
-use alacritty_terminal::event::VoidListener;
+use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
@@ -12,6 +12,7 @@ use seer_core::{
     TERMINAL_PROTOCOL_VERSION, TerminalFrame, TerminalInput, TerminalModes,
 };
 use std::io;
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::time::Instant;
 
 use crate::input::{encode_key, encode_mouse};
@@ -19,8 +20,9 @@ use crate::input::{encode_key, encode_mouse};
 const SCROLLBACK_LINES: usize = 1_000;
 
 pub struct PaneGrid {
-    terminal: Term<VoidListener>,
+    terminal: Term<TerminalReplies>,
     parser: Processor,
+    replies: Receiver<String>,
     input_changed: bool,
 }
 
@@ -32,9 +34,11 @@ impl PaneGrid {
             ..Config::default()
         };
 
+        let (reply_sender, replies) = mpsc::channel();
         Self {
-            terminal: Term::new(config, &dimensions, VoidListener),
+            terminal: Term::new(config, &dimensions, TerminalReplies(reply_sender)),
             parser: Processor::new(),
+            replies,
             input_changed: false,
         }
     }
@@ -45,6 +49,14 @@ impl PaneGrid {
         }
         self.parser.advance(&mut self.terminal, bytes);
         self.parser.sync_bytes_count() == 0
+    }
+
+    pub(crate) fn take_replies(&self) -> Vec<u8> {
+        let mut bytes = Vec::new();
+        for reply in self.replies.try_iter() {
+            bytes.extend(reply.into_bytes());
+        }
+        bytes
     }
 
     #[must_use]
@@ -176,6 +188,17 @@ impl PaneGrid {
             let before = self.terminal.grid().display_offset();
             self.terminal.scroll_display(Scroll::Delta(lines));
             self.input_changed = before != self.terminal.grid().display_offset();
+        }
+    }
+}
+
+#[derive(Clone)]
+struct TerminalReplies(Sender<String>);
+
+impl EventListener for TerminalReplies {
+    fn send_event(&self, event: Event) {
+        if let Event::PtyWrite(reply) = event {
+            let _ = self.0.send(reply);
         }
     }
 }
