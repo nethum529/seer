@@ -215,7 +215,7 @@ impl SharedSession {
                 .any(|connection| connection.id == id && connection.size_owner);
             connections.retain(|connection| connection.id != id);
             if removed_owner {
-                grant_next_owner(&mut *connections)
+                grant_next_owner(&mut connections)
             } else {
                 None
             }
@@ -300,7 +300,7 @@ impl SharedSession {
                 None
             } else {
                 connections[position].size_owner = false;
-                grant_next_owner(&mut *connections)
+                grant_next_owner(&mut connections)
             }
         };
         if let Some(viewport) = adopt {

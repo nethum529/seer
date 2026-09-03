@@ -2,7 +2,7 @@ use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_core::{
     ColorDepth, InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput,
 };
