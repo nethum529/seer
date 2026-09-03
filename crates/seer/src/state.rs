@@ -7,27 +7,46 @@ use seer_core::{Cell, Tab, Tree};
 pub(crate) struct ClientState {
     tree: Tree,
     buffers: HashMap<String, Vec<Vec<Cell>>>,
+    selected_workspace: Option<String>,
+    selected_tab: Option<String>,
     focused: Option<String>,
 }
 
 impl ClientState {
     pub(crate) fn new(tree: Tree) -> Self {
-        let focused = preferred_focus(&tree);
+        let (selected_workspace, selected_tab) = first_selection(&tree)
+            .map_or((None, None), |(workspace, tab)| {
+                (Some(workspace), Some(tab))
+            });
+        let focused = selected_tab_in(
+            &tree,
+            selected_workspace.as_deref(),
+            selected_tab.as_deref(),
+        )
+        .and_then(preferred_focus);
         Self {
             tree,
             buffers: HashMap::new(),
+            selected_workspace,
+            selected_tab,
             focused,
         }
     }
 
     pub(crate) fn replace_tree(&mut self, tree: Tree) {
         self.tree = tree;
+        if self.visible_tab().is_none() {
+            (self.selected_workspace, self.selected_tab) = first_selection(&self.tree)
+                .map_or((None, None), |(workspace, tab)| {
+                    (Some(workspace), Some(tab))
+                });
+        }
         let focus_is_valid = self
             .focused
             .as_deref()
             .is_some_and(|pane| self.visible_pane_ids().any(|id| id == pane));
         if !focus_is_valid {
-            self.focused = preferred_focus(&self.tree);
+            self.focused = self.visible_tab().and_then(preferred_focus);
         }
     }
 
@@ -49,7 +68,22 @@ impl ClientState {
     }
 
     pub(crate) fn visible_tab(&self) -> Option<&Tab> {
-        self.tree.workspaces.first()?.tabs.first()
+        selected_tab_in(
+            &self.tree,
+            self.selected_workspace.as_deref(),
+            self.selected_tab.as_deref(),
+        )
+    }
+
+    pub(crate) fn selection(&self) -> Option<(&str, &str)> {
+        Some((
+            self.selected_workspace.as_deref()?,
+            self.selected_tab.as_deref()?,
+        ))
+    }
+
+    pub(crate) fn selected_workspace(&self) -> Option<&str> {
+        self.selected_workspace.as_deref()
     }
 
     pub(crate) fn pane_rows(&self, pane: &str) -> &[Vec<Cell>] {
@@ -64,8 +98,29 @@ impl ClientState {
     }
 }
 
-fn preferred_focus(tree: &Tree) -> Option<String> {
-    let tab = tree.workspaces.first()?.tabs.first()?;
+fn first_selection(tree: &Tree) -> Option<(String, String)> {
+    tree.workspaces.iter().find_map(|workspace| {
+        workspace
+            .tabs
+            .first()
+            .map(|tab| (workspace.id.clone(), tab.id.clone()))
+    })
+}
+
+fn selected_tab_in<'a>(
+    tree: &'a Tree,
+    workspace: Option<&str>,
+    tab: Option<&str>,
+) -> Option<&'a Tab> {
+    tree.workspaces
+        .iter()
+        .find(|candidate| Some(candidate.id.as_str()) == workspace)?
+        .tabs
+        .iter()
+        .find(|candidate| Some(candidate.id.as_str()) == tab)
+}
+
+fn preferred_focus(tab: &Tab) -> Option<String> {
     tab.layout
         .focused
         .as_ref()

@@ -151,6 +151,7 @@ fn peek_reports_registry_and_runtime_errors() {
             .handle_client_message(ClientMsg::Peek {
                 user: "missing".into(),
                 workspace: String::new(),
+                tab: String::new(),
             })
             .is_err()
     );
@@ -247,7 +248,13 @@ fn client_reader_stops_if_the_event_receiver_is_gone() {
     drop(events);
     let reader = spawn_client_reader(server, sender);
 
-    codec::encode(&mut client, &ClientMsg::CreateTab).expect("message must encode");
+    codec::encode(
+        &mut client,
+        &ClientMsg::CreateTab {
+            workspace: "w1".into(),
+        },
+    )
+    .expect("message must encode");
     let stopped = wait_for_thread(&reader.thread);
     if !stopped {
         let _ = client.shutdown(std::net::Shutdown::Both);
