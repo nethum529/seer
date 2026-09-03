@@ -16,7 +16,9 @@ use seer_core::{
 };
 use seer_net::{Socket, Stream};
 
-use crate::input::{InputAction, is_control_char, key_to_action, mouse_to_input};
+use crate::input::{
+    InputAction, is_control_char, key_to_action, mouse_event_is_tracked, mouse_to_input,
+};
 use crate::render::PaneCells;
 use crate::state::{ClientState, pane_rects};
 use crate::terminal_session::{TerminalSession, ignore_setup_disconnect, set_cursor_style};
@@ -325,6 +327,9 @@ fn handle_mouse<S: Stream>(
     let Some((pane, column, row)) = state.mouse_target(mouse.column, mouse.row) else {
         return Ok(LoopControl::Continue);
     };
+    if !mouse_event_is_tracked(mouse.kind, state.pane_mouse_tracking(&pane)) {
+        return Ok(LoopControl::Continue);
+    }
     let Some((workspace, tab)) = state
         .selection()
         .map(|(workspace, tab)| (workspace.to_owned(), tab.to_owned()))

@@ -128,6 +128,7 @@ pub struct TerminalModes {
     pub bracketed_paste: bool,
     pub focus_events: bool,
     pub mouse_protocol: MouseProtocol,
+    pub mouse_tracking: MouseTracking,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
@@ -137,6 +138,15 @@ pub enum MouseProtocol {
     Normal,
     Utf8,
     Sgr,
+}
+
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum MouseTracking {
+    #[default]
+    None,
+    Click,
+    ButtonMotion,
+    AnyMotion,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
