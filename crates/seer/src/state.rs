@@ -1,15 +1,16 @@
 use std::collections::HashMap;
 
 use ratatui::layout::Rect;
-use seer_core::{Cell, Tab, Tree};
+use seer_core::{Cell, Cursor, Tab, TerminalFrame, Tree};
 
 #[derive(Debug)]
 pub(crate) struct ClientState {
     tree: Tree,
-    buffers: HashMap<String, Vec<Vec<Cell>>>,
+    frames: HashMap<String, TerminalFrame>,
     selected_workspace: Option<String>,
     selected_tab: Option<String>,
     focused: Option<String>,
+    pane_areas: Vec<(String, Rect)>,
 }
 
 impl ClientState {
@@ -26,10 +27,11 @@ impl ClientState {
         .and_then(preferred_focus);
         Self {
             tree,
-            buffers: HashMap::new(),
+            frames: HashMap::new(),
             selected_workspace,
             selected_tab,
             focused,
+            pane_areas: Vec::new(),
         }
     }
 
@@ -50,8 +52,8 @@ impl ClientState {
         }
     }
 
-    pub(crate) fn apply_cells(&mut self, pane: String, rows: Vec<Vec<Cell>>) {
-        self.buffers.insert(pane, rows);
+    pub(crate) fn apply_frame(&mut self, pane: String, frame: TerminalFrame) {
+        self.frames.insert(pane, frame);
     }
 
     pub(crate) fn focus_number(&mut self, number: usize) -> Option<String> {
@@ -65,6 +67,10 @@ impl ClientState {
 
     pub(crate) fn focused(&self) -> Option<&str> {
         self.focused.as_deref()
+    }
+
+    pub(crate) fn set_focus(&mut self, pane: String) {
+        self.focused = Some(pane);
     }
 
     pub(crate) fn visible_tab(&self) -> Option<&Tab> {
@@ -87,7 +93,27 @@ impl ClientState {
     }
 
     pub(crate) fn pane_rows(&self, pane: &str) -> &[Vec<Cell>] {
-        self.buffers.get(pane).map_or(&[], Vec::as_slice)
+        self.frames
+            .get(pane)
+            .map_or(&[], |frame| frame.rows.as_slice())
+    }
+
+    pub(crate) fn pane_cursor(&self, pane: &str) -> Option<Cursor> {
+        self.frames.get(pane).map(|frame| frame.cursor)
+    }
+
+    pub(crate) fn set_pane_areas(&mut self, areas: Vec<(String, Rect)>) {
+        self.pane_areas = areas;
+    }
+
+    pub(crate) fn mouse_target(&self, column: u16, row: u16) -> Option<(String, u16, u16)> {
+        self.pane_areas.iter().find_map(|(pane, area)| {
+            let inside = column >= area.x
+                && column < area.x.saturating_add(area.width)
+                && row >= area.y
+                && row < area.y.saturating_add(area.height);
+            inside.then(|| (pane.clone(), column - area.x, row - area.y))
+        })
     }
 
     fn visible_pane_ids(&self) -> impl Iterator<Item = &str> {
@@ -149,7 +175,9 @@ pub(crate) fn pane_rects(tab: &Tab, area: Rect) -> Vec<(String, Rect)> {
 #[cfg(test)]
 mod tests {
     use ratatui::layout::Rect;
-    use seer_core::{Cell, Color, PaneSize, SplitDirection, Tree};
+    use seer_core::{
+        Cell, Color, Cursor, PaneSize, SplitDirection, TerminalFrame, TerminalModes, Tree,
+    };
 
     use super::{ClientState, pane_rects};
 
@@ -174,7 +202,15 @@ mod tests {
             strikeout: false,
         }]];
 
-        state.apply_cells("w1:p1".into(), rows.clone());
+        state.apply_frame(
+            "w1:p1".into(),
+            TerminalFrame {
+                rows: rows.clone(),
+                cursor: Cursor::default(),
+                modes: TerminalModes::default(),
+                scrollback_offset: 0,
+            },
+        );
 
         assert_eq!(state.pane_rows("w1:p1"), rows);
         assert!(state.pane_rows("w1:p2").is_empty());

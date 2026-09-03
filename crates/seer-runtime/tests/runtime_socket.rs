@@ -10,6 +10,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::{InputEvent, TerminalInput};
 
 mod support;
 use support::*;
@@ -213,6 +214,7 @@ fn wait_for_socket_replacement(path: &Path, stale_inode: u64) {
     }
 }
 
+
 fn assert_cells_contain(stream: &mut UnixStream, expected: &str) {
     let cells = wait_for_cells_containing(stream, expected);
     assert!(cells.contains(expected));
@@ -225,8 +227,9 @@ fn wait_for_cells_containing(stream: &mut UnixStream, expected: &str) -> String 
             start.elapsed() < MESSAGE_TIMEOUT,
             "Cells did not contain {expected}"
         );
-        if let ServerMsg::Cells { rows, .. } = read_message(stream) {
-            let text = rows
+        if let ServerMsg::Cells { frame, .. } = read_message(stream) {
+            let text = frame
+                .rows
                 .iter()
                 .flatten()
                 .map(|cell| cell.character)
