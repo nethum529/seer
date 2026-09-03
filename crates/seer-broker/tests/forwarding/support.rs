@@ -20,8 +20,8 @@ static BROKER_BINARY: OnceLock<PathBuf> = OnceLock::new();
 static RUNTIME_BINARY: OnceLock<PathBuf> = OnceLock::new();
 
 pub struct TestFiles {
-    root: PathBuf,
-    state_dir: PathBuf,
+    pub root: PathBuf,
+    pub state_dir: PathBuf,
     config: PathBuf,
     wrapper: PathBuf,
     broker_log: PathBuf,
@@ -52,6 +52,16 @@ impl TestFiles {
     }
 
     pub fn write_config(&self, address: SocketAddr) {
+        let os_user = current_os_user();
+        self.write_config_with_os_users(address, &os_user, &os_user);
+    }
+
+    pub fn write_config_with_os_users(
+        &self,
+        address: SocketAddr,
+        alice_os_user: &str,
+        bob_os_user: &str,
+    ) {
         fs::create_dir(&self.state_dir).expect("state directory must be created");
         let alice_hash = hash("alice-secret");
         let bob_hash = hash("bob-secret");
@@ -61,14 +71,14 @@ impl TestFiles {
         fs::write(self.state_dir.join("people.json"), people).expect("people registry must write");
         fs::write(self.state_dir.join("seats.json"), "[]\n").expect("seat registry must write");
         let contents = format!(
-            "listen = \"{address}\"\npublished_addr = \"host:7321\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
-            self.state_dir.display()
+            "listen = \"{address}\"\npublished_addr = \"host:7321\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\n\n[os_users]\nalice = \"{alice_os_user}\"\nbob = \"{bob_os_user}\"\n",
+            self.state_dir.display(),
         );
         fs::write(&self.config, contents).expect("broker config must write");
     }
 
     pub fn write_runtime_wrapper(&self) {
-        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
+        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nprintf '%s\\n%s\\n%s\\n' \"$(id -u)\" \"$HOME\" \"$SHELL\" > \"$SEER_TEST_FILES/$2.identity\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
         fs::write(&self.wrapper, script).expect("runtime wrapper must write");
         fs::set_permissions(&self.wrapper, fs::Permissions::from_mode(0o700))
             .expect("runtime wrapper mode must set");
@@ -127,12 +137,13 @@ impl TestFiles {
         let arguments = fs::read_to_string(arguments_file).expect("runtime arguments must read");
         let expected_socket = self.xdg_runtime_dir.join(format!("seer/{user}.sock"));
         let expected_state = self.state_dir.join("users").join(user);
+        let shell = current_login_shell();
         assert_eq!(
             arguments.lines().collect::<Vec<_>>(),
             [
                 expected_socket.to_string_lossy().as_ref(),
                 user,
-                "sh",
+                shell.as_str(),
                 expected_state.to_string_lossy().as_ref()
             ]
         );
@@ -172,6 +183,32 @@ impl TestFiles {
         let contents = fs::read_to_string(&self.broker_log).expect("broker log must read");
         assert!(!contents.contains(unexpected));
     }
+}
+
+fn current_os_user() -> String {
+    command_output("id", &["-un"])
+}
+
+fn current_login_shell() -> String {
+    let user = current_os_user();
+    let record = command_output("getent", &["passwd", &user]);
+    record
+        .split(':')
+        .nth(6)
+        .expect("password record must contain a shell")
+        .to_owned()
+}
+
+fn command_output(program: &str, arguments: &[&str]) -> String {
+    let output = Command::new(program)
+        .args(arguments)
+        .output()
+        .expect("account command must run");
+    assert!(output.status.success(), "account command must succeed");
+    String::from_utf8(output.stdout)
+        .expect("account output must be UTF-8")
+        .trim()
+        .to_owned()
 }
 
 impl Drop for TestFiles {

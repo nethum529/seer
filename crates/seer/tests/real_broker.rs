@@ -183,9 +183,18 @@ impl TestFiles {
     }
 
     fn write_broker_files(&self, address: SocketAddr) {
+        let os_user = String::from_utf8(
+            Command::new("id")
+                .arg("-un")
+                .output()
+                .expect("id command must run")
+                .stdout,
+        )
+        .expect("id output must be UTF-8");
+        let os_user = os_user.trim();
         let config = format!(
-            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
-            self.state_dir.display()
+            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\n\n[os_users]\nowner = \"{os_user}\"\nbob = \"{os_user}\"\n",
+            self.state_dir.display(),
         );
         fs::write(&self.broker_config, config).expect("broker config must write");
         let wrapper = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_ROOT/runtime-$2.pid\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";

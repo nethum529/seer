@@ -33,6 +33,7 @@ struct Coordinator<'a> {
     attachment: Option<AttachmentGuard<'a>>,
     client_id: String,
     owner: &'a str,
+    owner_name: &'a str,
     owner_is_admin: bool,
     broker: &'a BrokerState,
     event_sender: SyncSender<Event>,
@@ -61,7 +62,19 @@ impl<'a> Coordinator<'a> {
                 tree: Tree::new(),
             },
         )?;
-        let runtime = connect_runtime(broker, &owner.user_id, None, &event_sender)?;
+        let runtime =
+            match connect_runtime(broker, &owner.user_id, &owner.name, None, &event_sender) {
+                Ok(runtime) => runtime,
+                Err(error) => {
+                    write_client(
+                        &client,
+                        &ServerMsg::Refused {
+                            reason: error.to_string(),
+                        },
+                    )?;
+                    return Err(error);
+                }
+            };
         let client_reader = spawn_client_reader(client_reader, event_sender.clone());
         Ok(Self {
             client,
@@ -69,6 +82,7 @@ impl<'a> Coordinator<'a> {
             attachment: Some(attachment),
             client_id,
             owner: &owner.user_id,
+            owner_name: &owner.name,
             owner_is_admin: owner.is_owner,
             broker,
             event_sender,
@@ -128,12 +142,13 @@ impl<'a> Coordinator<'a> {
                     })?;
                 }
             }
-            ClientMsg::Peek { ref user, .. } if self.user_exists(user)? => {
-                self.switch_runtime(user, Some(&message))?;
+            ClientMsg::Peek { ref user, .. } => {
+                let Some(person) = self.person(user)? else {
+                    eprintln!("broker dropped Peek for unknown user: {user}");
+                    return Ok(Action::Continue);
+                };
+                self.switch_runtime(&person.user_id, &person.name, Some(&message))?;
                 self.peeking = true;
-            }
-            ClientMsg::Peek { user, .. } => {
-                eprintln!("broker dropped Peek for unknown user: {user}");
             }
             ClientMsg::StopPeek if self.peeking => self.stop_peek()?,
             ClientMsg::StopPeek => {}
@@ -166,8 +181,8 @@ impl<'a> Coordinator<'a> {
         }
     }
 
-    fn user_exists(&self, user_id: &str) -> io::Result<bool> {
-        self.broker.registry().person_exists(user_id)
+    fn person(&self, user_id: &str) -> io::Result<Option<PersonRecord>> {
+        self.broker.registry().person(user_id)
     }
 
     fn runtime_is(&self, identity: &Arc<()>) -> bool {
@@ -190,14 +205,20 @@ impl<'a> Coordinator<'a> {
 
     fn stop_peek(&mut self) -> io::Result<()> {
         self.peeking = false;
-        self.switch_runtime(self.owner, None)
+        self.switch_runtime(self.owner, self.owner_name, None)
     }
 
-    fn switch_runtime(&mut self, user: &str, first: Option<&ClientMsg>) -> io::Result<()> {
+    fn switch_runtime(
+        &mut self,
+        user: &str,
+        person_name: &str,
+        first: Option<&ClientMsg>,
+    ) -> io::Result<()> {
         self.close_runtime()?;
         self.runtime = Some(connect_runtime(
             self.broker,
             user,
+            person_name,
             first,
             &self.event_sender,
         )?);
@@ -241,10 +262,11 @@ struct RuntimeConnection {
 fn connect_runtime(
     broker: &BrokerState,
     user: &str,
+    person_name: &str,
     first: Option<&ClientMsg>,
     sender: &SyncSender<Event>,
 ) -> io::Result<RuntimeConnection> {
-    let mut stream = broker.runtimes().connect(user)?;
+    let mut stream = broker.runtimes().connect(user, person_name)?;
     if let Some(message) = first {
         codec::encode(&mut stream, message)?;
     }

@@ -6,6 +6,7 @@ mod attachments;
 mod config;
 mod connection_limit;
 mod forwarding;
+mod os_identity;
 mod registry;
 mod runtime;
 mod server;

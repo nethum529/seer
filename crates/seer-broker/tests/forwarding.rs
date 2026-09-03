@@ -1,8 +1,11 @@
 #![cfg(target_os = "linux")]
 
+use std::fs;
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::os::unix::fs::{MetadataExt, PermissionsExt};
 use std::path::Path;
+use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -17,6 +20,95 @@ use support::{ProcessGuard, TestFiles};
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[test]
+fn uses_the_mapped_os_identity_and_rejects_an_unsafe_account() {
+    let temporary = TestFiles::new();
+    let account = current_account();
+    let unsafe_account = "x".repeat(65);
+    let address = unused_address();
+    temporary.write_config_with_os_users(address, &account.name, &unsafe_account);
+    temporary.write_runtime_wrapper();
+    let broker = temporary.start_broker();
+    let _broker = ProcessGuard::new(broker);
+
+    let mut rejected = connect_when_ready(address);
+    send_hello(&mut rejected, "bob", "bob-secret");
+    assert_welcome(read_message(&mut rejected), "bob");
+    assert_eq!(
+        read_message(&mut rejected),
+        ServerMsg::Refused {
+            reason: "OS account name is unsafe".into()
+        }
+    );
+    wait_for_disconnect(&mut rejected);
+    temporary.assert_log_contains("OS account name is unsafe");
+
+    let mut accepted = connect_when_ready(address);
+    send_hello(&mut accepted, "alice", "alice-secret");
+    assert_welcome(read_message(&mut accepted), "alice");
+    wait_for_tree_with_tab(&mut accepted);
+    assert_runtime_identity(&temporary, "alice", &account);
+    temporary.terminate_runtime("alice");
+}
+
+struct OsAccount {
+    name: String,
+    uid: String,
+    gid: String,
+    home: String,
+    shell: String,
+}
+
+fn current_account() -> OsAccount {
+    let name = command_output("id", &["-un"]);
+    let uid = command_output("id", &["-u"]);
+    let gid = command_output("id", &["-g"]);
+    let record = command_output("getent", &["passwd", &name]);
+    let fields = record.split(':').collect::<Vec<_>>();
+    assert_eq!(fields.len(), 7, "password record must have seven fields");
+    OsAccount {
+        name,
+        uid,
+        gid,
+        home: fields[5].to_owned(),
+        shell: fields[6].to_owned(),
+    }
+}
+
+fn command_output(program: &str, arguments: &[&str]) -> String {
+    let output = Command::new(program)
+        .args(arguments)
+        .output()
+        .expect("account command must run");
+    assert!(output.status.success(), "account command must succeed");
+    String::from_utf8(output.stdout)
+        .expect("account output must be UTF-8")
+        .trim()
+        .to_owned()
+}
+
+fn assert_runtime_identity(temporary: &TestFiles, user: &str, account: &OsAccount) {
+    let identity_file = temporary.root.join(format!("{user}.identity"));
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while Instant::now() < deadline && !identity_file.is_file() {
+        thread::sleep(POLL_INTERVAL);
+    }
+    let identity = fs::read_to_string(identity_file).expect("runtime identity must read");
+    assert_eq!(
+        identity.lines().collect::<Vec<_>>(),
+        [
+            account.uid.as_str(),
+            account.home.as_str(),
+            account.shell.as_str()
+        ]
+    );
+    let state = temporary.state_dir.join("users").join(user);
+    let metadata = fs::metadata(state).expect("runtime state metadata must load");
+    assert_eq!(metadata.uid().to_string(), account.uid);
+    assert_eq!(metadata.gid().to_string(), account.gid);
+    assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
+}
 
 #[test]
 fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
@@ -37,7 +129,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     send_input(
         &mut first,
         pane,
-        "printf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/alice-pane.pid\"\n",
+        "sh -c 'printf \"%s\\n\" \"$PPID\" > \"$SEER_TEST_FILES/alice-pane.pid\"'\n",
     );
     temporary.assert_process_running(temporary.pane_pid("alice"));
     let runtime_pid = temporary.runtime_pid("alice");

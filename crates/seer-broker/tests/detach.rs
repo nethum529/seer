@@ -35,7 +35,8 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
         &mut alice,
         &ClientMsg::Input {
             pane: "w1:p1".into(),
-            bytes: b"printf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/alice-pane.pid\"\n".to_vec(),
+            bytes: b"sh -c 'printf \"%s\\n\" \"$PPID\" > \"$SEER_TEST_FILES/alice-pane.pid\"'\n"
+                .to_vec(),
         },
     );
     let pane_pid = temporary.pane_pid("alice");

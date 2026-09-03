@@ -58,8 +58,24 @@ iroh), WireGuard libraries (wrong boundary, no traversal).
 - The friend reaches the Seer protocol only. Seer offers no port
   forwarding, no file transfer, no generic command channel.
 - The friend still gets a shell on the owner machine by design.
-  That shell has the rights of the Unix user who runs the broker.
-  This ADR does not change that. See docs/research/16.
+  The OS identity rules below control that shell. See
+  docs/research/08 and docs/research/09.
+
+### OS identity deployment
+
+- broker.toml has an os_users table. Each key is an exact Seer
+  person name. Each value is an existing OS account name. Seer
+  does not create OS accounts.
+- A Linux broker can launch its own account without extra rights.
+  A multi-user broker runs as a system service with rights to set
+  groups, GID, and UID. It sets HOME, USER, LOGNAME, and SHELL from
+  the target account. Each runtime uses that account shell and owns
+  a mode 0700 state directory.
+- A missing, unsafe, unknown, or unauthorized mapping refuses that
+  runtime connection. The broker continues to serve other users.
+- The multiplayer MVP server runs on Linux. macOS is a supported
+  client platform and uses the identities on the Linux server.
+  A macOS broker service is not supported in this release.
 
 ### Identity and invite
 

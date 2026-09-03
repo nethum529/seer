@@ -3,6 +3,7 @@ use serde::{Deserialize, Serialize};
 use std::process::ExitCode;
 #[cfg(target_os = "linux")]
 use std::{
+    collections::BTreeMap,
     env,
     fs::{self, File, OpenOptions},
     io::{self, Read, Seek, SeekFrom, Write},
@@ -31,6 +32,8 @@ struct BrokerConfig {
     remote: bool,
     owner_name: String,
     state_dir: PathBuf,
+    #[serde(default)]
+    os_users: BTreeMap<String, String>,
 }
 #[cfg(target_os = "linux")]
 #[derive(Default, Deserialize, Serialize)]
@@ -127,8 +130,9 @@ fn prompt_config() -> io::Result<BrokerConfig> {
         listen,
         published_addr: listen.to_string(),
         remote: true,
-        owner_name,
+        owner_name: owner_name.clone(),
         state_dir: state_dir()?,
+        os_users: BTreeMap::from([(owner_name.clone(), login)]),
     })
 }
 #[cfg(target_os = "linux")]
