@@ -68,6 +68,19 @@ impl UserSession {
             .collect()
     }
 
+    #[must_use]
+    pub(crate) fn snapshot(&mut self) -> Vec<ServerMsg> {
+        for host in self.pane_hosts.values_mut() {
+            host.poll();
+        }
+        let mut messages = self.tree_message();
+        messages.extend(self.pane_hosts.iter().map(|(pane, host)| ServerMsg::Cells {
+            pane: pane.clone(),
+            rows: host.cells(),
+        }));
+        messages
+    }
+
     pub(crate) fn ensure_first_shell(&mut self) -> io::Result<()> {
         if self
             .tree

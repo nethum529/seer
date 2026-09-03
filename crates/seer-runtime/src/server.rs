@@ -86,7 +86,7 @@ fn handle_message(
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
         ClientMsg::Peek { .. } => {
             *read_only = true;
-            shared.send_tree(connection_id)?;
+            shared.send_snapshot(connection_id)?;
             Ok(false)
         }
         message if *read_only && is_mutating(&message) => {
@@ -159,12 +159,7 @@ impl SharedSession {
         let mut session = lock(&self.session)?;
         session.ensure_first_shell()?;
         let mut connections = lock(&self.connections)?;
-        write_messages(
-            &mut stream,
-            &[ServerMsg::Tree {
-                tree: session.tree.clone(),
-            }],
-        )?;
+        write_messages(&mut stream, &session.snapshot())?;
         connections.push(Connection { id, stream });
         self.connection_opened.notify_one();
         Ok(())
@@ -175,17 +170,15 @@ impl SharedSession {
         Ok(())
     }
 
-    fn send_tree(&self, id: u64) -> io::Result<()> {
-        let session = lock(&self.session)?;
-        let message = ServerMsg::Tree {
-            tree: session.tree.clone(),
-        };
+    fn send_snapshot(&self, id: u64) -> io::Result<()> {
+        let mut session = lock(&self.session)?;
+        let messages = session.snapshot();
         let mut connections = lock(&self.connections)?;
         let position = connections
             .iter()
             .position(|connection| connection.id == id)
             .ok_or_else(connection_closed)?;
-        let result = write_messages(&mut connections[position].stream, &[message]);
+        let result = write_messages(&mut connections[position].stream, &messages);
         if result.is_err() {
             connections.remove(position);
         }
@@ -294,7 +287,11 @@ mod tests {
 
     #[test]
     fn removes_only_the_requested_connection() {
-        let shared = SharedSession::new(UserSession::new("alice", "sh"));
+        let mut session = UserSession::new("alice", "sh");
+        session
+            .apply(ClientMsg::Resize { cols: 1, rows: 1 })
+            .expect("session must resize");
+        let shared = SharedSession::new(session);
         let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
         let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
         shared
