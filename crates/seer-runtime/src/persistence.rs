@@ -1,14 +1,10 @@
-//! Session-level snapshot glue: the store handle, cold restore, and save.
-//!
-//! This module keeps UserSession small. It owns the snapshot file path and
-//! revision, restores a session from a snapshot at startup, and saves the
-//! session after every topology mutation.
-
 use crate::snapshot::{self, Snapshot};
 use crate::user_session::UserSession;
-use seer_core::PaneSize;
 use seer_core::layout::PaneRect;
+use seer_core::PaneSize;
 use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
 use std::fs;
 use std::io;
 use std::path::Path;
@@ -18,13 +14,6 @@ pub(crate) struct Store {
     revision: u64,
 }
 
-/// Loads the session snapshot from `directory`, or starts an empty session.
-///
-/// A missing, corrupt, unsupported, or inconsistent snapshot starts a safe
-/// empty session that keeps the store, so its first shell is persisted.
-/// Operational failures (directory creation, snapshot reading, metadata, or
-/// replacement shell start) propagate to the caller instead of being
-/// mistaken for an invalid snapshot.
 pub(crate) fn load_session(
     user: String,
     shell: String,
@@ -43,7 +32,10 @@ pub(crate) fn load_session(
 
 fn empty_session(user: String, shell: String, path: std::path::PathBuf) -> UserSession {
     let mut session = UserSession::new(user, shell);
-    session.store = Some(Store { path, revision: 0 });
+    session.store = Some(Store {
+        path,
+        revision: 0,
+    });
     session
 }
 
@@ -89,10 +81,8 @@ fn pane_launches(session: &UserSession) -> Vec<(String, PaneSize)> {
         .collect()
 }
 
-/// Saves the session after a successful mutation.
-///
-/// A failed save is an error, never a silent success: the caller reports the
-/// mutation as failed instead of claiming durable state that does not exist.
+/// A failed save must end the runtime so a later mutation cannot claim
+/// durable state that the disk never received.
 pub(crate) fn persist(session: &mut UserSession) -> io::Result<()> {
     let Some(store) = session.store.as_mut() else {
         return Ok(());
@@ -104,5 +94,30 @@ pub(crate) fn persist(session: &mut UserSession) -> io::Result<()> {
         session.viewport,
         &session.tree,
     );
-    snapshot::store(&store.path, &snapshot)
+    snapshot::store(&store.path, &snapshot).map_err(mark_fatal)
+}
+
+#[derive(Debug)]
+struct SaveFailed(io::Error);
+
+impl fmt::Display for SaveFailed {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "session snapshot save failed: {}", self.0)
+    }
+}
+
+impl Error for SaveFailed {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+fn mark_fatal(error: io::Error) -> io::Error {
+    io::Error::other(SaveFailed(error))
+}
+
+pub(crate) fn is_fatal(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|source| source.is::<SaveFailed>())
 }

@@ -32,6 +32,10 @@ pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
             .name(format!("runtime-connection-{connection_id}"))
             .spawn(move || {
                 if let Err(error) = handle_connection(stream, &connection, connection_id) {
+                    if crate::persistence::is_fatal(&error) {
+                        eprintln!("runtime stops after a snapshot save failure: {error}");
+                        std::process::exit(1);
+                    }
                     eprintln!("runtime connection error: {error}");
                 }
             })?;
