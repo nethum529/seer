@@ -13,8 +13,10 @@ mod connection;
 mod util;
 mod writer;
 
+use connection::{
+    Connection, ReportedViewport, evict_connection, grant_next_owner, reported_viewport,
+};
 use util::{connection_closed, lock};
-use connection::{Connection, ReportedViewport, evict_connection, grant_next_owner, reported_viewport};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -197,9 +199,9 @@ impl SharedSession {
         }
         let _lease = lock(&self.lease)?;
         let mut connections = lock(&self.connections)?;
-        let owner_stale = connections.iter().any(|c| {
-            c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now()
-        });
+        let owner_stale = connections
+            .iter()
+            .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
         if owner_stale {
             for owner in connections.iter_mut() {
                 owner.size_owner = false;
@@ -350,7 +352,9 @@ impl SharedSession {
         drop(session);
         let owner_lost = {
             let mut connections = lock(&self.connections)?;
-            let Some(position) = connections.iter().position(|connection| connection.id == id)
+            let Some(position) = connections
+                .iter()
+                .position(|connection| connection.id == id)
             else {
                 return Err(connection_closed());
             };
@@ -373,7 +377,9 @@ impl SharedSession {
         let output = writer::encode(message)?;
         let owner_lost = {
             let mut connections = lock(&self.connections)?;
-            let Some(position) = connections.iter().position(|connection| connection.id == id)
+            let Some(position) = connections
+                .iter()
+                .position(|connection| connection.id == id)
             else {
                 return Err(connection_closed());
             };
@@ -432,7 +438,6 @@ impl SharedSession {
         self.connections.lock().map(|c| c.len()).unwrap_or(0)
     }
 }
-
 
 #[cfg(test)]
 mod tests;
