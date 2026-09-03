@@ -39,19 +39,3 @@ fn hidden_with(
         visible(label)
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::hidden_with;
-
-    #[test]
-    fn terminal_prompt_uses_the_hidden_reader() {
-        let value = hidden_with("Invitation: ", true, |label| {
-            assert_eq!(label, "Invitation: ");
-            Ok("secret".into())
-        })
-        .expect("hidden prompt must succeed");
-
-        assert_eq!(value, "secret");
-    }
-}

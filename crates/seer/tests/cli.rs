@@ -150,7 +150,7 @@ fn attach_uses_the_saved_identity() {
         .expect("listener must have an address");
     write_store(&config, &[saved(address.port(), "team.example.com", true)]);
     let server = thread::spawn(move || {
-        for _ in 0..2 {
+        for _ in 0..3 {
             let mut stream = accept(&listener);
             assert_hello(&mut stream);
             send_welcome(&mut stream, "user-bob", "bob");
@@ -172,27 +172,12 @@ fn attach_uses_the_saved_identity() {
     let current = run(&config, &["attach"], "");
     assert_eq!(current.status.code(), Some(0));
     assert_eq!(current.stdout, b"Attached to second as bob.\n");
-    server.join().expect("server must finish");
-}
-
-#[test]
-fn picker_selects_one_of_several_servers() {
-    let config = TestConfig::new();
-    let listener = listener();
-    let address = listener
-        .local_addr()
-        .expect("listener must have an address");
     let first = SavedServer {
         endpoint: "127.0.0.1:1".into(),
         alias: "first".into(),
         current: false,
     };
     write_store(&config, &[first, saved(address.port(), "second", false)]);
-    let server = thread::spawn(move || {
-        let mut stream = accept(&listener);
-        assert_hello(&mut stream);
-        send_welcome(&mut stream, "user-bob", "bob");
-    });
 
     let output = run(&config, &["attach"], "2\n");
 

@@ -41,6 +41,18 @@ fn view_only_events_send_no_session_changes() {
     }
 
     assert_no_message(&mut server);
+
+    assert_eq!(
+        handle_event(
+            Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
+            &mut client,
+            &mut state,
+            &mut command_pending,
+        )
+        .expect("detach key must be handled"),
+        LoopControl::Exit
+    );
+    assert_eq!(decode(&mut server), ClientMsg::Detach);
 }
 
 #[test]
@@ -78,6 +90,21 @@ fn active_events_send_input_focus_and_resize() {
         &mut command_pending,
     )
     .expect("resize must be handled");
+    let release = KeyEvent::new_with_kind(
+        KeyCode::Char('a'),
+        KeyModifiers::NONE,
+        KeyEventKind::Release,
+    );
+    assert_eq!(
+        handle_event(
+            Event::Key(release),
+            &mut client,
+            &mut state,
+            &mut command_pending,
+        )
+        .expect("release key must be handled"),
+        LoopControl::Continue
+    );
 
     assert_eq!(
         decode(&mut server),
@@ -108,31 +135,6 @@ fn active_events_send_input_focus_and_resize() {
             rows: 40,
         }
     );
-}
-
-#[test]
-fn release_keys_send_no_messages() {
-    let (mut client, mut server) = socket_pair();
-    let mut state = state_with_pane();
-    let mut command_pending = false;
-    set_view_only(false);
-    let release = KeyEvent::new_with_kind(
-        KeyCode::Char('a'),
-        KeyModifiers::NONE,
-        KeyEventKind::Release,
-    );
-
-    assert_eq!(
-        handle_event(
-            Event::Key(release),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("release key must be handled"),
-        LoopControl::Continue
-    );
-
     assert_no_message(&mut server);
 }
 
@@ -168,26 +170,6 @@ fn mouse_move_without_tracking_sends_no_message() {
     .expect("mouse move must be handled");
 
     assert_no_message(&mut server);
-}
-
-#[test]
-fn control_q_detaches_in_view_only_mode() {
-    let (mut client, mut server) = socket_pair();
-    let mut state = state_with_pane();
-    let mut command_pending = false;
-    set_view_only(true);
-
-    assert_eq!(
-        handle_event(
-            Event::Key(KeyEvent::new(KeyCode::Char('q'), KeyModifiers::CONTROL)),
-            &mut client,
-            &mut state,
-            &mut command_pending,
-        )
-        .expect("detach key must be handled"),
-        LoopControl::Exit
-    );
-    assert_eq!(decode(&mut server), ClientMsg::Detach);
 }
 
 #[test]
