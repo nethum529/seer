@@ -35,7 +35,9 @@ pub fn runtime_binary() -> &'static Path {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
         let target = target_directory(
             manifest,
-            std::env::var_os("CARGO_TARGET_DIR").as_deref().map(Path::new),
+            std::env::var_os("CARGO_TARGET_DIR")
+                .as_deref()
+                .map(Path::new),
         );
         let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
             .args(["build", "-p", "seer", "--bin", "seer-runtime"])
