@@ -14,6 +14,7 @@ pub(crate) struct OsIdentity {
     groups: Vec<u32>,
     home: PathBuf,
     shell: PathBuf,
+    inherit_process: bool,
 }
 
 impl OsIdentity {
@@ -32,7 +33,19 @@ impl OsIdentity {
             groups,
             home,
             shell,
+            inherit_process: false,
         })
+    }
+
+    pub(crate) fn resolve_process_account() -> io::Result<Self> {
+        let output = run_account_command("/usr/bin/id", &["-un"])?;
+        if !output.status.success() {
+            return Err(io::Error::other("id -un failed"));
+        }
+        let name = output_text(output)?;
+        let mut identity = Self::resolve(name.trim())?;
+        identity.inherit_process = true;
+        Ok(identity)
     }
 
     pub(crate) const fn uid(&self) -> u32 {
@@ -66,7 +79,7 @@ impl OsIdentity {
     }
 
     pub(crate) fn check_switch_rights(&self) -> io::Result<()> {
-        if self.needs_switch()? && process_uid() != 0 {
+        if !self.inherit_process && self.needs_switch()? && process_uid() != 0 {
             Err(io::Error::new(
                 io::ErrorKind::PermissionDenied,
                 format!(
@@ -80,6 +93,9 @@ impl OsIdentity {
     }
 
     pub(crate) fn apply(&self, command: &mut Command) -> io::Result<()> {
+        if self.inherit_process {
+            return Ok(());
+        }
         command
             .env("HOME", &self.home)
             .env("USER", &self.name)

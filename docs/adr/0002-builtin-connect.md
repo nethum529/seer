@@ -71,8 +71,10 @@ iroh), WireGuard libraries (wrong boundary, no traversal).
   groups, GID, and UID. It sets HOME, USER, LOGNAME, and SHELL from
   the target account. Each runtime uses that account shell and owns
   a mode 0700 state directory.
-- A missing, unsafe, unknown, or unauthorized mapping refuses that
-  runtime connection. The broker continues to serve other users.
+- An unmapped person runs as the broker process account. Seer keeps
+  that account's login shell and the broker process environment.
+- An unsafe, unknown, or unauthorized mapping refuses that runtime
+  connection. The broker continues to serve other users.
 - The multiplayer MVP server runs on Linux. macOS is a supported
   client platform and uses the identities on the Linux server.
   A macOS broker service is not supported in this release.

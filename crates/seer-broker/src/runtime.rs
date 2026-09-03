@@ -28,17 +28,20 @@ pub(crate) struct RuntimeManager {
     binary: PathBuf,
     state_dir: PathBuf,
     os_users: HashMap<String, String>,
+    default_identity: OsIdentity,
     processes: Arc<Mutex<HashMap<String, RuntimeProcess>>>,
 }
 
 impl RuntimeManager {
     pub(crate) fn new(state_dir: PathBuf, os_users: HashMap<String, String>) -> io::Result<Self> {
+        let default_identity = OsIdentity::resolve_process_account()?;
         let processes = Arc::new(Mutex::new(HashMap::new()));
         spawn_supervisor(Arc::downgrade(&processes));
         Ok(Self {
             binary: runtime_binary()?,
             state_dir,
             os_users,
+            default_identity,
             processes,
         })
     }
@@ -133,13 +136,10 @@ impl RuntimeManager {
     }
 
     fn identity(&self, person_name: &str) -> io::Result<OsIdentity> {
-        let os_user = self.os_users.get(person_name).ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!("no OS account is configured for person {person_name}"),
-            )
-        })?;
-        OsIdentity::resolve(os_user)
+        self.os_users.get(person_name).map_or_else(
+            || Ok(self.default_identity.clone()),
+            |os_user| OsIdentity::resolve(os_user),
+        )
     }
 }
 
@@ -387,6 +387,8 @@ mod tests {
             binary: "true".into(),
             state_dir: temporary.clone(),
             os_users: HashMap::from([("Spawn".into(), current_os_user())]),
+            default_identity: crate::os_identity::OsIdentity::resolve_process_account()
+                .expect("process account must resolve"),
             processes: Arc::new(Mutex::new(HashMap::new())),
         };
 
