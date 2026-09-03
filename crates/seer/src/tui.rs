@@ -12,7 +12,8 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{
-    ColorDepth, InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput, Tree,
+    ColorDepth, InputEvent, MouseProtocol, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities,
+    TerminalInput, Tree,
 };
 use seer_net::{Socket, Stream};
 
@@ -325,6 +326,11 @@ fn handle_mouse<S: Stream>(
     let Some((pane, column, row)) = state.mouse_target(mouse.column, mouse.row) else {
         return Ok(LoopControl::Continue);
     };
+    if matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_))
+        && state.pane_mouse_protocol(&pane) == MouseProtocol::None
+    {
+        return Ok(LoopControl::Continue);
+    }
     let Some((workspace, tab)) = state
         .selection()
         .map(|(workspace, tab)| (workspace.to_owned(), tab.to_owned()))
