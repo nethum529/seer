@@ -70,6 +70,15 @@ pub(crate) fn set_cursor_style(state: &ClientState) -> io::Result<()> {
     execute!(io::stdout(), style)
 }
 
+pub(crate) fn ignore_setup_disconnect(error: io::Error) -> io::Result<()> {
+    match error.kind() {
+        io::ErrorKind::BrokenPipe
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::ConnectionReset => Ok(()),
+        _ => Err(error),
+    }
+}
+
 fn cursor_style(cursor: seer_core::Cursor) -> SetCursorStyle {
     match (cursor.shape, cursor.blinking) {
         (CursorShape::Underline, true) => SetCursorStyle::BlinkingUnderScore,

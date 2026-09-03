@@ -11,6 +11,7 @@ mod state;
 mod store;
 mod terminal_session;
 mod tui;
+mod tui_navigation;
 mod update;
 
 fn main() -> ExitCode {

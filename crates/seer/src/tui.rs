@@ -6,7 +6,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 use crossterm::event::{
-    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+    self, Event, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -18,13 +18,16 @@ use seer_core::{
 };
 use seer_net::{Socket, Stream};
 
-use crate::input::{key_to_input, mouse_to_input};
+use crate::input::{InputAction, is_control_char, key_to_action, mouse_to_input};
 use crate::render::PaneCells;
 use crate::state::{ClientState, pane_rects};
-use crate::terminal_session::{TerminalSession, set_cursor_style};
+use crate::terminal_session::{TerminalSession, ignore_setup_disconnect, set_cursor_style};
+use crate::tui_navigation::{
+    closes_last_tab, initialize, pane_in_direction, select_tab, show_hint,
+    show_last_tab_status, status, update_tree,
+};
 
 const EVENT_WAIT: Duration = Duration::from_millis(25);
-
 thread_local! {
     static VIEW_ONLY: ModeCell<bool> = const { ModeCell::new(false) };
     static PEEK_PERSON: RefCell<Option<String>> = const { RefCell::new(None) };
@@ -50,6 +53,7 @@ pub(crate) enum SessionExit {
 
 pub(crate) fn run(mut stream: Socket, tree: Tree) -> io::Result<SessionExit> {
     let mut terminal = TerminalSession::start()?;
+    initialize(&tree);
     let state = ClientState::new(tree);
     send_terminal_setup(&mut stream, &terminal.terminal, &state)?;
     let reader = stream.clone();
@@ -149,7 +153,10 @@ fn receive_messages(
 
 fn apply_server_message(message: ServerMsg, state: &mut ClientState) -> io::Result<LoopControl> {
     match message {
-        ServerMsg::Tree { tree } => state.replace_tree(tree),
+        ServerMsg::Tree { tree } => {
+            update_tree(&tree);
+            state.replace_tree(tree);
+        }
         ServerMsg::Cells { pane, frame } => state.apply_frame(pane, frame),
         ServerMsg::Bye { reason } if reason == "detached" => {
             return Ok(LoopControl::Detached);
@@ -225,37 +232,91 @@ fn handle_key<S: Stream>(
     if is_view_only() {
         return Ok(LoopControl::Continue);
     }
-    if is_control_char(key, 'b') {
-        *command_pending = true;
-        return Ok(LoopControl::Continue);
-    }
-    if *command_pending {
-        *command_pending = false;
-        if let KeyCode::Char(number @ '1'..='9') = key.code {
-            let index = number.to_digit(10).map_or(0, |value| value as usize);
-            if let Some(pane) = state.focus_number(index)
-                && let Some((workspace, tab)) = state.selection()
-            {
-                send(
-                    stream,
-                    &ClientMsg::FocusPane {
-                        workspace: workspace.to_owned(),
-                        tab: tab.to_owned(),
-                        pane,
-                    },
-                )?;
-            }
-            return Ok(LoopControl::Continue);
-        }
-    }
-    if let Some(input) = key_to_input(key) {
-        send_focused_input(stream, state, input)?;
+    if let Some(action) = key_to_action(key, command_pending) {
+        show_hint();
+        handle_action(action, stream, state)?;
     }
     Ok(LoopControl::Continue)
 }
 
-fn is_control_char(key: KeyEvent, character: char) -> bool {
-    key.code == KeyCode::Char(character) && key.modifiers.contains(KeyModifiers::CONTROL)
+fn handle_action(
+    action: InputAction,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+) -> io::Result<()> {
+    let message = match action {
+        InputAction::CreateTab => {
+            state
+                .selected_workspace()
+                .map(|workspace| ClientMsg::CreateTab {
+                    workspace: workspace.to_owned(),
+                })
+        }
+        InputAction::SplitPane(direction) => {
+            state
+                .selection()
+                .map(|(workspace, tab)| ClientMsg::SplitPane {
+                    workspace: workspace.to_owned(),
+                    tab: tab.to_owned(),
+                    direction,
+                })
+        }
+        InputAction::ClosePane => close_message(state),
+        InputAction::NextTab => {
+            select_tab(state, true);
+            None
+        }
+        InputAction::PreviousTab => {
+            select_tab(state, false);
+            None
+        }
+        InputAction::FocusPane(direction) => {
+            pane_in_direction(state, direction).and_then(|pane| focus_message(state, pane))
+        }
+        InputAction::FocusNumber(number) => state
+            .focus_number(number)
+            .and_then(|pane| focus_message(state, pane)),
+        InputAction::Bytes(input) => {
+            state
+                .selection()
+                .zip(state.focused())
+                .map(|((workspace, tab), pane)| ClientMsg::TerminalInput {
+                    workspace: workspace.to_owned(),
+                    tab: tab.to_owned(),
+                    pane: pane.to_owned(),
+                    input,
+                })
+        }
+    };
+    if let Some(message) = message {
+        send(stream, &message)?;
+    }
+    Ok(())
+}
+
+fn close_message(state: &ClientState) -> Option<ClientMsg> {
+    if closes_last_tab(state) {
+        show_last_tab_status();
+        return None;
+    }
+    state
+        .selection()
+        .zip(state.focused())
+        .map(|((workspace, tab), pane)| ClientMsg::ClosePane {
+            workspace: workspace.to_owned(),
+            tab: tab.to_owned(),
+            pane: pane.to_owned(),
+        })
+}
+
+fn focus_message(state: &ClientState, pane: String) -> Option<ClientMsg> {
+    state
+        .selection()
+        .map(|(workspace, tab)| ClientMsg::FocusPane {
+            workspace: workspace.to_owned(),
+            tab: tab.to_owned(),
+            pane,
+        })
 }
 
 fn handle_mouse<S: Stream>(
@@ -377,17 +438,17 @@ fn send_terminal_setup<S: Stream>(
     Ok(())
 }
 
-fn ignore_setup_disconnect(error: io::Error) -> io::Result<()> {
-    match error.kind() {
-        io::ErrorKind::BrokenPipe
-        | io::ErrorKind::ConnectionAborted
-        | io::ErrorKind::ConnectionReset => Ok(()),
-        _ => Err(error),
-    }
-}
-
 fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState) {
     let mut area = frame.area();
+    let status_height = area.height.min(1);
+    let status_area = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(status_height),
+        area.width,
+        status_height,
+    );
+    frame.render_widget(Paragraph::new(status()), status_area);
+    area.height = area.height.saturating_sub(status_height);
     if let Some(person) = peek_person() {
         let banner_height = area.height.min(2);
         let banner = Rect::new(area.x, area.y, area.width, banner_height);
