@@ -1,4 +1,4 @@
-use alacritty_terminal::event::VoidListener;
+use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
@@ -12,15 +12,18 @@ use seer_core::{
     MouseTracking, TERMINAL_PROTOCOL_VERSION, TerminalFrame, TerminalInput, TerminalModes,
 };
 use std::io;
+use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
 use crate::input::{encode_key, encode_mouse};
+use crate::pty::lock_mutex;
 
 const SCROLLBACK_LINES: usize = 1_000;
 
 pub struct PaneGrid {
-    terminal: Term<VoidListener>,
+    terminal: Term<TerminalReplies>,
     parser: Processor,
+    replies: TerminalReplies,
     input_changed: bool,
 }
 
@@ -31,10 +34,12 @@ impl PaneGrid {
             scrolling_history: SCROLLBACK_LINES,
             ..Config::default()
         };
+        let replies = TerminalReplies::default();
 
         Self {
-            terminal: Term::new(config, &dimensions, VoidListener),
+            terminal: Term::new(config, &dimensions, replies.clone()),
             parser: Processor::new(),
+            replies,
             input_changed: false,
         }
     }
@@ -69,6 +74,15 @@ impl PaneGrid {
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.terminal.resize(GridSize::new(cols, rows));
+    }
+
+    /// Bytes the terminal asked to write back to the pty master.
+    ///
+    /// A shell can query terminal capabilities. Alacritty answers
+    /// those queries by emitting a PtyWrite event. The pane host
+    /// sends the captured bytes back into the pty.
+    pub(crate) fn take_replies(&self) -> Vec<u8> {
+        self.replies.take()
     }
 
     pub fn handle_input(&mut self, input: &TerminalInput) -> io::Result<Option<Vec<u8>>> {
@@ -181,6 +195,26 @@ impl PaneGrid {
     }
 }
 
+/// Captures terminal reply events that must go back to the pty master.
+#[derive(Clone, Default)]
+struct TerminalReplies {
+    bytes: Arc<Mutex<Vec<u8>>>,
+}
+
+impl TerminalReplies {
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut *lock_mutex(&self.bytes))
+    }
+}
+
+impl EventListener for TerminalReplies {
+    fn send_event(&self, event: Event) {
+        if let Event::PtyWrite(reply) = event {
+            lock_mutex(&self.bytes).extend(reply.into_bytes());
+        }
+    }
+}
+
 fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
     if mode.contains(TermMode::BRACKETED_PASTE) {
         [b"\x1b[200~".as_slice(), text.as_bytes(), b"\x1b[201~"].concat()
@@ -289,6 +323,17 @@ impl Dimensions for GridSize {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn captures_terminal_replies_until_taken() {
+        let replies = TerminalReplies::default();
+
+        replies.send_event(Event::PtyWrite("first".to_owned()));
+        replies.send_event(Event::PtyWrite("second".to_owned()));
+
+        assert_eq!(replies.take(), b"firstsecond".to_vec());
+        assert!(replies.take().is_empty());
+    }
 
     #[test]
     fn feeds_plain_text() {

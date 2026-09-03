@@ -18,7 +18,14 @@ impl PaneHost {
 
     pub fn poll(&mut self) -> bool {
         let output = self.session.drain_output();
-        self.grid.feed(&output)
+        let changed = self.grid.feed(&output);
+        let replies = self.grid.take_replies();
+        if !replies.is_empty() {
+            if let Err(error) = self.session.write_input(&replies) {
+                eprintln!("pane reply write failed: {error}");
+            }
+        }
+        changed
     }
 
     pub fn write_input(&mut self, bytes: &[u8]) -> io::Result<()> {
