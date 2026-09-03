@@ -137,7 +137,8 @@ impl<'a> Coordinator<'a> {
             }
             ClientMsg::StopPeek if self.peeking => self.stop_peek()?,
             ClientMsg::StopPeek => {}
-            ClientMsg::Input { .. } if self.peeking => {
+            ClientMsg::TerminalCapabilities { .. } if self.peeking => {}
+            ClientMsg::TerminalInput { .. } if self.peeking => {
                 eprintln!("broker dropped Input while user {} peeks", self.owner);
             }
             message => self.send_to_runtime(&message)?,
