@@ -99,9 +99,23 @@ fn handle_message(
             Ok(false)
         }
         message => {
-            shared.apply_and_broadcast(message)?;
+            apply_or_refuse(shared, connection_id, message)?;
             Ok(false)
         }
+    }
+}
+
+fn apply_or_refuse(
+    shared: &SharedSession,
+    connection_id: u64,
+    message: ClientMsg,
+) -> io::Result<()> {
+    match shared.apply_and_broadcast(message) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            shared.send_refused(connection_id, error.to_string())
+        }
+        Err(error) => Err(error),
     }
 }
 
