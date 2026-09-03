@@ -1,15 +1,3 @@
-//! Versioned, atomic, bounded persistence for one user session.
-//!
-//! A snapshot stores the workspace tree with its pane sizes and per-tab
-//! focus, the session viewport, and restart metadata. It is a declarative
-//! image only: it never contains a live process or a PTY descriptor. A cold
-//! restart replays the image by spawning replacement shells through the
-//! normal pane start path.
-//!
-//! One snapshot file exists per user. Writes go to a temporary sibling file
-//! and then rename over the live file, so a reader always sees either the
-//! previous complete snapshot or the new one.
-
 use seer_core::{LayoutNode, PaneSize, Tree};
 use serde::{Deserialize, Serialize};
 use std::collections::HashSet;
@@ -63,14 +51,6 @@ impl Snapshot {
 pub(crate) fn snapshot_path(directory: &Path) -> PathBuf {
     directory.join(SNAPSHOT_FILE)
 }
-
-/// Loads and validates the snapshot at `path` for `expected_user`.
-///
-/// A missing file and a corrupt, oversized, unsupported, or inconsistent
-/// snapshot return `Ok(None)` so the caller can start an empty session. The
-/// rejected file is reported on stderr. Read and metadata failures return
-/// the underlying error because they are operational problems, not invalid
-/// snapshot content.
 pub(crate) fn load(path: &Path, expected_user: &str) -> io::Result<Option<Snapshot>> {
     let file = match File::open(path) {
         Ok(file) => file,
@@ -97,11 +77,6 @@ pub(crate) fn load(path: &Path, expected_user: &str) -> io::Result<Option<Snapsh
         }
     }
 }
-
-/// Writes `snapshot` to `path` atomically and durably.
-///
-/// The snapshot is serialized before any file is created, so an oversized
-/// snapshot is rejected up front and never leaves a partial file behind.
 pub(crate) fn store(path: &Path, snapshot: &Snapshot) -> io::Result<()> {
     let bytes = serde_json::to_vec(snapshot).map_err(json_error)?;
     if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {

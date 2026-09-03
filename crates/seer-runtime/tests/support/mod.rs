@@ -1,8 +1,3 @@
-//! The runtime binary is spawned for real, so every test in this directory
-//! needs the same process, socket, and message plumbing. Keeping the helpers
-//! here stops runtime_socket.rs and snapshot_restore.rs from duplicating
-//! them.
-
 use std::fs;
 use std::io;
 use std::os::unix::net::UnixStream;

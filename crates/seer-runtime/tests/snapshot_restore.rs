@@ -1,11 +1,3 @@
-//! End-to-end snapshot persistence for the runtime binary.
-//!
-//! The runtime persists a versioned session snapshot when it is started with
-//! the SEER_SNAPSHOT_DIR environment variable. This file covers one scenario:
-//! live detach and reattach keep the original shell processes, a cold restart
-//! restores the same topology with replacement shells, and a corrupt or
-//! unsupported snapshot file makes the runtime start a safe default session.
-
 // The runtime PTY shells run on Linux only.
 #![cfg(target_os = "linux")]
 
