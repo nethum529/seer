@@ -193,8 +193,12 @@ impl UserSession {
             self.pane_hosts.insert(pane.to_owned(), host);
             return Err(error);
         }
-        self.tree.close_pane(pane).map_err(tree_error)?;
-        self.resize_tab(workspace, tab)?;
+        let closed_tab = self.tree.close_pane(pane).map_err(tree_error)?;
+        if closed_tab.panes.is_empty() {
+            self.tree.close_tab(workspace, tab).map_err(tree_error)?;
+        } else {
+            self.resize_tab(workspace, tab)?;
+        }
         Ok(self.tree_message())
     }
 
