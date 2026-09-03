@@ -1,15 +1,18 @@
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::PaneSize;
 use std::fs;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::UserSession;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+/// A size-lease holder that stays silent for this long is treated as gone.
+const SIZE_LEASE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn bind(path: &Path) -> io::Result<UnixListener> {
     remove_stale_socket(path)?;
@@ -65,12 +68,11 @@ fn connection_loop(
     shared: &SharedSession,
     connection_id: u64,
 ) -> io::Result<()> {
-    let mut read_only = false;
     loop {
         let Ok(message) = codec::decode(stream) else {
             return Ok(());
         };
-        if handle_message(shared, connection_id, &mut read_only, message)? {
+        if handle_message(shared, connection_id, message)? {
             return Ok(());
         }
     }
@@ -79,17 +81,21 @@ fn connection_loop(
 fn handle_message(
     shared: &SharedSession,
     connection_id: u64,
-    read_only: &mut bool,
     message: ClientMsg,
 ) -> io::Result<bool> {
+    shared.touch_connection(connection_id)?;
+    let read_only = shared.is_read_only(connection_id)?;
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
         ClientMsg::Peek { .. } => {
-            *read_only = true;
+            shared.enter_peek(connection_id)?;
             shared.send_tree(connection_id)?;
             Ok(false)
         }
-        message if *read_only && is_mutating(&message) => {
+        ClientMsg::Resize { cols, rows } => {
+            shared.client_resize(connection_id, cols, rows)
+        }
+        message if read_only && is_mutating(&message) => {
             eprintln!("runtime dropped read-only message: {message:?}");
             Ok(false)
         }
@@ -165,13 +171,106 @@ impl SharedSession {
                 tree: session.tree.clone(),
             }],
         )?;
-        connections.push(Connection { id, stream });
+        let now = Instant::now();
+        let owner_stale = connections.iter().any(|connection| {
+            connection.size_owner
+                && connection.last_active + SIZE_LEASE_TIMEOUT <= now
+        });
+        let size_owner =
+            !connections.iter().any(|connection| connection.size_owner) || owner_stale;
+        if owner_stale {
+            eprintln!("runtime size lease expired; connection {id} took ownership");
+        }
+        connections.push(Connection {
+            id,
+            stream,
+            viewport: None,
+            read_only: false,
+            size_owner,
+            last_active: now,
+        });
         self.connection_opened.notify_one();
         Ok(())
     }
 
     fn remove_connection(&self, id: u64) -> io::Result<()> {
-        lock(&self.connections)?.retain(|connection| connection.id != id);
+        let mut session = lock(&self.session)?;
+        let mut connections = lock(&self.connections)?;
+        let removed_owner = connections
+            .iter()
+            .any(|connection| connection.id == id && connection.size_owner);
+        connections.retain(|connection| connection.id != id);
+        if removed_owner {
+            grant_next_owner(&mut session, &mut connections)?;
+        }
+        Ok(())
+    }
+
+    fn touch_connection(&self, id: u64) -> io::Result<()> {
+        let mut connections = lock(&self.connections)?;
+        if let Some(connection) = connections.iter_mut().find(|connection| connection.id == id) {
+            connection.last_active = Instant::now();
+        }
+        Ok(())
+    }
+
+    fn is_read_only(&self, id: u64) -> io::Result<bool> {
+        let connections = lock(&self.connections)?;
+        Ok(connections
+            .iter()
+            .find(|connection| connection.id == id)
+            .is_some_and(|connection| connection.read_only))
+    }
+
+    fn client_resize(&self, id: u64, cols: u16, rows: u16) -> io::Result<bool> {
+        let mut session = lock(&self.session)?;
+        let mut connections = lock(&self.connections)?;
+        let Some(position) = connections
+            .iter()
+            .position(|connection| connection.id == id)
+        else {
+            return Ok(false);
+        };
+        if connections[position].read_only {
+            eprintln!("runtime dropped read-only resize: {cols}x{rows}");
+            return Ok(false);
+        }
+        connections[position].viewport = Some(PaneSize { cols, rows });
+        let is_owner = connections[position].size_owner;
+        let owner_missing = !connections.iter().any(|connection| connection.size_owner);
+        let owner_stale = connections.iter().any(|connection| {
+            connection.size_owner
+                && connection.last_active + SIZE_LEASE_TIMEOUT <= Instant::now()
+        });
+        if !is_owner && !owner_missing && !owner_stale {
+            eprintln!("runtime denied resize for connection {id}: {cols}x{rows}");
+            return Ok(false);
+        }
+        if owner_stale && !is_owner {
+            eprintln!("runtime size lease expired; connection {id} took ownership");
+        }
+        for connection in connections.iter_mut() {
+            connection.size_owner = connection.id == id;
+        }
+        let messages = session.apply(ClientMsg::Resize { cols, rows })?;
+        broadcast(&mut connections, &messages);
+        Ok(false)
+    }
+
+    fn enter_peek(&self, id: u64) -> io::Result<()> {
+        let mut session = lock(&self.session)?;
+        let mut connections = lock(&self.connections)?;
+        let Some(position) = connections
+            .iter()
+            .position(|connection| connection.id == id)
+        else {
+            return Ok(());
+        };
+        connections[position].read_only = true;
+        if connections[position].size_owner {
+            connections[position].size_owner = false;
+            grant_next_owner(&mut session, &mut connections)?;
+        }
         Ok(())
     }
 
@@ -219,6 +318,34 @@ impl SharedSession {
 struct Connection {
     id: u64,
     stream: UnixStream,
+    /// The terminal size the attachment last reported.
+    viewport: Option<PaneSize>,
+    /// The attachment is a read-only peek viewer.
+    read_only: bool,
+    /// The attachment holds the size lease for the shared session.
+    size_owner: bool,
+    /// When the attachment last sent a message to the runtime.
+    last_active: Instant,
+}
+
+fn grant_next_owner(
+    session: &mut MutexGuard<'_, UserSession>,
+    connections: &mut Vec<Connection>,
+) -> io::Result<()> {
+    let Some(position) = connections
+        .iter()
+        .position(|connection| !connection.read_only)
+    else {
+        return Ok(());
+    };
+    connections[position].size_owner = true;
+    if let Some(size) = connections[position].viewport {
+        let _messages = session.apply(ClientMsg::Resize {
+            cols: size.cols,
+            rows: size.rows,
+        })?;
+    }
+    Ok(())
 }
 
 fn broadcast(connections: &mut Vec<Connection>, messages: &[ServerMsg]) {
@@ -245,70 +372,4 @@ fn connection_closed() -> io::Error {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ClientMsg, SharedSession, is_mutating, lock};
-    use crate::UserSession;
-    use std::os::unix::net::UnixStream;
-
-    #[test]
-    fn identifies_only_mutating_messages() {
-        let mutating = [
-            ClientMsg::Input {
-                pane: "p1".into(),
-                bytes: Vec::new(),
-            },
-            ClientMsg::CreateTab,
-            ClientMsg::SplitPane {
-                direction: seer_core::SplitDirection::Right,
-            },
-            ClientMsg::ClosePane { pane: "p1".into() },
-            ClientMsg::FocusPane { pane: "p1".into() },
-            ClientMsg::Resize { cols: 80, rows: 24 },
-        ];
-        let deferred = [
-            ClientMsg::Hello {
-                user_id: "alice".into(),
-                credential: "token".into(),
-                version: "0.1.0".into(),
-            },
-            ClientMsg::Join {
-                seat_token: "seat".into(),
-                name: "alice".into(),
-            },
-            ClientMsg::Invite,
-            ClientMsg::ListPeople,
-            ClientMsg::DetachClient {
-                client_id: "client-1".into(),
-            },
-            ClientMsg::Peek {
-                user: "alice".into(),
-                workspace: "w1".into(),
-            },
-            ClientMsg::StopPeek,
-            ClientMsg::Detach,
-        ];
-
-        assert!(mutating.iter().all(is_mutating));
-        assert!(deferred.iter().all(|message| !is_mutating(message)));
-    }
-
-    #[test]
-    fn removes_only_the_requested_connection() {
-        let shared = SharedSession::new(UserSession::new("alice", "sh"));
-        let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
-        let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
-        shared
-            .add_connection(1, first_server)
-            .expect("first connection must be added");
-        shared
-            .add_connection(2, second_server)
-            .expect("second connection must be added");
-
-        shared
-            .remove_connection(1)
-            .expect("connection must be removed");
-        let connections = lock(&shared.connections).expect("connections must lock");
-        assert_eq!(connections.len(), 1);
-        assert_eq!(connections[0].id, 2);
-    }
-}
+mod tests;
