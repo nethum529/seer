@@ -142,6 +142,48 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     );
     drop(unsupported_client);
     unsupported_runtime.stop();
+
+    fs::write(
+        &snapshot_path,
+        rewrite_number(&valid_text, "next_tab_id", "1"),
+    )
+    .expect("colliding counter snapshot must write");
+    let mut counter_runtime = spawn_runtime(&socket_path, &state);
+    let mut counter_client = connect_with_timeout(&socket_path);
+    let safe_counter = read_tree(&mut counter_client);
+    assert_eq!(
+        safe_counter.workspaces[0].tabs.len(),
+        1,
+        "snapshot that reuses a tab id must start a safe default session"
+    );
+    assert_eq!(safe_counter.workspaces[0].tabs[0].panes.len(), 1);
+    assert!(
+        wait_for_cells(&mut counter_client),
+        "default shell must run"
+    );
+    drop(counter_client);
+    counter_runtime.stop();
+
+    fs::write(
+        &snapshot_path,
+        valid_text.replacen("\"id\":\"w1:p1\"", "\"id\":\"\"", 1),
+    )
+    .expect("empty pane id snapshot must write");
+    let mut empty_pane_runtime = spawn_runtime(&socket_path, &state);
+    let mut empty_pane_client = connect_with_timeout(&socket_path);
+    let safe_empty_pane = read_tree(&mut empty_pane_client);
+    assert_eq!(
+        safe_empty_pane.workspaces[0].tabs.len(),
+        1,
+        "snapshot with an empty pane id must start a safe default session"
+    );
+    assert_eq!(safe_empty_pane.workspaces[0].tabs[0].panes.len(), 1);
+    assert!(
+        wait_for_cells(&mut empty_pane_client),
+        "default shell must run"
+    );
+    drop(empty_pane_client);
+    empty_pane_runtime.stop();
 }
 
 fn spawn_runtime(socket_path: &Path, state_dir: &Path) -> RuntimeProcess {
@@ -157,6 +199,24 @@ fn spawn_runtime(socket_path: &Path, state_dir: &Path) -> RuntimeProcess {
 
 fn read_tree(stream: &mut UnixStream) -> Tree {
     tree(read_message(stream))
+}
+
+fn rewrite_number(json: &str, key: &str, replacement: &str) -> String {
+    let marker = format!("\"{key}\":");
+    let start = json
+        .find(&marker)
+        .unwrap_or_else(|| panic!("json key must exist: {key}"));
+    let digits_start = start + marker.len();
+    let rest = &json[digits_start..];
+    let digits_end = rest
+        .find(|character: char| !character.is_ascii_digit())
+        .unwrap_or(rest.len());
+    format!(
+        "{}{}{}",
+        &json[..digits_start],
+        replacement,
+        &rest[digits_end..]
+    )
 }
 
 fn marked_pid(stream: &mut UnixStream, pane: &str) -> Option<u32> {

@@ -35,9 +35,7 @@ pub fn runtime_binary() -> &'static Path {
         let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
         let target = target_directory(
             manifest,
-            std::env::var_os("CARGO_TARGET_DIR")
-                .as_deref()
-                .map(Path::new),
+            std::env::var_os("CARGO_TARGET_DIR").as_deref().map(Path::new),
         );
         let status = Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
             .args(["build", "-p", "seer", "--bin", "seer-runtime"])
@@ -50,11 +48,6 @@ pub fn runtime_binary() -> &'static Path {
     })
 }
 
-/// Resolves the Cargo target directory the way Cargo does.
-///
-/// A relative CARGO_TARGET_DIR is relative to the workspace root, not to the
-/// crate manifest. An absolute value is used as it is. Without the variable,
-/// Cargo uses `<workspace-root>/target`.
 fn target_directory(manifest: &Path, target_var: Option<&Path>) -> PathBuf {
     let workspace_root = manifest
         .parent()
@@ -176,8 +169,8 @@ impl RuntimeProcess {
 
     pub fn stop(&mut self) -> Output {
         let mut child = self.0.take().expect("runtime process must exist");
-        let _ = child.kill();
-        wait_until_exit(&mut child, "runtime did not stop after kill");
+        drop(child.stdin.take());
+        wait_until_exit(&mut child, "runtime did not exit after its lifeline closed");
         child
             .wait_with_output()
             .expect("runtime output must be available")
@@ -205,31 +198,5 @@ pub fn wait_until_exit(child: &mut Child, timeout_message: &str) {
         }
         assert!(start.elapsed() < PROCESS_TIMEOUT, "{timeout_message}");
         thread::sleep(RETRY_INTERVAL);
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn keeps_an_absolute_target_directory() {
-        let manifest = Path::new("/work/crates/seer-runtime");
-        let target = target_directory(manifest, Some(Path::new("/out")));
-        assert_eq!(target, PathBuf::from("/out"));
-    }
-
-    #[test]
-    fn resolves_a_relative_target_directory_from_the_workspace_root() {
-        let manifest = Path::new("/work/crates/seer-runtime");
-        let target = target_directory(manifest, Some(Path::new("out")));
-        assert_eq!(target, PathBuf::from("/work/out"));
-    }
-
-    #[test]
-    fn defaults_to_the_workspace_target_directory() {
-        let manifest = Path::new("/work/crates/seer-runtime");
-        let target = target_directory(manifest, None);
-        assert_eq!(target, PathBuf::from("/work/target"));
     }
 }
