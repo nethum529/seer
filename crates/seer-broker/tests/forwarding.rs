@@ -7,6 +7,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::{InputEvent, TerminalInput};
 
 #[path = "support/binary.rs"]
 mod binary;
@@ -238,11 +239,11 @@ fn send(stream: &mut TcpStream, message: &ClientMsg) {
 fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
     send(
         stream,
-        &ClientMsg::Input {
+        &ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: pane.into(),
-            bytes: input.as_bytes().into(),
+            input: TerminalInput::new(InputEvent::Text(input.into())),
         },
     );
 }
@@ -333,8 +334,9 @@ fn wait_for_broker_message(
 fn wait_for_cells_containing(stream: &mut TcpStream, expected: &str) -> String {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while Instant::now() < deadline {
-        if let ServerMsg::Cells { rows, .. } = read_message(stream) {
-            let text = rows
+        if let ServerMsg::Cells { frame, .. } = read_message(stream) {
+            let text = frame
+                .rows
                 .iter()
                 .flatten()
                 .map(|cell| cell.character)

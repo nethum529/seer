@@ -3,7 +3,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::{PaneSize, Tree};
+use seer_core::{
+    ColorDepth, InputEvent, PaneSize, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities,
+    TerminalInput, Tree,
+};
 
 use super::{SIZE_LEASE_TIMEOUT, SharedSession, handle_message, is_mutating, lock};
 use crate::UserSession;
@@ -11,11 +14,11 @@ use crate::UserSession;
 #[test]
 fn identifies_only_mutating_messages() {
     let mutating = [
-        ClientMsg::Input {
+        ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: "p1".into(),
-            bytes: Vec::new(),
+            input: TerminalInput::new(InputEvent::Text(String::new())),
         },
         ClientMsg::CreateTab {
             workspace: "w1".into(),
@@ -64,6 +67,16 @@ fn identifies_only_mutating_messages() {
         },
         ClientMsg::StopPeek,
         ClientMsg::Detach,
+        ClientMsg::TerminalCapabilities {
+            capabilities: TerminalCapabilities {
+                protocol_version: TERMINAL_PROTOCOL_VERSION,
+                color_depth: ColorDepth::TrueColor,
+                mouse: true,
+                bracketed_paste: true,
+                focus_events: true,
+                synchronized_output: true,
+            },
+        },
     ];
 
     assert!(mutating.iter().all(is_mutating));
@@ -110,11 +123,11 @@ fn polls_output_without_connections() {
         .expect("first shell must start");
     let shared = SharedSession::new(session);
     shared
-        .apply_and_broadcast(ClientMsg::Input {
+        .apply_and_broadcast(ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: "w1:p1".into(),
-            bytes: b"printf detached-output\\n".to_vec(),
+            input: TerminalInput::new(InputEvent::Text("printf detached-output\\n".into())),
         })
         .expect("input must succeed");
 
@@ -126,7 +139,8 @@ fn polls_output_without_connections() {
             .expect("session poll must succeed");
         assert!(!has_connections);
         updated = messages.iter().any(|message| match message {
-            ServerMsg::Cells { rows, .. } => rows
+            ServerMsg::Cells { frame, .. } => frame
+                .rows
                 .iter()
                 .flatten()
                 .map(|cell| cell.character)

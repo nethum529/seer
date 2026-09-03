@@ -5,10 +5,13 @@ mod cli;
 mod commands;
 mod input;
 mod prompt;
+mod render;
 mod start;
 mod state;
 mod store;
+mod terminal_session;
 mod tui;
+mod tui_navigation;
 mod update;
 
 fn main() -> ExitCode {

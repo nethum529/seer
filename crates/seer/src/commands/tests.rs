@@ -4,7 +4,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientInfo, Person, ServerMsg, codec};
-use seer_core::{Cell, Tree};
+use seer_core::{Cell, Cursor as TerminalCursor, TerminalFrame, TerminalModes, Tree};
 
 use super::{
     edit_distance_at_most_one, finish_session, is_close, people_reply, pick_client, pick_server,
@@ -184,7 +184,12 @@ fn command_reply_skips_all_stream_messages() {
             },
             ServerMsg::Cells {
                 pane: "p1".into(),
-                rows: vec![Vec::<Cell>::new()],
+                frame: TerminalFrame {
+                    rows: vec![Vec::<Cell>::new()],
+                    cursor: TerminalCursor::default(),
+                    modes: TerminalModes::default(),
+                    scrollback_offset: 0,
+                },
             },
             ServerMsg::Seat {
                 capsule: "seat".into(),

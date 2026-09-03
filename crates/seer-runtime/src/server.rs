@@ -134,7 +134,7 @@ fn apply_or_refuse(
 fn is_mutating(message: &ClientMsg) -> bool {
     matches!(
         message,
-        ClientMsg::Input { .. }
+        ClientMsg::TerminalInput { .. }
             | ClientMsg::CreateTab { .. }
             | ClientMsg::SplitPane { .. }
             | ClientMsg::ClosePane { .. }
