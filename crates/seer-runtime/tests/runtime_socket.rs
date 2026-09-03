@@ -214,7 +214,6 @@ fn wait_for_socket_replacement(path: &Path, stale_inode: u64) {
     }
 }
 
-
 fn assert_cells_contain(stream: &mut UnixStream, expected: &str) {
     let cells = wait_for_cells_containing(stream, expected);
     assert!(cells.contains(expected));
