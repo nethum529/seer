@@ -1,7 +1,7 @@
 use std::io;
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc::{self, SyncSender};
 use std::sync::Arc;
+use std::sync::mpsc::{self, SyncSender};
 use std::time::Instant;
 
 use seer_core::proto::ServerMsg;
@@ -65,8 +65,12 @@ impl Drop for Connection {
     }
 }
 
-
-pub(super) fn reported_viewport(workspace: &str, tab: &str, cols: u16, rows: u16) -> ReportedViewport {
+pub(super) fn reported_viewport(
+    workspace: &str,
+    tab: &str,
+    cols: u16,
+    rows: u16,
+) -> ReportedViewport {
     ReportedViewport {
         workspace: workspace.to_owned(),
         tab: tab.to_owned(),

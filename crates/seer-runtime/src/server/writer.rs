@@ -1,7 +1,7 @@
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc::Receiver;
 use std::sync::Arc;
+use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Duration;
 
@@ -9,7 +9,11 @@ use seer_core::proto::{ServerMsg, codec};
 
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
-pub(super) fn spawn(id: u64, mut stream: UnixStream, output: Receiver<Arc<[u8]>>) -> io::Result<()> {
+pub(super) fn spawn(
+    id: u64,
+    mut stream: UnixStream,
+    output: Receiver<Arc<[u8]>>,
+) -> io::Result<()> {
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     thread::Builder::new()
         .name(format!("runtime-writer-{id}"))
