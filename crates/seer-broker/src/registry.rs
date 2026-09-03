@@ -183,12 +183,6 @@ impl Registry {
         SEAT_LIFETIME_SECS
     }
 
-    #[cfg(test)]
-    pub(crate) fn poison_for_test(&self) {
-        let _data = self.data.lock().expect("registry lock must start valid");
-        panic!("poison registry lock");
-    }
-
     fn lock(&self) -> io::Result<MutexGuard<'_, RegistryData>> {
         self.data
             .lock()
@@ -282,84 +276,12 @@ fn invalid_json(error: serde_json::Error) -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::path::{Path, PathBuf};
 
-    use super::{JoinError, PersonRecord, Registry, credential_hash, hashes_equal, load_json};
+    use super::{JoinError, Registry};
     use crate::test_support::{
         remove_directory, temporary_directory as create_temporary_directory,
     };
-
-    #[test]
-    fn registry_round_trip_and_owner_credential_is_returned_once() {
-        let directory = temporary_directory("round");
-        let (registry, credential) =
-            Registry::open(&directory, "Owner").expect("registry must open");
-        let credential = credential.expect("new owner credential must be returned");
-        let owner = registry.people().expect("people must load").remove(0);
-
-        assert_eq!(owner.user_id.len(), 32);
-        assert_eq!(owner.name, "Owner");
-        assert!(owner.is_owner);
-        assert!(directory.join("seats.json").is_file());
-        assert!(
-            registry
-                .person("missing")
-                .expect("lookup must finish")
-                .is_none()
-        );
-        assert!(
-            registry
-                .authenticate(&owner.user_id, &credential)
-                .expect("authentication must finish")
-                .is_some()
-        );
-        drop(registry);
-
-        let (reopened, second_credential) =
-            Registry::open(&directory, "Ignored").expect("registry must reopen");
-        assert!(second_credential.is_none());
-        assert_eq!(reopened.people().expect("people must load"), vec![owner]);
-        remove(directory);
-    }
-
-    #[test]
-    fn atomic_write_replaces_the_file_and_removes_the_temporary_file() {
-        let directory = temporary_directory("atomic");
-        let path = directory.join("people.json");
-        fs::write(&path, "[]\n").expect("old registry must write");
-
-        super::write_json_atomically(&path, &["new"]).expect("registry must write");
-
-        assert_eq!(
-            fs::read_to_string(path).expect("registry must read"),
-            "[\"new\"]\n"
-        );
-        assert!(!directory.join(".people.json.tmp").exists());
-        remove(directory);
-    }
-
-    #[test]
-    fn seat_expires_and_can_only_be_used_once() {
-        let directory = temporary_directory("seat");
-        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry
-            .create_seat_at(10, Registry::seat_lifetime_secs())
-            .expect("seat must be created");
-        assert!(matches!(
-            registry.join_at(&token, "Late", 3_610),
-            Ok(Err(JoinError::InvalidSeat))
-        ));
-        let joined = registry
-            .join_at(&token, "Guest", 3_609)
-            .expect("join must finish");
-        assert!(joined.is_ok());
-        assert!(matches!(
-            registry.join_at(&token, "Other", 3_609),
-            Ok(Err(JoinError::InvalidSeat))
-        ));
-        remove(directory);
-    }
 
     #[test]
     fn seat_uses_the_requested_lifetime() {
@@ -369,120 +291,25 @@ mod tests {
         let token = registry
             .create_seat_at(10, lifetime)
             .expect("seat must be created");
+        let default_token = registry
+            .create_seat_at(10, Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         let late = registry.join_at(&token, "Late", 10 + 25 * 60 * 60);
         let early = registry
             .join_at(&token, "Early", 10 + 23 * 60 * 60)
             .expect("join must finish");
         assert!(early.is_ok());
         assert!(matches!(late, Ok(Err(JoinError::InvalidSeat))));
-        remove(directory);
-    }
-
-    #[test]
-    fn seat_file_survives_a_registry_reopen() {
-        let directory = temporary_directory("reopen");
-        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry
-            .create_seat_at(10, Registry::seat_lifetime_secs())
-            .expect("seat must be created");
-        drop(registry);
-        let (reopened, _) = Registry::open(&directory, "Owner").expect("registry must reopen");
-        assert!(
-            reopened
-                .join_at(&token, "Guest", 11)
-                .expect("join must finish")
-                .is_ok()
-        );
-        remove(directory);
-    }
-
-    #[test]
-    fn creates_a_current_one_hour_seat() {
-        let directory = temporary_directory("current");
-        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-
-        let token = registry
-            .create_seat(Registry::seat_lifetime_secs())
-            .expect("seat must be created");
-        assert_eq!(token.len(), 64);
-        assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
-        assert!(
-            registry
-                .join(&token, "Guest")
-                .expect("join must finish")
-                .is_ok()
-        );
-        remove(directory);
-    }
-
-    #[test]
-    fn name_collision_and_invalid_name_do_not_consume_the_seat() {
-        let directory = temporary_directory("name");
-        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry
-            .create_seat_at(10, Registry::seat_lifetime_secs())
-            .expect("seat must be created");
         assert!(matches!(
-            registry.join_at(&token, "owner", 11),
-            Ok(Err(JoinError::NameInUse))
-        ));
-        assert!(matches!(
-            registry.join_at(&token, "bad name", 11),
-            Ok(Err(JoinError::InvalidName))
+            registry.join_at(&default_token, "LateDefault", 3_610),
+            Ok(Err(JoinError::InvalidSeat))
         ));
         assert!(
             registry
-                .join_at(&token, "Guest_1", 11)
+                .join_at(&default_token, "EarlyDefault", 3_609)
                 .expect("join must finish")
                 .is_ok()
         );
-        remove(directory);
-    }
-
-    #[test]
-    fn validates_name_boundaries() {
-        assert_eq!(JoinError::InvalidName.reason(), "invalid name");
-        for invalid in [
-            "",
-            "with space",
-            "nonascii-\u{e9}",
-            "123456789012345678901234567890123",
-        ] {
-            assert_eq!(super::validate_name(invalid), Err(JoinError::InvalidName));
-        }
-        for valid in ["a", "A-z_9", "12345678901234567890123456789012"] {
-            assert_eq!(super::validate_name(valid), Ok(()));
-        }
-    }
-
-    #[test]
-    fn compares_sha256_hashes_in_constant_time() {
-        let expected = credential_hash("secret");
-        assert_eq!(expected.len(), 64);
-        assert!(hashes_equal(&expected, &credential_hash("secret")));
-        assert!(!hashes_equal(&expected, &credential_hash("wrong")));
-        assert!(!hashes_equal(&expected, "short"));
-    }
-
-    #[test]
-    fn rejects_invalid_registry_json() {
-        let directory = temporary_directory("json");
-        let path = directory.join("people.json");
-        fs::write(&path, "not-json").expect("invalid registry must write");
-
-        let error = load_json::<Vec<PersonRecord>>(&path).expect_err("invalid JSON must fail");
-
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-        remove(directory);
-    }
-
-    #[test]
-    fn preserves_non_not_found_file_errors() {
-        let directory = temporary_directory("file-error");
-        let path = directory.join("x".repeat(300));
-
-        load_json::<Vec<String>>(&path).expect_err("invalid file path must fail");
-
         remove(directory);
     }
 

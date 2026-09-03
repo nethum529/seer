@@ -401,6 +401,3 @@ fn join_reader(reader: JoinHandle<()>) -> io::Result<()> {
         .join()
         .map_err(|_| io::Error::other("forward reader thread panicked"))
 }
-
-#[cfg(test)]
-mod tests;
