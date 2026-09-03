@@ -15,7 +15,9 @@ pub enum ClientMsg {
         seat_token: String,
         name: String,
     },
-    Invite,
+    Invite {
+        hours: Option<u32>,
+    },
     ListPeople,
     DetachClient {
         client_id: String,
@@ -164,7 +166,7 @@ mod tests {
                 seat_token: "seat-1".into(),
                 name: "Alice".into(),
             },
-            ClientMsg::Invite,
+            ClientMsg::Invite { hours: None },
             ClientMsg::ListPeople,
             ClientMsg::DetachClient {
                 client_id: "client-1".into(),

@@ -1,8 +1,9 @@
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::fs;
-use std::io;
+use std::io::{self, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::mpsc::{self, Receiver, SyncSender};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard};
 use std::thread;
 use std::time::Duration;
@@ -10,6 +11,9 @@ use std::time::Duration;
 use crate::UserSession;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+// A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
+const OUTPUT_QUEUE_CAPACITY: usize = 64;
+const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub fn bind(path: &Path) -> io::Result<UnixListener> {
     remove_stale_socket(path)?;
@@ -174,17 +178,20 @@ impl SharedSession {
         }
     }
 
-    fn add_connection(&self, id: u64, mut stream: UnixStream) -> io::Result<()> {
-        let mut session = lock(&self.session)?;
-        session.ensure_first_shell()?;
-        let mut connections = lock(&self.connections)?;
-        write_messages(
-            &mut stream,
-            &[ServerMsg::Tree {
+    fn add_connection(&self, id: u64, stream: UnixStream) -> io::Result<()> {
+        let message = {
+            let mut session = lock(&self.session)?;
+            session.ensure_first_shell()?;
+            ServerMsg::Tree {
                 tree: session.tree.clone(),
-            }],
-        )?;
-        connections.push(Connection { id, stream });
+            }
+        };
+        let connection = Connection::new(id, stream)?;
+        if !connection.send(encode_message(&message)?) {
+            return Err(connection_closed());
+        }
+        let mut connections = lock(&self.connections)?;
+        connections.push(connection);
         self.connection_opened.notify_one();
         Ok(())
     }
@@ -208,59 +215,97 @@ impl SharedSession {
     }
 
     fn send_to(&self, id: u64, message: &ServerMsg) -> io::Result<()> {
+        let output = encode_message(message)?;
         let mut connections = lock(&self.connections)?;
         let position = connections
             .iter()
             .position(|connection| connection.id == id)
             .ok_or_else(connection_closed)?;
-        let result = write_messages(
-            &mut connections[position].stream,
-            std::slice::from_ref(message),
-        );
-        if result.is_err() {
+        if !connections[position].send(output) {
             connections.remove(position);
+            return Err(connection_closed());
         }
-        result
+        Ok(())
     }
 
     fn apply_and_broadcast(&self, message: ClientMsg) -> io::Result<()> {
-        let mut session = lock(&self.session)?;
-        let messages = session.apply(message)?;
+        let messages = lock(&self.session)?.apply(message)?;
         self.broadcast(&messages)
     }
 
     fn poll_and_broadcast(&self) -> io::Result<()> {
-        let mut session = lock(&self.session)?;
-        let mut connections = lock(&self.connections)?;
-        if connections.is_empty() {
+        if lock(&self.connections)?.is_empty() {
             return Ok(());
         }
-        let messages = session.poll();
-        broadcast(&mut connections, &messages);
-        Ok(())
+        let messages = lock(&self.session)?.poll();
+        self.broadcast(&messages)
     }
 
     fn broadcast(&self, messages: &[ServerMsg]) -> io::Result<()> {
-        let mut connections = lock(&self.connections)?;
-        broadcast(&mut connections, messages);
+        for message in messages {
+            let output = encode_message(message)?;
+            let mut connections = lock(&self.connections)?;
+            connections.retain(|connection| connection.send(Arc::clone(&output)));
+        }
         Ok(())
+    }
+
+    #[cfg(test)]
+    fn connection_count(&self) -> usize {
+        self.connections
+            .lock()
+            .map(|connections| connections.len())
+            .unwrap_or(0)
     }
 }
 
 struct Connection {
     id: u64,
+    output: SyncSender<Arc<[u8]>>,
     stream: UnixStream,
 }
 
-fn broadcast(connections: &mut Vec<Connection>, messages: &[ServerMsg]) {
-    connections.retain_mut(|connection| write_messages(&mut connection.stream, messages).is_ok());
+impl Connection {
+    fn new(id: u64, stream: UnixStream) -> io::Result<Self> {
+        let writer = stream.try_clone()?;
+        let (output, queued) = mpsc::sync_channel(OUTPUT_QUEUE_CAPACITY);
+        spawn_writer(id, writer, queued)?;
+        Ok(Self { id, output, stream })
+    }
+
+    fn send(&self, output: Arc<[u8]>) -> bool {
+        self.output.try_send(output).is_ok()
+    }
 }
 
-fn write_messages(stream: &mut UnixStream, messages: &[ServerMsg]) -> io::Result<()> {
-    for message in messages {
-        codec::encode(stream, message)?;
+impl Drop for Connection {
+    fn drop(&mut self) {
+        let _ = self.stream.shutdown(std::net::Shutdown::Both);
     }
+}
+
+fn spawn_writer(id: u64, mut stream: UnixStream, output: Receiver<Arc<[u8]>>) -> io::Result<()> {
+    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
+    thread::Builder::new()
+        .name(format!("runtime-writer-{id}"))
+        .spawn(move || write_output(id, &mut stream, &output))?;
     Ok(())
+}
+
+fn write_output(id: u64, stream: &mut UnixStream, output: &Receiver<Arc<[u8]>>) {
+    while let Ok(bytes) = output.recv() {
+        if let Err(error) = stream.write_all(&bytes) {
+            eprintln!("runtime evicted slow connection {id}: {error}");
+            break;
+        }
+    }
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+}
+
+fn encode_message(message: &ServerMsg) -> io::Result<Arc<[u8]>> {
+    let mut output = Vec::new();
+    codec::encode(&mut output, message)?;
+    Ok(Arc::from(output))
 }
 
 fn lock<T>(mutex: &Mutex<T>) -> io::Result<MutexGuard<'_, T>> {
@@ -280,6 +325,8 @@ mod tests {
     use super::{ClientMsg, SharedSession, is_mutating, lock};
     use crate::UserSession;
     use std::os::unix::net::UnixStream;
+    use std::thread;
+    use std::time::Duration;
 
     #[test]
     fn identifies_only_mutating_messages() {
@@ -325,7 +372,7 @@ mod tests {
                 seat_token: "seat".into(),
                 name: "alice".into(),
             },
-            ClientMsg::Invite,
+            ClientMsg::Invite { hours: None },
             ClientMsg::ListPeople,
             ClientMsg::DetachClient {
                 client_id: "client-1".into(),
@@ -361,5 +408,58 @@ mod tests {
         let connections = lock(&shared.connections).expect("connections must lock");
         assert_eq!(connections.len(), 1);
         assert_eq!(connections[0].id, 2);
+    }
+
+    #[test]
+    fn evicts_stalled_connection_without_blocking_other_client() {
+        let shared = SharedSession::new(UserSession::new("alice", "sh"));
+        let (stalled_server, _stalled_client) =
+            UnixStream::pair().expect("stalled stream pair must open");
+        let (healthy_server, mut healthy_client) =
+            UnixStream::pair().expect("healthy stream pair must open");
+        healthy_client
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .expect("read timeout must set");
+        shared
+            .add_connection(1, stalled_server)
+            .expect("stalled connection must be added");
+        shared
+            .add_connection(2, healthy_server)
+            .expect("healthy connection must be added");
+        let _: seer_core::proto::ServerMsg =
+            seer_core::proto::codec::decode(&mut healthy_client).expect("initial tree must decode");
+
+        let reader = thread::spawn(move || {
+            loop {
+                let message: seer_core::proto::ServerMsg =
+                    seer_core::proto::codec::decode(&mut healthy_client)
+                        .expect("healthy output must decode");
+                if matches!(message, seer_core::proto::ServerMsg::Frame { pane, .. } if pane == "recovered")
+                {
+                    return;
+                }
+            }
+        });
+        let large = seer_core::proto::ServerMsg::Frame {
+            pane: "fill".into(),
+            bytes: vec![b'x'; 256 * 1024],
+        };
+        for _ in 0..68 {
+            shared
+                .broadcast(std::slice::from_ref(&large))
+                .expect("large output must broadcast");
+            if shared.connection_count() == 1 {
+                break;
+            }
+        }
+
+        assert_eq!(shared.connection_count(), 1);
+        shared
+            .broadcast(&[seer_core::proto::ServerMsg::Frame {
+                pane: "recovered".into(),
+                bytes: Vec::new(),
+            }])
+            .expect("recovery output must broadcast");
+        reader.join().expect("healthy reader must finish");
     }
 }

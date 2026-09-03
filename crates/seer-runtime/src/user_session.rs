@@ -66,7 +66,7 @@ impl UserSession {
             } => self.resize(&workspace, &tab, cols, rows),
             ClientMsg::Hello { .. }
             | ClientMsg::Join { .. }
-            | ClientMsg::Invite
+            | ClientMsg::Invite { .. }
             | ClientMsg::ListPeople
             | ClientMsg::DetachClient { .. }
             | ClientMsg::Peek { .. }

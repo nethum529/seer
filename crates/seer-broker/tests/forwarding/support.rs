@@ -148,10 +148,11 @@ impl TestFiles {
         assert_eq!(mode, 0o700);
     }
 
-    pub fn terminate_runtime(&self, user: &str) {
+    pub fn terminate_runtime(&self, user: &str) -> PathBuf {
         let pid = self.runtime_pid(user);
         terminate_process(pid);
         fs::remove_file(self.pid_file(user)).expect("runtime PID file must be removed");
+        self.xdg_runtime_dir.join(format!("seer/{user}.sock"))
     }
 
     pub fn assert_log_contains(&self, expected: &str) {
