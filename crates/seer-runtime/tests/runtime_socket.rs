@@ -10,7 +10,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::{InputEvent, TerminalInput};
 
 mod support;
 use support::*;

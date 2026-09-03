@@ -169,9 +169,10 @@ fn marked_pid(stream: &mut UnixStream, pane: &str) -> Option<u32> {
         match read_message(stream) {
             ServerMsg::Cells {
                 pane: cell_pane,
-                rows,
+                frame,
             } if cell_pane == pane => {
-                let text = rows
+                let text = frame
+                    .rows
                     .iter()
                     .flatten()
                     .map(|cell| cell.character)

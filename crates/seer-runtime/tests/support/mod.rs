@@ -15,6 +15,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::{InputEvent, TerminalInput};
 
 pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 pub const RETRY_INTERVAL: Duration = Duration::from_millis(10);
@@ -76,11 +77,11 @@ pub fn send(stream: &mut UnixStream, message: &ClientMsg) {
 pub fn send_input(stream: &mut UnixStream, pane: &str, input: &str) {
     send(
         stream,
-        &ClientMsg::Input {
+        &ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: pane.into(),
-            bytes: input.as_bytes().into(),
+            input: TerminalInput::new(InputEvent::Text(input.to_owned())),
         },
     );
 }
