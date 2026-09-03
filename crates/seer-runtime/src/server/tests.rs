@@ -4,7 +4,7 @@ use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_core::{
-    ColorDepth, InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput,
+    InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput,
 };
 
 use super::{SharedSession, is_mutating, lock};
@@ -69,11 +69,6 @@ fn identifies_only_mutating_messages() {
         ClientMsg::TerminalCapabilities {
             capabilities: TerminalCapabilities {
                 protocol_version: TERMINAL_PROTOCOL_VERSION,
-                color_depth: ColorDepth::TrueColor,
-                mouse: true,
-                bracketed_paste: true,
-                focus_events: true,
-                synchronized_output: true,
             },
         },
     ];

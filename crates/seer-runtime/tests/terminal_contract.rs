@@ -1,7 +1,7 @@
 use seer_core::proto::{ClientMsg, codec};
 use seer_core::{
-    Color, ColorDepth, CursorShape, InputEvent, KeyCode, KeyInput, Modifiers, MouseButton,
-    MouseInput, MouseKind, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput,
+    Color, CursorShape, InputEvent, KeyCode, KeyInput, Modifiers, MouseButton, MouseInput,
+    MouseKind, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput,
 };
 use seer_runtime::PaneGrid;
 
@@ -9,11 +9,6 @@ use seer_runtime::PaneGrid;
 fn terminal_behavior_fixture() {
     let capabilities = TerminalCapabilities {
         protocol_version: TERMINAL_PROTOCOL_VERSION,
-        color_depth: ColorDepth::TrueColor,
-        mouse: true,
-        bracketed_paste: true,
-        focus_events: true,
-        synchronized_output: true,
     };
     let message = ClientMsg::TerminalCapabilities { capabilities };
     let mut wire = Vec::new();
@@ -83,5 +78,4 @@ fn terminal_behavior_fixture() {
             .expect("scroll input must be accepted"),
         None
     );
-    assert_eq!(grid.snapshot().scrollback_offset, 1);
 }

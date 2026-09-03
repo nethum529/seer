@@ -11,9 +11,7 @@ use ratatui::backend::CrosstermBackend;
 use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::{
-    ColorDepth, InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput, Tree,
-};
+use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput, Tree};
 use seer_net::{Socket, Stream};
 
 use crate::input::{
@@ -411,11 +409,6 @@ fn send_terminal_setup<S: Stream>(
 ) -> io::Result<()> {
     let capabilities = TerminalCapabilities {
         protocol_version: TERMINAL_PROTOCOL_VERSION,
-        color_depth: ColorDepth::TrueColor,
-        mouse: true,
-        bracketed_paste: true,
-        focus_events: true,
-        synchronized_output: true,
     };
     if let Err(error) = send(stream, &ClientMsg::TerminalCapabilities { capabilities }) {
         return ignore_setup_disconnect(error);

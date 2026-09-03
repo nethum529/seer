@@ -214,7 +214,6 @@ mod tests {
                 rows: rows.clone(),
                 cursor: Cursor::default(),
                 modes: TerminalModes::default(),
-                scrollback_offset: 0,
             },
         );
 
