@@ -91,9 +91,6 @@ fn handle_message(
     connection_id: u64,
     message: ClientMsg,
 ) -> io::Result<bool> {
-    let Some(read_only) = shared.refresh_read_only(connection_id)? else {
-        return Ok(true);
-    };
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
         ClientMsg::Peek { workspace, tab, .. } => {
@@ -112,28 +109,8 @@ fn handle_message(
             cols,
             rows,
         } => shared.client_resize(connection_id, &workspace, &tab, cols, rows),
-        message if read_only && is_mutating(&message) => {
-            eprintln!("runtime dropped read-only message: {message:?}");
-            Ok(false)
-        }
-        message => {
-            apply_or_refuse(shared, connection_id, message)?;
-            Ok(false)
-        }
-    }
-}
-
-fn apply_or_refuse(
-    shared: &SharedSession,
-    connection_id: u64,
-    message: ClientMsg,
-) -> io::Result<()> {
-    match shared.apply_and_broadcast(message) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-            shared.send_refused(connection_id, error.to_string())
-        }
-        Err(error) => Err(error),
+        message if is_mutating(&message) => shared.dispatch_input(connection_id, message),
+        _ => Ok(false),
     }
 }
 
@@ -273,6 +250,29 @@ impl SharedSession {
         Ok(Some(connection.read_only))
     }
 
+    fn dispatch_input(&self, connection_id: u64, message: ClientMsg) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        let Some(read_only) = self.refresh_read_only(connection_id)? else {
+            return Ok(true);
+        };
+        if read_only {
+            eprintln!("runtime dropped read-only message: {message:?}");
+            return Ok(false);
+        }
+        match lock(&self.session)?.apply(message) {
+            Ok(messages) => {
+                self.flush_messages(&messages)?;
+                Ok(false)
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                drop(_lease);
+                self.send_refused(connection_id, error.to_string())?;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
     fn client_resize(
         &self,
         id: u64,
@@ -290,6 +290,7 @@ impl SharedSession {
             if connections[position].read_only {
                 return Ok(false);
             }
+            connections[position].last_active = Instant::now();
             let lease_vacant = !connections.iter().any(|c| c.size_owner);
             let owner_stale = connections
                 .iter()
@@ -396,6 +397,7 @@ impl SharedSession {
         Err(connection_closed())
     }
 
+    #[cfg(test)]
     fn apply_and_broadcast(&self, message: ClientMsg) -> io::Result<()> {
         let messages = lock(&self.session)?.apply(message)?;
         self.broadcast(&messages)
