@@ -34,6 +34,8 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
     send(
         &mut alice,
         &ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: "w1:p1".into(),
             bytes: b"sh -c 'printf \"%s\\n\" \"$PPID\" > \"$SEER_TEST_FILES/alice-pane.pid\"'\n"
                 .to_vec(),

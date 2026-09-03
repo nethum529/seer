@@ -180,7 +180,17 @@ fn handle_event<S: Stream>(
             handle_key(key, stream, state, command_pending)
         }
         Event::Resize(cols, rows) if !is_view_only() => {
-            send(stream, &ClientMsg::Resize { cols, rows })?;
+            if let Some((workspace, tab)) = state.selection() {
+                send(
+                    stream,
+                    &ClientMsg::Resize {
+                        workspace: workspace.to_owned(),
+                        tab: tab.to_owned(),
+                        cols,
+                        rows,
+                    },
+                )?;
+            }
             Ok(LoopControl::Continue)
         }
         _ => Ok(LoopControl::Continue),
@@ -208,16 +218,29 @@ fn handle_key<S: Stream>(
         *command_pending = false;
         if let KeyCode::Char(number @ '1'..='9') = key.code {
             let index = number.to_digit(10).map_or(0, |value| value as usize);
-            if let Some(pane) = state.focus_number(index) {
-                send(stream, &ClientMsg::FocusPane { pane })?;
+            if let Some(pane) = state.focus_number(index)
+                && let Some((workspace, tab)) = state.selection()
+            {
+                send(
+                    stream,
+                    &ClientMsg::FocusPane {
+                        workspace: workspace.to_owned(),
+                        tab: tab.to_owned(),
+                        pane,
+                    },
+                )?;
             }
             return Ok(LoopControl::Continue);
         }
     }
-    if let (Some(pane), Some(bytes)) = (state.focused(), key_to_bytes(key)) {
+    if let (Some((workspace, tab)), Some(pane), Some(bytes)) =
+        (state.selection(), state.focused(), key_to_bytes(key))
+    {
         send(
             stream,
             &ClientMsg::Input {
+                workspace: workspace.to_owned(),
+                tab: tab.to_owned(),
                 pane: pane.to_owned(),
                 bytes,
             },
@@ -262,7 +285,8 @@ fn draw(frame: &mut ratatui::Frame<'_>, state: &ClientState) {
         let banner = Rect::new(area.x, area.y, area.width, banner_height);
         frame.render_widget(
             Paragraph::new(format!(
-                "PEEK: {person} - READ ONLY\nWorkspace: {person}/current"
+                "PEEK: {person} - READ ONLY\nWorkspace: {person}/{}",
+                state.selected_workspace().unwrap_or("unknown")
             )),
             banner,
         );

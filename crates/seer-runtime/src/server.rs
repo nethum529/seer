@@ -88,9 +88,14 @@ fn handle_message(
 ) -> io::Result<bool> {
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
-        ClientMsg::Peek { .. } => {
-            *read_only = true;
-            shared.send_tree(connection_id)?;
+        ClientMsg::Peek { workspace, tab, .. } => {
+            match shared.send_selected_tree(connection_id, &workspace, &tab) {
+                Ok(()) => *read_only = true,
+                Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                    shared.send_refused(connection_id, error.to_string())?;
+                }
+                Err(error) => return Err(error),
+            }
             Ok(false)
         }
         message if *read_only && is_mutating(&message) => {
@@ -98,9 +103,23 @@ fn handle_message(
             Ok(false)
         }
         message => {
-            shared.apply_and_broadcast(message)?;
+            apply_or_refuse(shared, connection_id, message)?;
             Ok(false)
         }
+    }
+}
+
+fn apply_or_refuse(
+    shared: &SharedSession,
+    connection_id: u64,
+    message: ClientMsg,
+) -> io::Result<()> {
+    match shared.apply_and_broadcast(message) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            shared.send_refused(connection_id, error.to_string())
+        }
+        Err(error) => Err(error),
     }
 }
 
@@ -108,7 +127,7 @@ fn is_mutating(message: &ClientMsg) -> bool {
     matches!(
         message,
         ClientMsg::Input { .. }
-            | ClientMsg::CreateTab
+            | ClientMsg::CreateTab { .. }
             | ClientMsg::SplitPane { .. }
             | ClientMsg::ClosePane { .. }
             | ClientMsg::FocusPane { .. }
@@ -182,14 +201,21 @@ impl SharedSession {
         Ok(())
     }
 
-    fn send_tree(&self, id: u64) -> io::Result<()> {
-        let message = {
-            let session = lock(&self.session)?;
-            ServerMsg::Tree {
-                tree: session.tree.clone(),
-            }
+    fn send_selected_tree(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
+        let session = lock(&self.session)?;
+        let message = ServerMsg::Tree {
+            tree: session.selected_tree(workspace, tab)?,
         };
-        let output = encode_message(&message)?;
+        drop(session);
+        self.send_to(id, &message)
+    }
+
+    fn send_refused(&self, id: u64, reason: String) -> io::Result<()> {
+        self.send_to(id, &ServerMsg::Refused { reason })
+    }
+
+    fn send_to(&self, id: u64, message: &ServerMsg) -> io::Result<()> {
+        let output = encode_message(message)?;
         let mut connections = lock(&self.connections)?;
         let position = connections
             .iter()
@@ -306,16 +332,35 @@ mod tests {
     fn identifies_only_mutating_messages() {
         let mutating = [
             ClientMsg::Input {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 pane: "p1".into(),
                 bytes: Vec::new(),
             },
-            ClientMsg::CreateTab,
+            ClientMsg::CreateTab {
+                workspace: "w1".into(),
+            },
             ClientMsg::SplitPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 direction: seer_core::SplitDirection::Right,
             },
-            ClientMsg::ClosePane { pane: "p1".into() },
-            ClientMsg::FocusPane { pane: "p1".into() },
-            ClientMsg::Resize { cols: 80, rows: 24 },
+            ClientMsg::ClosePane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
+                pane: "p1".into(),
+            },
+            ClientMsg::FocusPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
+                pane: "p1".into(),
+            },
+            ClientMsg::Resize {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
+                cols: 80,
+                rows: 24,
+            },
         ];
         let deferred = [
             ClientMsg::Hello {
@@ -335,6 +380,7 @@ mod tests {
             ClientMsg::Peek {
                 user: "alice".into(),
                 workspace: "w1".into(),
+                tab: "w1:t1".into(),
             },
             ClientMsg::StopPeek,
             ClientMsg::Detach,
