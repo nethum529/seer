@@ -90,7 +90,7 @@ fn handle_message(
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
         ClientMsg::Peek { workspace, tab, .. } => {
-            match shared.send_selected_tree(connection_id, &workspace, &tab) {
+            match shared.send_snapshot(connection_id, &workspace, &tab) {
                 Ok(()) => *read_only = true,
                 Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
                     shared.send_refused(connection_id, error.to_string())?;
@@ -175,15 +175,13 @@ impl SharedSession {
     }
 
     fn add_connection(&self, id: u64, stream: UnixStream) -> io::Result<()> {
-        let message = {
+        let messages = {
             let mut session = lock(&self.session)?;
             session.ensure_first_shell()?;
-            ServerMsg::Tree {
-                tree: session.tree.clone(),
-            }
+            session.snapshot()
         };
         let connection = Connection::new(id, stream)?;
-        if !connection.send(encode_message(&message)?) {
+        if !connection.send_messages(&messages)? {
             return Err(connection_closed());
         }
         let mut connections = lock(&self.connections)?;
@@ -196,13 +194,21 @@ impl SharedSession {
         Ok(())
     }
 
-    fn send_selected_tree(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
+    fn send_snapshot(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
         let session = lock(&self.session)?;
-        let message = ServerMsg::Tree {
-            tree: session.selected_tree(workspace, tab)?,
-        };
+        let tree = session.selected_tree(workspace, tab)?;
+        let messages = session.snapshot_for(tree);
         drop(session);
-        self.send_to(id, &message)
+        let mut connections = lock(&self.connections)?;
+        let position = connections
+            .iter()
+            .position(|connection| connection.id == id)
+            .ok_or_else(connection_closed)?;
+        if !connections[position].send_messages(&messages)? {
+            connections.remove(position);
+            return Err(connection_closed());
+        }
+        Ok(())
     }
 
     fn send_refused(&self, id: u64, reason: String) -> io::Result<()> {
@@ -271,6 +277,15 @@ impl Connection {
 
     fn send(&self, output: Arc<[u8]>) -> bool {
         self.output.try_send(output).is_ok()
+    }
+
+    fn send_messages(&self, messages: &[ServerMsg]) -> io::Result<bool> {
+        for message in messages {
+            if !self.send(encode_message(message)?) {
+                return Ok(false);
+            }
+        }
+        Ok(true)
     }
 }
 
@@ -388,7 +403,19 @@ mod tests {
 
     #[test]
     fn removes_only_the_requested_connection() {
-        let shared = SharedSession::new(UserSession::new("alice", "sh"));
+        let mut session = UserSession::new("alice", "sh");
+        session
+            .ensure_first_shell()
+            .expect("first shell must start");
+        session
+            .apply(ClientMsg::Resize {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
+                cols: 1,
+                rows: 1,
+            })
+            .expect("session must resize");
+        let shared = SharedSession::new(session);
         let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
         let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
         shared
