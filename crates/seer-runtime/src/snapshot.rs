@@ -135,7 +135,10 @@ fn write_snapshot_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
 /// Makes a completed rename durable across a machine reboot.
 fn sync_parent_directory(path: &Path) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
-        io::Error::new(io::ErrorKind::InvalidInput, "snapshot has no parent directory")
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "snapshot has no parent directory",
+        )
     })?;
     File::open(parent)?.sync_all()
 }
@@ -165,7 +168,10 @@ fn validate_tree(tree: &Tree) -> Result<(), String> {
 
     for workspace in &tree.workspaces {
         if workspace.id.is_empty() || !workspace_ids.insert(workspace.id.as_str()) {
-            return Err(format!("workspace id is empty or repeated: {}", workspace.id));
+            return Err(format!(
+                "workspace id is empty or repeated: {}",
+                workspace.id
+            ));
         }
         largest_workspace = largest_workspace.max(id_number(&workspace.id, "w")?);
         let mut counters = WorkspaceCounters::default();
@@ -280,10 +286,7 @@ mod tests {
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
         assert!(!path.exists(), "snapshot file must not be written");
         let temporary = path.with_file_name(format!(".{}.tmp", SNAPSHOT_FILE));
-        assert!(
-            !temporary.exists(),
-            "temporary file must not remain behind"
-        );
+        assert!(!temporary.exists(), "temporary file must not remain behind");
 
         fs::remove_dir_all(&directory).expect("temporary directory must be removed");
     }

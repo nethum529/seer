@@ -1,5 +1,5 @@
-use crate::persistence::{self, Store};
 use crate::PaneHost;
+use crate::persistence::{self, Store};
 use portable_pty::CommandBuilder;
 use seer_core::layout::{PaneRect, rects};
 use seer_core::proto::{ClientMsg, ServerMsg};
