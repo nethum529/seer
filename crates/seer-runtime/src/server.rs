@@ -259,7 +259,8 @@ impl SharedSession {
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);
         }
-        match lock(&self.session)?.apply(message) {
+        let applied = lock(&self.session)?.apply(message);
+        match applied {
             Ok(messages) => {
                 self.flush_messages(&messages)?;
                 Ok(false)
