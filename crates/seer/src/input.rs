@@ -4,8 +4,8 @@ use crossterm::event::{
 };
 use ratatui::layout::Rect;
 use seer_core::{
-    InputEvent, KeyCode, KeyInput, Modifiers, MouseButton, MouseInput, MouseKind, SplitDirection,
-    TerminalInput, Tree,
+    InputEvent, KeyCode, KeyInput, Modifiers, MouseButton, MouseInput, MouseKind, MouseTracking,
+    SplitDirection, TerminalInput, Tree,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -103,6 +103,19 @@ pub(crate) fn mouse_to_input(mouse: MouseEvent, column: u16, row: u16) -> Termin
         row,
         modifiers: map_modifiers(mouse.modifiers),
     }))
+}
+
+pub(crate) fn mouse_event_is_tracked(kind: MouseEventKind, tracking: MouseTracking) -> bool {
+    match kind {
+        MouseEventKind::Moved => tracking == MouseTracking::AnyMotion,
+        MouseEventKind::Drag(_) => {
+            matches!(
+                tracking,
+                MouseTracking::ButtonMotion | MouseTracking::AnyMotion
+            )
+        }
+        _ => true,
+    }
 }
 
 fn map_key_code(code: CrosstermKeyCode) -> Option<KeyCode> {

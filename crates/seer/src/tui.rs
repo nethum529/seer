@@ -12,12 +12,13 @@ use ratatui::layout::Rect;
 use ratatui::widgets::{Block, Borders, Paragraph};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{
-    ColorDepth, InputEvent, MouseProtocol, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities,
-    TerminalInput, Tree,
+    ColorDepth, InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput, Tree,
 };
 use seer_net::{Socket, Stream};
 
-use crate::input::{InputAction, is_control_char, key_to_action, mouse_to_input};
+use crate::input::{
+    InputAction, is_control_char, key_to_action, mouse_event_is_tracked, mouse_to_input,
+};
 use crate::render::PaneCells;
 use crate::state::{ClientState, pane_rects};
 use crate::terminal_session::{TerminalSession, ignore_setup_disconnect, set_cursor_style};
@@ -326,9 +327,7 @@ fn handle_mouse<S: Stream>(
     let Some((pane, column, row)) = state.mouse_target(mouse.column, mouse.row) else {
         return Ok(LoopControl::Continue);
     };
-    if matches!(mouse.kind, MouseEventKind::Moved | MouseEventKind::Drag(_))
-        && state.pane_mouse_protocol(&pane) == MouseProtocol::None
-    {
+    if !mouse_event_is_tracked(mouse.kind, state.pane_mouse_tracking(&pane)) {
         return Ok(LoopControl::Continue);
     }
     let Some((workspace, tab)) = state

@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ratatui::layout::Rect;
-use seer_core::{Cell, Cursor, MouseProtocol, Tab, TerminalFrame, Tree};
+use seer_core::{Cell, Cursor, MouseTracking, Tab, TerminalFrame, Tree};
 
 #[derive(Debug)]
 pub(crate) struct ClientState {
@@ -102,10 +102,10 @@ impl ClientState {
         self.frames.get(pane).map(|frame| frame.cursor)
     }
 
-    pub(crate) fn pane_mouse_protocol(&self, pane: &str) -> MouseProtocol {
+    pub(crate) fn pane_mouse_tracking(&self, pane: &str) -> MouseTracking {
         self.frames
             .get(pane)
-            .map_or(MouseProtocol::None, |frame| frame.modes.mouse_protocol)
+            .map_or(MouseTracking::None, |frame| frame.modes.mouse_tracking)
     }
 
     pub(crate) fn set_pane_areas(&mut self, areas: Vec<(String, Rect)>) {
