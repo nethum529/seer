@@ -72,6 +72,19 @@ check_release_tag() {
     fi
 }
 
+check_source_deploy_key() {
+    if [[ "${dry_run}" == true ]]; then
+        print_command gh secret list --repo "${RELEASE_REPOSITORY}"
+        return
+    fi
+
+    if ! gh secret list --repo "${RELEASE_REPOSITORY}" | cut -f1 | grep -Fxq SEER_SOURCE_DEPLOY_KEY; then
+        printf 'Add the SEER_SOURCE_DEPLOY_KEY secret to %s, see issue 179\n' \
+            "${RELEASE_REPOSITORY}" >&2
+        exit 1
+    fi
+}
+
 build_target() {
     local builder=$1
     local target=$2
@@ -87,26 +100,73 @@ make_archive() {
     run tar -C "target/${target}/release" -czf "${output_directory}/${asset}" "${BINARIES[@]}"
 }
 
-update_install_script() {
+update_release_files() {
     local checkout=$1
+    local workflow_directory="${checkout}/.github/workflows"
+    local workflow_file="${workflow_directory}/macos-build.yml"
 
     if [[ "${dry_run}" == true ]]; then
         print_command cp scripts/install.sh "${checkout}/install.sh"
-        printf '+ if install.sh changed in %q\n' "${checkout}"
-        print_command git -C "${checkout}" add install.sh
-        print_command git -C "${checkout}" commit -s -m "Update install script"
+        print_command mkdir -p "${workflow_directory}"
+        print_command cp scripts/seer-releases/macos-build.yml "${workflow_file}"
+        printf '+ if release files changed in %q\n' "${checkout}"
+        print_command git -C "${checkout}" add install.sh .github/workflows/macos-build.yml
+        print_command git -C "${checkout}" commit -s -m "Update release files"
         print_command git -C "${checkout}" push origin main
         return
     fi
 
-    if cmp -s scripts/install.sh "${checkout}/install.sh"; then
+    mkdir -p "${workflow_directory}"
+    cp scripts/install.sh "${checkout}/install.sh"
+    cp scripts/seer-releases/macos-build.yml "${workflow_file}"
+    if [[ -z "$(git -C "${checkout}" status --porcelain -- \
+        install.sh .github/workflows/macos-build.yml)" ]]; then
         return
     fi
 
-    cp scripts/install.sh "${checkout}/install.sh"
-    git -C "${checkout}" add install.sh
-    git -C "${checkout}" commit -s -m "Update install script"
+    git -C "${checkout}" add install.sh .github/workflows/macos-build.yml
+    git -C "${checkout}" commit -s -m "Update release files"
     git -C "${checkout}" push origin main
+}
+
+run_macos_build() {
+    local tag=$1
+    local source_ref
+
+    if [[ "${dry_run}" == true ]]; then
+        print_command git rev-parse HEAD
+        source_ref="<git-rev-parse-HEAD>"
+    else
+        source_ref=$(git rev-parse HEAD)
+    fi
+
+    run gh workflow run macos-build.yml \
+        --repo "${RELEASE_REPOSITORY}" \
+        -f "tag=${tag}" \
+        -f "ref=${source_ref}"
+
+    if [[ "${dry_run}" == true ]]; then
+        print_command gh run list \
+            --repo "${RELEASE_REPOSITORY}" \
+            --workflow macos-build.yml \
+            --limit 1 \
+            --json databaseId \
+            --jq '.[0].databaseId'
+        print_command gh run watch "<run-id>" --repo "${RELEASE_REPOSITORY}" --exit-status
+        return
+    fi
+
+    local run_id
+    run_id=$(gh run list \
+        --repo "${RELEASE_REPOSITORY}" \
+        --workflow macos-build.yml \
+        --limit 1 \
+        --json databaseId \
+        --jq '.[0].databaseId')
+    if ! gh run watch "${run_id}" --repo "${RELEASE_REPOSITORY}" --exit-status; then
+        printf 'macOS build failed, see the run in seer-releases\n' >&2
+        exit 1
+    fi
 }
 
 parse_arguments() {
@@ -133,6 +193,7 @@ main() {
     cd "${repository_root}"
 
     check_source_tree
+    check_source_deploy_key
 
     local version
     version=$(read_version)
@@ -160,26 +221,20 @@ main() {
     run mkdir -p "${assets_directory}"
 
     build_target build x86_64-unknown-linux-gnu
-    build_target zigbuild aarch64-apple-darwin
-    build_target zigbuild x86_64-apple-darwin
 
     local linux_asset="seer-linux-x86_64.tar.gz"
-    local darwin_arm_asset="seer-darwin-arm64.tar.gz"
-    local darwin_x86_asset="seer-darwin-x86_64.tar.gz"
     make_archive x86_64-unknown-linux-gnu "${linux_asset}" "${assets_directory}"
-    make_archive aarch64-apple-darwin "${darwin_arm_asset}" "${assets_directory}"
-    make_archive x86_64-apple-darwin "${darwin_x86_asset}" "${assets_directory}"
 
     run git clone --branch main --single-branch "${RELEASE_REPOSITORY_URL}" "${release_checkout}"
-    update_install_script "${release_checkout}"
+    update_release_files "${release_checkout}"
 
     run gh release create "${tag}" \
         "${assets_directory}/${linux_asset}" \
-        "${assets_directory}/${darwin_arm_asset}" \
-        "${assets_directory}/${darwin_x86_asset}" \
         --repo "${RELEASE_REPOSITORY}" \
         --title "${tag}" \
         --generate-notes
+
+    run_macos_build "${tag}"
 }
 
 main "$@"

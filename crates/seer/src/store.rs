@@ -80,7 +80,11 @@ fn store_path() -> io::Result<PathBuf> {
     store_path_from(env::var_os("XDG_CONFIG_HOME"), env::var_os("HOME"))
 }
 
-fn store_path_from(
+pub(crate) fn config_dir() -> io::Result<PathBuf> {
+    config_dir_from(env::var_os("XDG_CONFIG_HOME"), env::var_os("HOME"))
+}
+
+fn config_dir_from(
     xdg_config_home: Option<std::ffi::OsString>,
     home: Option<std::ffi::OsString>,
 ) -> io::Result<PathBuf> {
@@ -93,7 +97,14 @@ fn store_path_from(
             PathBuf::from(home).join(".config")
         }
     };
-    Ok(root.join("seer").join("servers.toml"))
+    Ok(root.join("seer"))
+}
+
+fn store_path_from(
+    xdg_config_home: Option<std::ffi::OsString>,
+    home: Option<std::ffi::OsString>,
+) -> io::Result<PathBuf> {
+    Ok(config_dir_from(xdg_config_home, home)?.join("servers.toml"))
 }
 
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {

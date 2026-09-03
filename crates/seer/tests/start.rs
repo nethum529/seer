@@ -165,7 +165,7 @@ fn serve_fake_client(mut stream: TcpStream) {
     )
     .expect("fake welcome must write");
     let request: ClientMsg = codec::decode(&mut stream).expect("fake invite request must read");
-    assert_eq!(request, ClientMsg::Invite);
+    assert_eq!(request, ClientMsg::Invite { hours: None });
     codec::encode(
         &mut stream,
         &ServerMsg::Seat {
@@ -184,23 +184,20 @@ fn prompt_defaults_create_config_and_owner_store() {
     let executable = install_binaries(&directory);
     write_existing_servers(&directory);
 
-    let output = run_start(&executable, &directory, "\n127.0.0.1:7321\n", &[]);
+    let output = run_start(&executable, &directory, "\n", &[]);
 
     assert!(output.status.success(), "{}", output.stderr);
     assert!(output.stdout.contains("Your name [alice]: "));
-    assert!(
-        output
-            .stdout
-            .contains("Published address [host.test:7321]: ")
-    );
+    assert!(!output.stdout.contains("Published address"));
     assert!(
         output
             .stdout
             .contains("Server started at 127.0.0.1:7321.\nYou are alice.\n")
     );
     let broker: toml::Value = read_toml(directory.config_home().join("seer/broker.toml"));
-    assert_eq!(broker["listen"].as_str(), Some("0.0.0.0:7321"));
+    assert_eq!(broker["listen"].as_str(), Some("127.0.0.1:7321"));
     assert_eq!(broker["published_addr"].as_str(), Some("127.0.0.1:7321"));
+    assert_eq!(broker["remote"].as_bool(), Some(true));
     assert_eq!(broker["owner_name"].as_str(), Some("alice"));
     assert_eq!(broker["state_dir"].as_str(), directory.state_dir().to_str());
     let servers: toml::Value = read_toml(directory.config_home().join("seer/servers.toml"));
@@ -209,7 +206,7 @@ fn prompt_defaults_create_config_and_owner_store() {
     assert_eq!(owner["current"].as_bool(), Some(false));
     let local = &servers["servers"][1];
     assert_eq!(local["endpoint"].as_str(), Some("127.0.0.1:7321"));
-    assert_eq!(local["alias"].as_str(), Some("127.0.0.1"));
+    assert_eq!(local["alias"].as_str(), Some("host.test"));
     assert_eq!(local["user_id"].as_str(), Some("owner-id"));
     assert_eq!(local["name"].as_str(), Some("alice"));
     assert_eq!(local["credential"].as_str(), Some("owner-secret"));
@@ -224,28 +221,6 @@ fn prompt_defaults_create_config_and_owner_store() {
         .expect("broker log must be read");
     assert!(log.contains("broker-output"));
     assert!(!log.contains("owner-credential"));
-}
-
-#[test]
-fn published_port_sets_the_listen_port() {
-    let _serial = PROCESS_TEST.lock().expect("process test lock must work");
-    let directory = TestDirectory::new();
-    let port = unused_address().port();
-    let executable = install_binaries(&directory);
-
-    let output = run_start(
-        &executable,
-        &directory,
-        &format!("\n127.0.0.1:{port}\n"),
-        &[],
-    );
-
-    assert!(output.status.success(), "{}", output.stderr);
-    let broker: toml::Value = read_toml(directory.config_home().join("seer/broker.toml"));
-    assert_eq!(
-        broker["listen"].as_str(),
-        Some(format!("0.0.0.0:{port}").as_str())
-    );
 }
 
 #[test]

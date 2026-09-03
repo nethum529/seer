@@ -63,14 +63,18 @@ fn commands_work_with_stream_messages_from_the_real_broker() {
 fn invitation_from(output: &[u8]) -> String {
     let output = text(output);
     let lines: Vec<&str> = output.lines().collect();
-    assert_eq!(lines.first(), Some(&"Send this to a friend:"));
+    assert_eq!(
+        lines.first(),
+        Some(&"Seat ready. It works once and expires in 1 hour.")
+    );
+    assert_eq!(lines.get(1), Some(&"Send this to a friend:"));
     let join = lines.get(4).expect("install command must print");
     let invitation = join
         .strip_prefix(
             "curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- ",
         )
         .expect("install command must include the invitation");
-    assert_eq!(lines.len(), 7);
+    assert_eq!(lines.len(), 5);
     assert!(invitation.starts_with("SEER1-127.0.0.1-"));
     invitation.to_owned()
 }
@@ -180,7 +184,7 @@ impl TestFiles {
 
     fn write_broker_files(&self, address: SocketAddr) {
         let config = format!(
-            "listen = \"{address}\"\npublished_addr = \"{address}\"\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
+            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
             self.state_dir.display()
         );
         fs::write(&self.broker_config, config).expect("broker config must write");

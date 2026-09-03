@@ -9,11 +9,17 @@ use serde::Deserialize;
 pub struct Config {
     pub listen: SocketAddr,
     pub published_addr: String,
+    #[serde(default = "default_remote")]
+    pub remote: bool,
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
     pub owner_name: String,
     #[serde(default = "default_shell")]
     pub shell: String,
+}
+
+fn default_remote() -> bool {
+    true
 }
 
 fn default_shell() -> String {

@@ -3,10 +3,11 @@ members = [
     "crates/seer-broker",
     "crates/seer",
     "crates/seer-core",
+    "crates/seer-net",
     "crates/seer-runtime",
 ]
 resolver = "3"
 
 [workspace.package]
 edition = "2024"
-version = "0.1.1"
+version = "0.2.0"

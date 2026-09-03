@@ -46,7 +46,7 @@ impl UserSession {
             ClientMsg::Resize { cols, rows } => self.resize(cols, rows),
             ClientMsg::Hello { .. }
             | ClientMsg::Join { .. }
-            | ClientMsg::Invite
+            | ClientMsg::Invite { .. }
             | ClientMsg::ListPeople
             | ClientMsg::DetachClient { .. }
             | ClientMsg::Peek { .. }

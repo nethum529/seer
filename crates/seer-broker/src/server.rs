@@ -1,15 +1,16 @@
 use std::io::{self, Read, Write};
-use std::net::{TcpListener, TcpStream};
+use std::net::TcpListener;
 use std::sync::Arc;
 use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
+use seer_net::{EndpointId, Listener, Socket, Stream, load_or_create_secret_key};
 
 use crate::Config;
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
-use crate::registry::{PersonRecord, Registry};
+use crate::registry::{MAX_SEAT_LIFETIME_SECS, PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -18,13 +19,18 @@ const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
 
 pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
-    let (broker, owner_credential) = BrokerState::new(config)?;
+    let (mut broker, owner_credential) = BrokerState::new(config)?;
+    let remote_listener = bind_remote_listener(config);
+    broker.remote_endpoint = remote_listener.as_ref().map(Listener::id);
     if let Some(credential) = owner_credential {
         writeln!(io::stdout().lock(), "owner-credential: {credential}")?;
     }
     let broker = Arc::new(broker);
+    if let Some(remote_listener) = remote_listener {
+        spawn_remote_accept_loop(remote_listener, Arc::clone(&broker));
+    }
     for connection in listener.incoming() {
-        let stream = connection?;
+        let stream = Socket::from(connection?);
         let broker = Arc::clone(&broker);
         thread::spawn(move || report_connection(handle_connection(stream, &broker)));
     }
@@ -36,6 +42,7 @@ pub(crate) struct BrokerState {
     runtimes: RuntimeManager,
     attachments: Attachments,
     published: PublishedAddress,
+    remote_endpoint: Option<EndpointId>,
 }
 
 impl BrokerState {
@@ -49,6 +56,7 @@ impl BrokerState {
                 runtimes,
                 attachments: Attachments::default(),
                 published,
+                remote_endpoint: None,
             },
             owner_credential,
         ))
@@ -62,11 +70,19 @@ impl BrokerState {
         &self.runtimes
     }
 
-    pub(crate) fn invite(&self) -> io::Result<ServerMsg> {
-        let token = self.registry.create_seat()?;
+    pub(crate) fn invite(&self, hours: Option<u32>) -> io::Result<ServerMsg> {
+        let requested_lifetime = hours.map_or_else(Registry::seat_lifetime_secs, |hours| {
+            u64::from(hours).saturating_mul(3_600)
+        });
+        let lifetime_secs = requested_lifetime.min(MAX_SEAT_LIFETIME_SECS);
+        let token = self.registry.create_seat(lifetime_secs)?;
+        let capsule = match self.remote_endpoint {
+            Some(endpoint) => format!("SEER2-{endpoint}-{token}"),
+            None => self.published.capsule(&token),
+        };
         Ok(ServerMsg::Seat {
-            capsule: self.published.capsule(&token),
-            expires_in_secs: Registry::seat_lifetime_secs(),
+            capsule,
+            expires_in_secs: lifetime_secs,
         })
     }
 
@@ -132,6 +148,41 @@ fn invalid_published_addr() -> io::Error {
     )
 }
 
+fn bind_remote_listener(config: &Config) -> Option<Listener> {
+    if !config.remote {
+        return None;
+    }
+    let result =
+        load_or_create_secret_key(&config.state_dir.join("iroh.key")).and_then(Listener::bind);
+    match result {
+        Ok(listener) => Some(listener),
+        Err(error) => {
+            eprintln!("broker remote listener error: {error}");
+            None
+        }
+    }
+}
+
+fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
+    thread::spawn(move || {
+        loop {
+            match listener.accept() {
+                Ok((_remote, stream)) => {
+                    let broker = Arc::clone(&broker);
+                    let stream = Socket::from(stream);
+                    thread::spawn(move || {
+                        report_connection(handle_connection(stream, &broker));
+                    });
+                }
+                Err(error) => {
+                    eprintln!("broker remote accept error: {error}");
+                    return;
+                }
+            }
+        }
+    });
+}
+
 fn report_connection(result: io::Result<()>) -> bool {
     if let Err(error) = result {
         eprintln!("broker connection error: {error}");
@@ -141,7 +192,10 @@ fn report_connection(result: io::Result<()>) -> bool {
     }
 }
 
-fn handle_connection(mut stream: TcpStream, broker: &BrokerState) -> io::Result<()> {
+fn handle_connection<S>(mut stream: S, broker: &BrokerState) -> io::Result<()>
+where
+    S: Stream + Clone,
+{
     let Some(person) = handshake(&mut stream, broker, HANDSHAKE_TIMEOUT)? else {
         return Ok(());
     };
@@ -149,8 +203,8 @@ fn handle_connection(mut stream: TcpStream, broker: &BrokerState) -> io::Result<
     forward(stream, &person, broker)
 }
 
-fn handshake(
-    stream: &mut TcpStream,
+fn handshake<S: Stream>(
+    stream: &mut S,
     broker: &BrokerState,
     timeout: Duration,
 ) -> io::Result<Option<PersonRecord>> {
@@ -187,12 +241,12 @@ fn major_minor(version: &str) -> Option<(&str, &str)> {
     Some((major, minor))
 }
 
-fn read_message(stream: &mut TcpStream, deadline: Instant) -> io::Result<ClientMsg> {
+fn read_message<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ClientMsg> {
     codec::decode(&mut DeadlineReader { stream, deadline })
 }
 
-fn authenticate(
-    stream: &mut TcpStream,
+fn authenticate<S: Stream>(
+    stream: &mut S,
     registry: &Registry,
     user_id: &str,
     credential: &str,
@@ -203,8 +257,8 @@ fn authenticate(
     Ok(Some(person))
 }
 
-fn join(
-    stream: &mut TcpStream,
+fn join<S: Stream>(
+    stream: &mut S,
     registry: &Registry,
     seat_token: &str,
     name: &str,
@@ -224,7 +278,7 @@ fn join(
     Ok(Some(result.person))
 }
 
-pub(crate) fn refuse(stream: &mut TcpStream, reason: &str) -> io::Result<()> {
+pub(crate) fn refuse<S: Stream>(stream: &mut S, reason: &str) -> io::Result<()> {
     eprintln!("refused connection: {reason}");
     codec::encode(
         stream,
@@ -241,12 +295,12 @@ fn connection_was_silent(error: &io::Error) -> bool {
     )
 }
 
-struct DeadlineReader<'a> {
-    stream: &'a mut TcpStream,
+struct DeadlineReader<'a, S> {
+    stream: &'a mut S,
     deadline: Instant,
 }
 
-impl Read for DeadlineReader<'_> {
+impl<S: Stream> Read for DeadlineReader<'_, S> {
     fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
         let remaining = self
             .deadline
@@ -377,7 +431,9 @@ mod tests {
                 .expect("owner must authenticate");
         assert_eq!(authenticated.user_id, owner.user_id);
 
-        let token = registry.create_seat().expect("seat must be created");
+        let token = registry
+            .create_seat(crate::registry::Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         let joined = super::join(&mut server, &registry, &token, "Guest")
             .expect("join must finish")
             .expect("guest must join");
@@ -394,7 +450,9 @@ mod tests {
         assert!(
             super::authenticate(&mut closed_server, &registry, &owner.user_id, "wrong").is_err()
         );
-        let second_token = registry.create_seat().expect("seat must be created");
+        let second_token = registry
+            .create_seat(crate::registry::Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         assert!(super::join(&mut closed_server, &registry, &second_token, "Other").is_err());
         remove_directory(&directory, "state directory must be removed");
     }
@@ -404,6 +462,7 @@ mod tests {
         let config = crate::Config {
             listen: "127.0.0.1:0".parse().expect("address must parse"),
             published_addr: "bad".into(),
+            remote: false,
             state_dir: PathBuf::from("/tmp/not-created-by-invalid-config"),
             owner_name: "Owner".into(),
             shell: "sh".into(),

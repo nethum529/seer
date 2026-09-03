@@ -175,7 +175,7 @@ impl TemporaryConfig {
         let path = directory.join("broker.toml");
         let state_dir = directory.join("state");
         let contents = format!(
-            "listen = \"{address}\"\npublished_addr = \"host:7321\"\nstate_dir = \"{}\"\nowner_name = \"Owner\"\n",
+            "listen = \"{address}\"\npublished_addr = \"host:7321\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"Owner\"\n",
             state_dir.display()
         );
         fs::write(&path, contents).expect("temporary config must write");

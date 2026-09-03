@@ -14,8 +14,8 @@ Research notes live in docs/research/.
 ## Quickstart
 
 This example uses one owner on Linux and one friend on macOS or Linux. The
-friend needs a terminal and a Tailscale invite. The friend does not need Rust,
-Git, or a GitHub account.
+friend needs only a terminal. The friend does not need Rust, Git, or a GitHub
+account.
 
 On the owner's Linux machine, install Seer:
 
@@ -34,29 +34,26 @@ Seer prints a message in this format:
 ```text
 Send this to a friend:
 
-1. Accept the Tailscale invite I sent you.
-2. Paste this in Terminal:
+Paste this in Terminal:
 curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- <capsule>
-
-Invite them to Tailscale first: https://login.tailscale.com/admin/users
 ```
 
-Use the admin link to invite the friend to Tailscale. Send the printed message
-to the friend. The friend accepts the Tailscale invite and pastes the install
-line in Terminal. The installer joins the session and opens a shell. The friend
-presses Enter to use the default name or types a different name.
+Send the printed message to the friend. The friend pastes the install line in
+Terminal. The installer joins the session and opens a shell. The friend presses
+Enter to use the default name or types a different name.
 
 Use these commands after both people join:
 
 ```sh
 seer
+seer invite --hours 24
 seer peek <name>
 seer detach
 ```
 
 Bare seer attaches again after a detach.
 
-Seer uses plain TCP and has no TLS yet. Use Tailscale or a LAN.
+Remote connections are encrypted end to end (see docs/adr/0002-builtin-connect.md).
 
 ## Build from source
 
