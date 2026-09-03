@@ -213,10 +213,11 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
     let peek = ClientMsg::Peek {
         user: person.user_id.clone(),
         workspace: "w1".into(),
+        tab: "w1:t1".into(),
     };
     send(&mut stream, &peek)?;
     println!("PEEK: {} - READ ONLY", person.name);
-    println!("Workspace: {}/current", person.name);
+    println!("Workspace: {}/w1", person.name);
     finish_session(
         io::stdout().is_terminal(),
         stream,

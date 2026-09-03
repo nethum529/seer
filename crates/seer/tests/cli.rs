@@ -336,6 +336,7 @@ fn peek_requires_an_exact_name_and_sends_the_user_id() {
                     ClientMsg::Peek {
                         user: "user-alice".into(),
                         workspace: "w1".into(),
+                        tab: "w1:t1".into(),
                     }
                 );
             }
@@ -351,7 +352,7 @@ fn peek_requires_an_exact_name_and_sends_the_user_id() {
     assert_eq!(exact.status.code(), Some(0));
     assert_eq!(
         exact.stdout,
-        b"PEEK: alice - READ ONLY\nWorkspace: alice/current\n"
+        b"PEEK: alice - READ ONLY\nWorkspace: alice/w1\n"
     );
     assert!(exact.stderr.is_empty());
     server.join().expect("server must finish");

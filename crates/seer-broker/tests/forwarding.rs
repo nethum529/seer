@@ -118,9 +118,18 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "charlie".into(),
             workspace: workspace.clone(),
+            tab: "w1:t1".into(),
         },
     );
-    send(&mut bob, &ClientMsg::Resize { cols: 90, rows: 30 });
+    send(
+        &mut bob,
+        &ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            cols: 90,
+            rows: 30,
+        },
+    );
     wait_for_tree_with_tab(&mut bob);
     assert!(!temporary.pid_file("charlie").is_file());
 
@@ -129,6 +138,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace,
+            tab: "w1:t1".into(),
         },
     );
     assert_eq!(wait_for_tree_with_tab(&mut bob), alice_tree);
@@ -154,6 +164,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
     );
     wait_for_tree_with_tab(&mut bob);
@@ -187,6 +198,8 @@ fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
     send(
         stream,
         &ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: pane.into(),
             bytes: input.as_bytes().into(),
         },
