@@ -8,18 +8,18 @@ use seer_core::{InputEvent, TerminalInput};
 
 #[path = "support/binary.rs"]
 mod binary;
-#[path = "forwarding/support.rs"]
-mod support;
 #[path = "forwarding/extras.rs"]
 mod extras;
+#[path = "forwarding/support.rs"]
+mod support;
 
-use support::{
-    ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
-    wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
-};
 use extras::{
     assert_log_contains, assert_log_excludes, assert_process_running, assert_runtime_arguments,
     assert_socket_directory, pane_pid, send, wait_for_cells, write_config,
+};
+use support::{
+    ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
+    wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
 };
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);

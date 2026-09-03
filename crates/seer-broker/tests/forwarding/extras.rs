@@ -49,8 +49,8 @@ pub(crate) fn pane_pid(files: &TestFiles, user: &str) -> u32 {
 }
 
 pub(crate) fn assert_process_running(pid: u32) {
-    let status = fs::read_to_string(format!("/proc/{pid}/status"))
-        .expect("process status must be readable");
+    let status =
+        fs::read_to_string(format!("/proc/{pid}/status")).expect("process status must be readable");
     assert!(!status.lines().any(|line| line.starts_with("State:\tZ")));
 }
 
@@ -85,9 +85,7 @@ pub(crate) fn assert_socket_directory(files: &TestFiles) {
 pub(crate) fn assert_log_contains(files: &TestFiles, expected: &str) {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while Instant::now() < deadline {
-        if fs::read_to_string(&files.broker_log)
-            .is_ok_and(|contents| contents.contains(expected))
-        {
+        if fs::read_to_string(&files.broker_log).is_ok_and(|contents| contents.contains(expected)) {
             return;
         }
         thread::sleep(POLL_INTERVAL);
