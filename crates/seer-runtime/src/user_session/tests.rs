@@ -53,7 +53,7 @@ fn splits_and_resizes_both_panes() {
 #[test]
 fn writes_input_to_the_focused_pane_and_polls_cells() {
     let mut session = session_with_tab();
-    let _ = session.poll();
+    let _ = session.poll().expect("session must poll");
 
     let messages = session
         .apply(ClientMsg::Input {
@@ -74,7 +74,7 @@ fn poll_omits_a_quiet_pane() {
     let mut session = session_with_tab();
     assert!(wait_for_cells(&mut session, |_| true).is_some());
 
-    assert!(session.poll().is_empty());
+    assert!(session.poll().expect("session must poll").is_empty());
     close_all_panes(&mut session);
 }
 
@@ -264,7 +264,7 @@ fn wait_for_cells(
     let deadline = Instant::now() + WAIT_TIMEOUT;
     let mut matched_messages = None;
     while Instant::now() < deadline {
-        let messages = session.poll();
+        let messages = session.poll().expect("session must poll");
         if messages.is_empty() && matched_messages.is_some() {
             return matched_messages;
         }

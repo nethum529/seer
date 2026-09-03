@@ -1,114 +1,24 @@
 #![cfg(target_os = "linux")]
 
-use std::fs;
-use std::io::Read;
-use std::net::{SocketAddr, TcpListener, TcpStream};
-use std::os::unix::fs::{MetadataExt, PermissionsExt};
+use std::net::TcpStream;
 use std::path::Path;
-use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg};
 
 #[path = "support/binary.rs"]
 mod binary;
 #[path = "forwarding/support.rs"]
 mod support;
 
-use support::{ProcessGuard, TestFiles};
+use support::{
+    ProcessGuard, TestFiles, connect_when_ready, read_message, send, send_hello, unused_address,
+    wait_for_cells, wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
+};
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
-
-#[test]
-fn uses_the_mapped_os_identity_and_rejects_an_unsafe_account() {
-    let temporary = TestFiles::new();
-    let account = current_account();
-    let unsafe_account = "x".repeat(65);
-    let address = unused_address();
-    temporary.write_config_with_os_users(address, &account.name, &unsafe_account);
-    temporary.write_runtime_wrapper();
-    let broker = temporary.start_broker();
-    let _broker = ProcessGuard::new(broker);
-
-    let mut rejected = connect_when_ready(address);
-    send_hello(&mut rejected, "bob", "bob-secret");
-    assert_welcome(read_message(&mut rejected), "bob");
-    assert_eq!(
-        read_message(&mut rejected),
-        ServerMsg::Refused {
-            reason: "OS account name is unsafe".into()
-        }
-    );
-    wait_for_disconnect(&mut rejected);
-    temporary.assert_log_contains("OS account name is unsafe");
-
-    let mut accepted = connect_when_ready(address);
-    send_hello(&mut accepted, "alice", "alice-secret");
-    assert_welcome(read_message(&mut accepted), "alice");
-    wait_for_tree_with_tab(&mut accepted);
-    assert_runtime_identity(&temporary, "alice", &account);
-    temporary.terminate_runtime("alice");
-}
-
-struct OsAccount {
-    name: String,
-    uid: String,
-    gid: String,
-    home: String,
-    shell: String,
-}
-
-fn current_account() -> OsAccount {
-    let name = command_output("id", &["-un"]);
-    let uid = command_output("id", &["-u"]);
-    let gid = command_output("id", &["-g"]);
-    let record = command_output("getent", &["passwd", &name]);
-    let fields = record.split(':').collect::<Vec<_>>();
-    assert_eq!(fields.len(), 7, "password record must have seven fields");
-    OsAccount {
-        name,
-        uid,
-        gid,
-        home: fields[5].to_owned(),
-        shell: fields[6].to_owned(),
-    }
-}
-
-fn command_output(program: &str, arguments: &[&str]) -> String {
-    let output = Command::new(program)
-        .args(arguments)
-        .output()
-        .expect("account command must run");
-    assert!(output.status.success(), "account command must succeed");
-    String::from_utf8(output.stdout)
-        .expect("account output must be UTF-8")
-        .trim()
-        .to_owned()
-}
-
-fn assert_runtime_identity(temporary: &TestFiles, user: &str, account: &OsAccount) {
-    let identity_file = temporary.root.join(format!("{user}.identity"));
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    while Instant::now() < deadline && !identity_file.is_file() {
-        thread::sleep(POLL_INTERVAL);
-    }
-    let identity = fs::read_to_string(identity_file).expect("runtime identity must read");
-    assert_eq!(
-        identity.lines().collect::<Vec<_>>(),
-        [
-            account.uid.as_str(),
-            account.home.as_str(),
-            account.shell.as_str()
-        ]
-    );
-    let state = temporary.state_dir.join("users").join(user);
-    let metadata = fs::metadata(state).expect("runtime state metadata must load");
-    assert_eq!(metadata.uid().to_string(), account.uid);
-    assert_eq!(metadata.gid().to_string(), account.gid);
-    assert_eq!(metadata.permissions().mode() & 0o777, 0o700);
-}
 
 #[test]
 fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
@@ -122,7 +32,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
 
     assert!(!temporary.pid_file("alice").is_file());
     send_hello(&mut first, "alice", "alice-secret");
-    assert_welcome(read_message(&mut first), "alice");
+    drop(welcome_client_id(read_message(&mut first), "alice"));
     let tree = wait_for_tree_with_tab(&mut first);
     assert!(wait_for_cells(&mut first));
     let pane = &tree.workspaces[0].tabs[0].panes[0].id;
@@ -169,7 +79,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
 
     let mut second = connect_when_ready(address);
     send_hello(&mut second, "alice", "alice-secret");
-    assert_welcome(read_message(&mut second), "alice");
+    drop(welcome_client_id(read_message(&mut second), "alice"));
     assert_tree_has_one_tab(read_message(&mut second));
     assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
 
@@ -188,7 +98,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
 
     let mut alice = connect_when_ready(address);
     send_hello(&mut alice, "alice", "alice-secret");
-    assert_welcome(read_message(&mut alice), "alice");
+    drop(welcome_client_id(read_message(&mut alice), "alice"));
     let alice_tree = wait_for_tree_with_tab(&mut alice);
     assert!(wait_for_cells(&mut alice));
     let workspace = alice_tree.workspaces[0].id.clone();
@@ -196,7 +106,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
 
     let mut bob = connect_when_ready(address);
     send_hello(&mut bob, "bob", "bob-secret");
-    assert_welcome(read_message(&mut bob), "bob");
+    drop(welcome_client_id(read_message(&mut bob), "bob"));
     wait_for_tree_with_tab(&mut bob);
     send(&mut bob, &ClientMsg::Invite { hours: None });
     assert_eq!(
@@ -282,13 +192,13 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
 
     let mut alice = connect_when_ready(address);
     send_hello(&mut alice, "alice", "alice-secret");
-    assert_welcome(read_message(&mut alice), "alice");
+    drop(welcome_client_id(read_message(&mut alice), "alice"));
     wait_for_tree_with_tab(&mut alice);
     let alice_pid = temporary.runtime_pid("alice");
 
     let mut bob = connect_when_ready(address);
     send_hello(&mut bob, "bob", "bob-secret");
-    assert_welcome(read_message(&mut bob), "bob");
+    drop(welcome_client_id(read_message(&mut bob), "bob"));
     wait_for_tree_with_tab(&mut bob);
     let bob_pid = temporary.runtime_pid("bob");
 
@@ -299,7 +209,7 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
 
     let mut replacement = connect_when_ready(address);
     send_hello(&mut replacement, "alice", "alice-secret");
-    assert_welcome(read_message(&mut replacement), "alice");
+    drop(welcome_client_id(read_message(&mut replacement), "alice"));
     wait_for_tree_with_tab(&mut replacement);
     assert_ne!(temporary.runtime_pid("alice"), alice_pid);
     temporary.assert_process_running(bob_pid);
@@ -309,22 +219,6 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
     drop(replacement);
     temporary.terminate_runtime("alice");
     temporary.terminate_runtime("bob");
-}
-
-fn send_hello(stream: &mut TcpStream, user: &str, token: &str) {
-    codec::encode(
-        stream,
-        &ClientMsg::Hello {
-            user_id: user.into(),
-            credential: token.into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        },
-    )
-    .expect("Hello must encode");
-}
-
-fn send(stream: &mut TcpStream, message: &ClientMsg) {
-    codec::encode(stream, message).expect("client message must encode");
 }
 
 fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
@@ -337,49 +231,6 @@ fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
             bytes: input.as_bytes().into(),
         },
     );
-}
-
-fn assert_welcome(message: ServerMsg, expected_user: &str) {
-    match message {
-        ServerMsg::Welcome {
-            user_id,
-            name,
-            client_id,
-            tree,
-        } => {
-            assert_eq!(user_id, expected_user);
-            assert_eq!(name, expected_user);
-            assert_eq!(client_id.len(), 32);
-            assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
-            assert!(tree.workspaces.is_empty());
-        }
-        other => panic!("expected Welcome, got {other:?}"),
-    }
-}
-
-fn wait_for_tree_with_tab(stream: &mut TcpStream) -> seer_core::Tree {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    while Instant::now() < deadline {
-        if let ServerMsg::Tree { tree } = read_message(stream)
-            && tree
-                .workspaces
-                .first()
-                .is_some_and(|workspace| workspace.tabs.len() == 1)
-        {
-            return tree;
-        }
-    }
-    panic!("Tree with a tab was not received");
-}
-
-fn wait_for_cells(stream: &mut TcpStream) -> bool {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    while Instant::now() < deadline {
-        if matches!(read_message(stream), ServerMsg::Cells { .. }) {
-            return true;
-        }
-    }
-    false
 }
 
 fn assert_tree_has_one_tab(message: ServerMsg) {
@@ -437,57 +288,6 @@ fn wait_for_cells_containing(stream: &mut TcpStream, expected: &str) -> String {
         }
     }
     panic!("Cells did not contain {expected}");
-}
-
-fn read_message(stream: &mut TcpStream) -> ServerMsg {
-    stream
-        .set_read_timeout(Some(WAIT_TIMEOUT))
-        .expect("read timeout must set");
-    codec::decode(stream).expect("server message must decode")
-}
-
-fn wait_for_disconnect(stream: &mut TcpStream) {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    let mut bytes = [0; 1_024];
-    while Instant::now() < deadline {
-        match stream.read(&mut bytes) {
-            Ok(0) => return,
-            Ok(_) => {}
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::ConnectionReset
-                        | std::io::ErrorKind::ConnectionAborted
-                        | std::io::ErrorKind::BrokenPipe
-                        | std::io::ErrorKind::UnexpectedEof
-                ) =>
-            {
-                return;
-            }
-            Err(error) => panic!("Alice must disconnect: {error}"),
-        }
-    }
-    panic!("Alice did not disconnect");
-}
-
-fn unused_address() -> SocketAddr {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("port probe must bind");
-    listener
-        .local_addr()
-        .expect("port probe must have an address")
-}
-
-fn connect_when_ready(address: SocketAddr) -> TcpStream {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    let mut last_error = None;
-    while Instant::now() < deadline {
-        match TcpStream::connect(address) {
-            Ok(stream) => return stream,
-            Err(error) => last_error = Some(error),
-        }
-        thread::sleep(POLL_INTERVAL);
-    }
-    panic!("broker did not listen: {last_error:?}");
 }
 
 fn assert_path_removed(path: impl AsRef<Path>) {

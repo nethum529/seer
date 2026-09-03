@@ -1,16 +1,18 @@
-use alacritty_terminal::event::VoidListener;
+use alacritty_terminal::event::{Event, EventListener, WindowSize};
 use alacritty_terminal::grid::Dimensions;
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
 use alacritty_terminal::term::{Config, Term};
-use alacritty_terminal::vte::ansi::{Color as AlacrittyColor, NamedColor, Processor};
+use alacritty_terminal::vte::ansi::{Color as AlacrittyColor, NamedColor, Processor, Rgb};
 pub use seer_core::{Cell, Color};
+use std::sync::{Arc, Mutex, MutexGuard};
 
 const SCROLLBACK_LINES: usize = 1_000;
 
 pub struct PaneGrid {
-    terminal: Term<VoidListener>,
+    terminal: Term<TerminalReplies>,
     parser: Processor,
+    replies: TerminalReplies,
 }
 
 impl PaneGrid {
@@ -21,14 +23,17 @@ impl PaneGrid {
             ..Config::default()
         };
 
+        let replies = TerminalReplies::new(cols, rows);
         Self {
-            terminal: Term::new(config, &dimensions, VoidListener),
+            terminal: Term::new(config, &dimensions, replies.clone()),
             parser: Processor::new(),
+            replies,
         }
     }
 
-    pub fn feed(&mut self, bytes: &[u8]) {
+    pub fn feed(&mut self, bytes: &[u8]) -> Vec<u8> {
         self.parser.advance(&mut self.terminal, bytes);
+        self.replies.take()
     }
 
     pub fn snapshot(&self) -> Vec<Vec<Cell>> {
@@ -47,6 +52,75 @@ impl PaneGrid {
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
         self.terminal.resize(GridSize::new(cols, rows));
+        self.replies.resize(cols, rows);
+    }
+}
+
+#[derive(Clone)]
+struct TerminalReplies {
+    bytes: Arc<Mutex<Vec<u8>>>,
+    size: Arc<Mutex<WindowSize>>,
+}
+
+impl TerminalReplies {
+    fn new(cols: u16, rows: u16) -> Self {
+        Self {
+            bytes: Arc::new(Mutex::new(Vec::new())),
+            size: Arc::new(Mutex::new(WindowSize {
+                num_lines: rows,
+                num_cols: cols,
+                cell_width: 0,
+                cell_height: 0,
+            })),
+        }
+    }
+
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut *lock_recover(&self.bytes))
+    }
+
+    fn resize(&self, cols: u16, rows: u16) {
+        let mut size = lock_recover(&self.size);
+        size.num_cols = cols;
+        size.num_lines = rows;
+    }
+
+    fn append(&self, value: String) {
+        lock_recover(&self.bytes).extend(value.into_bytes());
+    }
+}
+
+impl EventListener for TerminalReplies {
+    fn send_event(&self, event: Event) {
+        let reply = match event {
+            Event::PtyWrite(value) => Some(value),
+            Event::ColorRequest(index, format) => Some(format(query_color(index))),
+            Event::TextAreaSizeRequest(format) => Some(format(*lock_recover(&self.size))),
+            Event::ClipboardLoad(_, format) => Some(format("")),
+            _ => None,
+        };
+        if let Some(reply) = reply {
+            self.append(reply);
+        }
+    }
+}
+
+fn query_color(index: usize) -> Rgb {
+    if index == NamedColor::Background as usize {
+        Rgb::default()
+    } else {
+        Rgb {
+            r: u8::MAX,
+            g: u8::MAX,
+            b: u8::MAX,
+        }
+    }
+}
+
+fn lock_recover<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(value) => value,
+        Err(poisoned) => poisoned.into_inner(),
     }
 }
 
@@ -117,7 +191,7 @@ mod tests {
     fn feeds_plain_text() {
         let mut grid = PaneGrid::new(5, 2);
 
-        grid.feed(b"hello");
+        let _ = grid.feed(b"hello");
 
         let snapshot = grid.snapshot();
         let first_row: String = snapshot[0].iter().map(|cell| cell.character).collect();
@@ -144,7 +218,7 @@ mod tests {
     fn feeds_sgr_colors_and_flags() {
         let mut grid = PaneGrid::new(3, 1);
 
-        grid.feed(b"\x1b[1;2;3;4;7;8;9;31;48;5;123mX\x1b[0;38;2;10;20;30mY");
+        let _ = grid.feed(b"\x1b[1;2;3;4;7;8;9;31;48;5;123mX\x1b[0;38;2;10;20;30mY");
 
         let snapshot = grid.snapshot();
         let styled = &snapshot[0][0];
@@ -171,7 +245,7 @@ mod tests {
     fn feeds_cursor_move() {
         let mut grid = PaneGrid::new(4, 3);
 
-        grid.feed(b"\x1b[2;3HZ");
+        let _ = grid.feed(b"\x1b[2;3HZ");
 
         let snapshot = grid.snapshot();
         assert_eq!(snapshot[1][2].character, 'Z');

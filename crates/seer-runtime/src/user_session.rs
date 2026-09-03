@@ -75,17 +75,17 @@ impl UserSession {
         }
     }
 
-    #[must_use]
-    pub fn poll(&mut self) -> Vec<ServerMsg> {
-        self.pane_hosts
-            .iter_mut()
-            .filter_map(|(pane, host)| {
-                (host.poll() > 0).then(|| ServerMsg::Cells {
+    pub fn poll(&mut self) -> io::Result<Vec<ServerMsg>> {
+        let mut messages = Vec::new();
+        for (pane, host) in &mut self.pane_hosts {
+            if host.poll()? > 0 {
+                messages.push(ServerMsg::Cells {
                     pane: pane.clone(),
                     rows: host.cells(),
-                })
-            })
-            .collect()
+                });
+            }
+        }
+        Ok(messages)
     }
 
     #[must_use]

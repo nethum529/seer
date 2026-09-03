@@ -1,6 +1,6 @@
 use std::fs;
-use std::io;
-use std::net::SocketAddr;
+use std::io::{self, Read};
+use std::net::{SocketAddr, TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
@@ -9,6 +9,7 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use sha2::{Digest, Sha256};
 
 use super::binary;
@@ -19,6 +20,120 @@ static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 static BROKER_BINARY: OnceLock<PathBuf> = OnceLock::new();
 static RUNTIME_BINARY: OnceLock<PathBuf> = OnceLock::new();
 
+pub fn unused_address() -> SocketAddr {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("port probe must bind");
+    listener
+        .local_addr()
+        .expect("port probe must have an address")
+}
+
+pub fn connect_when_ready(address: SocketAddr) -> TcpStream {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    let mut last_error = None;
+    while Instant::now() < deadline {
+        match TcpStream::connect(address) {
+            Ok(stream) => return stream,
+            Err(error) => last_error = Some(error),
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!("broker did not listen: {last_error:?}");
+}
+
+pub fn send(stream: &mut TcpStream, message: &ClientMsg) {
+    codec::encode(stream, message).expect("client message must encode");
+}
+
+pub fn send_hello(stream: &mut TcpStream, user: &str, credential: &str) {
+    send(
+        stream,
+        &ClientMsg::Hello {
+            user_id: user.into(),
+            credential: credential.into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+        },
+    );
+}
+
+pub fn welcome_client_id(message: ServerMsg, expected_user: &str) -> String {
+    let ServerMsg::Welcome {
+        user_id,
+        name,
+        client_id,
+        tree,
+    } = message
+    else {
+        panic!("expected Welcome");
+    };
+    assert_eq!(user_id, expected_user);
+    assert_eq!(name, expected_user);
+    assert_eq!(client_id.len(), 32);
+    assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    assert!(tree.workspaces.is_empty());
+    client_id
+}
+
+pub fn read_message(stream: &mut TcpStream) -> ServerMsg {
+    stream
+        .set_read_timeout(Some(WAIT_TIMEOUT))
+        .expect("read timeout must set");
+    codec::decode(stream).expect("server message must decode")
+}
+
+pub fn wait_for_tree_with_tab(stream: &mut TcpStream) -> seer_core::Tree {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while Instant::now() < deadline {
+        if let ServerMsg::Tree { tree } = read_message(stream)
+            && tree
+                .workspaces
+                .first()
+                .is_some_and(|workspace| workspace.tabs.len() == 1)
+        {
+            return tree;
+        }
+    }
+    panic!("Tree with a tab was not received");
+}
+
+pub fn wait_for_cells(stream: &mut TcpStream) -> bool {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while Instant::now() < deadline {
+        if matches!(read_message(stream), ServerMsg::Cells { .. }) {
+            return true;
+        }
+    }
+    false
+}
+
+pub fn wait_for_disconnect(stream: &mut TcpStream) {
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    let mut bytes = [0; 1_024];
+    while Instant::now() < deadline {
+        match stream.read(&mut bytes) {
+            Ok(0) => return,
+            Ok(_) => {}
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::ConnectionReset
+                        | io::ErrorKind::ConnectionAborted
+                        | io::ErrorKind::BrokenPipe
+                        | io::ErrorKind::UnexpectedEof
+                ) =>
+            {
+                return;
+            }
+            Err(error)
+                if matches!(
+                    error.kind(),
+                    io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
+                ) => {}
+            Err(error) => panic!("client disconnect failed: {error}"),
+        }
+    }
+    panic!("client did not disconnect");
+}
+
 pub struct TestFiles {
     pub root: PathBuf,
     pub state_dir: PathBuf,
@@ -26,6 +141,12 @@ pub struct TestFiles {
     wrapper: PathBuf,
     broker_log: PathBuf,
     xdg_runtime_dir: PathBuf,
+}
+
+impl Default for TestFiles {
+    fn default() -> Self {
+        Self::new()
+    }
 }
 
 impl TestFiles {
