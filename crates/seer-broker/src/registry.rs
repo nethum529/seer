@@ -8,6 +8,7 @@ use serde::{Deserialize, Serialize, de::DeserializeOwned};
 use sha2::{Digest, Sha256};
 
 const SEAT_LIFETIME_SECS: u64 = 3_600;
+pub(crate) const MAX_SEAT_LIFETIME_SECS: u64 = 604_800;
 const PEOPLE_FILE: &str = "people.json";
 const SEATS_FILE: &str = "seats.json";
 
@@ -119,8 +120,8 @@ impl Registry {
             .any(|person| person.user_id == user_id))
     }
 
-    pub(crate) fn create_seat(&self) -> io::Result<String> {
-        self.create_seat_at(now_secs()?)
+    pub(crate) fn create_seat(&self, lifetime_secs: u64) -> io::Result<String> {
+        self.create_seat_at(now_secs()?, lifetime_secs)
     }
 
     pub(crate) fn join(
@@ -131,11 +132,11 @@ impl Registry {
         self.join_at(seat_token, name, now_secs()?)
     }
 
-    fn create_seat_at(&self, now: u64) -> io::Result<String> {
+    fn create_seat_at(&self, now: u64, lifetime_secs: u64) -> io::Result<String> {
         let token = random_hex::<32>()?;
         let seat = SeatRecord {
             token_hash: credential_hash(&token),
-            expires_at: now.saturating_add(SEAT_LIFETIME_SECS),
+            expires_at: now.saturating_add(lifetime_secs.min(MAX_SEAT_LIFETIME_SECS)),
             used: false,
         };
         let mut data = self.lock()?;
@@ -345,8 +346,9 @@ mod tests {
     fn seat_expires_and_can_only_be_used_once() {
         let directory = temporary_directory("seat");
         let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry.create_seat_at(10).expect("seat must be created");
-
+        let token = registry
+            .create_seat_at(10, Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         assert!(matches!(
             registry.join_at(&token, "Late", 3_610),
             Ok(Err(JoinError::InvalidSeat))
@@ -363,12 +365,30 @@ mod tests {
     }
 
     #[test]
+    fn seat_uses_the_requested_lifetime() {
+        let directory = temporary_directory("seat-lifetime");
+        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
+        let lifetime = 24 * 60 * 60;
+        let token = registry
+            .create_seat_at(10, lifetime)
+            .expect("seat must be created");
+        let late = registry.join_at(&token, "Late", 10 + 25 * 60 * 60);
+        let early = registry
+            .join_at(&token, "Early", 10 + 23 * 60 * 60)
+            .expect("join must finish");
+        assert!(early.is_ok());
+        assert!(matches!(late, Ok(Err(JoinError::InvalidSeat))));
+        remove(directory);
+    }
+
+    #[test]
     fn seat_file_survives_a_registry_reopen() {
         let directory = temporary_directory("reopen");
         let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry.create_seat_at(10).expect("seat must be created");
+        let token = registry
+            .create_seat_at(10, Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         drop(registry);
-
         let (reopened, _) = Registry::open(&directory, "Owner").expect("registry must reopen");
         assert!(
             reopened
@@ -384,8 +404,9 @@ mod tests {
         let directory = temporary_directory("current");
         let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
 
-        let token = registry.create_seat().expect("seat must be created");
-
+        let token = registry
+            .create_seat(Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         assert_eq!(token.len(), 64);
         assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
         assert!(
@@ -401,8 +422,9 @@ mod tests {
     fn name_collision_and_invalid_name_do_not_consume_the_seat() {
         let directory = temporary_directory("name");
         let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry.create_seat_at(10).expect("seat must be created");
-
+        let token = registry
+            .create_seat_at(10, Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         assert!(matches!(
             registry.join_at(&token, "owner", 11),
             Ok(Err(JoinError::NameInUse))

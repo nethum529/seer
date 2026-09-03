@@ -10,7 +10,7 @@ use seer_net::{EndpointId, Listener, Socket, Stream, load_or_create_secret_key};
 use crate::Config;
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
-use crate::registry::{PersonRecord, Registry};
+use crate::registry::{MAX_SEAT_LIFETIME_SECS, PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
@@ -70,15 +70,19 @@ impl BrokerState {
         &self.runtimes
     }
 
-    pub(crate) fn invite(&self) -> io::Result<ServerMsg> {
-        let token = self.registry.create_seat()?;
+    pub(crate) fn invite(&self, hours: Option<u32>) -> io::Result<ServerMsg> {
+        let requested_lifetime = hours.map_or_else(Registry::seat_lifetime_secs, |hours| {
+            u64::from(hours).saturating_mul(3_600)
+        });
+        let lifetime_secs = requested_lifetime.min(MAX_SEAT_LIFETIME_SECS);
+        let token = self.registry.create_seat(lifetime_secs)?;
         let capsule = match self.remote_endpoint {
             Some(endpoint) => format!("SEER2-{endpoint}-{token}"),
             None => self.published.capsule(&token),
         };
         Ok(ServerMsg::Seat {
             capsule,
-            expires_in_secs: Registry::seat_lifetime_secs(),
+            expires_in_secs: lifetime_secs,
         })
     }
 
@@ -427,7 +431,9 @@ mod tests {
                 .expect("owner must authenticate");
         assert_eq!(authenticated.user_id, owner.user_id);
 
-        let token = registry.create_seat().expect("seat must be created");
+        let token = registry
+            .create_seat(crate::registry::Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         let joined = super::join(&mut server, &registry, &token, "Guest")
             .expect("join must finish")
             .expect("guest must join");
@@ -444,7 +450,9 @@ mod tests {
         assert!(
             super::authenticate(&mut closed_server, &registry, &owner.user_id, "wrong").is_err()
         );
-        let second_token = registry.create_seat().expect("seat must be created");
+        let second_token = registry
+            .create_seat(crate::registry::Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         assert!(super::join(&mut closed_server, &registry, &second_token, "Other").is_err());
         remove_directory(&directory, "state directory must be removed");
     }

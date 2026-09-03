@@ -98,10 +98,10 @@ impl<'a> Coordinator<'a> {
 
     fn handle_client_message(&mut self, message: ClientMsg) -> io::Result<Action> {
         match message {
-            ClientMsg::Invite if self.owner_is_admin => {
-                self.write_client(&self.broker.invite()?)?;
+            ClientMsg::Invite { hours } if self.owner_is_admin => {
+                self.write_client(&self.broker.invite(hours)?)?;
             }
-            ClientMsg::Invite => {
+            ClientMsg::Invite { .. } => {
                 self.write_client(&ServerMsg::Refused {
                     reason: "owner access required".into(),
                 })?;

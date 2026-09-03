@@ -165,7 +165,7 @@ fn serve_fake_client(mut stream: TcpStream) {
     )
     .expect("fake welcome must write");
     let request: ClientMsg = codec::decode(&mut stream).expect("fake invite request must read");
-    assert_eq!(request, ClientMsg::Invite);
+    assert_eq!(request, ClientMsg::Invite { hours: None });
     codec::encode(
         &mut stream,
         &ServerMsg::Seat {

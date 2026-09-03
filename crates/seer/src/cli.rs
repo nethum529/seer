@@ -2,14 +2,14 @@ use std::process::ExitCode;
 
 use crate::commands::{self, CommandError};
 
-const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start          Start the server\n  invite         Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Attach to your tree\n  detach         Detach this client\n  peek <person>  View another person's tree\n";
+const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start          Start the server\n  invite [--hours N]\n                 Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Attach to your tree\n  detach         Detach this client\n  peek <person>  View another person's tree\n";
 
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
     Bare,
     Help,
     Start,
-    Invite,
+    Invite(Option<String>),
     Join,
     JoinWithInvitation(String),
     List,
@@ -47,7 +47,7 @@ fn execute(command: Command) -> ExitCode {
             Ok(())
         }
         Command::Start => return crate::start::run(),
-        Command::Invite => commands::invite(),
+        Command::Invite(hours) => commands::invite(hours.as_deref()),
         Command::Join => commands::join(None),
         Command::JoinWithInvitation(invitation) => commands::join(Some(&invitation)),
         Command::List => commands::list(),
@@ -63,7 +63,17 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ()> {
     let command = match first.as_str() {
         "--help" | "-h" if arguments.next().is_none() => Command::Help,
         "start" if arguments.next().is_none() => Command::Start,
-        "invite" if arguments.next().is_none() => Command::Invite,
+        "invite" => match arguments.next() {
+            None => Command::Invite(None),
+            Some(flag) if flag == "--hours" => {
+                let hours = arguments.next().unwrap_or_default();
+                if arguments.next().is_some() {
+                    return Err(());
+                }
+                Command::Invite(Some(hours))
+            }
+            Some(_) => return Err(()),
+        },
         "join" => match arguments.next() {
             None => Command::Join,
             Some(invitation) if arguments.next().is_none() => {
@@ -105,7 +115,7 @@ mod tests {
         let cases = [
             (vec!["--help"], Command::Help),
             (vec!["start"], Command::Start),
-            (vec!["invite"], Command::Invite),
+            (vec!["invite"], Command::Invite(None)),
             (vec!["join"], Command::Join),
             (vec!["list"], Command::List),
             (vec!["attach"], Command::Attach),
