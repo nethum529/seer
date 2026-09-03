@@ -97,10 +97,15 @@ fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<OutputBuffers>) 
 
 fn append_output(output: &Mutex<OutputBuffers>, bytes: &[u8]) {
     let mut output = lock_output(output);
-    output.snapshot.extend(bytes);
-    output.pending.extend(bytes);
-    let excess = output.snapshot.len().saturating_sub(OUTPUT_LIMIT);
-    output.snapshot.drain(..excess);
+    append_bounded(&mut output.snapshot, bytes);
+    append_bounded(&mut output.pending, bytes);
+}
+
+// Discard the oldest bytes so detached output stays bounded and keeps the latest state.
+fn append_bounded(output: &mut VecDeque<u8>, bytes: &[u8]) {
+    output.extend(bytes);
+    let excess = output.len().saturating_sub(OUTPUT_LIMIT);
+    output.drain(..excess);
 }
 
 fn lock_output(output: &Mutex<OutputBuffers>) -> MutexGuard<'_, OutputBuffers> {
@@ -149,7 +154,7 @@ mod tests {
     }
 
     #[test]
-    fn output_buffer_keeps_last_mebibyte() {
+    fn output_buffers_keep_last_mebibyte_while_not_drained() {
         let output = Mutex::new(OutputBuffers::default());
         let bytes: Vec<u8> = (0..=OUTPUT_LIMIT)
             .map(|index| (index % usize::from(u8::MAX)) as u8)
@@ -165,7 +170,14 @@ mod tests {
                 .copied()
                 .eq(bytes[1..].iter().copied())
         );
-        assert!(output.pending.iter().copied().eq(bytes));
+        assert_eq!(output.pending.len(), OUTPUT_LIMIT);
+        assert!(
+            output
+                .pending
+                .iter()
+                .copied()
+                .eq(bytes[1..].iter().copied())
+        );
     }
 
     fn wait_for_output(session: &PtySession, expected: &[u8]) -> bool {

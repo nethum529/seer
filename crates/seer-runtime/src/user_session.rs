@@ -88,6 +88,30 @@ impl UserSession {
             .collect()
     }
 
+    #[must_use]
+    pub(crate) fn snapshot(&self) -> Vec<ServerMsg> {
+        self.snapshot_for(self.tree.clone())
+    }
+
+    #[must_use]
+    pub(crate) fn snapshot_for(&self, tree: Tree) -> Vec<ServerMsg> {
+        let cells = tree
+            .workspaces
+            .iter()
+            .flat_map(|workspace| &workspace.tabs)
+            .flat_map(|tab| &tab.panes)
+            .filter_map(|pane| {
+                self.pane_hosts.get(&pane.id).map(|host| ServerMsg::Cells {
+                    pane: pane.id.clone(),
+                    rows: host.cells(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut messages = vec![ServerMsg::Tree { tree }];
+        messages.extend(cells);
+        messages
+    }
+
     pub(crate) fn ensure_first_shell(&mut self) -> io::Result<()> {
         if self
             .tree
