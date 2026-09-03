@@ -62,18 +62,16 @@ impl OsIdentity {
             Err(error) if error.kind() == io::ErrorKind::AlreadyExists => false,
             Err(error) => return Err(error),
         };
-        if created {
+        if created && process_uid() != self.uid {
             chown(path, Some(self.uid), Some(self.gid))?;
         }
-        let metadata = fs::metadata(path)?;
-        if !metadata.is_dir() || metadata.uid() != self.uid || metadata.gid() != self.gid {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                format!(
-                    "runtime directory for OS account {} has unsafe ownership",
-                    self.name
-                ),
-            ));
+        let metadata = fs::symlink_metadata(path)?;
+        if metadata.file_type().is_symlink()
+            || !metadata.is_dir()
+            || metadata.uid() != self.uid
+            || metadata.gid() != self.gid
+        {
+            return Err(unsafe_directory(&self.name));
         }
         fs::set_permissions(path, Permissions::from_mode(0o700))
     }
@@ -132,6 +130,12 @@ impl OsIdentity {
     fn needs_switch(&self) -> io::Result<bool> {
         if process_uid() != self.uid || process_gid() != self.gid {
             return Ok(true);
+        }
+        if process_uid() != 0 {
+            // The broker already runs under the target account. A
+            // broker without root rights cannot change its session
+            // groups, so there is nothing left to switch.
+            return Ok(false);
         }
         let mut current = current_groups()?;
         let mut target = self.groups.clone();
@@ -269,6 +273,15 @@ fn validate_account_name(name: &str) -> io::Result<()> {
             "OS account name is unsafe",
         ))
     }
+}
+
+fn unsafe_directory(name: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!(
+            "runtime directory for OS account {name} is a symlink or has unsafe ownership"
+        ),
+    )
 }
 
 fn account_not_found(name: &str) -> io::Error {

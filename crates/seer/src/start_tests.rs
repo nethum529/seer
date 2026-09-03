@@ -21,7 +21,6 @@ fn running_check_rejects_a_pid_that_does_not_own_the_port() {
         remote: false,
         owner_name: "alice".to_owned(),
         state_dir: directory.clone(),
-        os_users: std::collections::BTreeMap::new(),
     };
 
     assert!(!running_broker(&config));
@@ -48,7 +47,6 @@ fn owner_save_creates_a_missing_store() {
         remote: false,
         owner_name: "alice".to_owned(),
         state_dir: directory.join("state"),
-        os_users: std::collections::BTreeMap::new(),
     };
 
     save_owner(&directory, &config, "secret".to_owned()).expect("owner must be saved");

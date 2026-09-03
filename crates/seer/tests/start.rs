@@ -200,7 +200,6 @@ fn prompt_defaults_create_config_and_owner_store() {
     assert_eq!(broker["remote"].as_bool(), Some(true));
     assert_eq!(broker["owner_name"].as_str(), Some("alice"));
     assert_eq!(broker["state_dir"].as_str(), directory.state_dir().to_str());
-    assert_eq!(broker["os_users"]["alice"].as_str(), Some("alice"));
     let servers: toml::Value = read_toml(directory.config_home().join("seer/servers.toml"));
     let owner = &servers["servers"][0];
     assert_eq!(owner["endpoint"].as_str(), Some("other.test:8000"));

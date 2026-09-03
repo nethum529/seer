@@ -235,7 +235,7 @@ impl SharedSession {
     }
 
     fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {
-        let messages = lock(&self.session)?.poll()?;
+        let messages = lock(&self.session)?.poll();
         let has_connections = !lock(&self.connections)?.is_empty();
         if has_connections {
             self.broadcast(&messages)?;

@@ -1,10 +1,27 @@
 use std::fs;
 use std::path::{Path, PathBuf};
+use std::process::Command;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+
+pub(crate) fn current_os_user() -> String {
+    command_output("id", &["-un"])
+}
+
+pub(crate) fn command_output(program: &str, arguments: &[&str]) -> String {
+    let output = Command::new(program)
+        .args(arguments)
+        .output()
+        .expect("account command must run");
+    assert!(output.status.success(), "account command must succeed");
+    String::from_utf8(output.stdout)
+        .expect("account output must be UTF-8")
+        .trim()
+        .to_owned()
+}
 
 pub(crate) fn temporary_directory(prefix: &str) -> PathBuf {
     let counter = NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed);

@@ -306,7 +306,7 @@ impl TestFiles {
     }
 }
 
-fn current_os_user() -> String {
+pub(crate) fn current_os_user() -> String {
     command_output("id", &["-un"])
 }
 
@@ -320,7 +320,7 @@ fn current_login_shell() -> String {
         .to_owned()
 }
 
-fn command_output(program: &str, arguments: &[&str]) -> String {
+pub(crate) fn command_output(program: &str, arguments: &[&str]) -> String {
     let output = Command::new(program)
         .args(arguments)
         .output()

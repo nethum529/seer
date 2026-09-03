@@ -16,14 +16,9 @@ impl PaneHost {
         })
     }
 
-    pub fn poll(&mut self) -> io::Result<bool> {
+    pub fn poll(&mut self) -> bool {
         let output = self.session.drain_output();
-        let changed = self.grid.feed(&output);
-        let replies = self.grid.take_replies();
-        if !replies.is_empty() {
-            self.session.write_input(&replies)?;
-        }
-        Ok(changed)
+        self.grid.feed(&output)
     }
 
     pub fn write_input(&mut self, bytes: &[u8]) -> io::Result<()> {
@@ -107,7 +102,7 @@ mod tests {
         let deadline = Instant::now() + WAIT_TIMEOUT;
         let mut fed = 0;
         while Instant::now() < deadline {
-            fed += usize::from(host.poll().expect("pane output must poll"));
+            fed += usize::from(host.poll());
             if visible_text(host).contains(expected) {
                 return Some(fed);
             }

@@ -2,7 +2,6 @@
 
 use std::fs;
 use std::os::unix::fs::{MetadataExt, PermissionsExt};
-use std::process::Command;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -11,46 +10,12 @@ use seer_core::proto::ServerMsg;
 #[path = "support/binary.rs"]
 mod binary;
 #[path = "forwarding/support.rs"]
-pub mod support;
+mod support;
 
 use support::{
-    ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
-    wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
+    ProcessGuard, TestFiles, command_output, connect_when_ready, current_os_user, read_message,
+    send_hello, unused_address, wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
 };
-
-const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
-
-#[test]
-fn uses_the_mapped_os_identity_and_rejects_an_unsafe_account() {
-    let temporary = TestFiles::new();
-    let account = current_account();
-    let unsafe_account = "x".repeat(65);
-    let address = unused_address();
-    temporary.write_config_with_os_users(address, &account.name, &unsafe_account);
-    temporary.write_runtime_wrapper();
-    let broker = temporary.start_broker();
-    let _broker = ProcessGuard::new(broker);
-
-    let mut rejected = connect_when_ready(address);
-    send_hello(&mut rejected, "bob", "bob-secret");
-    drop(welcome_client_id(read_message(&mut rejected), "bob"));
-    assert_eq!(
-        read_message(&mut rejected),
-        ServerMsg::Refused {
-            reason: "OS account name is unsafe".into()
-        }
-    );
-    wait_for_disconnect(&mut rejected);
-    temporary.assert_log_contains("OS account name is unsafe");
-
-    let mut accepted = connect_when_ready(address);
-    send_hello(&mut accepted, "alice", "alice-secret");
-    drop(welcome_client_id(read_message(&mut accepted), "alice"));
-    drop(wait_for_tree_with_tab(&mut accepted));
-    assert_runtime_identity(&temporary, "alice", &account);
-    temporary.terminate_runtime("alice");
-}
 
 struct OsAccount {
     name: String,
@@ -60,8 +25,8 @@ struct OsAccount {
     shell: String,
 }
 
-fn current_account() -> OsAccount {
-    let name = command_output("id", &["-un"]);
+fn current_os_account() -> OsAccount {
+    let name = current_os_user();
     let uid = command_output("id", &["-u"]);
     let gid = command_output("id", &["-g"]);
     let record = command_output("getent", &["passwd", &name]);
@@ -76,16 +41,35 @@ fn current_account() -> OsAccount {
     }
 }
 
-fn command_output(program: &str, arguments: &[&str]) -> String {
-    let output = Command::new(program)
-        .args(arguments)
-        .output()
-        .expect("account command must run");
-    assert!(output.status.success(), "account command must succeed");
-    String::from_utf8(output.stdout)
-        .expect("account output must be UTF-8")
-        .trim()
-        .to_owned()
+const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
+const POLL_INTERVAL: Duration = Duration::from_millis(10);
+
+#[test]
+fn uses_the_mapped_os_identity_and_rejects_an_unsafe_account() {
+    let temporary = TestFiles::new();
+    let account = current_os_account();
+    let unsafe_account = "x".repeat(65);
+    let address = unused_address();
+    temporary.write_config_with_os_users(address, &account.name, &unsafe_account);
+    temporary.write_runtime_wrapper();
+    let broker = temporary.start_broker();
+    let _broker = ProcessGuard::new(broker);
+
+    let mut rejected = connect_when_ready(address);
+    send_hello(&mut rejected, "bob", "bob-secret");
+    drop(welcome_client_id(read_message(&mut rejected), "bob"));
+    assert!(
+        matches!(read_message(&mut rejected), ServerMsg::Refused { .. }),
+        "an unsafe mapping must be refused"
+    );
+    wait_for_disconnect(&mut rejected);
+
+    let mut accepted = connect_when_ready(address);
+    send_hello(&mut accepted, "alice", "alice-secret");
+    drop(welcome_client_id(read_message(&mut accepted), "alice"));
+    drop(wait_for_tree_with_tab(&mut accepted));
+    assert_runtime_identity(&temporary, "alice", &account);
+    temporary.terminate_runtime("alice");
 }
 
 fn assert_runtime_identity(temporary: &TestFiles, user: &str, account: &OsAccount) {

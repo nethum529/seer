@@ -400,23 +400,14 @@ impl TestBroker {
             remote: false,
             state_dir: directory.clone(),
             owner_name: "Owner".into(),
-            os_users: std::collections::HashMap::from([("Owner".into(), current_os_user())]),
+            os_users: std::collections::HashMap::from([(
+                "Owner".into(),
+                crate::test_support::current_os_user(),
+            )]),
         };
         let (state, _) = BrokerState::new(&config).expect("broker state must initialize");
         Self { state, directory }
     }
-}
-
-fn current_os_user() -> String {
-    let output = std::process::Command::new("id")
-        .arg("-un")
-        .output()
-        .expect("id command must run");
-    assert!(output.status.success(), "id command must succeed");
-    String::from_utf8(output.stdout)
-        .expect("id output must be UTF-8")
-        .trim()
-        .to_owned()
 }
 
 impl Drop for TestBroker {

@@ -4,7 +4,7 @@ use std::ffi::OsString;
 use std::fs::{self, DirBuilder, Permissions};
 use std::io::{self, PipeWriter};
 use std::os::unix::ffi::OsStrExt;
-use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
+use std::os::unix::fs::{DirBuilderExt, MetadataExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -58,10 +58,12 @@ impl RuntimeManager {
     ) -> io::Result<UnixStream> {
         let identity = self.identity(person_name)?;
         identity.check_switch_rights()?;
-        let socket_path = runtime_socket_path(user_id, &identity)?;
+        let users_directory = self.state_dir.join("users");
+        create_private_directory(&users_directory)?;
         let state_directory = self.user_state_directory(user_id);
-        create_private_directory(&self.state_dir.join("users"))?;
         identity.prepare_directory(&state_directory)?;
+        allow_identity_traversal(&users_directory, &identity)?;
+        let socket_path = runtime_socket_path(user_id, &identity, &self.state_dir)?;
         let mut processes = self
             .processes
             .lock()
@@ -88,7 +90,7 @@ impl RuntimeManager {
     pub(crate) fn is_running(&self, user_id: &str, person_name: &str) -> bool {
         self.identity(person_name)
             .and_then(|identity| identity.check_switch_rights().map(|()| identity))
-            .and_then(|identity| runtime_socket_path(user_id, &identity))
+            .and_then(|identity| runtime_socket_path(user_id, &identity, &self.state_dir))
             .and_then(UnixStream::connect)
             .is_ok()
     }
@@ -99,7 +101,7 @@ impl RuntimeManager {
         user_id: &str,
         person_name: &str,
     ) -> io::Result<PathBuf> {
-        runtime_socket_path(user_id, &self.identity(person_name)?)
+        runtime_socket_path(user_id, &self.identity(person_name)?, &self.state_dir)
     }
 
     fn user_state_directory(&self, user_id: &str) -> PathBuf {
@@ -136,10 +138,20 @@ impl RuntimeManager {
     }
 
     fn identity(&self, person_name: &str) -> io::Result<OsIdentity> {
-        self.os_users.get(person_name).map_or_else(
-            || Ok(self.default_identity.clone()),
-            |os_user| OsIdentity::resolve(os_user),
-        )
+        let Some(os_user) = self.os_users.get(person_name) else {
+            return Ok(self.default_identity.clone());
+        };
+        let identity = OsIdentity::resolve(os_user)?;
+        if identity.uid() == 0 {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                format!(
+                    "person {person_name} maps to privileged OS account {os_user}; \
+                     refuse unsafe mappings"
+                ),
+            ));
+        }
+        Ok(identity)
     }
 }
 
@@ -196,20 +208,42 @@ fn remove_runtime_socket(path: &Path) -> io::Result<()> {
     }
 }
 
-fn runtime_socket_path(user: &str, identity: &OsIdentity) -> io::Result<PathBuf> {
+fn runtime_socket_path(user: &str, identity: &OsIdentity, state_dir: &Path) -> io::Result<PathBuf> {
     validate_user_id(user)?;
     let xdg_runtime_dir = env::var_os("XDG_RUNTIME_DIR").filter(|value| !value.is_empty());
     let broker_uid = process_uid();
-    let directory = runtime_directory_path(xdg_runtime_dir, broker_uid, identity.uid());
-    if let Some(parent) = directory.parent()
-        && parent != Path::new("/tmp")
-    {
+    let directory = runtime_directory_path(state_dir, xdg_runtime_dir, broker_uid, identity.uid());
+    let parent = directory
+        .parent()
+        .ok_or_else(|| io::Error::other("runtime socket directory has no parent"))?;
+    if !parent.exists() {
         create_private_directory(parent)?;
     }
     identity.prepare_directory(&directory)?;
     let path = directory.join(format!("{user}.sock"));
     validate_socket_path(&path)?;
     Ok(path)
+}
+
+fn allow_identity_traversal(directory: &Path, identity: &OsIdentity) -> io::Result<()> {
+    let metadata = fs::symlink_metadata(directory)?;
+    if metadata.file_type().is_symlink() {
+        return Err(unsafe_directory(directory));
+    }
+    if metadata.uid() != identity.uid() {
+        // The broker keeps the shared users directory private. The
+        // mapped account still needs to reach its own state directory
+        // inside it, so grant traversal without listing rights.
+        fs::set_permissions(directory, Permissions::from_mode(0o711))?;
+    }
+    Ok(())
+}
+
+fn unsafe_directory(directory: &Path) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::PermissionDenied,
+        format!("runtime directory is unsafe: {}", directory.display()),
+    )
 }
 
 fn validate_socket_path(path: &Path) -> io::Result<()> {
@@ -223,13 +257,14 @@ fn validate_socket_path(path: &Path) -> io::Result<()> {
 }
 
 fn runtime_directory_path(
+    state_dir: &Path,
     xdg_runtime_dir: Option<OsString>,
     broker_uid: u32,
     target_uid: u32,
 ) -> PathBuf {
     match xdg_runtime_dir.filter(|value| !value.is_empty() && broker_uid == target_uid) {
         Some(root) => PathBuf::from(root).join("seer"),
-        None => PathBuf::from(format!("/tmp/seer-{broker_uid}-{target_uid}")),
+        None => state_dir.join(format!("seer-{target_uid}")),
     }
 }
 
@@ -309,12 +344,13 @@ mod tests {
     fn selects_runtime_directories_and_private_mode() {
         let temporary = temporary_directory("directories");
         let xdg_root = temporary.join("xdg");
-        let xdg = runtime_directory_path(Some(xdg_root.clone().into_os_string()), 123, 123);
-        let fallback = runtime_directory_path(Some(OsString::new()), 123, 123);
+        let xdg =
+            runtime_directory_path(&temporary, Some(xdg_root.clone().into_os_string()), 123, 123);
+        let fallback = runtime_directory_path(&temporary, Some(OsString::new()), 123, 123);
         create_private_directory(&xdg).expect("XDG directory must be created");
 
         assert_eq!(xdg, xdg_root.join("seer"));
-        assert_eq!(fallback, Path::new("/tmp/seer-123-123"));
+        assert_eq!(fallback, temporary.join("seer-123"));
         assert_eq!(mode(&xdg), 0o700);
 
         remove_directory(&temporary, "temporary directory must be removed");
@@ -386,7 +422,7 @@ mod tests {
         let manager = RuntimeManager {
             binary: "true".into(),
             state_dir: temporary.clone(),
-            os_users: HashMap::from([("Spawn".into(), current_os_user())]),
+            os_users: HashMap::from([("Spawn".into(), crate::test_support::current_os_user())]),
             default_identity: crate::os_identity::OsIdentity::resolve_process_account()
                 .expect("process account must resolve"),
             processes: Arc::new(Mutex::new(HashMap::new())),
@@ -445,15 +481,4 @@ mod tests {
         child.wait().expect("stopped child must be reaped");
     }
 
-    fn current_os_user() -> String {
-        let output = Command::new("id")
-            .arg("-un")
-            .output()
-            .expect("id command must run");
-        assert!(output.status.success(), "id command must succeed");
-        String::from_utf8(output.stdout)
-            .expect("id output must be UTF-8")
-            .trim()
-            .to_owned()
-    }
 }

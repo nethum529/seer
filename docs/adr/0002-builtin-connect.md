@@ -69,12 +69,17 @@ iroh), WireGuard libraries (wrong boundary, no traversal).
 - A Linux broker can launch its own account without extra rights.
   A multi-user broker runs as a system service with rights to set
   groups, GID, and UID. It sets HOME, USER, LOGNAME, and SHELL from
-  the target account. Each runtime uses that account shell and owns
-  a mode 0700 state directory.
+  the target account. Each runtime uses that account shell.
+- Every person state directory is mode 0700 and owned by the mapped
+  account. The shared users directory grants traversal only, never
+  listing. Runtime sockets live under the broker owned state
+  directory, never under a world writable root, and the broker
+  rejects symlinked runtime directories.
 - An unmapped person runs as the broker process account. Seer keeps
   that account's login shell and the broker process environment.
 - An unsafe, unknown, or unauthorized mapping refuses that runtime
-  connection. The broker continues to serve other users.
+  connection. A mapping to uid 0 is refused. The broker continues
+  to serve other users.
 - The multiplayer MVP server runs on Linux. macOS is a supported
   client platform and uses the identities on the Linux server.
   A macOS broker service is not supported in this release.
