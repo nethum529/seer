@@ -2,12 +2,16 @@ use std::io::{self, Read};
 use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
-use crossterm::event::{Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
+use crossterm::event::{
+    Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
+};
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
+use ratatui::layout::Rect;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{
-    InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, PaneSize, TerminalInput, Tree,
+    Cursor, InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, MouseProtocol, MouseTracking,
+    PaneSize, TerminalFrame, TerminalInput, TerminalModes, Tree,
 };
 
 use super::{
@@ -128,6 +132,43 @@ fn release_keys_send_no_messages() {
         .expect("release key must be handled"),
         LoopControl::Continue
     );
+
+    assert_no_message(&mut server);
+}
+
+#[test]
+fn mouse_move_without_tracking_sends_no_message() {
+    let (mut client, mut server) = socket_pair();
+    let mut state = state_with_pane();
+    let mut command_pending = false;
+    set_view_only(false);
+    state.set_pane_areas(vec![("w1:p1".into(), Rect::new(0, 0, 80, 24))]);
+    state.apply_frame(
+        "w1:p1".into(),
+        TerminalFrame {
+            rows: Vec::new(),
+            cursor: Cursor::default(),
+            modes: TerminalModes {
+                mouse_protocol: MouseProtocol::Sgr,
+                mouse_tracking: MouseTracking::Click,
+                ..TerminalModes::default()
+            },
+            scrollback_offset: 0,
+        },
+    );
+
+    handle_event(
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Moved,
+            column: 10,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        }),
+        &mut client,
+        &mut state,
+        &mut command_pending,
+    )
+    .expect("mouse move must be handled");
 
     assert_no_message(&mut server);
 }
