@@ -1,5 +1,5 @@
 use super::*;
-use seer_core::SplitDirection;
+use seer_core::{InputEvent, SplitDirection, TerminalInput};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -56,11 +56,11 @@ fn writes_input_to_the_focused_pane_and_polls_cells() {
     let _ = session.poll();
 
     let messages = session
-        .apply(ClientMsg::Input {
+        .apply(ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: "w1:p1".into(),
-            bytes: b"printf session-input\\n".to_vec(),
+            input: TerminalInput::new(InputEvent::Text("printf session-input\n".into())),
         })
         .expect("input must succeed");
 
@@ -91,11 +91,14 @@ fn closes_a_pane_and_kills_its_process() {
     assert!(session.pane_hosts.contains_key("w1:p2"));
     let pid_file = std::env::temp_dir().join(format!("seer-runtime-close-{}", std::process::id()));
     session
-        .apply(ClientMsg::Input {
+        .apply(ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: "w1:p2".into(),
-            bytes: format!("echo $$ > {}\n", pid_file.display()).into_bytes(),
+            input: TerminalInput::new(InputEvent::Text(format!(
+                "echo $$ > {}\n",
+                pid_file.display()
+            ))),
         })
         .expect("PID command must succeed");
     let shell_pid = wait_for_pid(&pid_file).expect("shell PID must be valid");
@@ -312,7 +315,7 @@ fn cells_text(messages: &[ServerMsg]) -> String {
     messages
         .iter()
         .filter_map(|message| match message {
-            ServerMsg::Cells { rows, .. } => Some(rows),
+            ServerMsg::Cells { frame, .. } => Some(&frame.rows),
             _ => None,
         })
         .flatten()

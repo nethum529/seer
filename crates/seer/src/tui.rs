@@ -5,23 +5,23 @@ use std::sync::mpsc::{self, Receiver, TryRecvError};
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
-use crossterm::event::{self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers};
-use crossterm::execute;
-use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+use crossterm::event::{
+    self, Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::widgets::{Block, Borders, Paragraph, Widget};
+use ratatui::widgets::{Block, Borders, Paragraph};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::{Cell, Color, Tree};
+use seer_core::{
+    ColorDepth, InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput, Tree,
+};
 use seer_net::{Socket, Stream};
 
-use crate::input::key_to_bytes;
+use crate::input::{key_to_input, mouse_to_input};
+use crate::render::PaneCells;
 use crate::state::{ClientState, pane_rects};
+use crate::terminal_session::{TerminalSession, set_cursor_style};
 
 const EVENT_WAIT: Duration = Duration::from_millis(25);
 
@@ -50,9 +50,11 @@ pub(crate) enum SessionExit {
 
 pub(crate) fn run(mut stream: Socket, tree: Tree) -> io::Result<SessionExit> {
     let mut terminal = TerminalSession::start()?;
+    let state = ClientState::new(tree);
+    send_terminal_setup(&mut stream, &terminal.terminal, &state)?;
     let reader = stream.clone();
     let (receiver, reader_thread) = spawn_reader(reader);
-    let loop_result = run_loop(&mut terminal.terminal, &mut stream, &receiver, tree);
+    let loop_result = run_loop(&mut terminal.terminal, &mut stream, &receiver, state);
     drop(terminal);
     let _ = stream.shutdown(Shutdown::Both);
     join_reader(reader_thread)?;
@@ -92,9 +94,8 @@ fn run_loop<S: Stream>(
     terminal: &mut Terminal<CrosstermBackend<Stdout>>,
     stream: &mut S,
     receiver: &Receiver<ReaderEvent>,
-    tree: Tree,
+    mut state: ClientState,
 ) -> io::Result<LoopControl> {
-    let mut state = ClientState::new(tree);
     let mut command_pending = false;
     let mut dirty = true;
 
@@ -104,7 +105,8 @@ fn run_loop<S: Stream>(
             return Ok(received);
         }
         if dirty {
-            terminal.draw(|frame| draw(frame, &state))?;
+            terminal.draw(|frame| draw(frame, &mut state))?;
+            set_cursor_style(&state)?;
             dirty = false;
         }
         if event::poll(EVENT_WAIT)? {
@@ -148,7 +150,7 @@ fn receive_messages(
 fn apply_server_message(message: ServerMsg, state: &mut ClientState) -> io::Result<LoopControl> {
     match message {
         ServerMsg::Tree { tree } => state.replace_tree(tree),
-        ServerMsg::Cells { pane, rows } => state.apply_cells(pane, rows),
+        ServerMsg::Cells { pane, frame } => state.apply_frame(pane, frame),
         ServerMsg::Bye { reason } if reason == "detached" => {
             return Ok(LoopControl::Detached);
         }
@@ -193,6 +195,19 @@ fn handle_event<S: Stream>(
             }
             Ok(LoopControl::Continue)
         }
+        Event::Mouse(mouse) if !is_view_only() => handle_mouse(mouse, stream, state),
+        Event::Paste(text) if !is_view_only() => {
+            send_focused_input(stream, state, TerminalInput::new(InputEvent::Paste(text)))?;
+            Ok(LoopControl::Continue)
+        }
+        Event::FocusGained if !is_view_only() => {
+            send_focused_input(stream, state, TerminalInput::new(InputEvent::Focus(true)))?;
+            Ok(LoopControl::Continue)
+        }
+        Event::FocusLost if !is_view_only() => {
+            send_focused_input(stream, state, TerminalInput::new(InputEvent::Focus(false)))?;
+            Ok(LoopControl::Continue)
+        }
         _ => Ok(LoopControl::Continue),
     }
 }
@@ -233,24 +248,71 @@ fn handle_key<S: Stream>(
             return Ok(LoopControl::Continue);
         }
     }
-    if let (Some((workspace, tab)), Some(pane), Some(bytes)) =
-        (state.selection(), state.focused(), key_to_bytes(key))
-    {
-        send(
-            stream,
-            &ClientMsg::Input {
-                workspace: workspace.to_owned(),
-                tab: tab.to_owned(),
-                pane: pane.to_owned(),
-                bytes,
-            },
-        )?;
+    if let Some(input) = key_to_input(key) {
+        send_focused_input(stream, state, input)?;
     }
     Ok(LoopControl::Continue)
 }
 
 fn is_control_char(key: KeyEvent, character: char) -> bool {
     key.code == KeyCode::Char(character) && key.modifiers.contains(KeyModifiers::CONTROL)
+}
+
+fn handle_mouse<S: Stream>(
+    mouse: MouseEvent,
+    stream: &mut S,
+    state: &mut ClientState,
+) -> io::Result<LoopControl> {
+    let Some((pane, column, row)) = state.mouse_target(mouse.column, mouse.row) else {
+        return Ok(LoopControl::Continue);
+    };
+    let Some((workspace, tab)) = state
+        .selection()
+        .map(|(workspace, tab)| (workspace.to_owned(), tab.to_owned()))
+    else {
+        return Ok(LoopControl::Continue);
+    };
+    if matches!(mouse.kind, MouseEventKind::Down(_)) && state.focused() != Some(&pane) {
+        state.set_focus(pane.clone());
+        send(
+            stream,
+            &ClientMsg::FocusPane {
+                workspace: workspace.clone(),
+                tab: tab.clone(),
+                pane: pane.clone(),
+            },
+        )?;
+    }
+    let input = mouse_to_input(mouse, column, row);
+    send(
+        stream,
+        &ClientMsg::TerminalInput {
+            workspace,
+            tab,
+            pane,
+            input,
+        },
+    )?;
+    Ok(LoopControl::Continue)
+}
+
+fn send_focused_input(
+    stream: &mut impl Stream,
+    state: &ClientState,
+    input: TerminalInput,
+) -> io::Result<()> {
+    if let (Some((workspace, tab)), Some(pane)) = (state.selection(), state.focused()) {
+        send(
+            stream,
+            &ClientMsg::TerminalInput {
+                workspace: workspace.to_owned(),
+                tab: tab.to_owned(),
+                pane: pane.to_owned(),
+                input,
+            },
+        )?;
+    }
+    Ok(())
 }
 
 #[cfg(test)]
@@ -278,7 +340,53 @@ fn send(stream: &mut impl Stream, message: &ClientMsg) -> io::Result<()> {
     codec::encode(stream, message)
 }
 
-fn draw(frame: &mut ratatui::Frame<'_>, state: &ClientState) {
+fn send_terminal_setup<S: Stream>(
+    stream: &mut S,
+    terminal: &Terminal<CrosstermBackend<Stdout>>,
+    state: &ClientState,
+) -> io::Result<()> {
+    let capabilities = TerminalCapabilities {
+        protocol_version: TERMINAL_PROTOCOL_VERSION,
+        color_depth: ColorDepth::TrueColor,
+        mouse: true,
+        bracketed_paste: true,
+        focus_events: true,
+        synchronized_output: true,
+    };
+    if let Err(error) = send(stream, &ClientMsg::TerminalCapabilities { capabilities }) {
+        return ignore_setup_disconnect(error);
+    }
+    if is_view_only() {
+        return Ok(());
+    }
+    let Some((workspace, tab)) = state.selection() else {
+        return Ok(());
+    };
+    let size = terminal.size()?;
+    if let Err(error) = send(
+        stream,
+        &ClientMsg::Resize {
+            workspace: workspace.to_owned(),
+            tab: tab.to_owned(),
+            cols: size.width,
+            rows: size.height,
+        },
+    ) {
+        return ignore_setup_disconnect(error);
+    }
+    Ok(())
+}
+
+fn ignore_setup_disconnect(error: io::Error) -> io::Result<()> {
+    match error.kind() {
+        io::ErrorKind::BrokenPipe
+        | io::ErrorKind::ConnectionAborted
+        | io::ErrorKind::ConnectionReset => Ok(()),
+        _ => Err(error),
+    }
+}
+
+fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState) {
     let mut area = frame.area();
     if let Some(person) = peek_person() {
         let banner_height = area.height.min(2);
@@ -293,86 +401,31 @@ fn draw(frame: &mut ratatui::Frame<'_>, state: &ClientState) {
         area.y = area.y.saturating_add(banner_height);
         area.height = area.height.saturating_sub(banner_height);
     }
-    let Some(tab) = state.visible_tab() else {
+    let Some(tab) = state.visible_tab().cloned() else {
+        state.set_pane_areas(Vec::new());
         return;
     };
-    for (pane, pane_area) in pane_rects(tab, area) {
+    let mut input_areas = Vec::new();
+    for (pane, pane_area) in pane_rects(&tab, area) {
         let block = Block::default().borders(Borders::ALL).title(pane.as_str());
         let inner = block.inner(pane_area);
         frame.render_widget(block, pane_area);
         frame.render_widget(PaneCells::new(state.pane_rows(&pane)), inner);
+        set_frame_cursor(frame, state, &pane, inner);
+        input_areas.push((pane, inner));
     }
+    state.set_pane_areas(input_areas);
 }
 
-struct PaneCells<'a> {
-    rows: &'a [Vec<Cell>],
-}
-
-impl<'a> PaneCells<'a> {
-    fn new(rows: &'a [Vec<Cell>]) -> Self {
-        Self { rows }
-    }
-}
-
-impl Widget for PaneCells<'_> {
-    fn render(self, area: Rect, buffer: &mut Buffer) {
-        for (row_index, row) in self.rows.iter().take(area.height as usize).enumerate() {
-            let y = area.y.saturating_add(row_index as u16);
-            for (column_index, cell) in row.iter().take(area.width as usize).enumerate() {
-                let x = area.x.saturating_add(column_index as u16);
-                buffer[(x, y)]
-                    .set_char(cell.character)
-                    .set_style(cell_style(cell));
-            }
-        }
-    }
-}
-
-fn cell_style(cell: &Cell) -> Style {
-    let style = Style::default().fg(color(cell.fg));
-    if cell.bold {
-        style.add_modifier(Modifier::BOLD)
-    } else {
-        style
-    }
-}
-
-fn color(color: Color) -> ratatui::style::Color {
-    match color {
-        Color::Default => ratatui::style::Color::Reset,
-        Color::Indexed(index) => ratatui::style::Color::Indexed(index),
-        Color::Rgb { red, green, blue } => ratatui::style::Color::Rgb(red, green, blue),
-    }
-}
-
-struct TerminalSession {
-    terminal: Terminal<CrosstermBackend<Stdout>>,
-}
-
-impl TerminalSession {
-    fn start() -> io::Result<Self> {
-        enable_raw_mode()?;
-        let mut stdout = io::stdout();
-        if let Err(error) = execute!(stdout, EnterAlternateScreen) {
-            let _ = disable_raw_mode();
-            return Err(error);
-        }
-        match Terminal::new(CrosstermBackend::new(stdout)) {
-            Ok(terminal) => Ok(Self { terminal }),
-            Err(error) => {
-                let _ = execute!(io::stdout(), LeaveAlternateScreen);
-                let _ = disable_raw_mode();
-                Err(error)
-            }
-        }
-    }
-}
-
-impl Drop for TerminalSession {
-    fn drop(&mut self) {
-        let _ = self.terminal.show_cursor();
-        let _ = execute!(io::stdout(), LeaveAlternateScreen);
-        let _ = disable_raw_mode();
+fn set_frame_cursor(frame: &mut ratatui::Frame<'_>, state: &ClientState, pane: &str, area: Rect) {
+    let Some(cursor) = state
+        .pane_cursor(pane)
+        .filter(|cursor| cursor.visible && state.focused() == Some(pane))
+    else {
+        return;
+    };
+    if cursor.column < area.width && cursor.row < area.height {
+        frame.set_cursor_position((area.x + cursor.column, area.y + cursor.row));
     }
 }
 

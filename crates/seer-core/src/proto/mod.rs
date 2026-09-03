@@ -2,7 +2,7 @@ pub mod codec;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Cell, SplitDirection, Tree};
+use crate::{SplitDirection, TerminalCapabilities, TerminalFrame, TerminalInput, Tree};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ClientMsg {
@@ -40,11 +40,14 @@ pub enum ClientMsg {
         tab: String,
         pane: String,
     },
-    Input {
+    TerminalCapabilities {
+        capabilities: TerminalCapabilities,
+    },
+    TerminalInput {
         workspace: String,
         tab: String,
         pane: String,
-        bytes: Vec<u8>,
+        input: TerminalInput,
     },
     Resize {
         workspace: String,
@@ -96,7 +99,7 @@ pub enum ServerMsg {
     },
     Cells {
         pane: String,
-        rows: Vec<Vec<Cell>>,
+        frame: TerminalFrame,
     },
     Bye {
         reason: String,
@@ -124,7 +127,11 @@ mod tests {
     use serde::{Serialize, de::DeserializeOwned};
 
     use super::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
-    use crate::{Cell, Color, PaneSize, SplitDirection, Tree};
+    use crate::{
+        Cell, Color, ColorDepth, Cursor, InputEvent, KeyCode, KeyInput, Modifiers, PaneSize,
+        SplitDirection, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame,
+        TerminalInput, TerminalModes, Tree,
+    };
 
     fn assert_round_trip<T>(message: &T)
     where
@@ -194,11 +201,24 @@ mod tests {
                 tab: "w1:t1".into(),
                 pane: "w1:p2".into(),
             },
-            ClientMsg::Input {
+            ClientMsg::TerminalCapabilities {
+                capabilities: TerminalCapabilities {
+                    protocol_version: TERMINAL_PROTOCOL_VERSION,
+                    color_depth: ColorDepth::TrueColor,
+                    mouse: true,
+                    bracketed_paste: true,
+                    focus_events: true,
+                    synchronized_output: true,
+                },
+            },
+            ClientMsg::TerminalInput {
                 workspace: "w1".into(),
                 tab: "w1:t1".into(),
                 pane: "w1:p1".into(),
-                bytes: vec![0, 1, 255],
+                input: TerminalInput::new(InputEvent::Key(KeyInput {
+                    code: KeyCode::Function(5),
+                    modifiers: Modifiers::default(),
+                })),
             },
             ClientMsg::Resize {
                 workspace: "w1".into(),
@@ -263,36 +283,41 @@ mod tests {
             },
             ServerMsg::Cells {
                 pane: "w1:p1".into(),
-                rows: vec![
-                    vec![Cell {
-                        character: 'A',
-                        fg: Color::Indexed(1),
-                        bg: Color::Default,
-                        bold: true,
-                        italic: false,
-                        underline: false,
-                        dim: false,
-                        inverse: false,
-                        hidden: false,
-                        strikeout: false,
-                    }],
-                    vec![Cell {
-                        character: 'B',
-                        fg: Color::Rgb {
-                            red: 10,
-                            green: 20,
-                            blue: 30,
-                        },
-                        bg: Color::Indexed(2),
-                        bold: false,
-                        italic: true,
-                        underline: true,
-                        dim: false,
-                        inverse: false,
-                        hidden: false,
-                        strikeout: false,
-                    }],
-                ],
+                frame: TerminalFrame {
+                    rows: vec![
+                        vec![Cell {
+                            character: 'A',
+                            fg: Color::Indexed(1),
+                            bg: Color::Default,
+                            bold: true,
+                            italic: false,
+                            underline: false,
+                            dim: false,
+                            inverse: false,
+                            hidden: false,
+                            strikeout: false,
+                        }],
+                        vec![Cell {
+                            character: 'B',
+                            fg: Color::Rgb {
+                                red: 10,
+                                green: 20,
+                                blue: 30,
+                            },
+                            bg: Color::Indexed(2),
+                            bold: false,
+                            italic: true,
+                            underline: true,
+                            dim: false,
+                            inverse: false,
+                            hidden: false,
+                            strikeout: false,
+                        }],
+                    ],
+                    cursor: Cursor::default(),
+                    modes: TerminalModes::default(),
+                    scrollback_offset: 0,
+                },
             },
             ServerMsg::Bye {
                 reason: "detached".into(),

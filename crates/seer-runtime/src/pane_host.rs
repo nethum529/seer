@@ -1,5 +1,6 @@
-use crate::{Cell, PaneGrid, PtySession};
+use crate::{PaneGrid, PtySession};
 use portable_pty::CommandBuilder;
+use seer_core::{TerminalFrame, TerminalInput};
 use std::io;
 
 pub struct PaneHost {
@@ -15,15 +16,20 @@ impl PaneHost {
         })
     }
 
-    pub fn poll(&mut self) -> usize {
+    pub fn poll(&mut self) -> bool {
         let output = self.session.drain_output();
-        let count = output.len();
-        self.grid.feed(&output);
-        count
+        self.grid.feed(&output)
     }
 
     pub fn write_input(&mut self, bytes: &[u8]) -> io::Result<()> {
         self.session.write_input(bytes)
+    }
+
+    pub fn handle_input(&mut self, input: &TerminalInput) -> io::Result<bool> {
+        if let Some(bytes) = self.grid.handle_input(input)? {
+            self.session.write_input(&bytes)?;
+        }
+        Ok(self.grid.take_input_changed())
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
@@ -32,7 +38,7 @@ impl PaneHost {
         Ok(())
     }
 
-    pub fn cells(&self) -> Vec<Vec<Cell>> {
+    pub fn frame(&self) -> TerminalFrame {
         self.grid.snapshot()
     }
 
@@ -61,9 +67,9 @@ mod tests {
         let mut host = PaneHost::start(command, 10, 2).expect("pane host must start");
 
         let fed = wait_for_text(&mut host, "hi").expect("output must render");
-        assert!(fed >= 2);
-        assert_eq!(host.cells()[0][0].character, 'h');
-        assert_eq!(host.cells()[0][1].character, 'i');
+        assert!(fed >= 1);
+        assert_eq!(host.frame().rows[0][0].character, 'h');
+        assert_eq!(host.frame().rows[0][1].character, 'i');
     }
 
     #[test]
@@ -85,9 +91,9 @@ mod tests {
 
         host.resize(4, 3).expect("pane host must resize");
 
-        let cells = host.cells();
-        assert_eq!(cells.len(), 3);
-        assert!(cells.iter().all(|row| row.len() == 4));
+        let frame = host.frame();
+        assert_eq!(frame.rows.len(), 3);
+        assert!(frame.rows.iter().all(|row| row.len() == 4));
         assert!(host.is_alive().expect("process state must be readable"));
         host.kill().expect("pane process must stop");
     }
@@ -96,7 +102,7 @@ mod tests {
         let deadline = Instant::now() + WAIT_TIMEOUT;
         let mut fed = 0;
         while Instant::now() < deadline {
-            fed += host.poll();
+            fed += usize::from(host.poll());
             if visible_text(host).contains(expected) {
                 return Some(fed);
             }
@@ -118,7 +124,8 @@ mod tests {
     }
 
     fn visible_text(host: &PaneHost) -> String {
-        host.cells()
+        host.frame()
+            .rows
             .into_iter()
             .flatten()
             .map(|cell| cell.character)

@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::{InputEvent, TerminalInput};
 
 #[path = "support/binary.rs"]
 mod binary;
@@ -33,11 +34,13 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
     wait_for_cells(&mut alice);
     send(
         &mut alice,
-        &ClientMsg::Input {
+        &ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: "w1:p1".into(),
-            bytes: b"printf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/alice-pane.pid\"\n".to_vec(),
+            input: TerminalInput::new(InputEvent::Text(
+                "printf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/alice-pane.pid\"\n".into(),
+            )),
         },
     );
     let pane_pid = temporary.pane_pid("alice");

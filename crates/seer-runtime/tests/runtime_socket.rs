@@ -11,6 +11,7 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::{InputEvent, TerminalInput};
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
@@ -232,11 +233,11 @@ fn send(stream: &mut UnixStream, message: &ClientMsg) {
 fn send_input(stream: &mut UnixStream, pane: &str, input: &str) {
     send(
         stream,
-        &ClientMsg::Input {
+        &ClientMsg::TerminalInput {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
             pane: pane.into(),
-            bytes: input.as_bytes().into(),
+            input: TerminalInput::new(InputEvent::Text(input.into())),
         },
     );
 }
@@ -274,8 +275,9 @@ fn wait_for_cells_containing(stream: &mut UnixStream, expected: &str) -> String 
             start.elapsed() < MESSAGE_TIMEOUT,
             "Cells did not contain {expected}"
         );
-        if let ServerMsg::Cells { rows, .. } = read_message(stream) {
-            let text = rows
+        if let ServerMsg::Cells { frame, .. } = read_message(stream) {
+            let text = frame
+                .rows
                 .iter()
                 .flatten()
                 .map(|cell| cell.character)

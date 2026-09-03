@@ -126,7 +126,7 @@ fn apply_or_refuse(
 fn is_mutating(message: &ClientMsg) -> bool {
     matches!(
         message,
-        ClientMsg::Input { .. }
+        ClientMsg::TerminalInput { .. }
             | ClientMsg::CreateTab { .. }
             | ClientMsg::SplitPane { .. }
             | ClientMsg::ClosePane { .. }
@@ -324,6 +324,9 @@ fn connection_closed() -> io::Error {
 mod tests {
     use super::{ClientMsg, SharedSession, is_mutating, lock};
     use crate::UserSession;
+    use seer_core::{
+        ColorDepth, InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput,
+    };
     use std::os::unix::net::UnixStream;
     use std::thread;
     use std::time::Duration;
@@ -331,11 +334,11 @@ mod tests {
     #[test]
     fn identifies_only_mutating_messages() {
         let mutating = [
-            ClientMsg::Input {
+            ClientMsg::TerminalInput {
                 workspace: "w1".into(),
                 tab: "w1:t1".into(),
                 pane: "p1".into(),
-                bytes: Vec::new(),
+                input: TerminalInput::new(InputEvent::Text(String::new())),
             },
             ClientMsg::CreateTab {
                 workspace: "w1".into(),
@@ -384,6 +387,16 @@ mod tests {
             },
             ClientMsg::StopPeek,
             ClientMsg::Detach,
+            ClientMsg::TerminalCapabilities {
+                capabilities: TerminalCapabilities {
+                    protocol_version: TERMINAL_PROTOCOL_VERSION,
+                    color_depth: ColorDepth::TrueColor,
+                    mouse: true,
+                    bracketed_paste: true,
+                    focus_events: true,
+                    synchronized_output: true,
+                },
+            },
         ];
 
         assert!(mutating.iter().all(is_mutating));
