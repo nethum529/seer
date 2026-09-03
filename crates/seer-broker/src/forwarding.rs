@@ -14,8 +14,9 @@ use crate::attachments::{AttachmentGuard, ClientWriter, lock_writer};
 use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 
-const EVENT_QUEUE_CAPACITY: usize = 4;
-const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_millis(250);
+// A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
+const EVENT_QUEUE_CAPACITY: usize = 64;
+const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) fn forward<S>(client: S, owner: &PersonRecord, broker: &BrokerState) -> io::Result<()>
 where

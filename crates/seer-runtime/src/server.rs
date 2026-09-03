@@ -11,8 +11,9 @@ use std::time::Duration;
 use crate::UserSession;
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
-const OUTPUT_QUEUE_CAPACITY: usize = 4;
-const WRITE_TIMEOUT: Duration = Duration::from_millis(250);
+// A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
+const OUTPUT_QUEUE_CAPACITY: usize = 64;
+const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub fn bind(path: &Path) -> io::Result<UnixListener> {
     remove_stale_socket(path)?;
@@ -397,7 +398,7 @@ mod tests {
             pane: "fill".into(),
             bytes: vec![b'x'; 256 * 1024],
         };
-        for _ in 0..8 {
+        for _ in 0..68 {
             shared
                 .broadcast(std::slice::from_ref(&large))
                 .expect("large output must broadcast");
