@@ -2,6 +2,7 @@
 
 use std::io::Read;
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -42,7 +43,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     let runtime_pid = temporary.runtime_pid("alice");
     temporary.assert_runtime_arguments("alice");
     temporary.assert_socket_directory();
-    send(&mut first, &ClientMsg::Invite);
+    send(&mut first, &ClientMsg::Invite { hours: None });
     match wait_for_seat(&mut first) {
         ServerMsg::Seat {
             capsule,
@@ -105,7 +106,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
     send_hello(&mut bob, "bob", "bob-secret");
     assert_welcome(read_message(&mut bob), "bob");
     wait_for_tree_with_tab(&mut bob);
-    send(&mut bob, &ClientMsg::Invite);
+    send(&mut bob, &ClientMsg::Invite { hours: None });
     assert_eq!(
         wait_for_refused(&mut bob),
         ServerMsg::Refused {
@@ -118,9 +119,18 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "charlie".into(),
             workspace: workspace.clone(),
+            tab: "w1:t1".into(),
         },
     );
-    send(&mut bob, &ClientMsg::Resize { cols: 90, rows: 30 });
+    send(
+        &mut bob,
+        &ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            cols: 90,
+            rows: 30,
+        },
+    );
     wait_for_tree_with_tab(&mut bob);
     assert!(!temporary.pid_file("charlie").is_file());
 
@@ -129,6 +139,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace,
+            tab: "w1:t1".into(),
         },
     );
     assert_eq!(wait_for_tree_with_tab(&mut bob), alice_tree);
@@ -154,6 +165,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
         &ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
     );
     wait_for_tree_with_tab(&mut bob);
@@ -164,6 +176,46 @@ fn routes_peek_and_restores_the_owners_runtime() {
 
     drop(alice);
     drop(bob);
+    temporary.terminate_runtime("bob");
+}
+
+#[test]
+fn supervises_an_exited_runtime_and_starts_a_replacement() {
+    let temporary = TestFiles::new();
+    let address = unused_address();
+    temporary.write_config(address);
+    temporary.write_runtime_wrapper();
+    let broker = temporary.start_broker();
+    let _broker = ProcessGuard::new(broker);
+
+    let mut alice = connect_when_ready(address);
+    send_hello(&mut alice, "alice", "alice-secret");
+    assert_welcome(read_message(&mut alice), "alice");
+    wait_for_tree_with_tab(&mut alice);
+    let alice_pid = temporary.runtime_pid("alice");
+
+    let mut bob = connect_when_ready(address);
+    send_hello(&mut bob, "bob", "bob-secret");
+    assert_welcome(read_message(&mut bob), "bob");
+    wait_for_tree_with_tab(&mut bob);
+    let bob_pid = temporary.runtime_pid("bob");
+
+    let alice_socket = temporary.terminate_runtime("alice");
+    assert_path_removed(format!("/proc/{alice_pid}/status"));
+    assert_path_removed(&alice_socket);
+    temporary.assert_process_running(bob_pid);
+
+    let mut replacement = connect_when_ready(address);
+    send_hello(&mut replacement, "alice", "alice-secret");
+    assert_welcome(read_message(&mut replacement), "alice");
+    wait_for_tree_with_tab(&mut replacement);
+    assert_ne!(temporary.runtime_pid("alice"), alice_pid);
+    temporary.assert_process_running(bob_pid);
+
+    drop(alice);
+    drop(bob);
+    drop(replacement);
+    temporary.terminate_runtime("alice");
     temporary.terminate_runtime("bob");
 }
 
@@ -187,6 +239,8 @@ fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
     send(
         stream,
         &ClientMsg::Input {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: pane.into(),
             bytes: input.as_bytes().into(),
         },
@@ -342,4 +396,16 @@ fn connect_when_ready(address: SocketAddr) -> TcpStream {
         thread::sleep(POLL_INTERVAL);
     }
     panic!("broker did not listen: {last_error:?}");
+}
+
+fn assert_path_removed(path: impl AsRef<Path>) {
+    let path = path.as_ref();
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while Instant::now() < deadline {
+        if !path.exists() {
+            return;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    panic!("path was not removed: {}", path.display());
 }
