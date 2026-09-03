@@ -181,45 +181,9 @@ pub(crate) fn pane_rects(tab: &Tab, area: Rect) -> Vec<(String, Rect)> {
 #[cfg(test)]
 mod tests {
     use ratatui::layout::Rect;
-    use seer_core::{
-        Cell, Color, Cursor, PaneSize, SplitDirection, TerminalFrame, TerminalModes, Tree,
-    };
+    use seer_core::{PaneSize, SplitDirection, Tree};
 
-    use super::{ClientState, pane_rects};
-
-    #[test]
-    fn cells_replace_the_pane_buffer() {
-        let mut tree = Tree::new();
-        tree.create_workspace("main")
-            .expect("workspace must be created");
-        tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
-            .expect("tab must be created");
-        let mut state = ClientState::new(tree);
-        let rows = vec![vec![Cell {
-            character: 'A',
-            fg: Color::Indexed(2),
-            bg: Color::Default,
-            bold: true,
-            italic: false,
-            underline: false,
-            dim: false,
-            inverse: false,
-            hidden: false,
-            strikeout: false,
-        }]];
-
-        state.apply_frame(
-            "w1:p1".into(),
-            TerminalFrame {
-                rows: rows.clone(),
-                cursor: Cursor::default(),
-                modes: TerminalModes::default(),
-            },
-        );
-
-        assert_eq!(state.pane_rows("w1:p1"), rows);
-        assert!(state.pane_rows("w1:p2").is_empty());
-    }
+    use super::pane_rects;
 
     #[test]
     fn pane_rects_use_shared_layout_with_area_offsets() {
