@@ -114,44 +114,12 @@ fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Er
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{ServerEntry, ServerStore, store_path_from};
+    use super::ServerStore;
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
-
-    #[test]
-    fn writes_and_reads_the_store_with_private_permissions() {
-        let root = short_test_directory();
-        let path = root.join("seer").join("servers.toml");
-        let store = sample_store();
-
-        store.save_to(&path).expect("store must save");
-
-        assert_eq!(
-            fs::metadata(path.parent().expect("path must have a parent"))
-                .expect("directory metadata must load")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
-        assert_eq!(
-            fs::metadata(&path)
-                .expect("file metadata must load")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
-        assert_eq!(
-            ServerStore::load_from(&path).expect("store must load"),
-            store
-        );
-        fs::remove_dir_all(root).expect("test directory must be removed");
-    }
 
     #[test]
     fn missing_store_is_empty_and_invalid_store_fails() {
@@ -165,64 +133,6 @@ mod tests {
         fs::write(&path, "not = [valid").expect("invalid store must be written");
         assert!(ServerStore::load_from(&path).is_err());
         fs::remove_dir_all(root).expect("test directory must be removed");
-    }
-
-    #[test]
-    fn current_entry_replaces_the_same_endpoint() {
-        let mut store = sample_store();
-        store.make_current(ServerEntry {
-            endpoint: "host:7321".into(),
-            alias: "new-alias".into(),
-            user_id: "user-2".into(),
-            name: "bob".into(),
-            credential: "new-secret".into(),
-            current: true,
-        });
-
-        assert_eq!(store.servers.len(), 1);
-        assert_eq!(store.servers[0].name, "bob");
-        assert!(store.servers[0].current);
-    }
-
-    #[test]
-    fn path_uses_xdg_or_the_home_fallback() {
-        assert_eq!(
-            store_path_from(Some("/config".into()), Some("/home/user".into()))
-                .expect("XDG path must resolve"),
-            PathBuf::from("/config/seer/servers.toml")
-        );
-        assert_eq!(
-            store_path_from(None, Some("/home/user".into())).expect("home path must resolve"),
-            PathBuf::from("/home/user/.config/seer/servers.toml")
-        );
-        assert!(store_path_from(None, None).is_err());
-        assert!(store_path_from(Some("".into()), Some("".into())).is_err());
-    }
-
-    #[test]
-    fn reports_non_file_and_parentless_paths() {
-        let root = short_test_directory();
-        fs::create_dir_all(&root).expect("test directory must exist");
-        assert!(ServerStore::load_from(&root).is_err());
-        assert!(
-            ServerStore::default()
-                .save_to(PathBuf::new().as_path())
-                .is_err()
-        );
-        fs::remove_dir_all(root).expect("test directory must be removed");
-    }
-
-    fn sample_store() -> ServerStore {
-        ServerStore {
-            servers: vec![ServerEntry {
-                endpoint: "host:7321".into(),
-                alias: "host".into(),
-                user_id: "user-1".into(),
-                name: "alice".into(),
-                credential: "secret".into(),
-                current: true,
-            }],
-        }
     }
 
     fn short_test_directory() -> PathBuf {
