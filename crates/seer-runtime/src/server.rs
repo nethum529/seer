@@ -491,3 +491,6 @@ fn connection_closed() -> io::Error {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod size_lease;
