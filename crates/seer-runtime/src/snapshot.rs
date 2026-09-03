@@ -140,7 +140,10 @@ fn validate_tree(tree: &Tree) -> Result<(), String> {
 
     for workspace in &tree.workspaces {
         if workspace.id.is_empty() || !workspace_ids.insert(workspace.id.as_str()) {
-            return Err(format!("workspace id is empty or repeated: {}", workspace.id));
+            return Err(format!(
+                "workspace id is empty or repeated: {}",
+                workspace.id
+            ));
         }
         for tab in &workspace.tabs {
             if tab.id.is_empty() || !tab_ids.insert(tab.id.as_str()) {
@@ -170,10 +173,7 @@ fn validate_tab<'a>(
         collect_leaves(root, &mut leaves);
     }
     if leaves.len() != tab.panes.len() {
-        return Err(format!(
-            "tab layout does not match its panes: {}",
-            tab.id
-        ));
+        return Err(format!("tab layout does not match its panes: {}", tab.id));
     }
     let pane_set = tab
         .panes

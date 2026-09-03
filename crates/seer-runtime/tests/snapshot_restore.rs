@@ -91,13 +91,18 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
         .expect("restored first shell PID must be read");
     let restored_second = marked_pid(&mut restored_client, &second_pane)
         .expect("restored second shell PID must be read");
-    assert_ne!(restored_first, first_pid, "restored shell must be a fresh process");
-    assert_ne!(restored_second, second_pid, "restored shell must be a fresh process");
+    assert_ne!(
+        restored_first, first_pid,
+        "restored shell must be a fresh process"
+    );
+    assert_ne!(
+        restored_second, second_pid,
+        "restored shell must be a fresh process"
+    );
     drop(restored_client);
     restarted.stop();
 
-    let valid_text =
-        fs::read_to_string(&snapshot_path).expect("valid snapshot must be readable");
+    let valid_text = fs::read_to_string(&snapshot_path).expect("valid snapshot must be readable");
     fs::write(&snapshot_path, b"{\"version\":1,\"revision\":7,\"tree\":")
         .expect("truncated snapshot must write");
     let mut corrupt_runtime = spawn_runtime(&socket_path, &state);
@@ -109,7 +114,10 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
         "corrupt snapshot must start a safe default session"
     );
     assert_eq!(safe.workspaces[0].tabs[0].panes.len(), 1);
-    assert!(wait_for_cells(&mut corrupt_client), "default shell must run");
+    assert!(
+        wait_for_cells(&mut corrupt_client),
+        "default shell must run"
+    );
     drop(corrupt_client);
     corrupt_runtime.stop();
 
@@ -127,7 +135,10 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
         "unsupported snapshot version must start a safe default session"
     );
     assert_eq!(safe_again.workspaces[0].tabs[0].panes.len(), 1);
-    assert!(wait_for_cells(&mut unsupported_client), "default shell must run");
+    assert!(
+        wait_for_cells(&mut unsupported_client),
+        "default shell must run"
+    );
     drop(unsupported_client);
     unsupported_runtime.stop();
 }
