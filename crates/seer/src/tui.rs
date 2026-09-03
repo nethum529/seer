@@ -20,14 +20,20 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{Cell, Color, Tree};
 use seer_net::{Socket, Stream};
 
-use crate::input::key_to_bytes;
+use crate::input::{
+    FocusDirection, InputAction, key_to_action, pane_in_direction as find_pane_in_direction,
+    selected_tab_tree,
+};
 use crate::state::{ClientState, pane_rects};
 
 const EVENT_WAIT: Duration = Duration::from_millis(25);
-
+const STATUS_HINT: &str = "Ctrl-b c new tab, % split, x close, n/p tabs";
+const LAST_TAB_STATUS: &str = "Cannot close the last tab.";
 thread_local! {
     static VIEW_ONLY: ModeCell<bool> = const { ModeCell::new(false) };
     static PEEK_PERSON: RefCell<Option<String>> = const { RefCell::new(None) };
+    static NAVIGATION_TREE: RefCell<Option<Tree>> = const { RefCell::new(None) };
+    static STATUS: RefCell<&'static str> = const { RefCell::new(STATUS_HINT) };
 }
 
 enum ReaderEvent {
@@ -94,6 +100,8 @@ fn run_loop<S: Stream>(
     receiver: &Receiver<ReaderEvent>,
     tree: Tree,
 ) -> io::Result<LoopControl> {
+    set_navigation_tree(&tree);
+    set_status(STATUS_HINT);
     let mut state = ClientState::new(tree);
     let mut command_pending = false;
     let mut dirty = true;
@@ -147,7 +155,10 @@ fn receive_messages(
 
 fn apply_server_message(message: ServerMsg, state: &mut ClientState) -> io::Result<LoopControl> {
     match message {
-        ServerMsg::Tree { tree } => state.replace_tree(tree),
+        ServerMsg::Tree { tree } => {
+            set_navigation_tree(&tree);
+            state.replace_tree(tree);
+        }
         ServerMsg::Cells { pane, rows } => state.apply_cells(pane, rows),
         ServerMsg::Bye { reason } if reason == "detached" => {
             return Ok(LoopControl::Detached);
@@ -210,43 +221,130 @@ fn handle_key<S: Stream>(
     if is_view_only() {
         return Ok(LoopControl::Continue);
     }
-    if is_control_char(key, 'b') {
-        *command_pending = true;
-        return Ok(LoopControl::Continue);
-    }
-    if *command_pending {
-        *command_pending = false;
-        if let KeyCode::Char(number @ '1'..='9') = key.code {
-            let index = number.to_digit(10).map_or(0, |value| value as usize);
-            if let Some(pane) = state.focus_number(index)
-                && let Some((workspace, tab)) = state.selection()
-            {
-                send(
-                    stream,
-                    &ClientMsg::FocusPane {
-                        workspace: workspace.to_owned(),
-                        tab: tab.to_owned(),
-                        pane,
-                    },
-                )?;
-            }
-            return Ok(LoopControl::Continue);
-        }
-    }
-    if let (Some((workspace, tab)), Some(pane), Some(bytes)) =
-        (state.selection(), state.focused(), key_to_bytes(key))
-    {
-        send(
-            stream,
-            &ClientMsg::Input {
-                workspace: workspace.to_owned(),
-                tab: tab.to_owned(),
-                pane: pane.to_owned(),
-                bytes,
-            },
-        )?;
+    if let Some(action) = key_to_action(key, command_pending) {
+        set_status(STATUS_HINT);
+        handle_action(action, stream, state)?;
     }
     Ok(LoopControl::Continue)
+}
+
+fn handle_action(
+    action: InputAction,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+) -> io::Result<()> {
+    let message = match action {
+        InputAction::CreateTab => {
+            state
+                .selected_workspace()
+                .map(|workspace| ClientMsg::CreateTab {
+                    workspace: workspace.to_owned(),
+                })
+        }
+        InputAction::SplitPane(direction) => {
+            state
+                .selection()
+                .map(|(workspace, tab)| ClientMsg::SplitPane {
+                    workspace: workspace.to_owned(),
+                    tab: tab.to_owned(),
+                    direction,
+                })
+        }
+        InputAction::ClosePane => close_message(state),
+        InputAction::NextTab => {
+            select_tab(state, true);
+            None
+        }
+        InputAction::PreviousTab => {
+            select_tab(state, false);
+            None
+        }
+        InputAction::FocusPane(direction) => {
+            pane_in_direction(state, direction).and_then(|pane| focus_message(state, pane))
+        }
+        InputAction::FocusNumber(number) => state
+            .focus_number(number)
+            .and_then(|pane| focus_message(state, pane)),
+        InputAction::Bytes(bytes) => {
+            state
+                .selection()
+                .zip(state.focused())
+                .map(|((workspace, tab), pane)| ClientMsg::Input {
+                    workspace: workspace.to_owned(),
+                    tab: tab.to_owned(),
+                    pane: pane.to_owned(),
+                    bytes,
+                })
+        }
+    };
+    if let Some(message) = message {
+        send(stream, &message)?;
+    }
+    Ok(())
+}
+
+fn close_message(state: &ClientState) -> Option<ClientMsg> {
+    if closes_last_tab(state) {
+        set_status(LAST_TAB_STATUS);
+        return None;
+    }
+    state
+        .selection()
+        .zip(state.focused())
+        .map(|((workspace, tab), pane)| ClientMsg::ClosePane {
+            workspace: workspace.to_owned(),
+            tab: tab.to_owned(),
+            pane: pane.to_owned(),
+        })
+}
+
+fn focus_message(state: &ClientState, pane: String) -> Option<ClientMsg> {
+    state
+        .selection()
+        .map(|(workspace, tab)| ClientMsg::FocusPane {
+            workspace: workspace.to_owned(),
+            tab: tab.to_owned(),
+            pane,
+        })
+}
+
+fn select_tab(state: &mut ClientState, forward: bool) {
+    let Some((workspace, tab)) = state
+        .selection()
+        .map(|(workspace, tab)| (workspace.to_owned(), tab.to_owned()))
+    else {
+        return;
+    };
+    let selected = NAVIGATION_TREE.with_borrow(|tree| {
+        tree.as_ref()
+            .and_then(|tree| selected_tab_tree(tree, &workspace, &tab, forward))
+    });
+    if let Some(tree) = selected {
+        state.replace_tree(tree);
+    }
+}
+
+fn closes_last_tab(state: &ClientState) -> bool {
+    let Some((workspace, _)) = state.selection() else {
+        return false;
+    };
+    let last_pane = state.visible_tab().is_some_and(|tab| tab.panes.len() == 1);
+    last_pane
+        && NAVIGATION_TREE.with_borrow(|tree| {
+            tree.as_ref().is_none_or(|tree| {
+                tree.workspaces
+                    .iter()
+                    .find(|candidate| candidate.id == workspace)
+                    .is_none_or(|workspace| workspace.tabs.len() == 1)
+            })
+        })
+}
+
+fn pane_in_direction(state: &ClientState, direction: FocusDirection) -> Option<String> {
+    let tab = state.visible_tab()?;
+    let focused = state.focused()?;
+    let rects = pane_rects(tab, Rect::new(0, 0, 1_000, 1_000));
+    find_pane_in_direction(&rects, focused, direction)
 }
 
 fn is_control_char(key: KeyEvent, character: char) -> bool {
@@ -274,12 +372,33 @@ fn peek_person() -> Option<String> {
     PEEK_PERSON.with_borrow(Clone::clone)
 }
 
+fn set_navigation_tree(tree: &Tree) {
+    NAVIGATION_TREE.with_borrow_mut(|current| *current = Some(tree.clone()));
+}
+
+fn set_status(status: &'static str) {
+    STATUS.with_borrow_mut(|current| *current = status);
+}
+
+fn status() -> &'static str {
+    STATUS.with_borrow(|status| *status)
+}
+
 fn send(stream: &mut impl Stream, message: &ClientMsg) -> io::Result<()> {
     codec::encode(stream, message)
 }
 
 fn draw(frame: &mut ratatui::Frame<'_>, state: &ClientState) {
     let mut area = frame.area();
+    let status_height = area.height.min(1);
+    let status_area = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(status_height),
+        area.width,
+        status_height,
+    );
+    frame.render_widget(Paragraph::new(status()), status_area);
+    area.height = area.height.saturating_sub(status_height);
     if let Some(person) = peek_person() {
         let banner_height = area.height.min(2);
         let banner = Rect::new(area.x, area.y, area.width, banner_height);
