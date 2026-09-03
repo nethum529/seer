@@ -1,7 +1,7 @@
 use crate::snapshot::{self, Snapshot};
 use crate::user_session::UserSession;
-use seer_core::layout::PaneRect;
 use seer_core::PaneSize;
+use seer_core::layout::PaneRect;
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -32,10 +32,7 @@ pub(crate) fn load_session(
 
 fn empty_session(user: String, shell: String, path: std::path::PathBuf) -> UserSession {
     let mut session = UserSession::new(user, shell);
-    session.store = Some(Store {
-        path,
-        revision: 0,
-    });
+    session.store = Some(Store { path, revision: 0 });
     session
 }
 
