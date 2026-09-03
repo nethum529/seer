@@ -107,19 +107,46 @@ pub(crate) fn load(path: &Path, expected_user: &str) -> Option<Snapshot> {
     }
 }
 
-/// Writes `snapshot` to `path` atomically.
+/// Writes `snapshot` to `path` atomically and durably.
+///
+/// The snapshot is serialized before any file is created, so an oversized
+/// snapshot is rejected up front and never leaves a partial file behind.
 pub(crate) fn store(path: &Path, snapshot: &Snapshot) -> io::Result<()> {
+    let bytes = serde_json::to_vec(snapshot).map_err(json_error)?;
+    if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("snapshot exceeds the {} byte limit", MAX_SNAPSHOT_BYTES),
+        ));
+    }
     let file_name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "snapshot has no file name"))?;
     let temporary = path.with_file_name(format!(".{}.tmp", file_name.to_string_lossy()));
-    let file = File::create(&temporary)?;
+    let result =
+        write_snapshot_file(&temporary, &bytes).and_then(|()| fs::rename(&temporary, path));
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    sync_parent_directory(path)
+}
+
+fn write_snapshot_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let file = File::create(path)?;
     let mut writer = BufWriter::new(file);
-    serde_json::to_writer(&mut writer, snapshot).map_err(json_error)?;
+    writer.write_all(bytes)?;
     writer.write_all(b"\n")?;
     writer.flush()?;
-    writer.get_ref().sync_all()?;
-    fs::rename(&temporary, path)
+    writer.get_ref().sync_all()
+}
+
+/// Makes a completed rename durable across a machine reboot.
+fn sync_parent_directory(path: &Path) -> io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "snapshot has no parent directory")
+    })?;
+    File::open(parent)?.sync_all()
 }
 
 fn json_error(error: serde_json::Error) -> io::Error {
@@ -159,6 +186,9 @@ fn validate_tab<'a>(
     tab: &'a seer_core::Tab,
     pane_ids: &mut HashSet<&'a str>,
 ) -> Result<(), String> {
+    if tab.panes.is_empty() {
+        return Err(format!("tab has no panes: {}", tab.id));
+    }
     for pane in &tab.panes {
         if pane.size.cols == 0 || pane.size.rows == 0 {
             return Err(format!("pane has an empty size: {}", pane.id));
@@ -188,7 +218,6 @@ fn validate_tab<'a>(
     match tab.layout.focused.as_deref() {
         Some(pane) if pane_set.contains(pane) => Ok(()),
         Some(pane) => Err(format!("tab focus is missing from the layout: {pane}")),
-        None if tab.panes.is_empty() => Ok(()),
         None => Err(format!("tab has panes but no focus: {}", tab.id)),
     }
 }
@@ -200,5 +229,57 @@ fn collect_leaves<'a>(node: &'a LayoutNode, leaves: &mut Vec<&'a str>) {
             collect_leaves(first, leaves);
             collect_leaves(second, leaves);
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_rejects_an_oversized_snapshot_without_writing_a_file() {
+        let timestamp = unix_seconds();
+        let directory = std::env::temp_dir().join(format!(
+            "seer-snapshot-limit-{}-{timestamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).expect("temporary directory must be created");
+        let path = directory.join(SNAPSHOT_FILE);
+
+        let mut tree = Tree::new();
+        tree.create_workspace("main")
+            .expect("workspace creation must succeed");
+        for _ in 0..60_000 {
+            tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
+                .expect("tab creation must succeed");
+        }
+        let snapshot = Snapshot::capture(1, "alice", PaneSize { cols: 80, rows: 24 }, &tree);
+
+        let error = store(&path, &snapshot).expect_err("oversized snapshot must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(!path.exists(), "snapshot file must not be written");
+        let temporary = path.with_file_name(format!(".{}.tmp", SNAPSHOT_FILE));
+        assert!(
+            !temporary.exists(),
+            "temporary file must not remain behind"
+        );
+
+        fs::remove_dir_all(&directory).expect("temporary directory must be removed");
+    }
+
+    #[test]
+    fn validate_rejects_a_tab_without_panes() {
+        let mut tree = Tree::new();
+        tree.create_workspace("main")
+            .expect("workspace creation must succeed");
+        tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
+            .expect("tab creation must succeed");
+        tree.close_pane("w1:p1").expect("pane close must succeed");
+
+        let snapshot = Snapshot::capture(1, "alice", PaneSize { cols: 80, rows: 24 }, &tree);
+        let error = snapshot
+            .validate("alice")
+            .expect_err("empty tab must be rejected");
+        assert!(error.contains("no panes"));
     }
 }
