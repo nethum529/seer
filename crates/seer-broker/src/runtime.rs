@@ -344,8 +344,12 @@ mod tests {
     fn selects_runtime_directories_and_private_mode() {
         let temporary = temporary_directory("directories");
         let xdg_root = temporary.join("xdg");
-        let xdg =
-            runtime_directory_path(&temporary, Some(xdg_root.clone().into_os_string()), 123, 123);
+        let xdg = runtime_directory_path(
+            &temporary,
+            Some(xdg_root.clone().into_os_string()),
+            123,
+            123,
+        );
         let fallback = runtime_directory_path(&temporary, Some(OsString::new()), 123, 123);
         create_private_directory(&xdg).expect("XDG directory must be created");
 
@@ -480,5 +484,4 @@ mod tests {
         child.kill().expect("late child must stop");
         child.wait().expect("stopped child must be reaped");
     }
-
 }

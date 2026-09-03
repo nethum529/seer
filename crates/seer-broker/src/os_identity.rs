@@ -278,9 +278,7 @@ fn validate_account_name(name: &str) -> io::Result<()> {
 fn unsafe_directory(name: &str) -> io::Error {
     io::Error::new(
         io::ErrorKind::PermissionDenied,
-        format!(
-            "runtime directory for OS account {name} is a symlink or has unsafe ownership"
-        ),
+        format!("runtime directory for OS account {name} is a symlink or has unsafe ownership"),
     )
 }
 
