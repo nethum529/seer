@@ -229,10 +229,12 @@ fn second_start_uses_the_live_broker() {
     let directory = TestDirectory::new();
     let address = unused_address();
     write_config(&directory, address);
+    fs::write(directory.pid_path(), "999999\n").expect("stale pid must be written");
     let executable = install_binaries(&directory);
     let first = run_start(&executable, &directory, "", &[]);
     assert!(first.status.success(), "{}", first.stderr);
     let first_pid = fs::read_to_string(directory.pid_path()).expect("pid must exist");
+    assert_ne!(first_pid, "999999\n");
 
     let second = run_start(&executable, &directory, "", &[]);
 
@@ -244,25 +246,6 @@ fn second_start_uses_the_live_broker() {
     assert_eq!(
         fs::read_to_string(directory.pid_path()).expect("pid must still exist"),
         first_pid
-    );
-    assert_eq!(launch_count(&directory), 1);
-}
-
-#[test]
-fn dead_pid_is_replaced() {
-    let _serial = PROCESS_TEST.lock().expect("process test lock must work");
-    let directory = TestDirectory::new();
-    let address = unused_address();
-    write_config(&directory, address);
-    fs::write(directory.pid_path(), "999999\n").expect("stale pid must be written");
-    let executable = install_binaries(&directory);
-
-    let output = run_start(&executable, &directory, "", &[]);
-
-    assert!(output.status.success(), "{}", output.stderr);
-    assert_ne!(
-        fs::read_to_string(directory.pid_path()).expect("new pid must exist"),
-        "999999\n"
     );
     assert_eq!(launch_count(&directory), 1);
 }
