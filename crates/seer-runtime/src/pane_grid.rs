@@ -9,7 +9,7 @@ use alacritty_terminal::vte::ansi::{
 pub use seer_core::{Cell, Color};
 use seer_core::{
     Cursor, CursorShape, InputEvent, KeyCode, KeyInput, Modifiers, MouseKind, MouseProtocol,
-    TERMINAL_PROTOCOL_VERSION, TerminalFrame, TerminalInput, TerminalModes,
+    MouseTracking, TERMINAL_PROTOCOL_VERSION, TerminalFrame, TerminalInput, TerminalModes,
 };
 use std::io;
 use std::time::Instant;
@@ -132,6 +132,7 @@ impl PaneGrid {
             bracketed_paste: mode.contains(TermMode::BRACKETED_PASTE),
             focus_events: mode.contains(TermMode::FOCUS_IN_OUT),
             mouse_protocol: mouse_protocol(*mode),
+            mouse_tracking: mouse_tracking(*mode),
         }
     }
 
@@ -202,6 +203,18 @@ fn mouse_protocol(mode: TermMode) -> MouseProtocol {
         MouseProtocol::Utf8
     } else {
         MouseProtocol::Normal
+    }
+}
+
+fn mouse_tracking(mode: TermMode) -> MouseTracking {
+    if mode.contains(TermMode::MOUSE_MOTION) {
+        MouseTracking::AnyMotion
+    } else if mode.contains(TermMode::MOUSE_DRAG) {
+        MouseTracking::ButtonMotion
+    } else if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
+        MouseTracking::Click
+    } else {
+        MouseTracking::None
     }
 }
 
