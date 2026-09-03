@@ -171,7 +171,7 @@ impl SharedSession {
     }
 
     fn send_snapshot(&self, id: u64) -> io::Result<()> {
-        let mut session = lock(&self.session)?;
+        let session = lock(&self.session)?;
         let messages = session.snapshot();
         let mut connections = lock(&self.connections)?;
         let position = connections
