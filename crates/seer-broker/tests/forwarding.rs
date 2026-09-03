@@ -43,7 +43,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     let runtime_pid = temporary.runtime_pid("alice");
     temporary.assert_runtime_arguments("alice");
     temporary.assert_socket_directory();
-    send(&mut first, &ClientMsg::Invite);
+    send(&mut first, &ClientMsg::Invite { hours: None });
     match wait_for_seat(&mut first) {
         ServerMsg::Seat {
             capsule,
@@ -106,7 +106,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
     send_hello(&mut bob, "bob", "bob-secret");
     assert_welcome(read_message(&mut bob), "bob");
     wait_for_tree_with_tab(&mut bob);
-    send(&mut bob, &ClientMsg::Invite);
+    send(&mut bob, &ClientMsg::Invite { hours: None });
     assert_eq!(
         wait_for_refused(&mut bob),
         ServerMsg::Refused {

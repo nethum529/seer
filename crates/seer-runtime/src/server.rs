@@ -275,7 +275,7 @@ mod tests {
                 seat_token: "seat".into(),
                 name: "alice".into(),
             },
-            ClientMsg::Invite,
+            ClientMsg::Invite { hours: None },
             ClientMsg::ListPeople,
             ClientMsg::DetachClient {
                 client_id: "client-1".into(),
