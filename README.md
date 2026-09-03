@@ -46,6 +46,7 @@ Use these commands after both people join:
 
 ```sh
 seer
+seer invite --hours 24
 seer peek <name>
 seer detach
 ```

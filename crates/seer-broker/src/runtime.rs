@@ -8,32 +8,36 @@ use std::os::unix::fs::{DirBuilderExt, PermissionsExt};
 use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
-use std::sync::Mutex;
+use std::sync::{Arc, Mutex, Weak};
 use std::thread;
 use std::time::Duration;
 
 const CONNECT_RETRIES: usize = 500;
 const RETRY_INTERVAL: Duration = Duration::from_millis(10);
+const SUPERVISOR_INTERVAL: Duration = Duration::from_millis(250);
 const MAX_SOCKET_PATH_BYTES: usize = 99;
 struct RuntimeProcess {
     child: Child,
     _lifeline: PipeWriter,
+    socket_path: PathBuf,
 }
 
 pub(crate) struct RuntimeManager {
     binary: PathBuf,
     shell: String,
     state_dir: PathBuf,
-    processes: Mutex<HashMap<String, RuntimeProcess>>,
+    processes: Arc<Mutex<HashMap<String, RuntimeProcess>>>,
 }
 
 impl RuntimeManager {
     pub(crate) fn new(shell: String, state_dir: PathBuf) -> io::Result<Self> {
+        let processes = Arc::new(Mutex::new(HashMap::new()));
+        spawn_supervisor(Arc::downgrade(&processes));
         Ok(Self {
             binary: runtime_binary()?,
             shell,
             state_dir,
-            processes: Mutex::new(HashMap::new()),
+            processes,
         })
     }
 
@@ -55,7 +59,7 @@ impl RuntimeManager {
         }
 
         let process_is_running = match processes.get_mut(user_id) {
-            Some(process) => process.child.try_wait()?.is_none(),
+            Some(process) => runtime_is_running(user_id, process)?,
             None => false,
         };
         if !process_is_running {
@@ -96,7 +100,61 @@ impl RuntimeManager {
         Ok(RuntimeProcess {
             child,
             _lifeline: writer,
+            socket_path: socket_path.to_owned(),
         })
+    }
+}
+
+fn spawn_supervisor(processes: Weak<Mutex<HashMap<String, RuntimeProcess>>>) {
+    let _monitor = thread::spawn(move || {
+        supervise_runtimes(processes);
+    });
+}
+
+fn supervise_runtimes(processes: Weak<Mutex<HashMap<String, RuntimeProcess>>>) {
+    loop {
+        thread::sleep(SUPERVISOR_INTERVAL);
+        let Some(processes) = processes.upgrade() else {
+            return;
+        };
+        let mut processes = match processes.lock() {
+            Ok(processes) => processes,
+            Err(_) => {
+                eprintln!("runtime supervisor lock failed");
+                return;
+            }
+        };
+        processes.retain(
+            |user_id, process| match runtime_is_running(user_id, process) {
+                Ok(running) => running,
+                Err(error) => {
+                    eprintln!("runtime status check failed for user {user_id}: {error}");
+                    true
+                }
+            },
+        );
+    }
+}
+
+fn runtime_is_running(user_id: &str, process: &mut RuntimeProcess) -> io::Result<bool> {
+    let Some(status) = process.child.try_wait()? else {
+        return Ok(true);
+    };
+    if let Err(error) = remove_runtime_socket(&process.socket_path) {
+        eprintln!("runtime socket cleanup failed for user {user_id}: {error}");
+    }
+    eprintln!("runtime exited for user {user_id}: {status}");
+    Ok(false)
+}
+
+fn remove_runtime_socket(path: &Path) -> io::Result<()> {
+    if !path.exists() || UnixStream::connect(path).is_ok() {
+        return Ok(());
+    }
+    match fs::remove_file(path) {
+        Ok(()) => Ok(()),
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        Err(error) => Err(error),
     }
 }
 
@@ -196,7 +254,7 @@ mod tests {
     use std::os::unix::net::UnixListener;
     use std::path::Path;
     use std::process::Command;
-    use std::sync::Mutex;
+    use std::sync::{Arc, Mutex};
     use std::thread;
     use std::time::Duration;
 
@@ -290,7 +348,7 @@ mod tests {
             binary: "true".into(),
             shell: "sh".into(),
             state_dir: temporary.clone(),
-            processes: Mutex::new(HashMap::new()),
+            processes: Arc::new(Mutex::new(HashMap::new())),
         };
 
         manager

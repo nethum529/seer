@@ -7,11 +7,11 @@ use std::time::{Duration, Instant};
 use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
 use seer_net::{EndpointId, Listener, Socket, Stream, load_or_create_secret_key};
 
-use crate::Config;
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
-use crate::registry::{PersonRecord, Registry};
+use crate::registry::{MAX_SEAT_LIFETIME_SECS, PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
+use crate::{Config, connection_limit::ConnectionLimit};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INVALID_CREDENTIALS: &str = "invalid credentials";
@@ -30,9 +30,7 @@ pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
         spawn_remote_accept_loop(remote_listener, Arc::clone(&broker));
     }
     for connection in listener.incoming() {
-        let stream = Socket::from(connection?);
-        let broker = Arc::clone(&broker);
-        thread::spawn(move || report_connection(handle_connection(stream, &broker)));
+        spawn_connection(Socket::from(connection?), Arc::clone(&broker));
     }
     Ok(())
 }
@@ -43,6 +41,7 @@ pub(crate) struct BrokerState {
     attachments: Attachments,
     published: PublishedAddress,
     remote_endpoint: Option<EndpointId>,
+    connection_limit: ConnectionLimit,
 }
 
 impl BrokerState {
@@ -57,6 +56,7 @@ impl BrokerState {
                 attachments: Attachments::default(),
                 published,
                 remote_endpoint: None,
+                connection_limit: ConnectionLimit::default(),
             },
             owner_credential,
         ))
@@ -70,15 +70,19 @@ impl BrokerState {
         &self.runtimes
     }
 
-    pub(crate) fn invite(&self) -> io::Result<ServerMsg> {
-        let token = self.registry.create_seat()?;
+    pub(crate) fn invite(&self, hours: Option<u32>) -> io::Result<ServerMsg> {
+        let requested_lifetime = hours.map_or_else(Registry::seat_lifetime_secs, |hours| {
+            u64::from(hours).saturating_mul(3_600)
+        });
+        let lifetime_secs = requested_lifetime.min(MAX_SEAT_LIFETIME_SECS);
+        let token = self.registry.create_seat(lifetime_secs)?;
         let capsule = match self.remote_endpoint {
             Some(endpoint) => format!("SEER2-{endpoint}-{token}"),
             None => self.published.capsule(&token),
         };
         Ok(ServerMsg::Seat {
             capsule,
-            expires_in_secs: Registry::seat_lifetime_secs(),
+            expires_in_secs: lifetime_secs,
         })
     }
 
@@ -164,11 +168,7 @@ fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
         loop {
             match listener.accept() {
                 Ok((_remote, stream)) => {
-                    let broker = Arc::clone(&broker);
-                    let stream = Socket::from(stream);
-                    thread::spawn(move || {
-                        report_connection(handle_connection(stream, &broker));
-                    });
+                    spawn_connection(Socket::from(stream), Arc::clone(&broker))
                 }
                 Err(error) => {
                     eprintln!("broker remote accept error: {error}");
@@ -176,6 +176,18 @@ fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
                 }
             }
         }
+    });
+}
+
+fn spawn_connection<S: Stream + Clone>(stream: S, broker: Arc<BrokerState>) {
+    let Some(connection) = broker.connection_limit.try_acquire() else {
+        eprintln!("broker refused connection: connection limit reached");
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        return;
+    };
+    thread::spawn(move || {
+        let _connection = connection;
+        report_connection(handle_connection(stream, &broker));
     });
 }
 
@@ -427,7 +439,9 @@ mod tests {
                 .expect("owner must authenticate");
         assert_eq!(authenticated.user_id, owner.user_id);
 
-        let token = registry.create_seat().expect("seat must be created");
+        let token = registry
+            .create_seat(crate::registry::Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         let joined = super::join(&mut server, &registry, &token, "Guest")
             .expect("join must finish")
             .expect("guest must join");
@@ -444,7 +458,9 @@ mod tests {
         assert!(
             super::authenticate(&mut closed_server, &registry, &owner.user_id, "wrong").is_err()
         );
-        let second_token = registry.create_seat().expect("seat must be created");
+        let second_token = registry
+            .create_seat(crate::registry::Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         assert!(super::join(&mut closed_server, &registry, &second_token, "Other").is_err());
         remove_directory(&directory, "state directory must be removed");
     }
