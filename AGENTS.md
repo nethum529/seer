@@ -46,14 +46,29 @@ before every PR.
 
 ## Testing
 
-- Do not write excessive tests. Test writing is extremely limited.
-- Write a test only when there is a strong reason. Default is no test.
-- When a test is allowed, write the test before the code (test first).
-  Never add a test after the code it covers.
-- Do not add tests to cover lines, to reach a coverage number, or to
+- Tests are a cost. They slow every change. Default is no test.
+- Write a test only to guard a user facing contract or a bug that came
+  back. Write the test before the code. Never add a test after the code
+  it covers.
+- Do not write a test to cover lines, to reach a coverage number, or to
   satisfy a tool.
-- Keep existing tests that pass. Do not add new tests to existing modules
-  unless the same test-first rule applies.
+- Do not write a test that pins an internal detail: a private function,
+  a data layout, a log line, an exact error string.
+- When you touch a module, delete tests that do not earn their place:
+  tests that pin internals, tests that duplicate another test, tests that
+  exist only for coverage. A test does not stay because it passes.
+- Keep test helpers small. Do not build a test framework.
+
+## Comments
+
+- Comments are a cost. Default is no comment.
+- Keep only three kinds: the safety comment on an unsafe block, the reason
+  on an allow attribute, and a fact the reader cannot get from the code
+  (a protocol quirk, an OS limit, a decision from docs/research/).
+- Delete comments that restate the code, that say what a function does
+  when its name already says it, or that mark sections.
+- Do not write doc comments on private items. Write a doc comment on a
+  public item only when the name is not enough.
 
 ## Git
 
