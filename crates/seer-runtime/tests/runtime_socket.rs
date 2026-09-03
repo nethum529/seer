@@ -53,13 +53,7 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
     assert!(wait_for_cells(&mut reattached));
 
     codec::encode(&mut reattached, &ClientMsg::Detach).expect("Detach must encode");
-    let mut byte = [0];
-    assert_eq!(
-        reattached
-            .read(&mut byte)
-            .expect("runtime must close Detach"),
-        0
-    );
+    wait_for_close(&mut reattached);
 
     let duplicate = runtime_command()
         .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
