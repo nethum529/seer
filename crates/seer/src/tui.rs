@@ -481,6 +481,9 @@ fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState, drawer: &Drawer
 pub(crate) mod test_support;
 
 #[cfg(test)]
+mod drawer_tests;
+
+#[cfg(test)]
 mod herdr_tests;
 
 #[cfg(test)]
