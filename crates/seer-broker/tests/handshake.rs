@@ -73,6 +73,18 @@ fn handles_required_handshake_outcomes() {
         .expect("invalid frame must send");
     let malformed = codec::decode(&mut malformed_stream).expect("refusal must decode");
     assert_refused_and_closed(malformed_stream, malformed, "invalid message");
+
+    let mut oversized_stream = TcpStream::connect(address).expect("client must connect");
+    oversized_stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("read timeout must set");
+    let length =
+        u32::try_from(codec::MAX_PRE_AUTH_FRAME_SIZE + 1).expect("frame length must fit in u32");
+    oversized_stream
+        .write_all(&length.to_be_bytes())
+        .expect("frame length must send");
+    let oversized = codec::decode(&mut oversized_stream).expect("refusal must decode");
+    assert_refused_and_closed(oversized_stream, oversized, "invalid message");
     remove_state_directory(&state_dir);
 }
 

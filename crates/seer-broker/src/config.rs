@@ -43,8 +43,20 @@ fn state_dir_from(
 impl Config {
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let contents = fs::read_to_string(path)?;
-        toml::from_str(&contents).map_err(invalid_config)
+        let config: Self = toml::from_str(&contents).map_err(invalid_config)?;
+        validate_listen_address(config.listen)?;
+        Ok(config)
     }
+}
+
+fn validate_listen_address(listen: SocketAddr) -> io::Result<()> {
+    if listen.ip().is_loopback() {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "listen address must be loopback",
+    ))
 }
 
 fn invalid_config(error: toml::de::Error) -> io::Error {
