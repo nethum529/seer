@@ -7,7 +7,7 @@ use crossterm::event::{
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
-use ratatui::layout::Rect;
+use ratatui::layout::{Rect, Size};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{
     Cursor, InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, MouseTracking, PaneSize,
@@ -34,8 +34,14 @@ fn view_only_events_send_no_session_changes() {
 
     for event in events {
         assert_eq!(
-            handle_event(event, &mut client, &mut state, &mut command_pending)
-                .expect("event handling must succeed"),
+            handle_event(
+                event,
+                &mut client,
+                &mut state,
+                &mut command_pending,
+                Size::new(80, 24),
+            )
+            .expect("event handling must succeed"),
             LoopControl::Continue
         );
     }
@@ -48,6 +54,7 @@ fn view_only_events_send_no_session_changes() {
             &mut client,
             &mut state,
             &mut command_pending,
+            Size::new(80, 24),
         )
         .expect("detach key must be handled"),
         LoopControl::Exit
@@ -58,7 +65,7 @@ fn view_only_events_send_no_session_changes() {
 #[test]
 fn active_events_send_input_focus_and_resize() {
     let (mut client, mut server) = socket_pair();
-    let mut state = state_with_pane();
+    let mut state = state_with_two_tabs();
     let mut command_pending = false;
     set_view_only(false);
 
@@ -67,6 +74,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut client,
         &mut state,
         &mut command_pending,
+        Size::new(80, 24),
     )
     .expect("input key must be handled");
     handle_event(
@@ -74,6 +82,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut client,
         &mut state,
         &mut command_pending,
+        Size::new(80, 24),
     )
     .expect("command prefix must be handled");
     handle_event(
@@ -81,6 +90,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut client,
         &mut state,
         &mut command_pending,
+        Size::new(80, 24),
     )
     .expect("focus key must be handled");
     handle_event(
@@ -88,8 +98,25 @@ fn active_events_send_input_focus_and_resize() {
         &mut client,
         &mut state,
         &mut command_pending,
+        Size::new(120, 40),
     )
     .expect("resize must be handled");
+    handle_event(
+        Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        Size::new(120, 40),
+    )
+    .expect("command prefix must be handled");
+    handle_event(
+        Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        Size::new(120, 40),
+    )
+    .expect("tab change must be handled");
     let release = KeyEvent::new_with_kind(
         KeyCode::Char('a'),
         KeyModifiers::NONE,
@@ -101,6 +128,7 @@ fn active_events_send_input_focus_and_resize() {
             &mut client,
             &mut state,
             &mut command_pending,
+            Size::new(80, 24),
         )
         .expect("release key must be handled"),
         LoopControl::Continue
@@ -131,6 +159,15 @@ fn active_events_send_input_focus_and_resize() {
         ClientMsg::Resize {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
+            cols: 120,
+            rows: 40,
+        }
+    );
+    assert_eq!(
+        decode(&mut server),
+        ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t2".into(),
             cols: 120,
             rows: 40,
         }
@@ -166,6 +203,7 @@ fn mouse_move_without_tracking_sends_no_message() {
         &mut client,
         &mut state,
         &mut command_pending,
+        Size::new(80, 24),
     )
     .expect("mouse move must be handled");
 
@@ -255,5 +293,17 @@ fn state_with_pane() -> ClientState {
         .expect("workspace must be created");
     tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
         .expect("tab must be created");
+    ClientState::new(tree)
+}
+
+fn state_with_two_tabs() -> ClientState {
+    let mut tree = Tree::new();
+    tree.create_workspace("main")
+        .expect("workspace must be created");
+    for title in ["first", "second"] {
+        tree.create_tab("w1", title, PaneSize { cols: 80, rows: 24 })
+            .expect("tab must be created");
+    }
+    crate::tui_navigation::initialize(&tree);
     ClientState::new(tree)
 }

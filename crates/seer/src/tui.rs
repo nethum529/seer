@@ -8,7 +8,7 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::Rect;
+use ratatui::layout::{Rect, Size};
 use ratatui::widgets::{Block, Borders, Paragraph};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput, Tree};
@@ -113,8 +113,9 @@ fn run_loop<S: Stream>(
         }
         if event::poll(EVENT_WAIT)? {
             let event = event::read()?;
+            let size = terminal.size()?;
             if let LoopControl::Exit =
-                handle_event(event, stream, &mut state, &mut command_pending)?
+                handle_event(event, stream, &mut state, &mut command_pending, size)?
             {
                 return Ok(LoopControl::Exit);
             }
@@ -182,10 +183,11 @@ fn handle_event<S: Stream>(
     stream: &mut S,
     state: &mut ClientState,
     command_pending: &mut bool,
+    size: Size,
 ) -> io::Result<LoopControl> {
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
-            handle_key(key, stream, state, command_pending)
+            handle_key(key, stream, state, command_pending, size)
         }
         Event::Resize(cols, rows) if !is_view_only() => {
             if let Some((workspace, tab)) = state.selection() {
@@ -223,6 +225,7 @@ fn handle_key<S: Stream>(
     stream: &mut S,
     state: &mut ClientState,
     command_pending: &mut bool,
+    size: Size,
 ) -> io::Result<LoopControl> {
     if is_control_char(key, 'q') {
         send(stream, &ClientMsg::Detach)?;
@@ -233,7 +236,7 @@ fn handle_key<S: Stream>(
     }
     if let Some(action) = key_to_action(key, command_pending) {
         show_hint();
-        handle_action(action, stream, state)?;
+        handle_action(action, stream, state, size)?;
     }
     Ok(LoopControl::Continue)
 }
@@ -242,6 +245,7 @@ fn handle_action(
     action: InputAction,
     stream: &mut impl Stream,
     state: &mut ClientState,
+    size: Size,
 ) -> io::Result<()> {
     let message = match action {
         InputAction::CreateTab => {
@@ -261,13 +265,15 @@ fn handle_action(
                 })
         }
         InputAction::ClosePane => close_message(state),
-        InputAction::NextTab => {
-            select_tab(state, true);
-            None
-        }
-        InputAction::PreviousTab => {
-            select_tab(state, false);
-            None
+        InputAction::NextTab | InputAction::PreviousTab => {
+            let forward = action == InputAction::NextTab;
+            select_tab(state, forward);
+            state.selection().map(|(workspace, tab)| ClientMsg::Resize {
+                workspace: workspace.to_owned(),
+                tab: tab.to_owned(),
+                cols: size.width,
+                rows: size.height,
+            })
         }
         InputAction::FocusPane(direction) => {
             pane_in_direction(state, direction).and_then(|pane| focus_message(state, pane))
