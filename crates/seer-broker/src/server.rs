@@ -22,11 +22,13 @@ const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
 
 pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
-    let (mut broker, owner_credential) = BrokerState::new(config)?;
+    let (mut broker, owner_identity) = BrokerState::new(config)?;
     let remote_listener = bind_remote_listener(config);
     broker.remote_endpoint = remote_listener.as_ref().map(Listener::id);
-    if let Some(credential) = owner_credential {
-        writeln!(io::stdout().lock(), "owner-credential: {credential}")?;
+    if let Some((user_id, credential)) = owner_identity {
+        let mut stdout = io::stdout().lock();
+        writeln!(stdout, "owner-id: {user_id}")?;
+        writeln!(stdout, "owner-credential: {credential}")?;
     }
     let broker = Arc::new(broker);
     if let Some(remote_listener) = remote_listener {
@@ -50,10 +52,10 @@ pub(crate) struct BrokerState {
 }
 
 impl BrokerState {
-    pub(crate) fn new(config: &Config) -> io::Result<(Self, Option<String>)> {
+    pub(crate) fn new(config: &Config) -> io::Result<(Self, Option<(String, String)>)> {
         let published = PublishedAddress::parse(&config.published_addr)?;
         let runtimes = RuntimeManager::new(config.state_dir.clone(), config.os_users.clone())?;
-        let (registry, owner_credential) = Registry::open(&config.state_dir, &config.owner_name)?;
+        let (registry, owner_identity) = Registry::open(&config.state_dir, &config.owner_name)?;
         Ok((
             Self {
                 registry,
@@ -63,7 +65,7 @@ impl BrokerState {
                 remote_endpoint: None,
                 connection_limit: ConnectionLimit::default(),
             },
-            owner_credential,
+            owner_identity,
         ))
     }
 

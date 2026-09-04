@@ -18,7 +18,13 @@ fn owner_save_creates_a_missing_store() {
         state_dir: directory.join("state"),
     };
 
-    save_owner(&directory, &config, "secret".to_owned()).expect("owner must be saved");
+    save_owner(
+        &directory,
+        &config,
+        "owner-id".to_owned(),
+        "secret".to_owned(),
+    )
+    .expect("owner must be saved");
 
     let store =
         ServerStore::load_from(&directory.join("servers.toml")).expect("server store must parse");
