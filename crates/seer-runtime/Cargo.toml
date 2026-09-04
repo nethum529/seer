@@ -5,6 +5,7 @@ edition.workspace = true
 
 [dependencies]
 alacritty_terminal = { version = "0.26.0", default-features = false }
+libc = "0.2"
 portable-pty = "0.9"
 seer-core = { path = "../seer-core" }
 serde = { version = "1", features = ["derive"] }

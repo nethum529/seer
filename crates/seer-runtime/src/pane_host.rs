@@ -45,6 +45,10 @@ impl PaneHost {
         self.grid.snapshot()
     }
 
+    pub fn foreground(&self) -> String {
+        self.session.foreground_name()
+    }
+
     pub fn kill(&mut self) -> io::Result<()> {
         self.session.kill()
     }

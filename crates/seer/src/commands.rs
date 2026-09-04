@@ -3,7 +3,7 @@ use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
 use seer_core::Tree;
-use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientInfo, ClientMsg, Person, PersonState, ServerMsg, codec};
 use seer_net::{Socket, Stream};
 
 use crate::capsule;
@@ -12,9 +12,9 @@ use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
-pub(crate) use selection::peek;
+pub(crate) use selection::{peek, selected_server};
 mod selection;
-use selection::{select_client, selected_server};
+use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
 const INSTALL_URL: &str =
     "https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh";
@@ -201,13 +201,14 @@ fn list_server(server: &ServerEntry) -> ListRow {
                 .iter()
                 .find(|person| person.user_id == server.user_id)
                 .is_some_and(|person| person.attached_clients > 1);
-            let mut names: Vec<&str> = people.iter().map(|person| person.name.as_str()).collect();
-            names.sort_unstable_by_key(|name| name.to_ascii_lowercase());
+            let mut sorted: Vec<&Person> = people.iter().collect();
+            sorted.sort_unstable_by_key(|person| person.name.to_ascii_lowercase());
+            let entries: Vec<String> = sorted.into_iter().map(describe_person).collect();
             ListRow {
                 server: server.alias.clone(),
                 you: server.name.clone(),
                 state: if attached { "attached" } else { "detached" },
-                people: names.join(", "),
+                people: entries.join(", "),
             }
         }
         Err(_) => ListRow {
@@ -217,6 +218,21 @@ fn list_server(server: &ServerEntry) -> ListRow {
             people: String::new(),
         },
     }
+}
+
+fn describe_person(person: &Person) -> String {
+    let state = match person.state {
+        PersonState::Active => "active",
+        PersonState::Idle => "idle",
+        PersonState::Away => "away",
+    };
+    let foreground = if person.foreground.is_empty() {
+        "-"
+    } else {
+        person.foreground.as_str()
+    };
+    let (name, tabs, idle) = (&person.name, person.tabs, person.idle_secs);
+    format!("{name} {state} {tabs} {foreground} {idle}s")
 }
 
 fn receive_clients(stream: &mut impl Stream) -> Result<Vec<ClientInfo>, CommandError> {
@@ -280,7 +296,7 @@ fn edit_distance_at_most_one(left: &[u8], right: &[u8]) -> bool {
     differences == 0 || long_index == longer.len()
 }
 
-fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
+pub(crate) fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
     let mut stream = connect(&server.endpoint)?;
     let hello = ClientMsg::Hello {
         user_id: server.user_id.clone(),

@@ -1,22 +1,20 @@
-use std::io::{self, Read};
-use std::net::{TcpListener, TcpStream};
-use std::time::Duration;
-
 use crossterm::event::{
     Event, KeyCode, KeyEvent, KeyEventKind, KeyModifiers, MouseEvent, MouseEventKind,
 };
 use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::{Rect, Size};
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_core::{
     Cursor, InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, MouseTracking, PaneSize,
     TerminalFrame, TerminalInput, TerminalModes, Tree,
 };
 
+use super::test_support::*;
 use super::{
     LoopControl, apply_server_message, draw, handle_event, set_peek_person, set_view_only,
 };
+use crate::drawer::Drawer;
 use crate::state::ClientState;
 
 #[test]
@@ -24,6 +22,7 @@ fn view_only_events_send_no_session_changes() {
     let (mut client, mut server) = socket_pair();
     let mut state = state_with_pane();
     let mut command_pending = false;
+    let mut drawer = Drawer::default();
     set_view_only(true);
     let events = [
         Event::Key(KeyEvent::new(KeyCode::Char('a'), KeyModifiers::NONE)),
@@ -40,6 +39,7 @@ fn view_only_events_send_no_session_changes() {
                 &mut state,
                 &mut command_pending,
                 Size::new(80, 24),
+                &mut drawer,
             )
             .expect("event handling must succeed"),
             LoopControl::Continue
@@ -55,6 +55,7 @@ fn view_only_events_send_no_session_changes() {
             &mut state,
             &mut command_pending,
             Size::new(80, 24),
+            &mut drawer,
         )
         .expect("detach key must be handled"),
         LoopControl::Exit
@@ -68,6 +69,7 @@ fn active_events_send_input_focus_and_resize() {
     let mut tree = tree_with_two_tabs();
     let mut state = ClientState::new(tree.clone());
     let mut command_pending = false;
+    let mut drawer = Drawer::default();
     set_view_only(false);
 
     handle_event(
@@ -76,6 +78,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut command_pending,
         Size::new(80, 24),
+        &mut drawer,
     )
     .expect("input key must be handled");
     handle_event(
@@ -84,6 +87,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut command_pending,
         Size::new(80, 24),
+        &mut drawer,
     )
     .expect("command prefix must be handled");
     handle_event(
@@ -92,6 +96,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut command_pending,
         Size::new(80, 24),
+        &mut drawer,
     )
     .expect("focus key must be handled");
     handle_event(
@@ -100,6 +105,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut command_pending,
         Size::new(120, 40),
+        &mut drawer,
     )
     .expect("resize must be handled");
     let release = KeyEvent::new_with_kind(
@@ -114,10 +120,53 @@ fn active_events_send_input_focus_and_resize() {
             &mut state,
             &mut command_pending,
             Size::new(80, 24),
+            &mut drawer,
         )
         .expect("release key must be handled"),
         LoopControl::Continue
     );
+    for key in [
+        KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL),
+        KeyEvent::new(KeyCode::Char('u'), KeyModifiers::NONE),
+    ] {
+        handle_event(
+            Event::Key(key),
+            &mut client,
+            &mut state,
+            &mut command_pending,
+            Size::new(80, 24),
+            &mut drawer,
+        )
+        .expect("drawer key must be handled");
+    }
+    assert!(drawer.is_open());
+    apply_two_people(&mut client, &mut state, &mut drawer);
+    assert_eq!(highlighted_person(&drawer, &mut state), Some(0));
+    send_test_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Down,
+        &mut drawer,
+    );
+    assert_eq!(highlighted_person(&drawer, &mut state), Some(1));
+    send_test_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Char('z'),
+        &mut drawer,
+    );
+    handle_event(
+        Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        Size::new(80, 24),
+        &mut drawer,
+    )
+    .expect("drawer escape must be handled");
+    assert!(!drawer.is_open());
 
     assert_eq!(
         decode(&mut server),
@@ -144,16 +193,19 @@ fn active_events_send_input_focus_and_resize() {
         ClientMsg::Resize {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
-            cols: 120,
+            cols: 119,
             rows: 40,
         }
     );
+    assert_eq!(decode(&mut server), ClientMsg::ListPeople);
+    assert_key_input(&mut server, "w1:p1", 'z');
 
     send_prefixed_key(
         &mut client,
         &mut state,
         &mut command_pending,
         KeyCode::Char('%'),
+        &mut drawer,
     );
     assert_eq!(
         decode(&mut server),
@@ -170,6 +222,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut client,
         Size::new(120, 40),
+        &mut drawer,
     )
     .expect("split tree must apply");
     send_test_key(
@@ -177,6 +230,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut command_pending,
         KeyCode::Char('h'),
+        &mut drawer,
     );
     assert_key_input(&mut server, "w1:p3", 'h');
 
@@ -185,6 +239,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut command_pending,
         KeyCode::Char('"'),
+        &mut drawer,
     );
     assert_eq!(
         decode(&mut server),
@@ -201,6 +256,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut client,
         Size::new(120, 40),
+        &mut drawer,
     )
     .expect("split tree must apply");
     send_test_key(
@@ -208,6 +264,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut command_pending,
         KeyCode::Char('v'),
+        &mut drawer,
     );
     assert_key_input(&mut server, "w1:p4", 'v');
 
@@ -217,7 +274,13 @@ fn active_events_send_input_focus_and_resize() {
         (KeyCode::Left, "w1:p1", 'l'),
         (KeyCode::Right, "w1:p3", 'r'),
     ] {
-        send_prefixed_key(&mut client, &mut state, &mut command_pending, key);
+        send_prefixed_key(
+            &mut client,
+            &mut state,
+            &mut command_pending,
+            key,
+            &mut drawer,
+        );
         assert_eq!(
             decode(&mut server),
             ClientMsg::FocusPane {
@@ -232,6 +295,7 @@ fn active_events_send_input_focus_and_resize() {
             &mut state,
             &mut client,
             Size::new(120, 40),
+            &mut drawer,
         )
         .expect("focus tree must apply");
         send_test_key(
@@ -239,6 +303,7 @@ fn active_events_send_input_focus_and_resize() {
             &mut state,
             &mut command_pending,
             KeyCode::Char(marker),
+            &mut drawer,
         );
         assert_key_input(&mut server, pane, marker);
     }
@@ -248,13 +313,14 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut command_pending,
         KeyCode::Char('n'),
+        &mut drawer,
     );
     assert_eq!(
         decode(&mut server),
         ClientMsg::Resize {
             workspace: "w1".into(),
             tab: "w1:t2".into(),
-            cols: 120,
+            cols: 119,
             rows: 40,
         }
     );
@@ -272,6 +338,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut client,
         Size::new(120, 40),
+        &mut drawer,
     )
     .expect("tree must apply");
     assert_eq!(
@@ -279,7 +346,7 @@ fn active_events_send_input_focus_and_resize() {
         ClientMsg::Resize {
             workspace: "w1".into(),
             tab: "w1:t1".into(),
-            cols: 120,
+            cols: 119,
             rows: 40,
         }
     );
@@ -291,6 +358,7 @@ fn mouse_move_without_tracking_sends_no_message() {
     let (mut client, mut server) = socket_pair();
     let mut state = state_with_pane();
     let mut command_pending = false;
+    let mut drawer = Drawer::default();
     set_view_only(false);
     state.set_pane_areas(vec![("w1:p1".into(), Rect::new(0, 0, 80, 24))]);
     state.apply_frame(
@@ -315,16 +383,34 @@ fn mouse_move_without_tracking_sends_no_message() {
         &mut state,
         &mut command_pending,
         Size::new(80, 24),
+        &mut drawer,
     )
     .expect("mouse move must be handled");
 
-    assert_no_message(&mut server);
+    handle_event(
+        Event::Mouse(MouseEvent {
+            kind: MouseEventKind::Down(crossterm::event::MouseButton::Left),
+            column: 79,
+            row: 5,
+            modifiers: KeyModifiers::NONE,
+        }),
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        Size::new(80, 24),
+        &mut drawer,
+    )
+    .expect("drawer handle click must be handled");
+
+    assert!(drawer.is_open());
+    assert_eq!(decode(&mut server), ClientMsg::ListPeople);
 }
 
 #[test]
 fn detached_bye_has_a_distinct_exit() {
     let (mut client, _) = socket_pair();
     let mut state = state_with_pane();
+    let mut drawer = Drawer::default();
 
     assert_eq!(
         apply_server_message(
@@ -334,6 +420,7 @@ fn detached_bye_has_a_distinct_exit() {
             &mut state,
             &mut client,
             Size::new(80, 24),
+            &mut drawer,
         )
         .expect("Bye must apply"),
         LoopControl::Detached
@@ -346,6 +433,7 @@ fn detached_bye_has_a_distinct_exit() {
             &mut state,
             &mut client,
             Size::new(80, 24),
+            &mut drawer,
         )
         .expect("Bye must apply"),
         LoopControl::Exit
@@ -353,121 +441,58 @@ fn detached_bye_has_a_distinct_exit() {
 }
 
 #[test]
-fn peek_banner_is_fixed_above_the_tree() {
-    let mut terminal = Terminal::new(TestBackend::new(40, 5)).expect("terminal must start");
+fn peek_banner_and_drawer_are_fixed_over_the_tree() {
+    let mut terminal = Terminal::new(TestBackend::new(80, 5)).expect("terminal must start");
     let mut state = state_with_pane();
+    let mut drawer = Drawer::default();
     set_peek_person(Some("alice"));
 
     terminal
-        .draw(|frame| draw(frame, &mut state))
+        .draw(|frame| draw(frame, &mut state, &drawer))
         .expect("frame must draw");
 
     let buffer = terminal.backend().buffer();
-    let first_line: String = (0..40).map(|x| buffer[(x, 0)].symbol()).collect();
-    let second_line: String = (0..40).map(|x| buffer[(x, 1)].symbol()).collect();
+    let first_line: String = (0..79).map(|x| buffer[(x, 0)].symbol()).collect();
+    let second_line: String = (0..79).map(|x| buffer[(x, 1)].symbol()).collect();
     assert_eq!(first_line.trim_end(), "PEEK: alice - READ ONLY");
     assert_eq!(second_line.trim_end(), "Workspace: alice/w1");
+    assert_eq!(buffer[(78, 2)].symbol(), "\u{2510}");
+    assert_eq!(buffer[(79, 2)].symbol(), "\u{2502}");
+
+    drawer.toggle();
+    terminal
+        .draw(|frame| draw(frame, &mut state, &drawer))
+        .expect("open drawer must draw");
+    let title: String = (39..79)
+        .map(|x| terminal.backend().buffer()[(x, 0)].symbol())
+        .collect();
+    assert!(title.starts_with("\u{250c}People"));
     set_peek_person(None);
 }
 
-fn decode(stream: &mut TcpStream) -> ClientMsg {
-    codec::decode(stream).expect("client message must decode")
-}
+#[test]
+fn drawer_enter_peeks_and_escape_returns() {
+    let (mut client, mut server) = socket_pair();
+    let mut state = state_with_pane();
+    let mut drawer = Drawer::default();
+    set_view_only(false);
+    drawer.toggle();
+    apply_two_people(&mut client, &mut state, &mut drawer);
 
-fn assert_no_message(stream: &mut TcpStream) {
-    stream
-        .set_read_timeout(Some(Duration::from_millis(50)))
-        .expect("read timeout must be set");
-    let mut byte = [0];
-    let error = stream
-        .read_exact(&mut byte)
-        .expect_err("event must not send a message");
-    assert!(matches!(
-        error.kind(),
-        io::ErrorKind::WouldBlock | io::ErrorKind::TimedOut
-    ));
-}
-
-fn socket_pair() -> (TcpStream, TcpStream) {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-    let client = TcpStream::connect(
-        listener
-            .local_addr()
-            .expect("listener must have an address"),
-    )
-    .expect("client must connect");
-    let (server, _) = listener.accept().expect("server must accept client");
-    server
-        .set_read_timeout(Some(Duration::from_secs(1)))
-        .expect("read timeout must be set");
-    (client, server)
-}
-
-fn send_test_key(
-    client: &mut TcpStream,
-    state: &mut ClientState,
-    command_pending: &mut bool,
-    code: KeyCode,
-) {
-    handle_event(
-        Event::Key(KeyEvent::new(code, KeyModifiers::NONE)),
-        client,
-        state,
-        command_pending,
-        Size::new(120, 40),
-    )
-    .expect("key must be handled");
-}
-
-fn send_prefixed_key(
-    client: &mut TcpStream,
-    state: &mut ClientState,
-    command_pending: &mut bool,
-    code: KeyCode,
-) {
-    handle_event(
-        Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
-        client,
-        state,
-        command_pending,
-        Size::new(120, 40),
-    )
-    .expect("command prefix must be handled");
-    send_test_key(client, state, command_pending, code);
-}
-
-fn assert_key_input(stream: &mut TcpStream, pane: &str, character: char) {
+    press_key(&mut client, &mut state, &mut drawer, KeyCode::Enter);
+    assert!(!drawer.is_open());
     assert_eq!(
-        decode(stream),
-        ClientMsg::TerminalInput {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            pane: pane.into(),
-            input: TerminalInput::new(InputEvent::Key(KeyInput {
-                code: CoreKeyCode::Char(character),
-                modifiers: Modifiers::default(),
-            })),
+        decode(&mut server),
+        ClientMsg::QueryTargets {
+            user: "alice".into()
         }
     );
-}
 
-fn state_with_pane() -> ClientState {
-    let mut tree = Tree::new();
-    tree.create_workspace("main")
-        .expect("workspace must be created");
-    tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
-        .expect("tab must be created");
-    ClientState::new(tree)
-}
+    apply_active_target(&mut client, &mut state, &mut drawer);
+    assert_eq!(decode(&mut server), peek_message());
+    assert!(peek_banner_shown(&mut state, &drawer));
 
-fn tree_with_two_tabs() -> Tree {
-    let mut tree = Tree::new();
-    tree.create_workspace("main")
-        .expect("workspace must be created");
-    for title in ["first", "second"] {
-        tree.create_tab("w1", title, PaneSize { cols: 80, rows: 24 })
-            .expect("tab must be created");
-    }
-    crate::tui_navigation::initialize(&tree);
-    tree
+    press_key(&mut client, &mut state, &mut drawer, KeyCode::Esc);
+    assert_eq!(decode(&mut server), ClientMsg::StopPeek);
+    assert!(!peek_banner_shown(&mut state, &drawer));
 }

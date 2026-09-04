@@ -1,8 +1,72 @@
+use ratatui::Frame;
 use ratatui::buffer::Buffer;
 use ratatui::layout::Rect;
 use ratatui::style::{Modifier, Style};
-use ratatui::widgets::Widget;
+use ratatui::widgets::{Block, Borders, Paragraph, Widget};
 use seer_core::{Cell, Color};
+
+use crate::state::{ClientState, pane_rects};
+
+pub(crate) fn draw_tree(
+    frame: &mut Frame<'_>,
+    state: &mut ClientState,
+    mut area: Rect,
+    status: &str,
+    peek_person: Option<&str>,
+) {
+    let status_height = area.height.min(1);
+    let status_area = Rect::new(
+        area.x,
+        area.y + area.height.saturating_sub(status_height),
+        area.width,
+        status_height,
+    );
+    frame.render_widget(Paragraph::new(status), status_area);
+    area.height = area.height.saturating_sub(status_height);
+    if let Some(person) = peek_person {
+        let banner_height = area.height.min(2);
+        let banner = Rect::new(area.x, area.y, area.width, banner_height);
+        frame.render_widget(
+            Paragraph::new(format!(
+                "PEEK: {person} - READ ONLY\nWorkspace: {person}/{}",
+                state.selected_workspace().unwrap_or("unknown")
+            )),
+            banner,
+        );
+        area.y = area.y.saturating_add(banner_height);
+        area.height = area.height.saturating_sub(banner_height);
+    }
+    draw_panes(frame, state, area);
+}
+
+fn draw_panes(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
+    let Some(tab) = state.visible_tab().cloned() else {
+        state.set_pane_areas(Vec::new());
+        return;
+    };
+    let mut input_areas = Vec::new();
+    for (pane, pane_area) in pane_rects(&tab, area) {
+        let block = Block::default().borders(Borders::ALL).title(pane.as_str());
+        let inner = block.inner(pane_area);
+        frame.render_widget(block, pane_area);
+        frame.render_widget(PaneCells::new(state.pane_rows(&pane)), inner);
+        set_frame_cursor(frame, state, &pane, inner);
+        input_areas.push((pane, inner));
+    }
+    state.set_pane_areas(input_areas);
+}
+
+fn set_frame_cursor(frame: &mut Frame<'_>, state: &ClientState, pane: &str, area: Rect) {
+    let Some(cursor) = state
+        .pane_cursor(pane)
+        .filter(|cursor| cursor.visible && state.focused() == Some(pane))
+    else {
+        return;
+    };
+    if cursor.column < area.width && cursor.row < area.height {
+        frame.set_cursor_position((area.x + cursor.column, area.y + cursor.row));
+    }
+}
 
 pub(crate) struct PaneCells<'a> {
     rows: &'a [Vec<Cell>],

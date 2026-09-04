@@ -8,7 +8,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::Tree;
-use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, codec};
 
 use super::server_io::receive;
 
@@ -131,6 +131,10 @@ pub(crate) fn person(user_id: &str, name: &str, attached_clients: u32) -> Person
         name: name.into(),
         attached_clients,
         peekable: true,
+        state: PersonState::Idle,
+        tabs: 2,
+        foreground: "bash".into(),
+        idle_secs: 90,
     }
 }
 
