@@ -65,7 +65,8 @@ fn view_only_events_send_no_session_changes() {
 #[test]
 fn active_events_send_input_focus_and_resize() {
     let (mut client, mut server) = socket_pair();
-    let mut state = state_with_two_tabs();
+    let mut tree = tree_with_two_tabs();
+    let mut state = ClientState::new(tree.clone());
     let mut command_pending = false;
     set_view_only(false);
 
@@ -101,22 +102,6 @@ fn active_events_send_input_focus_and_resize() {
         Size::new(120, 40),
     )
     .expect("resize must be handled");
-    handle_event(
-        Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
-        &mut client,
-        &mut state,
-        &mut command_pending,
-        Size::new(120, 40),
-    )
-    .expect("command prefix must be handled");
-    handle_event(
-        Event::Key(KeyEvent::new(KeyCode::Char('n'), KeyModifiers::NONE)),
-        &mut client,
-        &mut state,
-        &mut command_pending,
-        Size::new(120, 40),
-    )
-    .expect("tab change must be handled");
     let release = KeyEvent::new_with_kind(
         KeyCode::Char('a'),
         KeyModifiers::NONE,
@@ -162,6 +147,107 @@ fn active_events_send_input_focus_and_resize() {
             cols: 120,
             rows: 40,
         }
+    );
+
+    send_prefixed_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Char('%'),
+    );
+    assert_eq!(
+        decode(&mut server),
+        ClientMsg::SplitPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            direction: seer_core::SplitDirection::Right,
+        }
+    );
+    tree.split_pane("w1:p1", seer_core::SplitDirection::Right)
+        .expect("right split must be created");
+    apply_server_message(
+        ServerMsg::Tree { tree: tree.clone() },
+        &mut state,
+        &mut client,
+        Size::new(120, 40),
+    )
+    .expect("split tree must apply");
+    send_test_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Char('h'),
+    );
+    assert_key_input(&mut server, "w1:p3", 'h');
+
+    send_prefixed_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Char('"'),
+    );
+    assert_eq!(
+        decode(&mut server),
+        ClientMsg::SplitPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            direction: seer_core::SplitDirection::Down,
+        }
+    );
+    tree.split_pane("w1:p3", seer_core::SplitDirection::Down)
+        .expect("down split must be created");
+    apply_server_message(
+        ServerMsg::Tree { tree: tree.clone() },
+        &mut state,
+        &mut client,
+        Size::new(120, 40),
+    )
+    .expect("split tree must apply");
+    send_test_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Char('v'),
+    );
+    assert_key_input(&mut server, "w1:p4", 'v');
+
+    for (key, pane, marker) in [
+        (KeyCode::Up, "w1:p3", 'u'),
+        (KeyCode::Down, "w1:p4", 'd'),
+        (KeyCode::Left, "w1:p1", 'l'),
+        (KeyCode::Right, "w1:p3", 'r'),
+    ] {
+        send_prefixed_key(&mut client, &mut state, &mut command_pending, key);
+        assert_eq!(
+            decode(&mut server),
+            ClientMsg::FocusPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
+                pane: pane.into(),
+            }
+        );
+        tree.focus_pane(pane).expect("pane focus must change");
+        apply_server_message(
+            ServerMsg::Tree { tree: tree.clone() },
+            &mut state,
+            &mut client,
+            Size::new(120, 40),
+        )
+        .expect("focus tree must apply");
+        send_test_key(
+            &mut client,
+            &mut state,
+            &mut command_pending,
+            KeyCode::Char(marker),
+        );
+        assert_key_input(&mut server, pane, marker);
+    }
+
+    send_prefixed_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Char('n'),
     );
     assert_eq!(
         decode(&mut server),
@@ -317,6 +403,54 @@ fn socket_pair() -> (TcpStream, TcpStream) {
     (client, server)
 }
 
+fn send_test_key(
+    client: &mut TcpStream,
+    state: &mut ClientState,
+    command_pending: &mut bool,
+    code: KeyCode,
+) {
+    handle_event(
+        Event::Key(KeyEvent::new(code, KeyModifiers::NONE)),
+        client,
+        state,
+        command_pending,
+        Size::new(120, 40),
+    )
+    .expect("key must be handled");
+}
+
+fn send_prefixed_key(
+    client: &mut TcpStream,
+    state: &mut ClientState,
+    command_pending: &mut bool,
+    code: KeyCode,
+) {
+    handle_event(
+        Event::Key(KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL)),
+        client,
+        state,
+        command_pending,
+        Size::new(120, 40),
+    )
+    .expect("command prefix must be handled");
+    send_test_key(client, state, command_pending, code);
+}
+
+fn assert_key_input(stream: &mut TcpStream, pane: &str, character: char) {
+    assert_eq!(
+        decode(stream),
+        ClientMsg::TerminalInput {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            pane: pane.into(),
+            input: TerminalInput::new(InputEvent::Key(KeyInput {
+                code: CoreKeyCode::Char(character),
+                modifiers: Modifiers::default(),
+            })),
+        }
+    );
+}
+
 fn state_with_pane() -> ClientState {
     let mut tree = Tree::new();
     tree.create_workspace("main")
@@ -326,7 +460,7 @@ fn state_with_pane() -> ClientState {
     ClientState::new(tree)
 }
 
-fn state_with_two_tabs() -> ClientState {
+fn tree_with_two_tabs() -> Tree {
     let mut tree = Tree::new();
     tree.create_workspace("main")
         .expect("workspace must be created");
@@ -335,5 +469,5 @@ fn state_with_two_tabs() -> ClientState {
             .expect("tab must be created");
     }
     crate::tui_navigation::initialize(&tree);
-    ClientState::new(tree)
+    tree
 }
