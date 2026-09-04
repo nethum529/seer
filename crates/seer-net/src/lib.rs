@@ -6,9 +6,13 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::timeout;
 
 mod stream;
 
@@ -16,8 +20,39 @@ pub use iroh::{EndpointId, SecretKey};
 pub use stream::{Socket, Stream};
 
 pub const ALPN: &[u8] = b"seer/1";
+const ONLINE_TIMEOUT: Duration = Duration::from_secs(4);
+
+const PRE_STREAM_CONNECTION_LIMIT: usize = 32;
+const PRE_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 
 type AcceptedStream = io::Result<(EndpointId, UnixStream)>;
+
+struct PreStreamLimit(Arc<AtomicUsize>);
+
+impl Default for PreStreamLimit {
+    fn default() -> Self {
+        Self(Arc::new(AtomicUsize::new(0)))
+    }
+}
+
+impl PreStreamLimit {
+    fn try_acquire(&self) -> Option<PreStreamGuard> {
+        self.0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < PRE_STREAM_CONNECTION_LIMIT).then_some(active + 1)
+            })
+            .ok()?;
+        Some(PreStreamGuard(Arc::clone(&self.0)))
+    }
+}
+
+struct PreStreamGuard(Arc<AtomicUsize>);
+
+impl Drop for PreStreamGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 pub fn load_or_create_secret_key(path: &Path) -> io::Result<SecretKey> {
     match fs::read(path) {
@@ -52,7 +87,7 @@ impl Listener {
             .name("seer-net-listener".to_owned())
             .spawn(move || listener_thread(secret_key, worker_control, ready_tx, accepted_tx))?;
 
-        match ready_rx.recv() {
+        match ready_rx.recv_timeout(ONLINE_TIMEOUT) {
             Ok(Ok(id)) => Ok(Self {
                 id,
                 accepted: accepted_rx,
@@ -63,10 +98,14 @@ impl Listener {
                 let _ = thread.join();
                 Err(error)
             }
-            Err(_) => {
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = thread.join();
                 Err(io::Error::other("listener thread stopped"))
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "endpoint did not become ready within 4 seconds",
+            )),
         }
     }
 
@@ -75,7 +114,6 @@ impl Listener {
     }
 
     pub fn accept(&self) -> AcceptedStream {
-        // Only a stopped listener makes accept return an error.
         self.accepted
             .recv()
             .map_err(|_| io::Error::other("listener stopped"))?
@@ -161,14 +199,21 @@ async fn run_listener(
             return;
         }
     };
-    endpoint.online().await;
+    let mut control_byte = [0_u8; 1];
+    tokio::select! {
+        _ = endpoint.online() => {}
+        _ = control.read(&mut control_byte) => {
+            endpoint.close().await;
+            return;
+        }
+    }
     if ready.send(Ok(endpoint.id())).is_err() {
         endpoint.close().await;
         return;
     }
 
-    let mut control_byte = [0_u8; 1];
     let mut connections = tokio::task::JoinSet::new();
+    let pre_streams = PreStreamLimit::default();
     loop {
         tokio::select! {
             _ = control.read(&mut control_byte) => break,
@@ -176,8 +221,12 @@ async fn run_listener(
                 let Some(incoming) = incoming else {
                     break;
                 };
+                let Some(pre_stream) = pre_streams.try_acquire() else {
+                    incoming.refuse();
+                    continue;
+                };
                 let result_sender = accepted.clone();
-                connections.spawn(handle_incoming(incoming, result_sender));
+                connections.spawn(handle_incoming(incoming, result_sender, pre_stream));
             }
             Some(_) = connections.join_next(), if !connections.is_empty() => {}
         }
@@ -195,16 +244,24 @@ async fn bind_endpoint(secret_key: SecretKey) -> io::Result<Endpoint> {
         .map_err(|_| io::Error::other("could not bind endpoint"))
 }
 
-async fn handle_incoming(incoming: Incoming, accepted: Sender<AcceptedStream>) {
-    let connection = match incoming.await {
-        Ok(connection) => connection,
-        Err(_) => return,
+async fn handle_incoming(
+    incoming: Incoming,
+    accepted: Sender<AcceptedStream>,
+    pre_stream: PreStreamGuard,
+) {
+    let connection = match timeout(PRE_STREAM_TIMEOUT, incoming).await {
+        Ok(Ok(connection)) => connection,
+        _ => return,
     };
     let remote = connection.remote_id();
-    let (send, recv) = match connection.accept_bi().await {
-        Ok(streams) => streams,
-        Err(_) => return,
+    let (send, recv) = match timeout(PRE_STREAM_TIMEOUT, connection.accept_bi()).await {
+        Ok(Ok(streams)) => streams,
+        _ => {
+            connection.close(0_u8.into(), b"seer stream deadline");
+            return;
+        }
     };
+    drop(pre_stream);
     let (caller_stream, bridge_stream) = match stream_pair() {
         Ok(streams) => streams,
         Err(_) => return,

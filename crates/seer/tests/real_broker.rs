@@ -8,7 +8,10 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
+#[path = "support/cli.rs"]
+mod cli_support;
+
+use cli_support::read_owner_identity;
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(7);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -184,8 +187,8 @@ impl TestFiles {
 
     fn write_broker_files(&self, address: SocketAddr) {
         let config = format!(
-            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\nshell = \"sh\"\n",
-            self.state_dir.display()
+            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"owner\"\n",
+            self.state_dir.display(),
         );
         fs::write(&self.broker_config, config).expect("broker config must write");
         let wrapper = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_ROOT/runtime-$2.pid\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
@@ -212,23 +215,12 @@ impl TestFiles {
     fn owner_identity(&self) -> (String, String) {
         let deadline = Instant::now() + WAIT_TIMEOUT;
         while Instant::now() < deadline {
-            if let Some(identity) = self.read_owner_identity() {
+            if let Some(identity) = read_owner_identity(&self.broker_output) {
                 return identity;
             }
             thread::sleep(POLL_INTERVAL);
         }
         panic!("owner identity did not become available");
-    }
-
-    fn read_owner_identity(&self) -> Option<(String, String)> {
-        let output = fs::read_to_string(&self.broker_output).ok()?;
-        let credential = output
-            .lines()
-            .find_map(|line| line.strip_prefix("owner-credential: "))?;
-        let people: Value =
-            serde_json::from_slice(&fs::read(self.state_dir.join("people.json")).ok()?).ok()?;
-        let user_id = people.as_array()?.first()?.get("user_id")?.as_str()?;
-        Some((user_id.to_owned(), credential.to_owned()))
     }
 }
 

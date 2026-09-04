@@ -64,6 +64,7 @@ pub enum SplitDirection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum TreeError {
     WorkspaceNotFound(String),
+    TabNotFound(String),
     PaneNotFound(String),
     IdExhausted,
 }
@@ -72,6 +73,7 @@ impl Display for TreeError {
     fn fmt(&self, formatter: &mut Formatter<'_>) -> fmt::Result {
         match self {
             Self::WorkspaceNotFound(id) => write!(formatter, "workspace not found: {id}"),
+            Self::TabNotFound(id) => write!(formatter, "tab not found: {id}"),
             Self::PaneNotFound(id) => write!(formatter, "pane not found: {id}"),
             Self::IdExhausted => formatter.write_str("tree id space is exhausted"),
         }
@@ -162,6 +164,16 @@ impl Tree {
 
         tab.panes.remove(pane_index);
         Ok(tab.clone())
+    }
+
+    pub fn close_tab(&mut self, workspace_id: &str, tab_id: &str) -> Result<Tab, TreeError> {
+        let workspace = self.workspace_mut(workspace_id)?;
+        let tab_index = workspace
+            .tabs
+            .iter()
+            .position(|tab| tab.id == tab_id)
+            .ok_or_else(|| TreeError::TabNotFound(tab_id.to_owned()))?;
+        Ok(workspace.tabs.remove(tab_index))
     }
 
     pub fn focus_pane(&mut self, pane_id: &str) -> Result<Tab, TreeError> {
@@ -332,3 +344,22 @@ fn take_id(next_id: &mut u64) -> Result<u64, TreeError> {
 
 #[cfg(test)]
 mod tests;
+
+impl Tree {
+    #[must_use]
+    pub fn next_workspace_id(&self) -> u64 {
+        self.next_workspace_id
+    }
+}
+
+impl Workspace {
+    #[must_use]
+    pub fn next_tab_id(&self) -> u64 {
+        self.next_tab_id
+    }
+
+    #[must_use]
+    pub fn next_pane_id(&self) -> u64 {
+        self.next_pane_id
+    }
+}

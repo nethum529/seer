@@ -51,6 +51,7 @@ seer
 seer invite --hours 24
 seer peek <name>
 seer detach
+seer stop
 ```
 
 Bare seer attaches again after a detach.

@@ -8,10 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use sha2::{Digest, Sha256};
-
 #[path = "support/binary.rs"]
 mod binary;
 
@@ -32,52 +28,7 @@ fn requires_config_path() {
 }
 
 #[test]
-fn loads_config_and_listens() {
-    let address = unused_address();
-    let config = TemporaryConfig::new(address);
-    let child = broker_command()
-        .arg(&config.path)
-        .env("XDG_RUNTIME_DIR", &config.directory)
-        .env("SEER_RUNTIME_BIN", config.directory.join("missing-runtime"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("broker must start");
-    let _broker = BrokerProcess(child);
-    let mut stream = connect_when_ready(address);
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .expect("read timeout must set");
-
-    codec::encode(
-        &mut stream,
-        &ClientMsg::Hello {
-            user_id: "alice".into(),
-            credential: "alice-secret".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        },
-    )
-    .expect("Hello must encode");
-    let response: ServerMsg = codec::decode(&mut stream).expect("Welcome must decode");
-
-    let ServerMsg::Welcome {
-        user_id,
-        name,
-        client_id,
-        tree,
-    } = response
-    else {
-        panic!("expected Welcome");
-    };
-    assert_eq!(user_id, "alice");
-    assert_eq!(name, "Alice");
-    assert_eq!(client_id.len(), 32);
-    assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    assert_eq!(tree, Tree::new());
-}
-
-#[test]
-fn prints_the_owner_credential_only_on_first_start() {
+fn prints_the_owner_identity_only_on_first_start() {
     let address = unused_address();
     let config = TemporaryConfig::new_empty(address);
     let first_log = config.directory.join("first.out");
@@ -88,10 +39,18 @@ fn prints_the_owner_credential_only_on_first_start() {
         assert!(wait_for_file(&first_log));
     }
     let first_output = fs::read_to_string(&first_log).expect("first output must read");
-    let credential = first_output
-        .strip_prefix("owner-credential: ")
-        .and_then(|value| value.strip_suffix('\n'))
+    let mut lines = first_output.lines();
+    let user_id = lines
+        .next()
+        .and_then(|line| line.strip_prefix("owner-id: "))
+        .expect("owner ID must print once");
+    let credential = lines
+        .next()
+        .and_then(|line| line.strip_prefix("owner-credential: "))
         .expect("owner credential must print once");
+    assert!(lines.next().is_none());
+    assert_eq!(user_id.len(), 32);
+    assert!(user_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
     assert_eq!(credential.len(), 64);
     assert!(credential.bytes().all(|byte| byte.is_ascii_hexdigit()));
 
@@ -105,6 +64,42 @@ fn prints_the_owner_credential_only_on_first_start() {
         fs::read_to_string(second_log).expect("second output must read"),
         ""
     );
+}
+
+#[test]
+fn rejects_non_loopback_listen_address_before_binding_or_state_changes() {
+    for address in [
+        "0.0.0.0:0",
+        "192.168.1.1:0",
+        "203.0.113.1:0",
+        "[::]:0",
+        "[fd00::1]:0",
+        "[2001:db8::1]:0",
+    ] {
+        let mut address: SocketAddr = address.parse().expect("test address must parse");
+        address.set_port(unused_address().port());
+        let config = TemporaryConfig::new_empty(address);
+        let output = run_broker(&config);
+
+        assert!(!output.status.success(), "{address}");
+        assert!(
+            TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_err(),
+            "{address}"
+        );
+        assert!(!config.directory.join("state").exists(), "{address}");
+    }
+}
+
+fn run_broker(config: &TemporaryConfig) -> Output {
+    let child = broker_command()
+        .arg(&config.path)
+        .env("XDG_RUNTIME_DIR", &config.directory)
+        .env("SEER_RUNTIME_BIN", config.directory.join("missing-runtime"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("broker must start");
+    wait_for_output(child)
 }
 
 fn start_broker(config: &TemporaryConfig, output: &PathBuf) -> Child {
@@ -152,15 +147,7 @@ struct TemporaryConfig {
 }
 
 impl TemporaryConfig {
-    fn new(address: SocketAddr) -> Self {
-        Self::create(address, true)
-    }
-
     fn new_empty(address: SocketAddr) -> Self {
-        Self::create(address, false)
-    }
-
-    fn create(address: SocketAddr, seed_owner: bool) -> Self {
         let counter = NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -179,24 +166,8 @@ impl TemporaryConfig {
             state_dir.display()
         );
         fs::write(&path, contents).expect("temporary config must write");
-        if seed_owner {
-            fs::create_dir(&state_dir).expect("state directory must be created");
-            let hash = hash("alice-secret");
-            let people = format!(
-                "[{{\"user_id\":\"alice\",\"name\":\"Alice\",\"credential_hash\":\"{hash}\",\"created_at\":1,\"is_owner\":true}}]\n"
-            );
-            fs::write(state_dir.join("people.json"), people).expect("people registry must write");
-            fs::write(state_dir.join("seats.json"), "[]\n").expect("seat registry must write");
-        }
         Self { path, directory }
     }
-}
-
-fn hash(value: &str) -> String {
-    Sha256::digest(value.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 fn wait_for_file(path: &Path) -> bool {

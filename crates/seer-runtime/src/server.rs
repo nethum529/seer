@@ -1,15 +1,29 @@
+use seer_core::TerminalCapabilities;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::fs;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::{Arc, Condvar, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::UserSession;
+use crate::user_session::validate_capabilities;
+
+mod connection;
+mod util;
+mod writer;
+
+use connection::{
+    Connection, ReportedViewport, evict_connection, grant_next_owner, handle_target_query,
+    reported_viewport,
+};
+use util::{connection_closed, lock, stop_after_snapshot_failure};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const SIZE_LEASE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn bind(path: &Path) -> io::Result<UnixListener> {
     remove_stale_socket(path)?;
@@ -27,6 +41,9 @@ pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
             .name(format!("runtime-connection-{connection_id}"))
             .spawn(move || {
                 if let Err(error) = handle_connection(stream, &connection, connection_id) {
+                    if crate::persistence::is_fatal(&error) {
+                        stop_after_snapshot_failure(&error);
+                    }
                     eprintln!("runtime connection error: {error}");
                 }
             })?;
@@ -53,7 +70,21 @@ fn handle_connection(
     shared: &SharedSession,
     connection_id: u64,
 ) -> io::Result<()> {
-    shared.add_connection(connection_id, stream.try_clone()?)?;
+    let Ok(first) = codec::decode(&mut stream) else {
+        return Ok(());
+    };
+    match first {
+        ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
+        ClientMsg::QueryTargets { .. } => {
+            return handle_target_query(&mut stream, shared, connection_id);
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected runtime attach",
+            ));
+        }
+    }
     let result = connection_loop(&mut stream, shared, connection_id);
     shared.remove_connection(connection_id)?;
     let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -65,12 +96,11 @@ fn connection_loop(
     shared: &SharedSession,
     connection_id: u64,
 ) -> io::Result<()> {
-    let mut read_only = false;
     loop {
         let Ok(message) = codec::decode(stream) else {
             return Ok(());
         };
-        if handle_message(shared, connection_id, &mut read_only, message)? {
+        if handle_message(shared, connection_id, message)? {
             return Ok(());
         }
     }
@@ -79,37 +109,32 @@ fn connection_loop(
 fn handle_message(
     shared: &SharedSession,
     connection_id: u64,
-    read_only: &mut bool,
     message: ClientMsg,
 ) -> io::Result<bool> {
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
-        ClientMsg::Peek { .. } => {
-            *read_only = true;
-            shared.send_tree(connection_id)?;
+        ClientMsg::Peek { workspace, tab, .. } => {
+            match shared.send_snapshot(connection_id, &workspace, &tab) {
+                Ok(()) => shared.enter_peek(connection_id)?,
+                Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                    shared.send_refused(connection_id, error.to_string())?;
+                }
+                Err(error) => return Err(error),
+            }
             Ok(false)
         }
-        message if *read_only && is_mutating(&message) => {
-            eprintln!("runtime dropped read-only message: {message:?}");
-            Ok(false)
+        ClientMsg::Resize {
+            workspace,
+            tab,
+            cols,
+            rows,
+        } => shared.client_resize(connection_id, &workspace, &tab, cols, rows),
+        ClientMsg::TerminalCapabilities { capabilities } => {
+            shared.record_capabilities(connection_id, capabilities)
         }
-        message => {
-            shared.apply_and_broadcast(message)?;
-            Ok(false)
-        }
+        message if message.is_mutating() => shared.dispatch_input(connection_id, message),
+        _ => Ok(false),
     }
-}
-
-fn is_mutating(message: &ClientMsg) -> bool {
-    matches!(
-        message,
-        ClientMsg::Input { .. }
-            | ClientMsg::CreateTab
-            | ClientMsg::SplitPane { .. }
-            | ClientMsg::ClosePane { .. }
-            | ClientMsg::FocusPane { .. }
-            | ClientMsg::Resize { .. }
-    )
 }
 
 fn start_poll_driver(shared: Arc<SharedSession>) -> io::Result<()> {
@@ -121,29 +146,26 @@ fn start_poll_driver(shared: Arc<SharedSession>) -> io::Result<()> {
 
 fn poll_driver(shared: &SharedSession) {
     loop {
-        let connections = shared.connections.lock().ok().and_then(|connections| {
-            shared
-                .connection_opened
-                .wait_while(connections, |connections| connections.is_empty())
-                .ok()
-        });
-        let Some(connections) = connections else {
-            eprintln!("runtime poll error: {}", lock_poisoned());
-            return;
+        let has_connections = match shared.poll_and_broadcast() {
+            Ok((_, has_connections)) => has_connections,
+            Err(error) => {
+                eprintln!("runtime poll error: {error}");
+                return;
+            }
         };
-        drop(connections);
-        thread::sleep(POLL_INTERVAL);
-        if let Err(error) = shared.poll_and_broadcast() {
-            eprintln!("runtime poll error: {error}");
-            return;
-        }
+        let interval = if has_connections {
+            POLL_INTERVAL
+        } else {
+            DETACHED_POLL_INTERVAL
+        };
+        thread::sleep(interval);
     }
 }
 
 struct SharedSession {
     session: Mutex<UserSession>,
     connections: Mutex<Vec<Connection>>,
-    connection_opened: Condvar,
+    lease: Mutex<()>,
 }
 
 impl SharedSession {
@@ -151,164 +173,324 @@ impl SharedSession {
         Self {
             session: Mutex::new(session),
             connections: Mutex::new(Vec::new()),
-            connection_opened: Condvar::new(),
+            lease: Mutex::new(()),
         }
     }
 
-    fn add_connection(&self, id: u64, mut stream: UnixStream) -> io::Result<()> {
-        let mut session = lock(&self.session)?;
-        session.ensure_first_shell()?;
+    fn add_connection(&self, id: u64, stream: UnixStream) -> io::Result<()> {
+        let messages = {
+            let mut session = lock(&self.session)?;
+            match session.ensure_first_shell() {
+                Ok(()) => session.snapshot(),
+                Err(error) if crate::persistence::is_fatal(&error) => {
+                    stop_after_snapshot_failure(&error)
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        let mut connection = Connection::new(id, stream)?;
+        if !connection.send_messages(&messages)? {
+            return Err(connection_closed());
+        }
+        let _lease = lock(&self.lease)?;
         let mut connections = lock(&self.connections)?;
-        write_messages(
-            &mut stream,
-            &[ServerMsg::Tree {
-                tree: session.tree.clone(),
-            }],
-        )?;
-        connections.push(Connection { id, stream });
-        self.connection_opened.notify_one();
+        let owner_stale = connections
+            .iter()
+            .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
+        if owner_stale {
+            for owner in connections.iter_mut() {
+                owner.size_owner = false;
+            }
+            connection.size_owner = true;
+        } else {
+            connection.size_owner = !connections.iter().any(|c| c.size_owner);
+        }
+        connections.push(connection);
         Ok(())
     }
 
     fn remove_connection(&self, id: u64) -> io::Result<()> {
-        lock(&self.connections)?.retain(|connection| connection.id != id);
+        let _lease = lock(&self.lease)?;
+        let owner_removed = {
+            let mut connections = lock(&self.connections)?;
+            let removed_owner = connections.iter().any(|c| c.id == id && c.size_owner);
+            connections.retain(|connection| connection.id != id);
+            removed_owner
+        };
+        if owner_removed {
+            self.recover_locked()?;
+        }
         Ok(())
     }
 
-    fn send_tree(&self, id: u64) -> io::Result<()> {
-        let session = lock(&self.session)?;
-        let message = ServerMsg::Tree {
-            tree: session.tree.clone(),
-        };
-        let mut connections = lock(&self.connections)?;
-        let position = connections
-            .iter()
-            .position(|connection| connection.id == id)
-            .ok_or_else(connection_closed)?;
-        let result = write_messages(&mut connections[position].stream, &[message]);
-        if result.is_err() {
-            connections.remove(position);
-        }
-        result
+    fn recover(&self) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
+        self.recover_locked()
     }
 
+    fn recover_locked(&self) -> io::Result<()> {
+        let adopt = {
+            let mut connections = lock(&self.connections)?;
+            if connections.iter().any(|connection| connection.size_owner) {
+                None
+            } else {
+                grant_next_owner(&mut connections)
+            }
+        };
+        if let Some(viewport) = adopt {
+            self.adopt_locked(viewport)?;
+        }
+        Ok(())
+    }
+
+    fn adopt_locked(&self, viewport: ReportedViewport) -> io::Result<()> {
+        let messages = match self.apply(ClientMsg::Resize {
+            workspace: viewport.workspace,
+            tab: viewport.tab,
+            cols: viewport.cols,
+            rows: viewport.rows,
+        }) {
+            Ok(messages) => messages,
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        self.flush_messages(&messages)
+    }
+
+    fn refresh_read_only(&self, id: u64) -> io::Result<Option<bool>> {
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections.iter_mut().find(|c| c.id == id) else {
+            return Ok(None);
+        };
+        connection.last_active = Instant::now();
+        Ok(Some(connection.read_only))
+    }
+
+    fn dispatch_input(&self, connection_id: u64, message: ClientMsg) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        let Some(read_only) = self.refresh_read_only(connection_id)? else {
+            return Ok(true);
+        };
+        if read_only {
+            eprintln!("runtime dropped read-only message: {message:?}");
+            return Ok(false);
+        }
+        let applied = self.apply(message);
+        match applied {
+            Ok(messages) => {
+                self.flush_messages(&messages)?;
+                Ok(false)
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                drop(_lease);
+                self.send_refused(connection_id, error.to_string())?;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn record_capabilities(
+        &self,
+        connection_id: u64,
+        capabilities: TerminalCapabilities,
+    ) -> io::Result<bool> {
+        if let Err(error) = validate_capabilities(capabilities) {
+            self.send_refused(connection_id, error.to_string())?;
+            return Ok(false);
+        }
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections.iter_mut().find(|c| c.id == connection_id) else {
+            return Ok(true);
+        };
+        connection.capabilities = Some(capabilities);
+        connection.last_active = Instant::now();
+        Ok(false)
+    }
+
+    fn client_resize(
+        &self,
+        id: u64,
+        workspace: &str,
+        tab: &str,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections.iter().position(|c| c.id == id) else {
+                return Ok(false);
+            };
+            if connections[position].read_only {
+                return Ok(false);
+            }
+            connections[position].last_active = Instant::now();
+            let lease_vacant = !connections.iter().any(|c| c.size_owner);
+            let owner_stale = connections
+                .iter()
+                .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
+            if !connections[position].size_owner && !lease_vacant && !owner_stale {
+                connections[position].viewport =
+                    Some(reported_viewport(workspace, tab, cols, rows));
+                return Ok(false);
+            }
+        }
+        let message = ClientMsg::Resize {
+            workspace: workspace.to_owned(),
+            tab: tab.to_owned(),
+            cols,
+            rows,
+        };
+        let applied = self.apply(message);
+        match applied {
+            Ok(messages) => {
+                let mut connections = lock(&self.connections)?;
+                for connection in connections.iter_mut() {
+                    connection.size_owner = connection.id == id;
+                }
+                if let Some(connection) = connections.iter_mut().find(|c| c.id == id) {
+                    connection.viewport = Some(reported_viewport(workspace, tab, cols, rows));
+                }
+                drop(connections);
+                self.flush_messages(&messages)?;
+                Ok(false)
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                drop(_lease);
+                self.send_refused(id, error.to_string())?;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn enter_peek(&self, id: u64) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
+        let demoted = {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections.iter().position(|c| c.id == id) else {
+                return Ok(());
+            };
+            connections[position].read_only = true;
+            let demoted = connections[position].size_owner;
+            connections[position].size_owner = false;
+            demoted
+        };
+        if demoted {
+            self.recover_locked()?;
+        }
+        Ok(())
+    }
+
+    fn send_snapshot(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
+        let session = lock(&self.session)?;
+        let tree = session.selected_tree(workspace, tab)?;
+        let messages = session.snapshot_for(tree);
+        drop(session);
+        let owner_lost = {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections
+                .iter()
+                .position(|connection| connection.id == id)
+            else {
+                return Err(connection_closed());
+            };
+            if connections[position].send_messages(&messages)? {
+                return Ok(());
+            }
+            evict_connection(&mut connections, position)
+        };
+        if owner_lost {
+            self.recover()?;
+        }
+        Err(connection_closed())
+    }
+
+    fn send_refused(&self, id: u64, reason: String) -> io::Result<()> {
+        self.send_to(id, &ServerMsg::Refused { reason })
+    }
+
+    fn send_to(&self, id: u64, message: &ServerMsg) -> io::Result<()> {
+        let output = writer::encode(message)?;
+        let owner_lost = {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections
+                .iter()
+                .position(|connection| connection.id == id)
+            else {
+                return Err(connection_closed());
+            };
+            if connections[position].send(output) {
+                return Ok(());
+            }
+            evict_connection(&mut connections, position)
+        };
+        if owner_lost {
+            self.recover()?;
+        }
+        Err(connection_closed())
+    }
+
+    #[cfg(test)]
     fn apply_and_broadcast(&self, message: ClientMsg) -> io::Result<()> {
-        let mut session = lock(&self.session)?;
-        let messages = session.apply(message)?;
+        let messages = self.apply(message)?;
         self.broadcast(&messages)
     }
 
-    fn poll_and_broadcast(&self) -> io::Result<()> {
+    fn apply(&self, message: ClientMsg) -> io::Result<Vec<ServerMsg>> {
         let mut session = lock(&self.session)?;
-        let mut connections = lock(&self.connections)?;
-        if connections.is_empty() {
-            return Ok(());
+        match session.apply(message) {
+            Ok(messages) => Ok(messages),
+            Err(error) if crate::persistence::is_fatal(&error) => {
+                stop_after_snapshot_failure(&error)
+            }
+            Err(error) => Err(error),
         }
-        let messages = session.poll();
-        broadcast(&mut connections, &messages);
-        Ok(())
+    }
+
+    fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {
+        let messages = lock(&self.session)?.poll();
+        let has_connections = !lock(&self.connections)?.is_empty();
+        if has_connections {
+            self.broadcast(&messages)?;
+        }
+        Ok((messages, has_connections))
     }
 
     fn broadcast(&self, messages: &[ServerMsg]) -> io::Result<()> {
-        let mut connections = lock(&self.connections)?;
-        broadcast(&mut connections, messages);
+        let _lease = lock(&self.lease)?;
+        self.flush_messages(messages)
+    }
+
+    fn flush_messages(&self, messages: &[ServerMsg]) -> io::Result<()> {
+        let adopt = {
+            let mut connections = lock(&self.connections)?;
+            let owner_present = connections.iter().any(|connection| connection.size_owner);
+            for message in messages {
+                let output = writer::encode(message)?;
+                connections.retain(|connection| connection.send(Arc::clone(&output)));
+            }
+            if owner_present && !connections.iter().any(|connection| connection.size_owner) {
+                grant_next_owner(&mut connections)
+            } else {
+                None
+            }
+        };
+        if let Some(viewport) = adopt {
+            self.adopt_locked(viewport)?;
+        }
         Ok(())
     }
-}
 
-struct Connection {
-    id: u64,
-    stream: UnixStream,
-}
-
-fn broadcast(connections: &mut Vec<Connection>, messages: &[ServerMsg]) {
-    connections.retain_mut(|connection| write_messages(&mut connection.stream, messages).is_ok());
-}
-
-fn write_messages(stream: &mut UnixStream, messages: &[ServerMsg]) -> io::Result<()> {
-    for message in messages {
-        codec::encode(stream, message)?;
+    #[cfg(test)]
+    fn connection_count(&self) -> usize {
+        self.connections.lock().map(|c| c.len()).unwrap_or(0)
     }
-    Ok(())
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> io::Result<MutexGuard<'_, T>> {
-    mutex.lock().map_err(|_| lock_poisoned())
-}
-
-fn lock_poisoned() -> io::Error {
-    io::Error::other("runtime shared state lock is poisoned")
-}
-
-fn connection_closed() -> io::Error {
-    io::Error::new(io::ErrorKind::NotConnected, "runtime connection is closed")
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ClientMsg, SharedSession, is_mutating, lock};
-    use crate::UserSession;
-    use std::os::unix::net::UnixStream;
+mod tests;
 
-    #[test]
-    fn identifies_only_mutating_messages() {
-        let mutating = [
-            ClientMsg::Input {
-                pane: "p1".into(),
-                bytes: Vec::new(),
-            },
-            ClientMsg::CreateTab,
-            ClientMsg::SplitPane {
-                direction: seer_core::SplitDirection::Right,
-            },
-            ClientMsg::ClosePane { pane: "p1".into() },
-            ClientMsg::FocusPane { pane: "p1".into() },
-            ClientMsg::Resize { cols: 80, rows: 24 },
-        ];
-        let deferred = [
-            ClientMsg::Hello {
-                user_id: "alice".into(),
-                credential: "token".into(),
-                version: "0.1.0".into(),
-            },
-            ClientMsg::Join {
-                seat_token: "seat".into(),
-                name: "alice".into(),
-            },
-            ClientMsg::Invite { hours: None },
-            ClientMsg::ListPeople,
-            ClientMsg::DetachClient {
-                client_id: "client-1".into(),
-            },
-            ClientMsg::Peek {
-                user: "alice".into(),
-                workspace: "w1".into(),
-            },
-            ClientMsg::StopPeek,
-            ClientMsg::Detach,
-        ];
-
-        assert!(mutating.iter().all(is_mutating));
-        assert!(deferred.iter().all(|message| !is_mutating(message)));
-    }
-
-    #[test]
-    fn removes_only_the_requested_connection() {
-        let shared = SharedSession::new(UserSession::new("alice", "sh"));
-        let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
-        let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
-        shared
-            .add_connection(1, first_server)
-            .expect("first connection must be added");
-        shared
-            .add_connection(2, second_server)
-            .expect("second connection must be added");
-
-        shared
-            .remove_connection(1)
-            .expect("connection must be removed");
-        let connections = lock(&shared.connections).expect("connections must lock");
-        assert_eq!(connections.len(), 1);
-        assert_eq!(connections[0].id, 2);
-    }
-}
+#[cfg(test)]
+mod size_lease;

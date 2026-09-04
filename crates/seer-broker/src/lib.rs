@@ -4,7 +4,9 @@ use std::net::TcpListener;
 
 mod attachments;
 mod config;
+mod connection_limit;
 mod forwarding;
+mod os_identity;
 mod registry;
 mod runtime;
 mod server;
@@ -22,6 +24,7 @@ pub fn run() -> io::Result<()> {
         )
     })?;
     let config = Config::load(config_path)?;
+    let remote_listener = server::bind_remote_listener(&config)?;
     let listener = TcpListener::bind(config.listen)?;
-    serve(listener, &config)
+    serve(listener, remote_listener, &config)
 }

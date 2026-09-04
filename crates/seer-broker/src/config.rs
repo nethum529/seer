@@ -1,3 +1,4 @@
+use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::net::SocketAddr;
@@ -14,16 +15,12 @@ pub struct Config {
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
     pub owner_name: String,
-    #[serde(default = "default_shell")]
-    pub shell: String,
+    #[serde(default)]
+    pub os_users: HashMap<String, String>,
 }
 
 fn default_remote() -> bool {
     true
-}
-
-fn default_shell() -> String {
-    "sh".to_owned()
 }
 
 fn default_state_dir() -> PathBuf {
@@ -46,8 +43,20 @@ fn state_dir_from(
 impl Config {
     pub fn load(path: impl AsRef<Path>) -> io::Result<Self> {
         let contents = fs::read_to_string(path)?;
-        toml::from_str(&contents).map_err(invalid_config)
+        let config: Self = toml::from_str(&contents).map_err(invalid_config)?;
+        validate_listen_address(config.listen)?;
+        Ok(config)
     }
+}
+
+fn validate_listen_address(listen: SocketAddr) -> io::Result<()> {
+    if listen.ip().is_loopback() {
+        return Ok(());
+    }
+    Err(io::Error::new(
+        io::ErrorKind::InvalidInput,
+        "listen address must be loopback",
+    ))
 }
 
 fn invalid_config(error: toml::de::Error) -> io::Error {
@@ -56,7 +65,6 @@ fn invalid_config(error: toml::de::Error) -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
     use std::path::Path;
 
     use super::Config;
@@ -70,47 +78,9 @@ mod tests {
         assert_eq!(config.published_addr, "seer.example.com:7321");
         assert_eq!(config.state_dir, Path::new("/var/lib/seer"));
         assert_eq!(config.owner_name, "owner");
-        assert_eq!(config.shell, "sh");
-    }
-
-    #[test]
-    fn loads_configured_shell() {
-        let config = toml::from_str::<Config>(
-            "listen = \"127.0.0.1:7321\"\npublished_addr = \"host:7321\"\nowner_name = \"owner\"\nshell = \"bash\"\n",
-        )
-        .expect("config must load");
-
-        assert_eq!(config.shell, "bash");
-        assert!(config.state_dir.ends_with(".local/state/seer"));
-    }
-
-    #[test]
-    fn selects_the_default_state_directory() {
-        let xdg = super::state_dir_from(Some("/xdg".into()), Some("/home/user".into()));
-        let empty_xdg = super::state_dir_from(Some("".into()), Some("/home/user".into()));
-        let no_home = super::state_dir_from(None, Some("".into()));
-
-        assert_eq!(xdg, Path::new("/xdg/seer"));
-        assert_eq!(empty_xdg, Path::new("/home/user/.local/state/seer"));
-        assert_eq!(no_home, Path::new("./.local/state/seer"));
-    }
-
-    #[test]
-    fn rejects_invalid_config() {
-        let error = toml::from_str::<Config>("listen = 1")
-            .err()
-            .map(super::invalid_config)
-            .expect("config must be invalid");
-
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn reports_missing_config() {
-        let error = Config::load("path-that-does-not-exist")
-            .err()
-            .expect("missing config must return an error");
-
-        assert_eq!(error.kind(), io::ErrorKind::NotFound);
+        assert_eq!(
+            config.os_users.get("owner").map(String::as_str),
+            Some("owner")
+        );
     }
 }

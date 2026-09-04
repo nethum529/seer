@@ -5,4 +5,4 @@ edition.workspace = true
 
 [dependencies]
 iroh = "1"
-tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread"] }
+tokio = { version = "1", features = ["io-util", "macros", "net", "rt-multi-thread", "time"] }

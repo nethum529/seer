@@ -1,18 +1,28 @@
 #![cfg(target_os = "linux")]
 
-use std::io::Read;
-use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::net::TcpStream;
+use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg};
+use seer_core::{InputEvent, TerminalInput};
 
 #[path = "support/binary.rs"]
 mod binary;
+#[path = "forwarding/extras.rs"]
+mod extras;
 #[path = "forwarding/support.rs"]
 mod support;
 
-use support::{ProcessGuard, TestFiles};
+use extras::{
+    assert_process_running, assert_runtime_arguments, assert_socket_directory, pane_pid, send,
+    wait_for_cells, write_config,
+};
+use support::{
+    ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
+    wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
+};
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
@@ -21,7 +31,7 @@ const POLL_INTERVAL: Duration = Duration::from_millis(10);
 fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     let temporary = TestFiles::new();
     let address = unused_address();
-    temporary.write_config(address);
+    write_config(&temporary, address);
     temporary.write_runtime_wrapper();
     let broker = temporary.start_broker();
     let _broker = ProcessGuard::new(broker);
@@ -29,19 +39,21 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
 
     assert!(!temporary.pid_file("alice").is_file());
     send_hello(&mut first, "alice", "alice-secret");
-    assert_welcome(read_message(&mut first), "alice");
+    drop(welcome_client_id(read_message(&mut first), "alice"));
     let tree = wait_for_tree_with_tab(&mut first);
     assert!(wait_for_cells(&mut first));
     let pane = &tree.workspaces[0].tabs[0].panes[0].id;
     send_input(
         &mut first,
+        "w1",
+        "w1:t1",
         pane,
-        "printf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/alice-pane.pid\"\n",
+        "sh -c 'printf \"%s\\n\" \"$PPID\" > \"$SEER_TEST_FILES/alice-pane.pid\"'\n",
     );
-    temporary.assert_process_running(temporary.pane_pid("alice"));
+    assert_process_running(pane_pid(&temporary, "alice"));
     let runtime_pid = temporary.runtime_pid("alice");
-    temporary.assert_runtime_arguments("alice");
-    temporary.assert_socket_directory();
+    assert_runtime_arguments(&temporary, "alice");
+    assert_socket_directory(&temporary);
     send(&mut first, &ClientMsg::Invite { hours: None });
     match wait_for_seat(&mut first) {
         ServerMsg::Seat {
@@ -76,7 +88,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
 
     let mut second = connect_when_ready(address);
     send_hello(&mut second, "alice", "alice-secret");
-    assert_welcome(read_message(&mut second), "alice");
+    drop(welcome_client_id(read_message(&mut second), "alice"));
     assert_tree_has_one_tab(read_message(&mut second));
     assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
 
@@ -88,22 +100,32 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
 fn routes_peek_and_restores_the_owners_runtime() {
     let temporary = TestFiles::new();
     let address = unused_address();
-    temporary.write_config(address);
+    write_config(&temporary, address);
     temporary.write_runtime_wrapper();
     let broker = temporary.start_broker();
     let _broker = ProcessGuard::new(broker);
 
     let mut alice = connect_when_ready(address);
     send_hello(&mut alice, "alice", "alice-secret");
-    assert_welcome(read_message(&mut alice), "alice");
-    let alice_tree = wait_for_tree_with_tab(&mut alice);
+    drop(welcome_client_id(read_message(&mut alice), "alice"));
+    let first_tree = wait_for_tree_with_tab(&mut alice);
     assert!(wait_for_cells(&mut alice));
-    let workspace = alice_tree.workspaces[0].id.clone();
-    let pane = alice_tree.workspaces[0].tabs[0].panes[0].id.clone();
+    let workspace = first_tree.workspaces[0].id.clone();
+    let first_tab = first_tree.workspaces[0].tabs[0].id.clone();
+    let first_pane = first_tree.workspaces[0].tabs[0].panes[0].id.clone();
+    send(
+        &mut alice,
+        &ClientMsg::ClosePane {
+            workspace: workspace.clone(),
+            tab: first_tab,
+            pane: first_pane,
+        },
+    );
+    wait_for_empty_tree(&mut alice);
 
     let mut bob = connect_when_ready(address);
     send_hello(&mut bob, "bob", "bob-secret");
-    assert_welcome(read_message(&mut bob), "bob");
+    drop(welcome_client_id(read_message(&mut bob), "bob"));
     wait_for_tree_with_tab(&mut bob);
     send(&mut bob, &ClientMsg::Invite { hours: None });
     assert_eq!(
@@ -115,29 +137,88 @@ fn routes_peek_and_restores_the_owners_runtime() {
 
     send(
         &mut bob,
-        &ClientMsg::Peek {
+        &ClientMsg::QueryTargets {
             user: "charlie".into(),
-            workspace: workspace.clone(),
         },
     );
-    send(&mut bob, &ClientMsg::Resize { cols: 90, rows: 30 });
-    wait_for_tree_with_tab(&mut bob);
+    assert_eq!(
+        wait_for_refused(&mut bob),
+        ServerMsg::Refused {
+            reason: "person not found".into()
+        }
+    );
     assert!(!temporary.pid_file("charlie").is_file());
 
     send(
         &mut bob,
+        &ClientMsg::QueryTargets {
+            user: "alice".into(),
+        },
+    );
+    assert!(wait_for_targets(&mut bob).is_empty());
+
+    send(
+        &mut alice,
+        &ClientMsg::CreateTab {
+            workspace: workspace.clone(),
+        },
+    );
+    let alice_tree = wait_for_tree_with_tab(&mut alice);
+    assert!(wait_for_cells(&mut alice));
+    let tab = alice_tree.workspaces[0].tabs[0].id.clone();
+    let pane = alice_tree.workspaces[0].tabs[0].panes[0].id.clone();
+    send(
+        &mut alice,
+        &ClientMsg::Resize {
+            workspace: workspace.clone(),
+            tab: tab.clone(),
+            cols: 80,
+            rows: 24,
+        },
+    );
+    wait_for_tree_with_tab(&mut alice);
+
+    send(
+        &mut bob,
+        &ClientMsg::QueryTargets {
+            user: "alice".into(),
+        },
+    );
+    let target = wait_for_targets(&mut bob)
+        .into_iter()
+        .next()
+        .expect("alice must have a target");
+    assert_eq!(target.workspace, workspace);
+    assert_eq!(target.tab, tab);
+    assert!(target.active);
+    send(
+        &mut bob,
         &ClientMsg::Peek {
             user: "alice".into(),
-            workspace,
+            workspace: target.workspace,
+            tab: target.tab,
         },
     );
     assert_eq!(wait_for_tree_with_tab(&mut bob), alice_tree);
-    send_input(&mut alice, &pane, "printf 'alice-before\\n'\n");
+
+    send_input(
+        &mut alice,
+        &workspace,
+        &tab,
+        &pane,
+        "printf 'alice-before\\n'\n",
+    );
     assert!(wait_for_cells_containing(&mut alice, "alice-before").contains("alice-before"));
     assert!(wait_for_cells_containing(&mut bob, "alice-before").contains("alice-before"));
 
-    send_input(&mut bob, &pane, "printf 'bob-write\\n'\n");
-    send_input(&mut alice, &pane, "printf 'alice-after\\n'\n");
+    send_input(&mut bob, &workspace, &tab, &pane, "printf 'bob-write\\n'\n");
+    send_input(
+        &mut alice,
+        &workspace,
+        &tab,
+        &pane,
+        "printf 'alice-after\\n'\n",
+    );
     let alice_cells = wait_for_cells_containing(&mut alice, "alice-after");
     let bob_cells = wait_for_cells_containing(&mut bob, "alice-after");
     assert!(!alice_cells.contains("bob-write"));
@@ -145,18 +226,24 @@ fn routes_peek_and_restores_the_owners_runtime() {
 
     send(&mut bob, &ClientMsg::StopPeek);
     wait_for_tree_with_tab(&mut bob);
-    temporary.assert_log_contains("broker dropped Peek for unknown user: charlie");
-    temporary.assert_log_contains("broker dropped Input while user bob peeks");
-    temporary.assert_log_excludes("runtime dropped read-only message");
-
+    send(
+        &mut bob,
+        &ClientMsg::QueryTargets {
+            user: "alice".into(),
+        },
+    );
+    let target = wait_for_targets(&mut bob)
+        .into_iter()
+        .next()
+        .expect("alice must have a target after requery");
     send(
         &mut bob,
         &ClientMsg::Peek {
             user: "alice".into(),
-            workspace: "w1".into(),
+            workspace: target.workspace,
+            tab: target.tab,
         },
     );
-    wait_for_tree_with_tab(&mut bob);
     wait_for_tree_with_tab(&mut bob);
     temporary.terminate_runtime("alice");
     wait_for_tree_with_tab(&mut bob);
@@ -167,73 +254,56 @@ fn routes_peek_and_restores_the_owners_runtime() {
     temporary.terminate_runtime("bob");
 }
 
-fn send_hello(stream: &mut TcpStream, user: &str, token: &str) {
-    codec::encode(
-        stream,
-        &ClientMsg::Hello {
-            user_id: user.into(),
-            credential: token.into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        },
-    )
-    .expect("Hello must encode");
+#[test]
+fn supervises_an_exited_runtime_and_starts_a_replacement() {
+    let temporary = TestFiles::new();
+    let address = unused_address();
+    write_config(&temporary, address);
+    temporary.write_runtime_wrapper();
+    let broker = temporary.start_broker();
+    let _broker = ProcessGuard::new(broker);
+
+    let mut alice = connect_when_ready(address);
+    send_hello(&mut alice, "alice", "alice-secret");
+    drop(welcome_client_id(read_message(&mut alice), "alice"));
+    wait_for_tree_with_tab(&mut alice);
+    let alice_pid = temporary.runtime_pid("alice");
+
+    let mut bob = connect_when_ready(address);
+    send_hello(&mut bob, "bob", "bob-secret");
+    drop(welcome_client_id(read_message(&mut bob), "bob"));
+    wait_for_tree_with_tab(&mut bob);
+    let bob_pid = temporary.runtime_pid("bob");
+
+    let alice_socket = temporary.terminate_runtime("alice");
+    assert_path_removed(format!("/proc/{alice_pid}/status"));
+    assert_path_removed(&alice_socket);
+    assert_process_running(bob_pid);
+
+    let mut replacement = connect_when_ready(address);
+    send_hello(&mut replacement, "alice", "alice-secret");
+    drop(welcome_client_id(read_message(&mut replacement), "alice"));
+    wait_for_tree_with_tab(&mut replacement);
+    assert_ne!(temporary.runtime_pid("alice"), alice_pid);
+    assert_process_running(bob_pid);
+
+    drop(alice);
+    drop(bob);
+    drop(replacement);
+    temporary.terminate_runtime("alice");
+    temporary.terminate_runtime("bob");
 }
 
-fn send(stream: &mut TcpStream, message: &ClientMsg) {
-    codec::encode(stream, message).expect("client message must encode");
-}
-
-fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
+fn send_input(stream: &mut TcpStream, workspace: &str, tab: &str, pane: &str, input: &str) {
     send(
         stream,
-        &ClientMsg::Input {
+        &ClientMsg::TerminalInput {
+            workspace: workspace.into(),
+            tab: tab.into(),
             pane: pane.into(),
-            bytes: input.as_bytes().into(),
+            input: TerminalInput::new(InputEvent::Text(input.into())),
         },
     );
-}
-
-fn assert_welcome(message: ServerMsg, expected_user: &str) {
-    match message {
-        ServerMsg::Welcome {
-            user_id,
-            name,
-            client_id,
-            tree,
-        } => {
-            assert_eq!(user_id, expected_user);
-            assert_eq!(name, expected_user);
-            assert_eq!(client_id.len(), 32);
-            assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
-            assert!(tree.workspaces.is_empty());
-        }
-        other => panic!("expected Welcome, got {other:?}"),
-    }
-}
-
-fn wait_for_tree_with_tab(stream: &mut TcpStream) -> seer_core::Tree {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    while Instant::now() < deadline {
-        if let ServerMsg::Tree { tree } = read_message(stream)
-            && tree
-                .workspaces
-                .first()
-                .is_some_and(|workspace| workspace.tabs.len() == 1)
-        {
-            return tree;
-        }
-    }
-    panic!("Tree with a tab was not received");
-}
-
-fn wait_for_cells(stream: &mut TcpStream) -> bool {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    while Instant::now() < deadline {
-        if matches!(read_message(stream), ServerMsg::Cells { .. }) {
-            return true;
-        }
-    }
-    false
 }
 
 fn assert_tree_has_one_tab(message: ServerMsg) {
@@ -243,6 +313,22 @@ fn assert_tree_has_one_tab(message: ServerMsg) {
             assert_eq!(tree.workspaces[0].tabs.len(), 1);
         }
         other => panic!("expected Tree, got {other:?}"),
+    }
+}
+
+fn wait_for_empty_tree(stream: &mut TcpStream) {
+    wait_for_broker_message(
+        stream,
+        |message| matches!(message, ServerMsg::Tree { tree } if tree.workspaces.iter().all(|workspace| workspace.tabs.is_empty())),
+    );
+}
+
+fn wait_for_targets(stream: &mut TcpStream) -> Vec<PeekTarget> {
+    match wait_for_broker_message(stream, |message| {
+        matches!(message, ServerMsg::Targets { .. })
+    }) {
+        ServerMsg::Targets { targets } => targets,
+        other => panic!("expected Targets, got {other:?}"),
     }
 }
 
@@ -279,8 +365,9 @@ fn wait_for_broker_message(
 fn wait_for_cells_containing(stream: &mut TcpStream, expected: &str) -> String {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while Instant::now() < deadline {
-        if let ServerMsg::Cells { rows, .. } = read_message(stream) {
-            let text = rows
+        if let ServerMsg::Cells { frame, .. } = read_message(stream) {
+            let text = frame
+                .rows
                 .iter()
                 .flatten()
                 .map(|cell| cell.character)
@@ -293,53 +380,14 @@ fn wait_for_cells_containing(stream: &mut TcpStream, expected: &str) -> String {
     panic!("Cells did not contain {expected}");
 }
 
-fn read_message(stream: &mut TcpStream) -> ServerMsg {
-    stream
-        .set_read_timeout(Some(WAIT_TIMEOUT))
-        .expect("read timeout must set");
-    codec::decode(stream).expect("server message must decode")
-}
-
-fn wait_for_disconnect(stream: &mut TcpStream) {
+fn assert_path_removed(path: impl AsRef<Path>) {
+    let path = path.as_ref();
     let deadline = Instant::now() + WAIT_TIMEOUT;
-    let mut bytes = [0; 1_024];
     while Instant::now() < deadline {
-        match stream.read(&mut bytes) {
-            Ok(0) => return,
-            Ok(_) => {}
-            Err(error)
-                if matches!(
-                    error.kind(),
-                    std::io::ErrorKind::ConnectionReset
-                        | std::io::ErrorKind::ConnectionAborted
-                        | std::io::ErrorKind::BrokenPipe
-                        | std::io::ErrorKind::UnexpectedEof
-                ) =>
-            {
-                return;
-            }
-            Err(error) => panic!("Alice must disconnect: {error}"),
-        }
-    }
-    panic!("Alice did not disconnect");
-}
-
-fn unused_address() -> SocketAddr {
-    let listener = TcpListener::bind("127.0.0.1:0").expect("port probe must bind");
-    listener
-        .local_addr()
-        .expect("port probe must have an address")
-}
-
-fn connect_when_ready(address: SocketAddr) -> TcpStream {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    let mut last_error = None;
-    while Instant::now() < deadline {
-        match TcpStream::connect(address) {
-            Ok(stream) => return stream,
-            Err(error) => last_error = Some(error),
+        if !path.exists() {
+            return;
         }
         thread::sleep(POLL_INTERVAL);
     }
-    panic!("broker did not listen: {last_error:?}");
+    panic!("path was not removed: {}", path.display());
 }

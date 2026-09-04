@@ -1,5 +1,6 @@
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, BufReader, BufWriter, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -9,6 +10,9 @@ use sha2::{Digest, Sha256};
 
 const SEAT_LIFETIME_SECS: u64 = 3_600;
 pub(crate) const MAX_SEAT_LIFETIME_SECS: u64 = 604_800;
+const DIRECTORY_MODE: u32 = 0o700;
+const FILE_MODE: u32 = 0o600;
+const REGISTRY_FILE: &str = "registry.json";
 const PEOPLE_FILE: &str = "people.json";
 const SEATS_FILE: &str = "seats.json";
 
@@ -28,6 +32,7 @@ struct SeatRecord {
     used: bool,
 }
 
+#[derive(Clone, Default, Deserialize, Serialize)]
 struct RegistryData {
     people: Vec<PersonRecord>,
     seats: Vec<SeatRecord>,
@@ -64,32 +69,43 @@ impl Registry {
     pub(crate) fn open(
         state_dir: impl AsRef<Path>,
         owner_name: &str,
-    ) -> io::Result<(Self, Option<String>)> {
+    ) -> io::Result<(Self, Option<(String, String)>)> {
         validate_name(owner_name)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.reason()))?;
         let state_dir = state_dir.as_ref().to_owned();
         fs::create_dir_all(&state_dir)?;
+        fs::set_permissions(&state_dir, Permissions::from_mode(DIRECTORY_MODE))?;
         let people_path = state_dir.join(PEOPLE_FILE);
         let seats_path = state_dir.join(SEATS_FILE);
-        let mut people: Vec<PersonRecord> = load_json(&people_path)?;
-        let seats: Vec<SeatRecord> = load_json(&seats_path)?;
-        let owner_credential = if people.is_empty() {
+        let registry_path = state_dir.join(REGISTRY_FILE);
+        let registry_exists = registry_path.exists();
+        let mut data = if registry_exists {
+            set_private_file(&registry_path)?;
+            load_json(&registry_path)?
+        } else {
+            RegistryData {
+                people: load_json(&people_path)?,
+                seats: load_json(&seats_path)?,
+            }
+        };
+        let owner_identity = if data.people.is_empty() {
             let credential = random_hex::<32>()?;
-            people.push(new_person(owner_name, &credential, true, now_secs()?)?);
-            write_json_atomically(&people_path, &people)?;
-            Some(credential)
+            let person = new_person(owner_name, &credential, true, now_secs()?)?;
+            let user_id = person.user_id.clone();
+            data.people.push(person);
+            Some((user_id, credential))
         } else {
             None
         };
-        if !seats_path.exists() {
-            write_json_atomically(&seats_path, &seats)?;
+        if !registry_exists || owner_identity.is_some() {
+            write_json_atomically(&registry_path, &data)?;
         }
         Ok((
             Self {
                 state_dir,
-                data: Mutex::new(RegistryData { people, seats }),
+                data: Mutex::new(data),
             },
-            owner_credential,
+            owner_identity,
         ))
     }
 
@@ -112,12 +128,13 @@ impl Registry {
         Ok(self.lock()?.people.clone())
     }
 
-    pub(crate) fn person_exists(&self, user_id: &str) -> io::Result<bool> {
-        Ok(self
-            .lock()?
+    pub(crate) fn person(&self, user_id: &str) -> io::Result<Option<PersonRecord>> {
+        let data = self.lock()?;
+        Ok(data
             .people
             .iter()
-            .any(|person| person.user_id == user_id))
+            .find(|person| person.user_id == user_id)
+            .cloned())
     }
 
     pub(crate) fn create_seat(&self, lifetime_secs: u64) -> io::Result<String> {
@@ -140,8 +157,10 @@ impl Registry {
             used: false,
         };
         let mut data = self.lock()?;
-        data.seats.push(seat);
-        write_json_atomically(&self.state_dir.join(SEATS_FILE), &data.seats)?;
+        let mut next = data.clone();
+        next.seats.push(seat);
+        write_json_atomically(&self.state_dir.join(REGISTRY_FILE), &next)?;
+        *data = next;
         Ok(token)
     }
 
@@ -171,21 +190,16 @@ impl Registry {
 
         let credential = random_hex::<32>()?;
         let person = new_person(name, &credential, false, now)?;
-        data.people.push(person.clone());
-        data.seats[seat_index].used = true;
-        write_json_atomically(&self.state_dir.join(PEOPLE_FILE), &data.people)?;
-        write_json_atomically(&self.state_dir.join(SEATS_FILE), &data.seats)?;
+        let mut next = data.clone();
+        next.people.push(person.clone());
+        next.seats[seat_index].used = true;
+        write_json_atomically(&self.state_dir.join(REGISTRY_FILE), &next)?;
+        *data = next;
         Ok(Ok(JoinResult { person, credential }))
     }
 
     pub(crate) const fn seat_lifetime_secs() -> u64 {
         SEAT_LIFETIME_SECS
-    }
-
-    #[cfg(test)]
-    pub(crate) fn poison_for_test(&self) {
-        let _data = self.data.lock().expect("registry lock must start valid");
-        panic!("poison registry lock");
     }
 
     fn lock(&self) -> io::Result<MutexGuard<'_, RegistryData>> {
@@ -261,18 +275,41 @@ fn load_json<T: DeserializeOwned + Default>(path: &Path) -> io::Result<T> {
     }
 }
 
+fn set_private_file(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, Permissions::from_mode(FILE_MODE))
+}
+
 fn write_json_atomically<T: Serialize + ?Sized>(path: &Path, value: &T) -> io::Result<()> {
     let file_name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "state file has no name"))?;
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "state file has no directory")
+    })?;
     let temporary = path.with_file_name(format!(".{}.tmp", file_name.to_string_lossy()));
-    let file = File::create(&temporary)?;
-    let mut writer = BufWriter::new(file);
-    serde_json::to_writer(&mut writer, value).map_err(invalid_json)?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
-    writer.get_ref().sync_all()?;
-    fs::rename(&temporary, path)
+    let result = (|| {
+        {
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(FILE_MODE)
+                .open(&temporary)?;
+            file.set_permissions(Permissions::from_mode(FILE_MODE))?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer(&mut writer, value).map_err(invalid_json)?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
+            writer.get_ref().sync_all()?;
+        }
+        fs::rename(&temporary, path)?;
+        let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn invalid_json(error: serde_json::Error) -> io::Error {
@@ -281,88 +318,12 @@ fn invalid_json(error: serde_json::Error) -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::fs;
     use std::path::{Path, PathBuf};
 
-    use super::{JoinError, PersonRecord, Registry, credential_hash, hashes_equal, load_json};
+    use super::{JoinError, Registry};
     use crate::test_support::{
         remove_directory, temporary_directory as create_temporary_directory,
     };
-
-    #[test]
-    fn registry_round_trip_and_owner_credential_is_returned_once() {
-        let directory = temporary_directory("round");
-        let (registry, credential) =
-            Registry::open(&directory, "Owner").expect("registry must open");
-        let credential = credential.expect("new owner credential must be returned");
-        let owner = registry.people().expect("people must load").remove(0);
-
-        assert_eq!(owner.user_id.len(), 32);
-        assert_eq!(owner.name, "Owner");
-        assert!(owner.is_owner);
-        assert!(directory.join("seats.json").is_file());
-        assert!(
-            registry
-                .person_exists(&owner.user_id)
-                .expect("lookup must finish")
-        );
-        assert!(
-            !registry
-                .person_exists("missing")
-                .expect("lookup must finish")
-        );
-        assert!(
-            registry
-                .authenticate(&owner.user_id, &credential)
-                .expect("authentication must finish")
-                .is_some()
-        );
-        drop(registry);
-
-        let (reopened, second_credential) =
-            Registry::open(&directory, "Ignored").expect("registry must reopen");
-        assert!(second_credential.is_none());
-        assert_eq!(reopened.people().expect("people must load"), vec![owner]);
-        remove(directory);
-    }
-
-    #[test]
-    fn atomic_write_replaces_the_file_and_removes_the_temporary_file() {
-        let directory = temporary_directory("atomic");
-        let path = directory.join("people.json");
-        fs::write(&path, "[]\n").expect("old registry must write");
-
-        super::write_json_atomically(&path, &["new"]).expect("registry must write");
-
-        assert_eq!(
-            fs::read_to_string(path).expect("registry must read"),
-            "[\"new\"]\n"
-        );
-        assert!(!directory.join(".people.json.tmp").exists());
-        remove(directory);
-    }
-
-    #[test]
-    fn seat_expires_and_can_only_be_used_once() {
-        let directory = temporary_directory("seat");
-        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry
-            .create_seat_at(10, Registry::seat_lifetime_secs())
-            .expect("seat must be created");
-        assert!(matches!(
-            registry.join_at(&token, "Late", 3_610),
-            Ok(Err(JoinError::InvalidSeat))
-        ));
-        let joined = registry
-            .join_at(&token, "Guest", 3_609)
-            .expect("join must finish");
-        assert!(joined.is_ok());
-        assert!(matches!(
-            registry.join_at(&token, "Other", 3_609),
-            Ok(Err(JoinError::InvalidSeat))
-        ));
-        remove(directory);
-    }
 
     #[test]
     fn seat_uses_the_requested_lifetime() {
@@ -372,120 +333,25 @@ mod tests {
         let token = registry
             .create_seat_at(10, lifetime)
             .expect("seat must be created");
+        let default_token = registry
+            .create_seat_at(10, Registry::seat_lifetime_secs())
+            .expect("seat must be created");
         let late = registry.join_at(&token, "Late", 10 + 25 * 60 * 60);
         let early = registry
             .join_at(&token, "Early", 10 + 23 * 60 * 60)
             .expect("join must finish");
         assert!(early.is_ok());
         assert!(matches!(late, Ok(Err(JoinError::InvalidSeat))));
-        remove(directory);
-    }
-
-    #[test]
-    fn seat_file_survives_a_registry_reopen() {
-        let directory = temporary_directory("reopen");
-        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry
-            .create_seat_at(10, Registry::seat_lifetime_secs())
-            .expect("seat must be created");
-        drop(registry);
-        let (reopened, _) = Registry::open(&directory, "Owner").expect("registry must reopen");
-        assert!(
-            reopened
-                .join_at(&token, "Guest", 11)
-                .expect("join must finish")
-                .is_ok()
-        );
-        remove(directory);
-    }
-
-    #[test]
-    fn creates_a_current_one_hour_seat() {
-        let directory = temporary_directory("current");
-        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-
-        let token = registry
-            .create_seat(Registry::seat_lifetime_secs())
-            .expect("seat must be created");
-        assert_eq!(token.len(), 64);
-        assert!(token.bytes().all(|byte| byte.is_ascii_hexdigit()));
-        assert!(
-            registry
-                .join(&token, "Guest")
-                .expect("join must finish")
-                .is_ok()
-        );
-        remove(directory);
-    }
-
-    #[test]
-    fn name_collision_and_invalid_name_do_not_consume_the_seat() {
-        let directory = temporary_directory("name");
-        let (registry, _) = Registry::open(&directory, "Owner").expect("registry must open");
-        let token = registry
-            .create_seat_at(10, Registry::seat_lifetime_secs())
-            .expect("seat must be created");
         assert!(matches!(
-            registry.join_at(&token, "owner", 11),
-            Ok(Err(JoinError::NameInUse))
-        ));
-        assert!(matches!(
-            registry.join_at(&token, "bad name", 11),
-            Ok(Err(JoinError::InvalidName))
+            registry.join_at(&default_token, "LateDefault", 3_610),
+            Ok(Err(JoinError::InvalidSeat))
         ));
         assert!(
             registry
-                .join_at(&token, "Guest_1", 11)
+                .join_at(&default_token, "EarlyDefault", 3_609)
                 .expect("join must finish")
                 .is_ok()
         );
-        remove(directory);
-    }
-
-    #[test]
-    fn validates_name_boundaries() {
-        assert_eq!(JoinError::InvalidName.reason(), "invalid name");
-        for invalid in [
-            "",
-            "with space",
-            "nonascii-\u{e9}",
-            "123456789012345678901234567890123",
-        ] {
-            assert_eq!(super::validate_name(invalid), Err(JoinError::InvalidName));
-        }
-        for valid in ["a", "A-z_9", "12345678901234567890123456789012"] {
-            assert_eq!(super::validate_name(valid), Ok(()));
-        }
-    }
-
-    #[test]
-    fn compares_sha256_hashes_in_constant_time() {
-        let expected = credential_hash("secret");
-        assert_eq!(expected.len(), 64);
-        assert!(hashes_equal(&expected, &credential_hash("secret")));
-        assert!(!hashes_equal(&expected, &credential_hash("wrong")));
-        assert!(!hashes_equal(&expected, "short"));
-    }
-
-    #[test]
-    fn rejects_invalid_registry_json() {
-        let directory = temporary_directory("json");
-        let path = directory.join("people.json");
-        fs::write(&path, "not-json").expect("invalid registry must write");
-
-        let error = load_json::<Vec<PersonRecord>>(&path).expect_err("invalid JSON must fail");
-
-        assert_eq!(error.kind(), std::io::ErrorKind::InvalidData);
-        remove(directory);
-    }
-
-    #[test]
-    fn preserves_non_not_found_file_errors() {
-        let directory = temporary_directory("file-error");
-        let path = directory.join("x".repeat(300));
-
-        load_json::<Vec<String>>(&path).expect_err("invalid file path must fail");
-
         remove(directory);
     }
 

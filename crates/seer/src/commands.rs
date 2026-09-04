@@ -1,6 +1,5 @@
-use std::io::{self, BufRead, IsTerminal, Read, Write};
+use std::io::{self, IsTerminal, Read};
 use std::net::TcpStream;
-use std::os::unix::fs::PermissionsExt;
 use std::time::{Duration, Instant};
 
 use seer_core::Tree;
@@ -13,6 +12,9 @@ use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
+pub(crate) use selection::peek;
+mod selection;
+use selection::{select_client, selected_server};
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
 const INSTALL_URL: &str =
     "https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh";
@@ -56,6 +58,7 @@ pub(crate) fn detach() -> Result<(), CommandError> {
             client_id: client.client_id,
         },
     )?;
+    receive_clients(&mut stream)?;
     print_detached(&server.alias);
     Ok(())
 }
@@ -216,89 +219,12 @@ fn list_server(server: &ServerEntry) -> ListRow {
     }
 }
 
-pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
-    let server = selected_server()?;
-    let (mut stream, tree) = authenticate(&server)?;
-    send(&mut stream, &ClientMsg::ListPeople)?;
-    let people = people_reply(receive_reply(&mut stream)?)?;
-    let Some(person) = people.iter().find(|person| person.name == target) else {
-        print_close_names(target, &people);
-        return Err(CommandError::usage(format!("no person named {target}")));
-    };
-    let peek = ClientMsg::Peek {
-        user: person.user_id.clone(),
-        workspace: "w1".into(),
-    };
-    send(&mut stream, &peek)?;
-    println!("PEEK: {} - READ ONLY", person.name);
-    println!("Workspace: {}/current", person.name);
-    finish_session(
-        io::stdout().is_terminal(),
-        stream,
-        tree,
-        Some(&person.name),
-        &server.alias,
-        tui::run,
-    )
-}
-
 fn receive_clients(stream: &mut impl Stream) -> Result<Vec<ClientInfo>, CommandError> {
     match receive_reply(stream)? {
         ServerMsg::Clients { clients } => Ok(clients),
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
         _ => Err(unexpected_reply()),
     }
-}
-
-fn select_client(clients: &[ClientInfo]) -> Result<ClientInfo, CommandError> {
-    match clients {
-        [] => Err(CommandError::usage("no attached client")),
-        [client] => Ok(client.clone()),
-        _ => {
-            let stdin = io::stdin();
-            let mut input = stdin.lock();
-            let stdout = io::stdout();
-            let mut output = stdout.lock();
-            pick_client(clients, &mut input, &mut output)
-        }
-    }
-}
-
-fn pick_client(
-    clients: &[ClientInfo],
-    input: &mut impl BufRead,
-    output: &mut impl Write,
-) -> Result<ClientInfo, CommandError> {
-    writeln!(output, "Select a client:").map_err(CommandError::system)?;
-    for (index, client) in clients.iter().enumerate() {
-        writeln!(
-            output,
-            "  {}. {} (connected {} seconds)",
-            index + 1,
-            client.client_id,
-            client.connected_secs
-        )
-        .map_err(CommandError::system)?;
-    }
-    write!(output, "Client: ").map_err(CommandError::system)?;
-    output.flush().map_err(CommandError::system)?;
-    let mut selection = String::new();
-    if input
-        .read_line(&mut selection)
-        .map_err(CommandError::system)?
-        == 0
-    {
-        return Err(CommandError::usage("no client selected"));
-    }
-    let index = selection
-        .trim()
-        .parse::<usize>()
-        .map_err(|_| CommandError::usage("no client selected"))?;
-    index
-        .checked_sub(1)
-        .and_then(|index| clients.get(index))
-        .cloned()
-        .ok_or_else(|| CommandError::usage("no client selected"))
 }
 
 fn print_detached(alias: &str) {
@@ -354,61 +280,6 @@ fn edit_distance_at_most_one(left: &[u8], right: &[u8]) -> bool {
     differences == 0 || long_index == longer.len()
 }
 
-fn selected_server() -> Result<ServerEntry, CommandError> {
-    let store = ServerStore::load().map_err(CommandError::system)?;
-    if store.servers.is_empty() {
-        return Err(CommandError::usage("run seer join first"));
-    }
-    if store.servers.len() == 1 {
-        return Ok(store.servers[0].clone());
-    }
-    if let Some(server) = store.servers.iter().find(|server| server.current) {
-        return Ok(server.clone());
-    }
-    let stdin = io::stdin();
-    let mut input = stdin.lock();
-    let stdout = io::stdout();
-    let mut output = stdout.lock();
-    pick_server(&store.servers, &mut input, &mut output)
-}
-
-fn pick_server(
-    servers: &[ServerEntry],
-    input: &mut impl BufRead,
-    output: &mut impl Write,
-) -> Result<ServerEntry, CommandError> {
-    writeln!(output, "Select a server:").map_err(CommandError::system)?;
-    for (index, server) in servers.iter().enumerate() {
-        writeln!(
-            output,
-            "  {}. {} ({})",
-            index + 1,
-            server.alias,
-            server.name
-        )
-        .map_err(CommandError::system)?;
-    }
-    write!(output, "Server: ").map_err(CommandError::system)?;
-    output.flush().map_err(CommandError::system)?;
-    let mut selection = String::new();
-    if input
-        .read_line(&mut selection)
-        .map_err(CommandError::system)?
-        == 0
-    {
-        return Err(CommandError::usage("no server selected"));
-    }
-    let index = selection
-        .trim()
-        .parse::<usize>()
-        .map_err(|_| CommandError::usage("no server selected"))?;
-    index
-        .checked_sub(1)
-        .and_then(|index| servers.get(index))
-        .cloned()
-        .ok_or_else(|| CommandError::usage("no server selected"))
-}
-
 fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
     let mut stream = connect(&server.endpoint)?;
     let hello = ClientMsg::Hello {
@@ -462,11 +333,9 @@ fn connect(endpoint: &str) -> Result<Socket, CommandError> {
 
 fn connect_iroh(id: &str) -> Result<Socket, CommandError> {
     let directory = crate::store::config_dir().map_err(CommandError::system)?;
-    std::fs::create_dir_all(&directory).map_err(CommandError::system)?;
-    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
-        .map_err(CommandError::system)?;
-    let secret_key = seer_net::load_or_create_secret_key(&directory.join("device.key"))
-        .map_err(CommandError::system)?;
+    let secret_key =
+        crate::store::ServerStore::load_or_create_device_key(&directory.join("device.key"))
+            .map_err(CommandError::system)?;
     let endpoint_id = seer_net::decode_endpoint_id(id).map_err(CommandError::system)?;
     seer_net::dial(secret_key, endpoint_id)
         .map(Socket::from)

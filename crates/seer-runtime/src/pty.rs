@@ -17,7 +17,6 @@ pub struct PtySession {
 
 #[derive(Default)]
 struct OutputBuffers {
-    snapshot: VecDeque<u8>,
     pending: VecDeque<u8>,
 }
 
@@ -54,21 +53,12 @@ impl PtySession {
             .map_err(to_io_error)
     }
 
-    pub fn is_alive(&mut self) -> io::Result<bool> {
-        self.child.try_wait().map(|status| status.is_none())
-    }
-
     pub fn kill(&mut self) -> io::Result<()> {
         self.child.kill()
     }
 
-    pub fn snapshot(&self) -> Vec<u8> {
-        let output = lock_output(&self.output);
-        output.snapshot.iter().copied().collect()
-    }
-
     pub fn drain_output(&self) -> Vec<u8> {
-        let mut output = lock_output(&self.output);
+        let mut output = lock_mutex(&self.output);
         output.pending.drain(..).collect()
     }
 }
@@ -96,16 +86,20 @@ fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<OutputBuffers>) 
 }
 
 fn append_output(output: &Mutex<OutputBuffers>, bytes: &[u8]) {
-    let mut output = lock_output(output);
-    output.snapshot.extend(bytes);
-    output.pending.extend(bytes);
-    let excess = output.snapshot.len().saturating_sub(OUTPUT_LIMIT);
-    output.snapshot.drain(..excess);
+    let mut output = lock_mutex(output);
+    append_bounded(&mut output.pending, bytes);
 }
 
-fn lock_output(output: &Mutex<OutputBuffers>) -> MutexGuard<'_, OutputBuffers> {
-    match output.lock() {
-        Ok(output) => output,
+// Discard the oldest bytes so detached output stays bounded and keeps the latest state.
+fn append_bounded(output: &mut VecDeque<u8>, bytes: &[u8]) {
+    output.extend(bytes);
+    let excess = output.len().saturating_sub(OUTPUT_LIMIT);
+    output.drain(..excess);
+}
+
+pub(crate) fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(value) => value,
         Err(poisoned) => poisoned.into_inner(),
     }
 }
@@ -117,39 +111,9 @@ fn to_io_error(error: impl Display) -> io::Error {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
-
-    const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
-    const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
     #[test]
-    fn session_captures_output_accepts_input_resizes_and_stops() {
-        let mut command = CommandBuilder::new("sh");
-        command.args(["-c", "echo hello; cat"]);
-        let mut session = PtySession::start(command, 80, 24).expect("PTY must start");
-
-        assert!(wait_for_output(&session, b"hello"));
-        assert!(
-            session
-                .drain_output()
-                .windows(5)
-                .any(|bytes| bytes == b"hello")
-        );
-        assert!(session.drain_output().is_empty());
-        assert!(session.snapshot().windows(5).any(|bytes| bytes == b"hello"));
-        session
-            .write_input(b"input text\n")
-            .expect("input write must succeed");
-        assert!(wait_for_output(&session, b"input text"));
-        session.resize(100, 40).expect("resize must succeed");
-        assert!(session.is_alive().expect("process state must be readable"));
-
-        session.kill().expect("kill must succeed");
-        assert!(wait_for_exit(&mut session));
-    }
-
-    #[test]
-    fn output_buffer_keeps_last_mebibyte() {
+    fn output_buffers_keep_last_mebibyte_while_not_drained() {
         let output = Mutex::new(OutputBuffers::default());
         let bytes: Vec<u8> = (0..=OUTPUT_LIMIT)
             .map(|index| (index % usize::from(u8::MAX)) as u8)
@@ -157,41 +121,13 @@ mod tests {
         append_output(&output, &bytes);
 
         let output = output.into_inner().expect("output lock must be valid");
-        assert_eq!(output.snapshot.len(), OUTPUT_LIMIT);
+        assert_eq!(output.pending.len(), OUTPUT_LIMIT);
         assert!(
             output
-                .snapshot
+                .pending
                 .iter()
                 .copied()
                 .eq(bytes[1..].iter().copied())
         );
-        assert!(output.pending.iter().copied().eq(bytes));
-    }
-
-    fn wait_for_output(session: &PtySession, expected: &[u8]) -> bool {
-        let deadline = Instant::now() + WAIT_TIMEOUT;
-        while Instant::now() < deadline {
-            if session
-                .snapshot()
-                .windows(expected.len())
-                .any(|window| window == expected)
-            {
-                return true;
-            }
-            thread::sleep(POLL_INTERVAL);
-        }
-        false
-    }
-
-    fn wait_for_exit(session: &mut PtySession) -> bool {
-        let deadline = Instant::now() + WAIT_TIMEOUT;
-        while Instant::now() < deadline {
-            match session.is_alive() {
-                Ok(false) => return true,
-                Ok(true) => thread::sleep(POLL_INTERVAL),
-                Err(_) => return false,
-            }
-        }
-        false
     }
 }

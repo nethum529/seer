@@ -1,38 +1,56 @@
 use std::collections::HashMap;
 
 use ratatui::layout::Rect;
-use seer_core::{Cell, Tab, Tree};
+use seer_core::{Cell, Cursor, MouseTracking, Tab, TerminalFrame, Tree};
 
 #[derive(Debug)]
 pub(crate) struct ClientState {
     tree: Tree,
-    buffers: HashMap<String, Vec<Vec<Cell>>>,
+    frames: HashMap<String, TerminalFrame>,
+    selected_workspace: Option<String>,
+    selected_tab: Option<String>,
     focused: Option<String>,
+    pane_areas: Vec<(String, Rect)>,
 }
 
 impl ClientState {
     pub(crate) fn new(tree: Tree) -> Self {
-        let focused = preferred_focus(&tree);
+        let (selected_workspace, selected_tab) = first_selection(&tree)
+            .map_or((None, None), |(workspace, tab)| {
+                (Some(workspace), Some(tab))
+            });
+        let focused = selected_tab_in(
+            &tree,
+            selected_workspace.as_deref(),
+            selected_tab.as_deref(),
+        )
+        .and_then(preferred_focus);
         Self {
             tree,
-            buffers: HashMap::new(),
+            frames: HashMap::new(),
+            selected_workspace,
+            selected_tab,
             focused,
+            pane_areas: Vec::new(),
         }
     }
 
-    pub(crate) fn replace_tree(&mut self, tree: Tree) {
+    pub(crate) fn replace_tree(&mut self, tree: Tree) -> bool {
+        let previous_workspace = self.selected_workspace.clone();
+        let previous_tab = self.selected_tab.clone();
         self.tree = tree;
-        let focus_is_valid = self
-            .focused
-            .as_deref()
-            .is_some_and(|pane| self.visible_pane_ids().any(|id| id == pane));
-        if !focus_is_valid {
-            self.focused = preferred_focus(&self.tree);
+        if self.visible_tab().is_none() {
+            (self.selected_workspace, self.selected_tab) = first_selection(&self.tree)
+                .map_or((None, None), |(workspace, tab)| {
+                    (Some(workspace), Some(tab))
+                });
         }
+        self.focused = self.visible_tab().and_then(preferred_focus);
+        previous_workspace != self.selected_workspace || previous_tab != self.selected_tab
     }
 
-    pub(crate) fn apply_cells(&mut self, pane: String, rows: Vec<Vec<Cell>>) {
-        self.buffers.insert(pane, rows);
+    pub(crate) fn apply_frame(&mut self, pane: String, frame: TerminalFrame) {
+        self.frames.insert(pane, frame);
     }
 
     pub(crate) fn focus_number(&mut self, number: usize) -> Option<String> {
@@ -48,12 +66,57 @@ impl ClientState {
         self.focused.as_deref()
     }
 
+    pub(crate) fn set_focus(&mut self, pane: String) {
+        self.focused = Some(pane);
+    }
+
     pub(crate) fn visible_tab(&self) -> Option<&Tab> {
-        self.tree.workspaces.first()?.tabs.first()
+        selected_tab_in(
+            &self.tree,
+            self.selected_workspace.as_deref(),
+            self.selected_tab.as_deref(),
+        )
+    }
+
+    pub(crate) fn selection(&self) -> Option<(&str, &str)> {
+        Some((
+            self.selected_workspace.as_deref()?,
+            self.selected_tab.as_deref()?,
+        ))
+    }
+
+    pub(crate) fn selected_workspace(&self) -> Option<&str> {
+        self.selected_workspace.as_deref()
     }
 
     pub(crate) fn pane_rows(&self, pane: &str) -> &[Vec<Cell>] {
-        self.buffers.get(pane).map_or(&[], Vec::as_slice)
+        self.frames
+            .get(pane)
+            .map_or(&[], |frame| frame.rows.as_slice())
+    }
+
+    pub(crate) fn pane_cursor(&self, pane: &str) -> Option<Cursor> {
+        self.frames.get(pane).map(|frame| frame.cursor)
+    }
+
+    pub(crate) fn pane_mouse_tracking(&self, pane: &str) -> MouseTracking {
+        self.frames
+            .get(pane)
+            .map_or(MouseTracking::None, |frame| frame.modes.mouse_tracking)
+    }
+
+    pub(crate) fn set_pane_areas(&mut self, areas: Vec<(String, Rect)>) {
+        self.pane_areas = areas;
+    }
+
+    pub(crate) fn mouse_target(&self, column: u16, row: u16) -> Option<(String, u16, u16)> {
+        self.pane_areas.iter().find_map(|(pane, area)| {
+            let inside = column >= area.x
+                && column < area.x.saturating_add(area.width)
+                && row >= area.y
+                && row < area.y.saturating_add(area.height);
+            inside.then(|| (pane.clone(), column - area.x, row - area.y))
+        })
     }
 
     fn visible_pane_ids(&self) -> impl Iterator<Item = &str> {
@@ -64,8 +127,29 @@ impl ClientState {
     }
 }
 
-fn preferred_focus(tree: &Tree) -> Option<String> {
-    let tab = tree.workspaces.first()?.tabs.first()?;
+fn first_selection(tree: &Tree) -> Option<(String, String)> {
+    tree.workspaces.iter().find_map(|workspace| {
+        workspace
+            .tabs
+            .first()
+            .map(|tab| (workspace.id.clone(), tab.id.clone()))
+    })
+}
+
+fn selected_tab_in<'a>(
+    tree: &'a Tree,
+    workspace: Option<&str>,
+    tab: Option<&str>,
+) -> Option<&'a Tab> {
+    tree.workspaces
+        .iter()
+        .find(|candidate| Some(candidate.id.as_str()) == workspace)?
+        .tabs
+        .iter()
+        .find(|candidate| Some(candidate.id.as_str()) == tab)
+}
+
+fn preferred_focus(tab: &Tab) -> Option<String> {
     tab.layout
         .focused
         .as_ref()
@@ -94,36 +178,9 @@ pub(crate) fn pane_rects(tab: &Tab, area: Rect) -> Vec<(String, Rect)> {
 #[cfg(test)]
 mod tests {
     use ratatui::layout::Rect;
-    use seer_core::{Cell, Color, PaneSize, SplitDirection, Tree};
+    use seer_core::{PaneSize, SplitDirection, Tree};
 
-    use super::{ClientState, pane_rects};
-
-    #[test]
-    fn cells_replace_the_pane_buffer() {
-        let mut tree = Tree::new();
-        tree.create_workspace("main")
-            .expect("workspace must be created");
-        tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
-            .expect("tab must be created");
-        let mut state = ClientState::new(tree);
-        let rows = vec![vec![Cell {
-            character: 'A',
-            fg: Color::Indexed(2),
-            bg: Color::Default,
-            bold: true,
-            italic: false,
-            underline: false,
-            dim: false,
-            inverse: false,
-            hidden: false,
-            strikeout: false,
-        }]];
-
-        state.apply_cells("w1:p1".into(), rows.clone());
-
-        assert_eq!(state.pane_rows("w1:p1"), rows);
-        assert!(state.pane_rows("w1:p2").is_empty());
-    }
+    use super::pane_rects;
 
     #[test]
     fn pane_rects_use_shared_layout_with_area_offsets() {

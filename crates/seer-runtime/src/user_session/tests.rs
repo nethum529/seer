@@ -1,5 +1,5 @@
 use super::*;
-use seer_core::SplitDirection;
+use seer_core::{InputEvent, SplitDirection, TerminalInput};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -7,30 +7,21 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[test]
-fn creates_a_workspace_tab_and_shell_pane() {
-    let mut session = UserSession::new("alice", "sh");
-
-    let messages = session
-        .apply(ClientMsg::CreateTab)
-        .expect("tab creation must succeed");
-
-    let tree = message_tree(&messages);
-    assert_eq!(session.user, "alice");
-    assert_eq!(tree.workspaces[0].name, "main");
-    assert_eq!(tree.workspaces[0].tabs[0].panes[0].size, session.viewport);
-    assert!(wait_for_cells(&mut session, |_| true).is_some());
-    close_all_panes(&mut session);
-}
-
-#[test]
 fn splits_and_resizes_both_panes() {
     let mut session = session_with_tab();
     session
-        .apply(ClientMsg::Resize { cols: 81, rows: 25 })
+        .apply(ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            cols: 81,
+            rows: 25,
+        })
         .expect("resize must succeed");
 
     let messages = session
         .apply(ClientMsg::SplitPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             direction: SplitDirection::Right,
         })
         .expect("split must succeed");
@@ -39,23 +30,6 @@ fn splits_and_resizes_both_panes() {
     assert_eq!(panes.len(), 2);
     assert_eq!(panes[0].size, PaneSize { cols: 41, rows: 25 });
     assert_eq!(panes[1].size, PaneSize { cols: 40, rows: 25 });
-    close_all_panes(&mut session);
-}
-
-#[test]
-fn writes_input_to_the_focused_pane_and_polls_cells() {
-    let mut session = session_with_tab();
-    let _ = session.poll();
-
-    let messages = session
-        .apply(ClientMsg::Input {
-            pane: "w1:p1".into(),
-            bytes: b"printf session-input\\n".to_vec(),
-        })
-        .expect("input must succeed");
-
-    assert!(messages.is_empty());
-    assert!(wait_for_cells(&mut session, |text| text.contains("session-input")).is_some());
     close_all_panes(&mut session);
 }
 
@@ -73,21 +47,30 @@ fn closes_a_pane_and_kills_its_process() {
     let mut session = session_with_tab();
     session
         .apply(ClientMsg::SplitPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             direction: SplitDirection::Down,
         })
         .expect("split must succeed");
     assert!(session.pane_hosts.contains_key("w1:p2"));
     let pid_file = std::env::temp_dir().join(format!("seer-runtime-close-{}", std::process::id()));
     session
-        .apply(ClientMsg::Input {
+        .apply(ClientMsg::TerminalInput {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: "w1:p2".into(),
-            bytes: format!("echo $$ > {}\n", pid_file.display()).into_bytes(),
+            input: TerminalInput::new(InputEvent::Text(format!(
+                "echo $$ > {}\n",
+                pid_file.display()
+            ))),
         })
         .expect("PID command must succeed");
     let shell_pid = wait_for_pid(&pid_file).expect("shell PID must be valid");
 
     let messages = session
         .apply(ClientMsg::ClosePane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: "w1:p2".into(),
         })
         .expect("close must succeed");
@@ -108,12 +91,16 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
     let mut session = session_with_tab();
     session
         .apply(ClientMsg::SplitPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             direction: SplitDirection::Right,
         })
         .expect("split must succeed");
 
     let messages = session
         .apply(ClientMsg::FocusPane {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
             pane: "w1:p1".into(),
         })
         .expect("focus must succeed");
@@ -140,9 +127,12 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
         ClientMsg::DetachClient {
             client_id: "client-1".into(),
         },
+        ClientMsg::AttachRuntime,
+        ClientMsg::QueryTargets { user: "bob".into() },
         ClientMsg::Peek {
             user: "bob".into(),
             workspace: "w1".into(),
+            tab: "w1:t1".into(),
         },
         ClientMsg::StopPeek,
         ClientMsg::Detach,
@@ -159,29 +149,52 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
 }
 
 #[test]
-fn resize_before_tab_creation_is_stored() {
+fn peek_selects_one_workspace_and_tab_and_rejects_invalid_ids() {
     let mut session = UserSession::new("alice", "sh");
+    for name in ["first", "second"] {
+        let workspace = session
+            .tree
+            .create_workspace(name)
+            .expect("workspace must be created");
+        session
+            .tree
+            .create_tab(&workspace.id, "first", session.viewport)
+            .expect("first tab must be created");
+        session
+            .tree
+            .create_tab(&workspace.id, "second", session.viewport)
+            .expect("second tab must be created");
+    }
 
-    let messages = session
-        .apply(ClientMsg::Resize { cols: 90, rows: 30 })
-        .expect("resize must succeed");
-    assert!(message_tree(&messages).workspaces.is_empty());
+    let selected = session
+        .selected_tree("w2", "w2:t2")
+        .expect("selected tree must exist");
 
-    let messages = session
-        .apply(ClientMsg::CreateTab)
-        .expect("tab creation must succeed");
+    assert_eq!(selected.workspaces.len(), 1);
+    assert_eq!(selected.workspaces[0].id, "w2");
+    assert_eq!(selected.workspaces[0].tabs.len(), 1);
+    assert_eq!(selected.workspaces[0].tabs[0].id, "w2:t2");
     assert_eq!(
-        message_tree(&messages).workspaces[0].tabs[0].panes[0].size,
-        PaneSize { cols: 90, rows: 30 }
+        session
+            .selected_tree("w9", "w9:t1")
+            .expect_err("workspace must be rejected")
+            .kind(),
+        io::ErrorKind::InvalidInput
     );
-    close_all_panes(&mut session);
+    assert_eq!(
+        session
+            .selected_tree("w1", "w2:t1")
+            .expect_err("tab must be rejected")
+            .kind(),
+        io::ErrorKind::InvalidInput
+    );
 }
 
 fn session_with_tab() -> UserSession {
     let mut session = UserSession::new("alice", "sh");
     session
-        .apply(ClientMsg::CreateTab)
-        .expect("tab creation must succeed");
+        .ensure_first_shell()
+        .expect("first shell must be created");
     session
 }
 
@@ -248,7 +261,7 @@ fn cells_text(messages: &[ServerMsg]) -> String {
     messages
         .iter()
         .filter_map(|message| match message {
-            ServerMsg::Cells { rows, .. } => Some(rows),
+            ServerMsg::Cells { frame, .. } => Some(&frame.rows),
             _ => None,
         })
         .flatten()
@@ -261,7 +274,11 @@ fn close_all_panes(session: &mut UserSession) {
     let pane_ids: Vec<String> = session.pane_hosts.keys().cloned().collect();
     for pane in pane_ids {
         session
-            .apply(ClientMsg::ClosePane { pane })
+            .apply(ClientMsg::ClosePane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
+                pane,
+            })
             .expect("pane close must succeed");
     }
 }

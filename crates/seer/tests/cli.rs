@@ -1,22 +1,24 @@
 use std::fs;
-use std::io::Write;
-use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::Path;
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg};
 
+#[path = "support/cli_harness.rs"]
+mod cli_harness;
+#[path = "support/cli.rs"]
+mod cli_support;
 #[path = "support/server_io.rs"]
 mod server_io;
 
+use cli_harness::{
+    TestConfig, accept, assert_hello, listener, person, run, send, send_welcome, text,
+};
+use cli_support::read_owner_identity;
 use server_io::receive;
-
-static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn help_detach_and_missing_attach_have_exact_results() {
@@ -26,7 +28,7 @@ fn help_detach_and_missing_attach_have_exact_results() {
     assert_eq!(help.status.code(), Some(0));
     let help_text = text(&help.stdout);
     for command in [
-        "start", "invite", "join", "list", "attach", "detach", "peek",
+        "start", "stop", "invite", "join", "list", "attach", "detach", "peek",
     ] {
         assert!(help_text.contains(command));
     }
@@ -51,14 +53,64 @@ fn help_detach_and_missing_attach_have_exact_results() {
 }
 
 #[test]
-fn join_retries_the_name_once_saves_private_store_and_attaches() {
+fn stop_ends_the_local_server_and_attached_client() {
     let config = TestConfig::new();
     let listener = listener();
     let address = listener
         .local_addr()
         .expect("listener must have an address");
+    drop(listener);
+    let state_dir = config.root.join("state");
+    let config_dir = config.root.join("seer");
+    fs::create_dir_all(&config_dir).expect("config directory must exist");
+    fs::write(
+        config_dir.join("broker.toml"),
+        format!(
+            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nowner_name = \"alice\"\nstate_dir = {:?}\n",
+            state_dir
+        ),
+    )
+    .expect("broker config must be written");
+
+    let start = run(&config, &["start"], "");
+    assert!(start.status.success(), "{}", text(&start.stderr));
+    let pid_path = state_dir.join("broker.pid");
+    let broker_pid = read_pid(&pid_path);
+    let _broker = ProcessGroup(broker_pid);
+    let (user_id, credential) = owner_identity(&state_dir.join("broker.log"));
+    write_identity(&config, address.port(), &user_id, &credential);
+    let mut attached = Command::new(env!("CARGO_BIN_EXE_seer"))
+        .arg("attach")
+        .env("XDG_CONFIG_HOME", &config.root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("attached client must start");
+    let runtime_pid = wait_for_child_pid(broker_pid);
+
+    let started = Instant::now();
+    let stop = run(&config, &["stop"], "");
+
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(stop.status.code(), Some(0));
+    assert_eq!(stop.stdout, b"Server stopped.\n");
+    assert!(stop.stderr.is_empty());
+    assert!(!pid_path.exists());
+    wait_for_process_end(broker_pid);
+    wait_for_process_end(runtime_pid);
+    wait_for_child_exit(&mut attached);
+}
+
+#[test]
+fn join_persists_private_store_without_seat_token_and_reconnects_after_restart() {
+    let config = TestConfig::new();
+    let listener =
+        seer_net::Listener::bind(seer_net::SecretKey::generate()).expect("iroh listener must bind");
+    let endpoint = listener.id().to_string();
+    let alias = endpoint[..8].to_owned();
     let server = thread::spawn(move || {
-        let mut first = accept(&listener);
+        let (device_id, mut first) = listener.accept().expect("first client must connect");
         assert_eq!(
             receive(&mut first),
             ClientMsg::Join {
@@ -73,7 +125,8 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
             },
         );
 
-        let mut second = accept(&listener);
+        let (retry_id, mut second) = listener.accept().expect("retry client must connect");
+        assert_eq!(retry_id, device_id);
         assert_eq!(
             receive(&mut second),
             ClientMsg::Join {
@@ -91,7 +144,8 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
         );
         drop(second);
 
-        let mut attached = accept(&listener);
+        let (attached_id, mut attached) = listener.accept().expect("first attach must connect");
+        assert_eq!(attached_id, device_id);
         assert_eq!(
             receive(&mut attached),
             ClientMsg::Hello {
@@ -101,44 +155,41 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
             }
         );
         send_welcome(&mut attached, "user-bob", "bob");
+        let (restarted_id, mut restarted) = listener.accept().expect("second attach must connect");
+        assert_eq!(restarted_id, device_id);
+        assert_hello(&mut restarted);
+        send_welcome(&mut restarted, "user-bob", "bob");
     });
-    let capsule = format!(
-        "SEER1-127.0.0.1-{}-seat-token\nalice\nbob\n",
-        address.port()
-    );
-
+    let capsule = format!("SEER2-{endpoint}-seat-token\nalice\nbob\n");
     let output = run(&config, &["join"], &capsule);
 
-    assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.is_empty());
+    assert!(output.status.success() && output.stderr.is_empty());
     assert_eq!(
         text(&output.stdout),
         format!(
-            "Invitation: Server: 127.0.0.1:{}\nName: That name is in use.\nName: Joined as bob. Attaching...\n",
-            address.port()
+            "Invitation: Server: iroh:{endpoint}\nName: That name is in use.\nName: Joined as bob. Attaching...\n"
         )
     );
-    server.join().expect("server must finish");
     let store_path = config.root.join("seer/servers.toml");
     let store = fs::read_to_string(&store_path).expect("store must be readable");
-    assert!(store.contains("name = \"bob\""));
     assert!(store.contains("credential = \"device-secret\""));
+    assert!(!store.contains("seat-token"));
+    let key_path = config.root.join("seer/device.key");
     assert_eq!(
-        fs::metadata(&store_path)
-            .expect("store metadata must load")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
+        fs::read(&key_path)
+            .expect("device key must be readable")
+            .len(),
+        32
     );
+    assert_eq!(mode(&key_path), 0o600);
+    let restarted = run(&config, &["attach"], "");
     assert_eq!(
-        fs::metadata(config.root.join("seer"))
-            .expect("directory metadata must load")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o700
+        text(&restarted.stdout),
+        format!("Attached to {alias} as bob.\n")
     );
+    server.join().expect("server must finish");
+    assert_eq!(mode(&store_path), 0o600);
+    assert_eq!(mode(&config.root.join("seer")), 0o700);
 }
 
 #[test]
@@ -150,7 +201,7 @@ fn attach_uses_the_saved_identity() {
         .expect("listener must have an address");
     write_store(&config, &[saved(address.port(), "team.example.com", true)]);
     let server = thread::spawn(move || {
-        for _ in 0..2 {
+        for _ in 0..3 {
             let mut stream = accept(&listener);
             assert_hello(&mut stream);
             send_welcome(&mut stream, "user-bob", "bob");
@@ -172,27 +223,12 @@ fn attach_uses_the_saved_identity() {
     let current = run(&config, &["attach"], "");
     assert_eq!(current.status.code(), Some(0));
     assert_eq!(current.stdout, b"Attached to second as bob.\n");
-    server.join().expect("server must finish");
-}
-
-#[test]
-fn picker_selects_one_of_several_servers() {
-    let config = TestConfig::new();
-    let listener = listener();
-    let address = listener
-        .local_addr()
-        .expect("listener must have an address");
     let first = SavedServer {
         endpoint: "127.0.0.1:1".into(),
         alias: "first".into(),
         current: false,
     };
     write_store(&config, &[first, saved(address.port(), "second", false)]);
-    let server = thread::spawn(move || {
-        let mut stream = accept(&listener);
-        assert_hello(&mut stream);
-        send_welcome(&mut stream, "user-bob", "bob");
-    });
 
     let output = run(&config, &["attach"], "2\n");
 
@@ -310,151 +346,91 @@ fn invite_prints_the_worked_example_block() {
     server.join().expect("server must finish");
 }
 
-#[test]
-fn peek_requires_an_exact_name_and_sends_the_user_id() {
-    let config = TestConfig::new();
-    let listener = listener();
-    let address = listener
-        .local_addr()
-        .expect("listener must have an address");
-    write_store(&config, &[saved(address.port(), "team.example.com", true)]);
-    let server = thread::spawn(move || {
-        for exact in [false, true] {
-            let mut stream = accept(&listener);
-            assert_hello(&mut stream);
-            send_welcome(&mut stream, "user-bob", "bob");
-            assert_eq!(receive(&mut stream), ClientMsg::ListPeople);
-            send(
-                &mut stream,
-                &ServerMsg::People {
-                    people: vec![person("user-alice", "alice", 1)],
-                },
-            );
-            if exact {
-                assert_eq!(
-                    receive(&mut stream),
-                    ClientMsg::Peek {
-                        user: "user-alice".into(),
-                        workspace: "w1".into(),
-                    }
-                );
-            }
-        }
-    });
-
-    let close = run(&config, &["peek", "alic"], "");
-    assert_eq!(close.status.code(), Some(1));
-    assert!(close.stdout.is_empty());
-    assert_eq!(close.stderr, b"Close names: alice\nno person named alic\n");
-
-    let exact = run(&config, &["peek", "alice"], "");
-    assert_eq!(exact.status.code(), Some(0));
-    assert_eq!(
-        exact.stdout,
-        b"PEEK: alice - READ ONLY\nWorkspace: alice/current\n"
-    );
-    assert!(exact.stderr.is_empty());
-    server.join().expect("server must finish");
+fn read_pid(path: &Path) -> i32 {
+    fs::read_to_string(path)
+        .expect("pid file must be readable")
+        .trim()
+        .parse()
+        .expect("pid must be valid")
 }
 
-fn assert_hello(stream: &mut TcpStream) {
-    assert_eq!(
-        receive(stream),
-        ClientMsg::Hello {
-            user_id: "user-bob".into(),
-            credential: "device-secret".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        }
-    );
-}
-
-fn send_welcome(stream: &mut TcpStream, user_id: &str, name: &str) {
-    send(
-        stream,
-        &ServerMsg::Welcome {
-            user_id: user_id.into(),
-            name: name.into(),
-            client_id: "client-1".into(),
-            tree: Tree::new(),
-        },
-    );
-}
-
-fn person(user_id: &str, name: &str, attached_clients: u32) -> Person {
-    Person {
-        user_id: user_id.into(),
-        name: name.into(),
-        attached_clients,
-        peekable: true,
-    }
-}
-
-fn send(stream: &mut TcpStream, message: &ServerMsg) {
-    codec::encode(stream, message).expect("server message must encode");
-}
-
-fn listener() -> TcpListener {
-    TcpListener::bind("127.0.0.1:0").expect("listener must bind")
-}
-
-fn accept(listener: &TcpListener) -> TcpStream {
-    listener
-        .set_nonblocking(true)
-        .expect("listener must become nonblocking");
+fn owner_identity(path: &Path) -> (String, String) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                stream
-                    .set_nonblocking(false)
-                    .expect("accepted stream must become blocking");
-                stream
-                    .set_read_timeout(Some(Duration::from_millis(100)))
-                    .expect("read timeout must be set");
-                stream
-                    .set_write_timeout(Some(Duration::from_secs(5)))
-                    .expect("write timeout must be set");
-                return stream;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(Instant::now() < deadline, "server accept timed out");
-                thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => panic!("server accept failed: {error}"),
+        if let Some(identity) = read_owner_identity(path) {
+            return identity;
         }
+        assert!(Instant::now() < deadline, "owner identity must be ready");
+        thread::sleep(Duration::from_millis(10));
     }
 }
 
-fn run(config: &TestConfig, arguments: &[&str], input: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_seer"))
-        .args(arguments)
-        .env("XDG_CONFIG_HOME", &config.root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("seer must start");
-    child
-        .stdin
-        .take()
-        .expect("stdin must be piped")
-        .write_all(input.as_bytes())
-        .expect("input must be written");
+fn write_identity(config: &TestConfig, port: u16, user_id: &str, credential: &str) {
+    fs::write(
+        config.root.join("seer/servers.toml"),
+        format!(
+            "[[servers]]\nendpoint = \"127.0.0.1:{port}\"\nalias = \"local\"\nuser_id = \"{user_id}\"\nname = \"alice\"\ncredential = \"{credential}\"\ncurrent = true\n"
+        ),
+    )
+    .expect("owner identity must be written");
+}
+
+fn wait_for_child_pid(parent: i32) -> i32 {
     let deadline = Instant::now() + Duration::from_secs(5);
+    let path = format!("/proc/{parent}/task/{parent}/children");
+    loop {
+        if let Some(pid) = fs::read_to_string(&path)
+            .ok()
+            .and_then(|contents| contents.split_whitespace().next()?.parse().ok())
+        {
+            return pid;
+        }
+        assert!(Instant::now() < deadline, "runtime must start");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_process_end(pid: i32) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while process_exists(pid) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!process_exists(pid), "process must stop");
+}
+
+fn process_exists(pid: i32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .is_some_and(|stat| stat.split_whitespace().nth(2) != Some("Z"))
+}
+
+fn wait_for_child_exit(child: &mut Child) {
+    let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         if child
             .try_wait()
-            .expect("seer status must be available")
+            .expect("attached client status must be available")
             .is_some()
         {
-            return child.wait_with_output().expect("seer output must be read");
+            return;
         }
         if Instant::now() >= deadline {
-            child.kill().expect("seer must be killed after timeout");
+            child.kill().expect("attached client must be killed");
             let _ = child.wait();
-            panic!("seer did not finish before timeout");
+            panic!("attached client must exit");
         }
         thread::sleep(Duration::from_millis(10));
+    }
+}
+
+struct ProcessGroup(i32);
+
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        // Safety: kill receives the broker process group created by seer start.
+        unsafe {
+            libc::kill(-self.0, libc::SIGKILL);
+        }
     }
 }
 
@@ -485,25 +461,7 @@ struct SavedServer {
     current: bool,
 }
 
-struct TestConfig {
-    root: PathBuf,
-}
-
-impl TestConfig {
-    fn new() -> Self {
-        let number = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let root = Path::new("/tmp").join(format!("s2-{}-{number}", std::process::id()));
-        fs::create_dir_all(&root).expect("test directory must exist");
-        Self { root }
-    }
-}
-
-impl Drop for TestConfig {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8(bytes.to_vec()).expect("output must be UTF-8")
+fn mode(path: &Path) -> u32 {
+    let metadata = fs::metadata(path).expect("metadata must load");
+    metadata.permissions().mode() & 0o777
 }

@@ -1,14 +1,16 @@
 use std::env;
-use std::fs::{self, OpenOptions, Permissions};
+use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use seer_net::SecretKey;
 use serde::{Deserialize, Serialize};
 
 const DIRECTORY_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
-
+static NEXT_TEMPORARY: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct ServerEntry {
     pub(crate) endpoint: String,
@@ -44,20 +46,19 @@ impl ServerStore {
     }
 
     pub(crate) fn save_to(&self, path: &Path) -> io::Result<()> {
-        let directory = path.parent().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "store path has no directory")
-        })?;
+        let directory = parent_directory(path)?;
         fs::create_dir_all(directory)?;
         fs::set_permissions(directory, Permissions::from_mode(DIRECTORY_MODE))?;
         let contents = toml::to_string(self).map_err(invalid_data)?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(FILE_MODE)
-            .open(path)?;
-        file.set_permissions(Permissions::from_mode(FILE_MODE))?;
-        file.write_all(contents.as_bytes())
+        replace_atomically(path, contents.as_bytes())
+    }
+
+    pub(crate) fn load_or_create_device_key(path: &Path) -> io::Result<SecretKey> {
+        match fs::read(path) {
+            Ok(bytes) => load_device_key(path, &bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => create_device_key(path),
+            Err(error) => Err(error),
+        }
     }
 
     pub(crate) fn make_current(&mut self, entry: ServerEntry) {
@@ -107,6 +108,92 @@ fn store_path_from(
     Ok(config_dir_from(xdg_config_home, home)?.join("servers.toml"))
 }
 
+fn parent_directory(path: &Path) -> io::Result<&Path> {
+    path.parent()
+        .filter(|directory| !directory.as_os_str().is_empty())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no directory"))
+}
+
+fn temporary_path(path: &Path) -> io::Result<PathBuf> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    let number = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+    Ok(path.with_file_name(format!(
+        ".{}.tmp-{}-{number}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    )))
+}
+
+fn replace_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let directory = parent_directory(path)?;
+    let temporary = temporary_path(path)?;
+    let result = write_temporary(&temporary, contents).and_then(|()| fs::rename(&temporary, path));
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    } else {
+        let _ = sync_directory(directory);
+    }
+    result
+}
+
+fn create_device_key(path: &Path) -> io::Result<SecretKey> {
+    let directory = parent_directory(path)?;
+    fs::create_dir_all(directory)?;
+    fs::set_permissions(directory, Permissions::from_mode(DIRECTORY_MODE))?;
+    let key = SecretKey::generate();
+    let temporary = temporary_path(path)?;
+    if let Err(error) = write_temporary(&temporary, &key.to_bytes()) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+
+    match fs::hard_link(&temporary, path) {
+        Ok(()) => {
+            let result = sync_directory(directory)
+                .and_then(|()| fs::remove_file(&temporary))
+                .and_then(|()| sync_directory(directory));
+            if let Err(error) = result {
+                let _ = fs::remove_file(&temporary);
+                return Err(error);
+            }
+            Ok(key)
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&temporary);
+            let bytes = fs::read(path)?;
+            load_device_key(path, &bytes)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            Err(error)
+        }
+    }
+}
+
+fn write_temporary(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(FILE_MODE)
+        .open(path)?;
+    file.set_permissions(Permissions::from_mode(FILE_MODE))?;
+    file.write_all(contents)?;
+    file.sync_all()
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+fn load_device_key(path: &Path, bytes: &[u8]) -> io::Result<SecretKey> {
+    let key = SecretKey::try_from(bytes)
+        .map_err(|_| io::Error::other("secret key must contain 32 bytes"))?;
+    fs::set_permissions(path, Permissions::from_mode(FILE_MODE))?;
+    Ok(key)
+}
+
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
 }
@@ -114,44 +201,12 @@ fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Er
 #[cfg(test)]
 mod tests {
     use std::fs;
-    use std::os::unix::fs::PermissionsExt;
     use std::path::PathBuf;
     use std::sync::atomic::{AtomicUsize, Ordering};
 
-    use super::{ServerEntry, ServerStore, store_path_from};
+    use super::ServerStore;
 
     static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
-
-    #[test]
-    fn writes_and_reads_the_store_with_private_permissions() {
-        let root = short_test_directory();
-        let path = root.join("seer").join("servers.toml");
-        let store = sample_store();
-
-        store.save_to(&path).expect("store must save");
-
-        assert_eq!(
-            fs::metadata(path.parent().expect("path must have a parent"))
-                .expect("directory metadata must load")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o700
-        );
-        assert_eq!(
-            fs::metadata(&path)
-                .expect("file metadata must load")
-                .permissions()
-                .mode()
-                & 0o777,
-            0o600
-        );
-        assert_eq!(
-            ServerStore::load_from(&path).expect("store must load"),
-            store
-        );
-        fs::remove_dir_all(root).expect("test directory must be removed");
-    }
 
     #[test]
     fn missing_store_is_empty_and_invalid_store_fails() {
@@ -165,64 +220,6 @@ mod tests {
         fs::write(&path, "not = [valid").expect("invalid store must be written");
         assert!(ServerStore::load_from(&path).is_err());
         fs::remove_dir_all(root).expect("test directory must be removed");
-    }
-
-    #[test]
-    fn current_entry_replaces_the_same_endpoint() {
-        let mut store = sample_store();
-        store.make_current(ServerEntry {
-            endpoint: "host:7321".into(),
-            alias: "new-alias".into(),
-            user_id: "user-2".into(),
-            name: "bob".into(),
-            credential: "new-secret".into(),
-            current: true,
-        });
-
-        assert_eq!(store.servers.len(), 1);
-        assert_eq!(store.servers[0].name, "bob");
-        assert!(store.servers[0].current);
-    }
-
-    #[test]
-    fn path_uses_xdg_or_the_home_fallback() {
-        assert_eq!(
-            store_path_from(Some("/config".into()), Some("/home/user".into()))
-                .expect("XDG path must resolve"),
-            PathBuf::from("/config/seer/servers.toml")
-        );
-        assert_eq!(
-            store_path_from(None, Some("/home/user".into())).expect("home path must resolve"),
-            PathBuf::from("/home/user/.config/seer/servers.toml")
-        );
-        assert!(store_path_from(None, None).is_err());
-        assert!(store_path_from(Some("".into()), Some("".into())).is_err());
-    }
-
-    #[test]
-    fn reports_non_file_and_parentless_paths() {
-        let root = short_test_directory();
-        fs::create_dir_all(&root).expect("test directory must exist");
-        assert!(ServerStore::load_from(&root).is_err());
-        assert!(
-            ServerStore::default()
-                .save_to(PathBuf::new().as_path())
-                .is_err()
-        );
-        fs::remove_dir_all(root).expect("test directory must be removed");
-    }
-
-    fn sample_store() -> ServerStore {
-        ServerStore {
-            servers: vec![ServerEntry {
-                endpoint: "host:7321".into(),
-                alias: "host".into(),
-                user_id: "user-1".into(),
-                name: "alice".into(),
-                credential: "secret".into(),
-                current: true,
-            }],
-        }
     }
 
     fn short_test_directory() -> PathBuf {

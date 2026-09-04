@@ -1,8 +1,10 @@
 use std::io;
 use std::os::unix::net::UnixStream;
-use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::sync::{Arc, Mutex};
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
@@ -11,6 +13,10 @@ use seer_net::Stream;
 use crate::attachments::{AttachmentGuard, ClientWriter, lock_writer};
 use crate::registry::PersonRecord;
 use crate::server::BrokerState;
+
+// A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
+const EVENT_QUEUE_CAPACITY: usize = 64;
+const CLIENT_WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
 pub(crate) fn forward<S>(client: S, owner: &PersonRecord, broker: &BrokerState) -> io::Result<()>
 where
@@ -23,16 +29,18 @@ where
 
 struct Coordinator<'a> {
     client: ClientWriter,
-    client_reader: Option<JoinHandle<()>>,
+    client_reader: Option<ReaderTask>,
     attachment: Option<AttachmentGuard<'a>>,
     client_id: String,
     owner: &'a str,
+    owner_name: &'a str,
     owner_is_admin: bool,
     broker: &'a BrokerState,
-    event_sender: Sender<Event>,
+    event_sender: SyncSender<Event>,
     events: Receiver<Event>,
     runtime: Option<RuntimeConnection>,
     peeking: bool,
+    querying_targets: Option<String>,
 }
 
 impl<'a> Coordinator<'a> {
@@ -40,7 +48,8 @@ impl<'a> Coordinator<'a> {
     where
         S: Stream + Clone,
     {
-        let (event_sender, events) = mpsc::channel();
+        client.set_write_timeout(Some(CLIENT_WRITE_TIMEOUT))?;
+        let (event_sender, events) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         let client_reader = client.clone();
         let client = Arc::new(Mutex::new(Box::new(client) as Box<dyn Stream>));
         let attachment = broker.attach_client(&owner.user_id, Arc::clone(&client))?;
@@ -54,7 +63,26 @@ impl<'a> Coordinator<'a> {
                 tree: Tree::new(),
             },
         )?;
-        let runtime = connect_runtime(broker, &owner.user_id, None, &event_sender)?;
+        let attach = ClientMsg::AttachRuntime;
+        let runtime = match connect_runtime(
+            broker,
+            &owner.user_id,
+            &owner.name,
+            Some(&attach),
+            true,
+            &event_sender,
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                write_client(
+                    &client,
+                    &ServerMsg::Refused {
+                        reason: error.to_string(),
+                    },
+                )?;
+                return Err(error);
+            }
+        };
         let client_reader = spawn_client_reader(client_reader, event_sender.clone());
         Ok(Self {
             client,
@@ -62,12 +90,14 @@ impl<'a> Coordinator<'a> {
             attachment: Some(attachment),
             client_id,
             owner: &owner.user_id,
+            owner_name: &owner.name,
             owner_is_admin: owner.is_owner,
             broker,
             event_sender,
             events,
             runtime: Some(runtime),
             peeking: false,
+            querying_targets: None,
         })
     }
 
@@ -114,23 +144,61 @@ impl<'a> Coordinator<'a> {
                 self.write_client(&ServerMsg::Clients { clients })?;
             }
             ClientMsg::DetachClient { client_id } => {
-                if !self.broker.detach_client(self.owner, &client_id)? {
+                if self.broker.detach_client(self.owner, &client_id)? {
+                    let clients = self.broker.clients(self.owner, &self.client_id)?;
+                    self.write_client(&ServerMsg::Clients { clients })?;
+                } else {
                     eprintln!("broker refused DetachClient for user {}", self.owner);
                     self.write_client(&ServerMsg::Refused {
                         reason: "client does not belong to this person".into(),
                     })?;
                 }
             }
-            ClientMsg::Peek { ref user, .. } if self.user_exists(user)? => {
-                self.switch_runtime(user, Some(&message))?;
-                self.peeking = true;
+            ClientMsg::QueryTargets { ref user } if !self.peeking => {
+                let Some(person) = self.person(user)? else {
+                    self.write_client(&ServerMsg::Refused {
+                        reason: "person not found".into(),
+                    })?;
+                    return Ok(Action::Continue);
+                };
+                match self.switch_runtime(&person.user_id, &person.name, Some(&message), false) {
+                    Ok(()) => self.querying_targets = Some(person.user_id),
+                    Err(error) => {
+                        self.write_client(&ServerMsg::Refused {
+                            reason: error.to_string(),
+                        })?;
+                    }
+                }
             }
-            ClientMsg::Peek { user, .. } => {
-                eprintln!("broker dropped Peek for unknown user: {user}");
+            ClientMsg::Peek { ref user, .. } => {
+                let Some(person) = self.person(user)? else {
+                    eprintln!("broker dropped Peek for unknown user: {user}");
+                    return Ok(Action::Continue);
+                };
+                let result = if self.querying_targets.as_deref() == Some(&person.user_id) {
+                    self.send_to_runtime(&message)
+                } else {
+                    self.switch_runtime(&person.user_id, &person.name, Some(&message), false)
+                };
+                match result {
+                    Ok(()) => {
+                        self.querying_targets = None;
+                        self.peeking = true;
+                    }
+                    Err(error) => {
+                        self.write_client(&ServerMsg::Refused {
+                            reason: error.to_string(),
+                        })?;
+                    }
+                }
             }
             ClientMsg::StopPeek if self.peeking => self.stop_peek()?,
             ClientMsg::StopPeek => {}
-            ClientMsg::Input { .. } if self.peeking => {
+            message if self.querying_targets.is_some() && message.is_mutating() => {
+                eprintln!("broker dropped input while target selection is pending");
+            }
+            ClientMsg::TerminalCapabilities { .. } if self.peeking => {}
+            ClientMsg::TerminalInput { .. } if self.peeking => {
                 eprintln!("broker dropped Input while user {} peeks", self.owner);
             }
             message => self.send_to_runtime(&message)?,
@@ -159,8 +227,8 @@ impl<'a> Coordinator<'a> {
         }
     }
 
-    fn user_exists(&self, user_id: &str) -> io::Result<bool> {
-        self.broker.registry().person_exists(user_id)
+    fn person(&self, user_id: &str) -> io::Result<Option<PersonRecord>> {
+        self.broker.registry().person(user_id)
     }
 
     fn runtime_is(&self, identity: &Arc<()>) -> bool {
@@ -183,17 +251,28 @@ impl<'a> Coordinator<'a> {
 
     fn stop_peek(&mut self) -> io::Result<()> {
         self.peeking = false;
-        self.switch_runtime(self.owner, None)
+        self.querying_targets = None;
+        let attach = ClientMsg::AttachRuntime;
+        self.switch_runtime(self.owner, self.owner_name, Some(&attach), true)
     }
 
-    fn switch_runtime(&mut self, user: &str, first: Option<&ClientMsg>) -> io::Result<()> {
-        self.close_runtime()?;
-        self.runtime = Some(connect_runtime(
+    fn switch_runtime(
+        &mut self,
+        user: &str,
+        person_name: &str,
+        first: Option<&ClientMsg>,
+        start: bool,
+    ) -> io::Result<()> {
+        let runtime = connect_runtime(
             self.broker,
             user,
+            person_name,
             first,
+            start,
             &self.event_sender,
-        )?);
+        )?;
+        self.close_runtime()?;
+        self.runtime = Some(runtime);
         Ok(())
     }
 
@@ -206,12 +285,15 @@ impl<'a> Coordinator<'a> {
 
     fn close(&mut self) -> io::Result<()> {
         self.attachment.take();
+        if let Some(reader) = &self.client_reader {
+            reader.cancel();
+        }
         if let Ok(client) = lock_writer(&self.client) {
             let _ = client.shutdown(std::net::Shutdown::Both);
         }
         let runtime_result = self.close_runtime();
         let client_result = match self.client_reader.take() {
-            Some(reader) => join_reader(reader),
+            Some(reader) => reader.join(),
             None => Ok(()),
         };
         runtime_result.and(client_result)
@@ -225,16 +307,22 @@ fn write_client(client: &ClientWriter, message: &ServerMsg) -> io::Result<()> {
 struct RuntimeConnection {
     stream: UnixStream,
     identity: Arc<()>,
-    reader: JoinHandle<()>,
+    reader: ReaderTask,
 }
 
 fn connect_runtime(
     broker: &BrokerState,
     user: &str,
+    person_name: &str,
     first: Option<&ClientMsg>,
-    sender: &Sender<Event>,
+    start: bool,
+    sender: &SyncSender<Event>,
 ) -> io::Result<RuntimeConnection> {
-    let mut stream = broker.runtimes().connect(user)?;
+    let mut stream = if start {
+        broker.runtimes().connect(user, person_name)?
+    } else {
+        broker.runtimes().connect_existing(user, person_name)?
+    };
     if let Some(message) = first {
         codec::encode(&mut stream, message)?;
     }
@@ -249,8 +337,9 @@ fn connect_runtime(
 
 impl RuntimeConnection {
     fn close(self) -> io::Result<()> {
+        self.reader.cancel();
         let _ = self.stream.shutdown(std::net::Shutdown::Both);
-        join_reader(self.reader)
+        self.reader.join()
     }
 }
 
@@ -274,17 +363,17 @@ enum Action {
     Stop,
 }
 
-fn spawn_client_reader<S: Stream>(mut stream: S, sender: Sender<Event>) -> JoinHandle<()> {
-    thread::spawn(move || {
+fn spawn_client_reader<S: Stream>(mut stream: S, sender: SyncSender<Event>) -> ReaderTask {
+    ReaderTask::spawn(move |cancelled| {
         loop {
             match codec::decode(&mut stream) {
                 Ok(message) => {
-                    if sender.send(Event::Client(Ok(message))).is_err() {
+                    if !send_event(&sender, Event::Client(Ok(message)), cancelled) {
                         return;
                     }
                 }
                 Err(error) => {
-                    let _ = sender.send(Event::Client(Err(error)));
+                    send_event(&sender, Event::Client(Err(error)), cancelled);
                     return;
                 }
             }
@@ -295,9 +384,9 @@ fn spawn_client_reader<S: Stream>(mut stream: S, sender: Sender<Event>) -> JoinH
 fn spawn_runtime_reader(
     mut stream: UnixStream,
     identity: Arc<()>,
-    sender: Sender<Event>,
-) -> JoinHandle<()> {
-    thread::spawn(move || {
+    sender: SyncSender<Event>,
+) -> ReaderTask {
+    ReaderTask::spawn(move |cancelled| {
         loop {
             match codec::decode(&mut stream) {
                 Ok(message) => {
@@ -305,15 +394,19 @@ fn spawn_runtime_reader(
                         identity: Arc::clone(&identity),
                         result: Ok(message),
                     };
-                    if sender.send(event).is_err() {
+                    if !send_event(&sender, event, cancelled) {
                         return;
                     }
                 }
                 Err(error) => {
-                    let _ = sender.send(Event::Runtime {
-                        identity: Arc::clone(&identity),
-                        result: Err(error),
-                    });
+                    send_event(
+                        &sender,
+                        Event::Runtime {
+                            identity: Arc::clone(&identity),
+                            result: Err(error),
+                        },
+                        cancelled,
+                    );
                     return;
                 }
             }
@@ -321,11 +414,45 @@ fn spawn_runtime_reader(
     })
 }
 
+struct ReaderTask {
+    thread: JoinHandle<()>,
+    cancelled: Arc<AtomicBool>,
+}
+
+impl ReaderTask {
+    fn spawn(worker: impl FnOnce(&AtomicBool) + Send + 'static) -> Self {
+        let cancelled = Arc::new(AtomicBool::new(false));
+        let worker_cancelled = Arc::clone(&cancelled);
+        let thread = thread::spawn(move || worker(&worker_cancelled));
+        Self { thread, cancelled }
+    }
+
+    fn cancel(&self) {
+        self.cancelled.store(true, Ordering::Release);
+    }
+
+    fn join(self) -> io::Result<()> {
+        join_reader(self.thread)
+    }
+}
+
+fn send_event(sender: &SyncSender<Event>, event: Event, cancelled: &AtomicBool) -> bool {
+    let mut pending = event;
+    loop {
+        match sender.try_send(pending) {
+            Ok(()) => return true,
+            Err(TrySendError::Disconnected(_)) => return false,
+            Err(TrySendError::Full(event)) => pending = event,
+        }
+        if cancelled.load(Ordering::Acquire) {
+            return false;
+        }
+        thread::sleep(Duration::from_millis(1));
+    }
+}
+
 fn join_reader(reader: JoinHandle<()>) -> io::Result<()> {
     reader
         .join()
         .map_err(|_| io::Error::other("forward reader thread panicked"))
 }
-
-#[cfg(test)]
-mod tests;

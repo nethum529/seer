@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use std::process::ExitCode;
 #[cfg(target_os = "linux")]
+mod stop;
+#[cfg(target_os = "linux")]
 use std::{
     env,
     fs::{self, File, OpenOptions},
@@ -32,22 +34,6 @@ struct BrokerConfig {
     owner_name: String,
     state_dir: PathBuf,
 }
-#[cfg(target_os = "linux")]
-#[derive(Default, Deserialize, Serialize)]
-struct ServersFile {
-    #[serde(default)]
-    servers: Vec<ServerEntry>,
-}
-#[cfg(target_os = "linux")]
-#[derive(Deserialize, Serialize)]
-struct ServerEntry {
-    endpoint: String,
-    alias: String,
-    user_id: String,
-    name: String,
-    credential: String,
-    current: bool,
-}
 pub fn run() -> ExitCode {
     #[cfg(target_os = "macos")]
     {
@@ -63,6 +49,16 @@ pub fn run() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+pub fn stop() -> ExitCode {
+    #[cfg(target_os = "macos")]
+    {
+        eprintln!("the server runs on Linux only");
+        ExitCode::FAILURE
+    }
+
+    #[cfg(target_os = "linux")]
+    stop::run()
 }
 #[cfg(target_os = "linux")]
 fn run_linux() -> io::Result<()> {
@@ -180,14 +176,17 @@ fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
 }
 #[cfg(target_os = "linux")]
 fn running_broker(config: &BrokerConfig) -> bool {
+    live_broker(config).is_some()
+}
+#[cfg(target_os = "linux")]
+fn live_broker(config: &BrokerConfig) -> Option<i32> {
+    let pid = broker_pid(config)?;
+    (owns_listen_socket(pid, config.listen) && port_accepts(config.listen)).then_some(pid)
+}
+#[cfg(target_os = "linux")]
+fn broker_pid(config: &BrokerConfig) -> Option<i32> {
     let pid_path = config.state_dir.join("broker.pid");
-    let Ok(contents) = fs::read_to_string(pid_path) else {
-        return false;
-    };
-    let Ok(pid) = contents.trim().parse::<i32>() else {
-        return false;
-    };
-    owns_listen_socket(pid, config.listen) && port_accepts(config.listen)
+    fs::read_to_string(pid_path).ok()?.trim().parse().ok()
 }
 #[cfg(target_os = "linux")]
 fn owns_listen_socket(pid: i32, listen: SocketAddr) -> bool {
@@ -287,8 +286,8 @@ fn complete_start(
 ) -> io::Result<()> {
     wait_for_port(child, config.listen, deadline)?;
     if first_start {
-        let credential = wait_for_credential(log_path, log_start, deadline)?;
-        let save_result = save_owner(config_dir, config, credential);
+        let (user_id, credential) = wait_for_owner_identity(log_path, log_start, deadline)?;
+        let save_result = save_owner(config_dir, config, user_id, credential);
         strip_owner_credential(log_path)?;
         save_result?;
     }
@@ -358,13 +357,13 @@ fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> 
 #[cfg(target_os = "linux")]
 fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io::Result<()> {
     loop {
-        if port_accepts(listen) {
-            return Ok(());
-        }
         if let Some(status) = child.try_wait()? {
             return Err(io::Error::other(format!(
                 "seer-broker exited with {status}"
             )));
+        }
+        if port_accepts(listen) {
+            return Ok(());
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(
@@ -388,15 +387,19 @@ fn stop_child(child: &mut Child) {
 }
 
 #[cfg(target_os = "linux")]
-fn wait_for_credential(path: &Path, start: u64, deadline: Instant) -> io::Result<String> {
+fn wait_for_owner_identity(
+    path: &Path,
+    start: u64,
+    deadline: Instant,
+) -> io::Result<(String, String)> {
     loop {
-        if let Some(credential) = read_credential(path, start)? {
-            return Ok(credential);
+        if let Some(identity) = read_owner_identity(path, start)? {
+            return Ok(identity);
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(
                 io::ErrorKind::TimedOut,
-                "seer-broker did not write the owner credential within 5 seconds",
+                "seer-broker did not write the owner identity within 5 seconds",
             ));
         }
         thread::sleep(POLL_INTERVAL);
@@ -404,16 +407,22 @@ fn wait_for_credential(path: &Path, start: u64, deadline: Instant) -> io::Result
 }
 
 #[cfg(target_os = "linux")]
-fn read_credential(path: &Path, start: u64) -> io::Result<Option<String>> {
+fn read_owner_identity(path: &Path, start: u64) -> io::Result<Option<(String, String)>> {
     let mut log = File::open(path)?;
     log.seek(SeekFrom::Start(start))?;
     let mut contents = String::new();
     log.read_to_string(&mut contents)?;
-    Ok(contents.lines().find_map(|line| {
-        line.strip_prefix("owner-credential: ")
-            .filter(|value| !value.is_empty())
-            .map(str::to_owned)
-    }))
+    let user_id = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("owner-id: "))
+        .filter(|value| !value.is_empty());
+    let credential = contents
+        .lines()
+        .find_map(|line| line.strip_prefix("owner-credential: "))
+        .filter(|value| !value.is_empty());
+    Ok(user_id
+        .zip(credential)
+        .map(|(user_id, credential)| (user_id.to_owned(), credential.to_owned())))
 }
 
 #[cfg(target_os = "linux")]
@@ -427,52 +436,26 @@ fn strip_owner_credential(path: &Path) -> io::Result<()> {
 }
 
 #[cfg(target_os = "linux")]
-fn save_owner(config_dir: &Path, config: &BrokerConfig, credential: String) -> io::Result<()> {
+fn save_owner(
+    config_dir: &Path,
+    config: &BrokerConfig,
+    user_id: String,
+    credential: String,
+) -> io::Result<()> {
     let path = config_dir.join("servers.toml");
-    let mut store = match fs::read_to_string(&path) {
-        Ok(contents) => toml::from_str(&contents).map_err(invalid_data)?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => ServersFile::default(),
-        Err(error) => return Err(error),
-    };
-    for server in &mut store.servers {
-        server.current = false;
-    }
+    let mut store = crate::store::ServerStore::load_from(&path)?;
     store
         .servers
         .retain(|server| server.endpoint != config.published_addr);
-    store.servers.push(ServerEntry {
+    store.make_current(crate::store::ServerEntry {
         endpoint: config.published_addr.clone(),
         alias: host_name(),
-        user_id: owner_user_id(&config.state_dir).unwrap_or_else(|| config.owner_name.clone()),
+        user_id,
         name: config.owner_name.clone(),
         credential,
         current: true,
     });
-    write_private(&path, toml_text(&store)?.as_bytes())
-}
-
-#[cfg(target_os = "linux")]
-fn owner_user_id(state_dir: &Path) -> Option<String> {
-    let contents = fs::read_to_string(state_dir.join("people.json")).ok()?;
-    let value: serde_json::Value = serde_json::from_str(&contents).ok()?;
-    find_owner_id(&value)
-}
-
-#[cfg(target_os = "linux")]
-fn find_owner_id(value: &serde_json::Value) -> Option<String> {
-    match value {
-        serde_json::Value::Object(object) => {
-            if object.get("is_owner").and_then(serde_json::Value::as_bool) == Some(true) {
-                return object
-                    .get("user_id")
-                    .and_then(serde_json::Value::as_str)
-                    .map(str::to_owned);
-            }
-            object.values().find_map(find_owner_id)
-        }
-        serde_json::Value::Array(values) => values.iter().find_map(find_owner_id),
-        _ => None,
-    }
+    store.save_to(&path)
 }
 
 #[cfg(target_os = "linux")]

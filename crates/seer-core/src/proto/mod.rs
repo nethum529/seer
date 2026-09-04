@@ -2,7 +2,7 @@ pub mod codec;
 
 use serde::{Deserialize, Serialize};
 
-use crate::{Cell, SplitDirection, Tree};
+use crate::{SplitDirection, TerminalCapabilities, TerminalFrame, TerminalInput, Tree};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ClientMsg {
@@ -22,27 +22,47 @@ pub enum ClientMsg {
     DetachClient {
         client_id: String,
     },
-    CreateTab,
+    CreateTab {
+        workspace: String,
+    },
     SplitPane {
+        workspace: String,
+        tab: String,
         direction: SplitDirection,
     },
     ClosePane {
+        workspace: String,
+        tab: String,
         pane: String,
     },
     FocusPane {
+        workspace: String,
+        tab: String,
         pane: String,
     },
-    Input {
+    TerminalCapabilities {
+        capabilities: TerminalCapabilities,
+    },
+    TerminalInput {
+        workspace: String,
+        tab: String,
         pane: String,
-        bytes: Vec<u8>,
+        input: TerminalInput,
     },
     Resize {
+        workspace: String,
+        tab: String,
         cols: u16,
         rows: u16,
+    },
+    AttachRuntime,
+    QueryTargets {
+        user: String,
     },
     Peek {
         user: String,
         workspace: String,
+        tab: String,
     },
     StopPeek,
     Detach,
@@ -71,6 +91,9 @@ pub enum ServerMsg {
     Clients {
         clients: Vec<ClientInfo>,
     },
+    Targets {
+        targets: Vec<PeekTarget>,
+    },
     Refused {
         reason: String,
     },
@@ -83,11 +106,35 @@ pub enum ServerMsg {
     },
     Cells {
         pane: String,
-        rows: Vec<Vec<Cell>>,
+        frame: TerminalFrame,
     },
     Bye {
         reason: String,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PeekTarget {
+    pub workspace: String,
+    pub workspace_name: String,
+    pub tab: String,
+    pub tab_title: String,
+    pub active: bool,
+}
+
+impl ClientMsg {
+    #[must_use]
+    pub fn is_mutating(&self) -> bool {
+        matches!(
+            self,
+            Self::TerminalInput { .. }
+                | Self::CreateTab { .. }
+                | Self::SplitPane { .. }
+                | Self::ClosePane { .. }
+                | Self::FocusPane { .. }
+                | Self::Resize { .. }
+        )
+    }
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -110,8 +157,12 @@ mod tests {
 
     use serde::{Serialize, de::DeserializeOwned};
 
-    use super::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
-    use crate::{Cell, Color, PaneSize, SplitDirection, Tree};
+    use super::{ClientInfo, ClientMsg, PeekTarget, Person, ServerMsg, codec};
+    use crate::{
+        Cell, Color, Cursor, InputEvent, KeyCode, KeyInput, Modifiers, PaneSize, SplitDirection,
+        TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, TerminalInput,
+        TerminalModes, Tree,
+    };
 
     fn assert_round_trip<T>(message: &T)
     where
@@ -158,30 +209,55 @@ mod tests {
             ClientMsg::DetachClient {
                 client_id: "client-1".into(),
             },
-            ClientMsg::CreateTab,
+            ClientMsg::CreateTab {
+                workspace: "w1".into(),
+            },
             ClientMsg::SplitPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 direction: SplitDirection::Right,
             },
             ClientMsg::SplitPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 direction: SplitDirection::Down,
             },
             ClientMsg::ClosePane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 pane: "w1:p1".into(),
             },
             ClientMsg::FocusPane {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 pane: "w1:p2".into(),
             },
-            ClientMsg::Input {
+            ClientMsg::TerminalCapabilities {
+                capabilities: TerminalCapabilities {
+                    protocol_version: TERMINAL_PROTOCOL_VERSION,
+                },
+            },
+            ClientMsg::TerminalInput {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 pane: "w1:p1".into(),
-                bytes: vec![0, 1, 255],
+                input: TerminalInput::new(InputEvent::Key(KeyInput {
+                    code: KeyCode::Function(5),
+                    modifiers: Modifiers::default(),
+                })),
             },
             ClientMsg::Resize {
+                workspace: "w1".into(),
+                tab: "w1:t1".into(),
                 cols: 120,
                 rows: 40,
             },
+            ClientMsg::AttachRuntime,
+            ClientMsg::QueryTargets { user: "bob".into() },
             ClientMsg::Peek {
                 user: "bob".into(),
                 workspace: "w1".into(),
+                tab: "w1:t1".into(),
             },
             ClientMsg::StopPeek,
             ClientMsg::Detach,
@@ -219,6 +295,15 @@ mod tests {
                     peekable: true,
                 }],
             },
+            ServerMsg::Targets {
+                targets: vec![PeekTarget {
+                    workspace: "w2".into(),
+                    workspace_name: "work".into(),
+                    tab: "w2:t3".into(),
+                    tab_title: "shell".into(),
+                    active: true,
+                }],
+            },
             ServerMsg::Clients {
                 clients: vec![ClientInfo {
                     client_id: "client-1".into(),
@@ -235,36 +320,40 @@ mod tests {
             },
             ServerMsg::Cells {
                 pane: "w1:p1".into(),
-                rows: vec![
-                    vec![Cell {
-                        character: 'A',
-                        fg: Color::Indexed(1),
-                        bg: Color::Default,
-                        bold: true,
-                        italic: false,
-                        underline: false,
-                        dim: false,
-                        inverse: false,
-                        hidden: false,
-                        strikeout: false,
-                    }],
-                    vec![Cell {
-                        character: 'B',
-                        fg: Color::Rgb {
-                            red: 10,
-                            green: 20,
-                            blue: 30,
-                        },
-                        bg: Color::Indexed(2),
-                        bold: false,
-                        italic: true,
-                        underline: true,
-                        dim: false,
-                        inverse: false,
-                        hidden: false,
-                        strikeout: false,
-                    }],
-                ],
+                frame: TerminalFrame {
+                    rows: vec![
+                        vec![Cell {
+                            character: 'A',
+                            fg: Color::Indexed(1),
+                            bg: Color::Default,
+                            bold: true,
+                            italic: false,
+                            underline: false,
+                            dim: false,
+                            inverse: false,
+                            hidden: false,
+                            strikeout: false,
+                        }],
+                        vec![Cell {
+                            character: 'B',
+                            fg: Color::Rgb {
+                                red: 10,
+                                green: 20,
+                                blue: 30,
+                            },
+                            bg: Color::Indexed(2),
+                            bold: false,
+                            italic: true,
+                            underline: true,
+                            dim: false,
+                            inverse: false,
+                            hidden: false,
+                            strikeout: false,
+                        }],
+                    ],
+                    cursor: Cursor::default(),
+                    modes: TerminalModes::default(),
+                },
             },
             ServerMsg::Bye {
                 reason: "detached".into(),

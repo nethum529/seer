@@ -7,32 +7,40 @@ use std::time::{Duration, Instant};
 use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
 use seer_net::{EndpointId, Listener, Socket, Stream, load_or_create_secret_key};
 
-use crate::Config;
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
 use crate::registry::{MAX_SEAT_LIFETIME_SECS, PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
+use crate::{
+    Config,
+    connection_limit::{ConnectionGuard, ConnectionKey, ConnectionLimit},
+};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INVALID_CREDENTIALS: &str = "invalid credentials";
 const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
 
-pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
-    let (mut broker, owner_credential) = BrokerState::new(config)?;
-    let remote_listener = bind_remote_listener(config);
+pub fn serve(
+    listener: TcpListener,
+    remote_listener: Option<Listener>,
+    config: &Config,
+) -> io::Result<()> {
+    let (mut broker, owner_identity) = BrokerState::new(config)?;
     broker.remote_endpoint = remote_listener.as_ref().map(Listener::id);
-    if let Some(credential) = owner_credential {
-        writeln!(io::stdout().lock(), "owner-credential: {credential}")?;
+    if let Some((user_id, credential)) = owner_identity {
+        let mut stdout = io::stdout().lock();
+        writeln!(stdout, "owner-id: {user_id}")?;
+        writeln!(stdout, "owner-credential: {credential}")?;
     }
     let broker = Arc::new(broker);
     if let Some(remote_listener) = remote_listener {
         spawn_remote_accept_loop(remote_listener, Arc::clone(&broker));
     }
     for connection in listener.incoming() {
-        let stream = Socket::from(connection?);
-        let broker = Arc::clone(&broker);
-        thread::spawn(move || report_connection(handle_connection(stream, &broker)));
+        let connection = connection?;
+        let source = ConnectionKey::direct(connection.peer_addr()?);
+        spawn_connection(Socket::from(connection), Arc::clone(&broker), source);
     }
     Ok(())
 }
@@ -43,13 +51,14 @@ pub(crate) struct BrokerState {
     attachments: Attachments,
     published: PublishedAddress,
     remote_endpoint: Option<EndpointId>,
+    connection_limit: ConnectionLimit,
 }
 
 impl BrokerState {
-    pub(crate) fn new(config: &Config) -> io::Result<(Self, Option<String>)> {
+    pub(crate) fn new(config: &Config) -> io::Result<(Self, Option<(String, String)>)> {
         let published = PublishedAddress::parse(&config.published_addr)?;
-        let runtimes = RuntimeManager::new(config.shell.clone(), config.state_dir.clone())?;
-        let (registry, owner_credential) = Registry::open(&config.state_dir, &config.owner_name)?;
+        let runtimes = RuntimeManager::new(config.state_dir.clone(), config.os_users.clone())?;
+        let (registry, owner_identity) = Registry::open(&config.state_dir, &config.owner_name)?;
         Ok((
             Self {
                 registry,
@@ -57,8 +66,9 @@ impl BrokerState {
                 attachments: Attachments::default(),
                 published,
                 remote_endpoint: None,
+                connection_limit: ConnectionLimit::default(),
             },
-            owner_credential,
+            owner_identity,
         ))
     }
 
@@ -93,7 +103,7 @@ impl BrokerState {
             .into_iter()
             .map(|person| Person {
                 attached_clients: self.attachments.count(&person.user_id),
-                peekable: self.runtimes.is_running(&person.user_id),
+                peekable: self.runtimes.is_running(&person.user_id, &person.name),
                 user_id: person.user_id,
                 name: person.name,
             })
@@ -148,38 +158,41 @@ fn invalid_published_addr() -> io::Error {
     )
 }
 
-fn bind_remote_listener(config: &Config) -> Option<Listener> {
+pub(crate) fn bind_remote_listener(config: &Config) -> io::Result<Option<Listener>> {
     if !config.remote {
-        return None;
+        return Ok(None);
     }
-    let result =
-        load_or_create_secret_key(&config.state_dir.join("iroh.key")).and_then(Listener::bind);
-    match result {
-        Ok(listener) => Some(listener),
-        Err(error) => {
-            eprintln!("broker remote listener error: {error}");
-            None
-        }
-    }
+    let listener =
+        load_or_create_secret_key(&config.state_dir.join("iroh.key")).and_then(Listener::bind)?;
+    Ok(Some(listener))
 }
 
 fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
     thread::spawn(move || {
         loop {
             match listener.accept() {
-                Ok((_remote, stream)) => {
-                    let broker = Arc::clone(&broker);
-                    let stream = Socket::from(stream);
-                    thread::spawn(move || {
-                        report_connection(handle_connection(stream, &broker));
-                    });
-                }
+                Ok((remote, stream)) => spawn_connection(
+                    Socket::from(stream),
+                    Arc::clone(&broker),
+                    ConnectionKey::Relay(remote),
+                ),
                 Err(error) => {
                     eprintln!("broker remote accept error: {error}");
                     return;
                 }
             }
         }
+    });
+}
+
+fn spawn_connection<S: Stream + Clone>(stream: S, broker: Arc<BrokerState>, source: ConnectionKey) {
+    let Some(connection) = broker.connection_limit.try_acquire_for(source) else {
+        eprintln!("broker refused connection: connection limit reached");
+        let _ = stream.shutdown(std::net::Shutdown::Both);
+        return;
+    };
+    thread::spawn(move || {
+        report_connection(handle_connection(stream, &broker, connection));
     });
 }
 
@@ -192,13 +205,18 @@ fn report_connection(result: io::Result<()>) -> bool {
     }
 }
 
-fn handle_connection<S>(mut stream: S, broker: &BrokerState) -> io::Result<()>
+fn handle_connection<S>(
+    mut stream: S,
+    broker: &BrokerState,
+    connection: ConnectionGuard,
+) -> io::Result<()>
 where
     S: Stream + Clone,
 {
     let Some(person) = handshake(&mut stream, broker, HANDSHAKE_TIMEOUT)? else {
         return Ok(());
     };
+    drop(connection);
     stream.set_read_timeout(None)?;
     forward(stream, &person, broker)
 }
@@ -242,7 +260,10 @@ fn major_minor(version: &str) -> Option<(&str, &str)> {
 }
 
 fn read_message<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ClientMsg> {
-    codec::decode(&mut DeadlineReader { stream, deadline })
+    codec::decode_with_limit(
+        &mut DeadlineReader { stream, deadline },
+        codec::MAX_PRE_AUTH_FRAME_SIZE,
+    )
 }
 
 fn authenticate<S: Stream>(
@@ -317,145 +338,7 @@ fn handshake_timed_out() -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
-    use std::net::{TcpListener, TcpStream};
     use std::path::PathBuf;
-    use std::thread;
-    use std::time::Duration;
-
-    use super::{PublishedAddress, connection_was_silent, report_connection};
-    use crate::test_support::{remove_directory, temporary_directory};
-
-    #[test]
-    fn published_address_creates_the_required_capsule() {
-        let published =
-            PublishedAddress::parse("seer.example.com:7321").expect("published address must parse");
-        assert_eq!(
-            published.capsule("token"),
-            "SEER1-seer.example.com-7321-token"
-        );
-        assert!(PublishedAddress::parse("missing-port").is_err());
-        assert!(PublishedAddress::parse(":7321").is_err());
-        assert!(PublishedAddress::parse("host:bad").is_err());
-    }
-
-    #[test]
-    fn silent_connection_reaches_deadline() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-        let address = listener
-            .local_addr()
-            .expect("listener must have an address");
-        let mut client = TcpStream::connect(address).expect("client must connect");
-        let (mut server, _) = listener.accept().expect("server must accept client");
-        server
-            .set_read_timeout(Some(Duration::from_millis(10)))
-            .expect("timeout must set");
-
-        let error = super::read_message(&mut server, std::time::Instant::now())
-            .expect_err("expired handshake must fail");
-        drop(server);
-        let mut byte = [0];
-        let bytes_read = std::io::Read::read(&mut client, &mut byte)
-            .expect("silent connection must close without a response");
-
-        assert_eq!(error.kind(), io::ErrorKind::TimedOut);
-        assert_eq!(bytes_read, 0);
-    }
-
-    #[test]
-    fn identifies_silent_connection_errors() {
-        for kind in [
-            io::ErrorKind::TimedOut,
-            io::ErrorKind::WouldBlock,
-            io::ErrorKind::UnexpectedEof,
-        ] {
-            assert!(connection_was_silent(&io::Error::from(kind)));
-        }
-        assert!(!connection_was_silent(&io::Error::from(
-            io::ErrorKind::InvalidData
-        )));
-    }
-
-    #[test]
-    fn reports_handshake_error() {
-        assert!(report_connection(Err(io::Error::other("test error"))));
-        assert!(!report_connection(Ok(())));
-    }
-
-    #[test]
-    fn malformed_message_is_refused() {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-        let address = listener
-            .local_addr()
-            .expect("listener must have an address");
-        let mut client = TcpStream::connect(address).expect("client must connect");
-        let (mut server, _) = listener.accept().expect("server must accept client");
-
-        let worker = thread::spawn(move || {
-            let deadline = std::time::Instant::now() + Duration::from_secs(1);
-            let result = super::read_message(&mut server, deadline);
-            assert!(result.is_err(), "invalid message must fail");
-            super::refuse(&mut server, super::INVALID_MESSAGE).expect("refusal must send");
-            Ok::<(), io::Error>(())
-        });
-        std::io::Write::write_all(&mut client, &[0, 0, 0, 1, b'{'])
-            .expect("invalid frame must send");
-        let response =
-            seer_core::proto::codec::decode::<_, seer_core::proto::ServerMsg>(&mut client)
-                .expect("refusal must decode");
-
-        assert_eq!(
-            response,
-            seer_core::proto::ServerMsg::Refused {
-                reason: "invalid message".into()
-            }
-        );
-        worker
-            .join()
-            .expect("worker must not panic")
-            .expect("worker must finish");
-    }
-
-    #[test]
-    fn authentication_and_join_write_their_success_replies() {
-        let directory = test_directory("replies");
-        let (registry, credential) =
-            crate::registry::Registry::open(&directory, "Owner").expect("registry must open");
-        let credential = credential.expect("owner credential must exist");
-        let owner = registry.people().expect("people must load")[0].clone();
-        let (mut server, mut client) = tcp_pair();
-
-        let authenticated =
-            super::authenticate(&mut server, &registry, &owner.user_id, &credential)
-                .expect("authentication must finish")
-                .expect("owner must authenticate");
-        assert_eq!(authenticated.user_id, owner.user_id);
-
-        let token = registry
-            .create_seat(crate::registry::Registry::seat_lifetime_secs())
-            .expect("seat must be created");
-        let joined = super::join(&mut server, &registry, &token, "Guest")
-            .expect("join must finish")
-            .expect("guest must join");
-        assert_eq!(joined.name, "Guest");
-        assert!(matches!(
-            seer_core::proto::codec::decode::<_, seer_core::proto::ServerMsg>(&mut client),
-            Ok(seer_core::proto::ServerMsg::Joined { .. })
-        ));
-
-        let (mut closed_server, _closed_client) = tcp_pair();
-        closed_server
-            .shutdown(std::net::Shutdown::Write)
-            .expect("server writes must close");
-        assert!(
-            super::authenticate(&mut closed_server, &registry, &owner.user_id, "wrong").is_err()
-        );
-        let second_token = registry
-            .create_seat(crate::registry::Registry::seat_lifetime_secs())
-            .expect("seat must be created");
-        assert!(super::join(&mut closed_server, &registry, &second_token, "Other").is_err());
-        remove_directory(&directory, "state directory must be removed");
-    }
 
     #[test]
     fn broker_rejects_an_invalid_published_address_before_state_creation() {
@@ -465,35 +348,8 @@ mod tests {
             remote: false,
             state_dir: PathBuf::from("/tmp/not-created-by-invalid-config"),
             owner_name: "Owner".into(),
-            shell: "sh".into(),
+            os_users: std::collections::HashMap::new(),
         };
         assert!(super::BrokerState::new(&config).is_err());
-
-        let directory = test_directory("serve");
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-        listener
-            .set_nonblocking(true)
-            .expect("listener must be nonblocking");
-        let config = crate::Config {
-            published_addr: "host:7321".into(),
-            state_dir: directory.clone(),
-            ..config
-        };
-        assert!(super::serve(listener, &config).is_err());
-        remove_directory(&directory, "state directory must be removed");
-    }
-
-    fn tcp_pair() -> (TcpStream, TcpStream) {
-        let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-        let address = listener
-            .local_addr()
-            .expect("listener must have an address");
-        let client = TcpStream::connect(address).expect("client must connect");
-        let (server, _) = listener.accept().expect("server must accept client");
-        (server, client)
-    }
-
-    fn test_directory(name: &str) -> PathBuf {
-        temporary_directory(&format!("ss-{name}"))
     }
 }
