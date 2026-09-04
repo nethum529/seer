@@ -122,16 +122,6 @@ fn routes_peek_and_restores_the_owners_runtime() {
         },
     );
     wait_for_empty_tree(&mut alice);
-    send(
-        &mut alice,
-        &ClientMsg::CreateTab {
-            workspace: workspace.clone(),
-        },
-    );
-    let alice_tree = wait_for_tree_with_tab(&mut alice);
-    assert!(wait_for_cells(&mut alice));
-    let tab = alice_tree.workspaces[0].tabs[0].id.clone();
-    let pane = alice_tree.workspaces[0].tabs[0].panes[0].id.clone();
 
     let mut bob = connect_when_ready(address);
     send_hello(&mut bob, "bob", "bob-secret");
@@ -165,12 +155,42 @@ fn routes_peek_and_restores_the_owners_runtime() {
             user: "alice".into(),
         },
     );
+    assert!(wait_for_targets(&mut bob).is_empty());
+
+    send(
+        &mut alice,
+        &ClientMsg::CreateTab {
+            workspace: workspace.clone(),
+        },
+    );
+    let alice_tree = wait_for_tree_with_tab(&mut alice);
+    assert!(wait_for_cells(&mut alice));
+    let tab = alice_tree.workspaces[0].tabs[0].id.clone();
+    let pane = alice_tree.workspaces[0].tabs[0].panes[0].id.clone();
+    send(
+        &mut alice,
+        &ClientMsg::Resize {
+            workspace: workspace.clone(),
+            tab: tab.clone(),
+            cols: 80,
+            rows: 24,
+        },
+    );
+    wait_for_tree_with_tab(&mut alice);
+
+    send(
+        &mut bob,
+        &ClientMsg::QueryTargets {
+            user: "alice".into(),
+        },
+    );
     let target = wait_for_targets(&mut bob)
         .into_iter()
         .next()
         .expect("alice must have a target");
     assert_eq!(target.workspace, workspace);
     assert_eq!(target.tab, tab);
+    assert!(target.active);
     send(
         &mut bob,
         &ClientMsg::Peek {
@@ -191,13 +211,7 @@ fn routes_peek_and_restores_the_owners_runtime() {
     assert!(wait_for_cells_containing(&mut alice, "alice-before").contains("alice-before"));
     assert!(wait_for_cells_containing(&mut bob, "alice-before").contains("alice-before"));
 
-    send_input(
-        &mut bob,
-        &workspace,
-        &tab,
-        &pane,
-        "printf 'bob-write\\n'\n",
-    );
+    send_input(&mut bob, &workspace, &tab, &pane, "printf 'bob-write\\n'\n");
     send_input(
         &mut alice,
         &workspace,
@@ -230,7 +244,6 @@ fn routes_peek_and_restores_the_owners_runtime() {
             tab: target.tab,
         },
     );
-    wait_for_tree_with_tab(&mut bob);
     wait_for_tree_with_tab(&mut bob);
     temporary.terminate_runtime("alice");
     wait_for_tree_with_tab(&mut bob);
@@ -304,9 +317,10 @@ fn assert_tree_has_one_tab(message: ServerMsg) {
 }
 
 fn wait_for_empty_tree(stream: &mut TcpStream) {
-    wait_for_broker_message(stream, |message| {
-        matches!(message, ServerMsg::Tree { tree } if tree.workspaces.iter().all(|workspace| workspace.tabs.is_empty()))
-    });
+    wait_for_broker_message(
+        stream,
+        |message| matches!(message, ServerMsg::Tree { tree } if tree.workspaces.iter().all(|workspace| workspace.tabs.is_empty())),
+    );
 }
 
 fn wait_for_targets(stream: &mut TcpStream) -> Vec<PeekTarget> {

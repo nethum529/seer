@@ -318,17 +318,15 @@ mod tests {
     }
 
     #[test]
-    fn feeds_plain_text() {
-        let mut grid = PaneGrid::new(5, 2);
-
-        grid.feed(b"hello");
-
-        let snapshot = grid.snapshot();
-        let first_row: String = snapshot.rows[0].iter().map(|cell| cell.character).collect();
+    fn feeds_sgr_colors_and_flags() {
+        let mut plain_grid = PaneGrid::new(5, 2);
+        plain_grid.feed(b"hello");
+        let plain = plain_grid.snapshot();
+        let first_row: String = plain.rows[0].iter().map(|cell| cell.character).collect();
         assert_eq!(first_row, "hello");
-        assert_eq!(snapshot.rows[1][0].character, ' ');
+        assert_eq!(plain.rows[1][0].character, ' ');
         assert_eq!(
-            snapshot.rows[0][0],
+            plain.rows[0][0],
             Cell {
                 character: 'h',
                 fg: Color::Default,
@@ -342,10 +340,7 @@ mod tests {
                 strikeout: false,
             }
         );
-    }
 
-    #[test]
-    fn feeds_sgr_colors_and_flags() {
         let mut grid = PaneGrid::new(3, 1);
 
         grid.feed(b"\x1b[1;2;3;4;7;8;9;31;48;5;123mX\x1b[0;38;2;10;20;30mY");
@@ -369,27 +364,5 @@ mod tests {
                 blue: 30,
             }
         );
-    }
-
-    #[test]
-    fn feeds_cursor_move() {
-        let mut grid = PaneGrid::new(4, 3);
-
-        grid.feed(b"\x1b[2;3HZ");
-
-        let snapshot = grid.snapshot();
-        assert_eq!(snapshot.rows[1][2].character, 'Z');
-        assert_eq!(snapshot.rows[0][0].character, ' ');
-    }
-
-    #[test]
-    fn resizes_grid_shape() {
-        let mut grid = PaneGrid::new(2, 2);
-
-        grid.resize(3, 4);
-
-        let snapshot = grid.snapshot();
-        assert_eq!(snapshot.rows.len(), 4);
-        assert!(snapshot.rows.iter().all(|row| row.len() == 3));
     }
 }

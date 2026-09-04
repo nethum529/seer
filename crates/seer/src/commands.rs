@@ -1,23 +1,25 @@
-#[path = "commands/command_support.rs"]
-mod command_support;
 #[path = "commands/selection.rs"]
 mod selection;
 
-use command_support::{
-    authenticate, connect, finish_session, people, people_reply, receive, receive_clients,
-    receive_reply, send,
-};
-pub(super) use command_support::receive_reply_before;
-use selection::{select_client, select_target, selected_server};
-use std::io::{self, IsTerminal};
-use std::time::Duration;
+use std::io::{self, BufRead, IsTerminal, Read, Write};
+use std::net::TcpStream;
+use std::os::unix::fs::PermissionsExt;
+use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientMsg, PeekTarget, Person, ServerMsg};
+use seer_core::Tree;
+use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
+use seer_net::{Socket, Stream};
 
 use crate::capsule;
+use crate::capsule::Endpoint;
 use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
+
+pub(crate) use selection::peek;
+#[cfg(test)]
+use selection::{edit_distance_at_most_one, is_close};
+use selection::{finish_session, people_reply};
 
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
 const INSTALL_URL: &str =
@@ -222,52 +224,233 @@ fn list_server(server: &ServerEntry) -> ListRow {
     }
 }
 
-pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
-    let server = selected_server()?;
-    let (mut stream, tree) = authenticate(&server)?;
-    send(&mut stream, &ClientMsg::ListPeople)?;
-    let people = people_reply(receive_reply(&mut stream)?)?;
-    let Some(person) = people.iter().find(|person| person.name == target) else {
-        print_close_names(target, &people);
-        return Err(CommandError::usage(format!("no person named {target}")));
-    };
-    send(
-        &mut stream,
-        &ClientMsg::QueryTargets {
-            user: person.user_id.clone(),
-        },
-    )?;
-    let targets = targets_reply(receive_reply(&mut stream)?)?;
-    let selected = select_target(&targets)?;
-    send(
-        &mut stream,
-        &ClientMsg::Peek {
-            user: person.user_id.clone(),
-            workspace: selected.workspace.clone(),
-            tab: selected.tab.clone(),
-        },
-    )?;
-    println!("PEEK: {} - READ ONLY", person.name);
-    println!("Workspace: {}/{}", person.name, selected.workspace);
-    finish_session(
-        io::stdout().is_terminal(),
-        stream,
-        tree,
-        Some(&person.name),
-        &server.alias,
-        tui::run,
-    )
-}
-
-fn targets_reply(reply: ServerMsg) -> Result<Vec<PeekTarget>, CommandError> {
-    match reply {
-        ServerMsg::Targets { targets } => Ok(targets),
+fn receive_clients(stream: &mut impl Stream) -> Result<Vec<ClientInfo>, CommandError> {
+    match receive_reply(stream)? {
+        ServerMsg::Clients { clients } => Ok(clients),
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
         _ => Err(unexpected_reply()),
     }
 }
 
+fn select_client(clients: &[ClientInfo]) -> Result<ClientInfo, CommandError> {
+    match clients {
+        [] => Err(CommandError::usage("no attached client")),
+        [client] => Ok(client.clone()),
+        _ => {
+            let stdin = io::stdin();
+            let mut input = stdin.lock();
+            let stdout = io::stdout();
+            let mut output = stdout.lock();
+            pick_client(clients, &mut input, &mut output)
+        }
+    }
+}
 
+fn pick_client(
+    clients: &[ClientInfo],
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<ClientInfo, CommandError> {
+    writeln!(output, "Select a client:").map_err(CommandError::system)?;
+    for (index, client) in clients.iter().enumerate() {
+        writeln!(
+            output,
+            "  {}. {} (connected {} seconds)",
+            index + 1,
+            client.client_id,
+            client.connected_secs
+        )
+        .map_err(CommandError::system)?;
+    }
+    write!(output, "Client: ").map_err(CommandError::system)?;
+    output.flush().map_err(CommandError::system)?;
+    let mut selection = String::new();
+    if input
+        .read_line(&mut selection)
+        .map_err(CommandError::system)?
+        == 0
+    {
+        return Err(CommandError::usage("no client selected"));
+    }
+    let index = selection
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| CommandError::usage("no client selected"))?;
+    index
+        .checked_sub(1)
+        .and_then(|index| clients.get(index))
+        .cloned()
+        .ok_or_else(|| CommandError::usage("no client selected"))
+}
+
+fn print_detached(alias: &str) {
+    println!("Detached from {alias}. Your panes are still running.");
+}
+
+fn selected_server() -> Result<ServerEntry, CommandError> {
+    let store = ServerStore::load().map_err(CommandError::system)?;
+    if store.servers.is_empty() {
+        return Err(CommandError::usage("run seer join first"));
+    }
+    if store.servers.len() == 1 {
+        return Ok(store.servers[0].clone());
+    }
+    if let Some(server) = store.servers.iter().find(|server| server.current) {
+        return Ok(server.clone());
+    }
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    pick_server(&store.servers, &mut input, &mut output)
+}
+
+fn pick_server(
+    servers: &[ServerEntry],
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<ServerEntry, CommandError> {
+    writeln!(output, "Select a server:").map_err(CommandError::system)?;
+    for (index, server) in servers.iter().enumerate() {
+        writeln!(
+            output,
+            "  {}. {} ({})",
+            index + 1,
+            server.alias,
+            server.name
+        )
+        .map_err(CommandError::system)?;
+    }
+    write!(output, "Server: ").map_err(CommandError::system)?;
+    output.flush().map_err(CommandError::system)?;
+    let mut selection = String::new();
+    if input
+        .read_line(&mut selection)
+        .map_err(CommandError::system)?
+        == 0
+    {
+        return Err(CommandError::usage("no server selected"));
+    }
+    let index = selection
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| CommandError::usage("no server selected"))?;
+    index
+        .checked_sub(1)
+        .and_then(|index| servers.get(index))
+        .cloned()
+        .ok_or_else(|| CommandError::usage("no server selected"))
+}
+
+fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
+    let mut stream = connect(&server.endpoint)?;
+    let hello = ClientMsg::Hello {
+        user_id: server.user_id.clone(),
+        credential: server.credential.clone(),
+        version: env!("CARGO_PKG_VERSION").into(),
+    };
+    send(&mut stream, &hello)?;
+    let tree = welcome_tree(receive_reply(&mut stream)?)?;
+    Ok((stream, tree))
+}
+
+fn people(server: &ServerEntry) -> Result<Vec<Person>, CommandError> {
+    let (mut stream, _) = authenticate(server)?;
+    send(&mut stream, &ClientMsg::ListPeople)?;
+    people_reply(receive_reply(&mut stream)?)
+}
+
+fn welcome_tree(reply: ServerMsg) -> Result<Tree, CommandError> {
+    match reply {
+        ServerMsg::Welcome { tree, .. } => Ok(tree),
+        ServerMsg::Refused { reason } => Err(CommandError::usage(format!("refused: {reason}"))),
+        _ => Err(unexpected_reply()),
+    }
+}
+
+fn connect(endpoint: &str) -> Result<Socket, CommandError> {
+    let parsed = capsule::parse_endpoint(endpoint).ok_or_else(|| tcp_failure(endpoint))?;
+    let stream = match parsed {
+        Endpoint::Tcp(address) => {
+            Socket::from(TcpStream::connect(&address).map_err(|_| tcp_failure(endpoint))?)
+        }
+        Endpoint::Iroh(id) => connect_iroh(&id)?,
+    };
+    stream
+        .set_read_timeout(Some(NETWORK_TIMEOUT))
+        .map_err(CommandError::system)?;
+    stream
+        .set_write_timeout(Some(NETWORK_TIMEOUT))
+        .map_err(CommandError::system)?;
+    Ok(stream)
+}
+
+fn connect_iroh(id: &str) -> Result<Socket, CommandError> {
+    let directory = crate::store::config_dir().map_err(CommandError::system)?;
+    std::fs::create_dir_all(&directory).map_err(CommandError::system)?;
+    std::fs::set_permissions(&directory, std::fs::Permissions::from_mode(0o700))
+        .map_err(CommandError::system)?;
+    let secret_key = seer_net::load_or_create_secret_key(&directory.join("device.key"))
+        .map_err(CommandError::system)?;
+    let endpoint_id = seer_net::decode_endpoint_id(id).map_err(CommandError::system)?;
+    seer_net::dial(secret_key, endpoint_id)
+        .map(Socket::from)
+        .map_err(|_| {
+            CommandError::usage(
+                "Cannot reach the server. Check that the owner ran seer start and that you both have internet.",
+            )
+        })
+}
+
+fn tcp_failure(endpoint: &str) -> CommandError {
+    CommandError::usage(format!(
+        "Cannot reach {endpoint}. Check that the server is running and that you are on the same network."
+    ))
+}
+
+fn send(stream: &mut impl Stream, message: &ClientMsg) -> Result<(), CommandError> {
+    codec::encode(stream, message).map_err(CommandError::system)
+}
+
+fn receive(stream: &mut impl Stream) -> Result<ServerMsg, CommandError> {
+    codec::decode(stream).map_err(CommandError::system)
+}
+
+fn receive_reply(stream: &mut impl Stream) -> Result<ServerMsg, CommandError> {
+    receive_reply_before(stream, Instant::now() + NETWORK_TIMEOUT)
+}
+
+fn receive_reply_before<S: Stream>(
+    stream: &mut S,
+    deadline: Instant,
+) -> Result<ServerMsg, CommandError> {
+    loop {
+        let reply = codec::decode(&mut DeadlineReader { stream, deadline })
+            .map_err(CommandError::system)?;
+        if !matches!(
+            reply,
+            ServerMsg::Tree { .. } | ServerMsg::Frame { .. } | ServerMsg::Cells { .. }
+        ) {
+            return Ok(reply);
+        }
+    }
+}
+
+struct DeadlineReader<'a, S> {
+    stream: &'a mut S,
+    deadline: Instant,
+}
+
+impl<S: Stream> Read for DeadlineReader<'_, S> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let remaining = self
+            .deadline
+            .checked_duration_since(Instant::now())
+            .ok_or_else(|| io::Error::new(io::ErrorKind::TimedOut, "command reply timed out"))?;
+        self.stream.set_read_timeout(Some(remaining))?;
+        self.stream.read(buffer)
+    }
+}
 
 fn unexpected_reply() -> CommandError {
     CommandError::system("unexpected server reply")

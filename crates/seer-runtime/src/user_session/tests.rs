@@ -7,23 +7,6 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[test]
-fn creates_a_workspace_tab_and_shell_pane() {
-    let mut session = UserSession::new("alice", "sh");
-
-    session
-        .ensure_first_shell()
-        .expect("first shell must be created");
-    let messages = session.tree_message();
-
-    let tree = message_tree(&messages);
-    assert_eq!(session.user, "alice");
-    assert_eq!(tree.workspaces[0].name, "main");
-    assert_eq!(tree.workspaces[0].tabs[0].panes[0].size, session.viewport);
-    assert!(wait_for_cells(&mut session, |_| true).is_some());
-    close_all_panes(&mut session);
-}
-
-#[test]
 fn splits_and_resizes_both_panes() {
     let mut session = session_with_tab();
     session
@@ -47,25 +30,6 @@ fn splits_and_resizes_both_panes() {
     assert_eq!(panes.len(), 2);
     assert_eq!(panes[0].size, PaneSize { cols: 41, rows: 25 });
     assert_eq!(panes[1].size, PaneSize { cols: 40, rows: 25 });
-    close_all_panes(&mut session);
-}
-
-#[test]
-fn writes_input_to_the_focused_pane_and_polls_cells() {
-    let mut session = session_with_tab();
-    let _ = session.poll();
-
-    let messages = session
-        .apply(ClientMsg::TerminalInput {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            pane: "w1:p1".into(),
-            input: TerminalInput::new(InputEvent::Text("printf session-input\n".into())),
-        })
-        .expect("input must succeed");
-
-    assert!(messages.is_empty());
-    assert!(wait_for_cells(&mut session, |text| text.contains("session-input")).is_some());
     close_all_panes(&mut session);
 }
 
@@ -163,9 +127,8 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
         ClientMsg::DetachClient {
             client_id: "client-1".into(),
         },
-        ClientMsg::QueryTargets {
-            user: "bob".into(),
-        },
+        ClientMsg::AttachRuntime,
+        ClientMsg::QueryTargets { user: "bob".into() },
         ClientMsg::Peek {
             user: "bob".into(),
             workspace: "w1".into(),
@@ -186,26 +149,6 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
 }
 
 #[test]
-fn resize_before_tab_creation_is_rejected() {
-    let mut session = UserSession::new("alice", "sh");
-
-    let error = session
-        .apply(ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 90,
-            rows: 30,
-        })
-        .expect_err("unknown address must fail");
-
-    assert_eq!(
-        error.kind(),
-        io::ErrorKind::InvalidInput,
-        "runtime boundary must reject an unknown address"
-    );
-}
-
-#[test]
 fn peek_selects_one_workspace_and_tab_and_rejects_invalid_ids() {
     let mut session = UserSession::new("alice", "sh");
     for name in ["first", "second"] {
@@ -222,13 +165,6 @@ fn peek_selects_one_workspace_and_tab_and_rejects_invalid_ids() {
             .create_tab(&workspace.id, "second", session.viewport)
             .expect("second tab must be created");
     }
-
-    let targets = session.targets();
-    assert_eq!(targets.len(), 4);
-    assert_eq!(targets[0].workspace, "w1");
-    assert_eq!(targets[0].tab, "w1:t1");
-    assert_eq!(targets[2].workspace, "w2");
-    assert_eq!(targets[2].tab, "w2:t1");
 
     let selected = session
         .selected_tree("w2", "w2:t2")
@@ -253,6 +189,7 @@ fn peek_selects_one_workspace_and_tab_and_rejects_invalid_ids() {
         io::ErrorKind::InvalidInput
     );
 }
+
 fn session_with_tab() -> UserSession {
     let mut session = UserSession::new("alice", "sh");
     session

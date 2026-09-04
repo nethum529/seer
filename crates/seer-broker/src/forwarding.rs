@@ -40,7 +40,7 @@ struct Coordinator<'a> {
     events: Receiver<Event>,
     runtime: Option<RuntimeConnection>,
     peeking: bool,
-    querying_targets: bool,
+    querying_targets: Option<String>,
 }
 
 impl<'a> Coordinator<'a> {
@@ -63,19 +63,26 @@ impl<'a> Coordinator<'a> {
                 tree: Tree::new(),
             },
         )?;
-        let runtime =
-            match connect_runtime(broker, &owner.user_id, &owner.name, None, true, &event_sender) {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    write_client(
-                        &client,
-                        &ServerMsg::Refused {
-                            reason: error.to_string(),
-                        },
-                    )?;
-                    return Err(error);
-                }
-            };
+        let attach = ClientMsg::AttachRuntime;
+        let runtime = match connect_runtime(
+            broker,
+            &owner.user_id,
+            &owner.name,
+            Some(&attach),
+            true,
+            &event_sender,
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                write_client(
+                    &client,
+                    &ServerMsg::Refused {
+                        reason: error.to_string(),
+                    },
+                )?;
+                return Err(error);
+            }
+        };
         let client_reader = spawn_client_reader(client_reader, event_sender.clone());
         Ok(Self {
             client,
@@ -87,9 +94,10 @@ impl<'a> Coordinator<'a> {
             owner_is_admin: owner.is_owner,
             broker,
             event_sender,
+            events,
             runtime: Some(runtime),
             peeking: false,
-            querying_targets: false,
+            querying_targets: None,
         })
     }
 
@@ -151,7 +159,7 @@ impl<'a> Coordinator<'a> {
                     return Ok(Action::Continue);
                 };
                 match self.switch_runtime(&person.user_id, &person.name, Some(&message), false) {
-                    Ok(()) => self.querying_targets = true,
+                    Ok(()) => self.querying_targets = Some(person.user_id),
                     Err(error) => {
                         self.write_client(&ServerMsg::Refused {
                             reason: error.to_string(),
@@ -164,9 +172,14 @@ impl<'a> Coordinator<'a> {
                     eprintln!("broker dropped Peek for unknown user: {user}");
                     return Ok(Action::Continue);
                 };
-                match self.switch_runtime(&person.user_id, &person.name, Some(&message), false) {
+                let result = if self.querying_targets.as_deref() == Some(&person.user_id) {
+                    self.send_to_runtime(&message)
+                } else {
+                    self.switch_runtime(&person.user_id, &person.name, Some(&message), false)
+                };
+                match result {
                     Ok(()) => {
-                        self.querying_targets = false;
+                        self.querying_targets = None;
                         self.peeking = true;
                     }
                     Err(error) => {
@@ -178,13 +191,14 @@ impl<'a> Coordinator<'a> {
             }
             ClientMsg::StopPeek if self.peeking => self.stop_peek()?,
             ClientMsg::StopPeek => {}
-            message if self.querying_targets && is_mutating(&message) => {
+            message if self.querying_targets.is_some() && message.is_mutating() => {
                 eprintln!("broker dropped input while target selection is pending");
             }
             ClientMsg::TerminalCapabilities { .. } if self.peeking => {}
             ClientMsg::TerminalInput { .. } if self.peeking => {
                 eprintln!("broker dropped Input while user {} peeks", self.owner);
             }
+            message => self.send_to_runtime(&message)?,
         }
         Ok(Action::Continue)
     }
@@ -234,8 +248,9 @@ impl<'a> Coordinator<'a> {
 
     fn stop_peek(&mut self) -> io::Result<()> {
         self.peeking = false;
-        self.querying_targets = false;
-        self.switch_runtime(self.owner, self.owner_name, None, true)
+        self.querying_targets = None;
+        let attach = ClientMsg::AttachRuntime;
+        self.switch_runtime(self.owner, self.owner_name, Some(&attach), true)
     }
 
     fn switch_runtime(
@@ -282,17 +297,6 @@ impl<'a> Coordinator<'a> {
     }
 }
 
-fn is_mutating(message: &ClientMsg) -> bool {
-    matches!(
-        message,
-        ClientMsg::TerminalInput { .. }
-            | ClientMsg::CreateTab { .. }
-            | ClientMsg::SplitPane { .. }
-            | ClientMsg::ClosePane { .. }
-            | ClientMsg::FocusPane { .. }
-            | ClientMsg::Resize { .. }
-    )
-}
 fn write_client(client: &ClientWriter, message: &ServerMsg) -> io::Result<()> {
     codec::encode(&mut *lock_writer(client)?, message)
 }

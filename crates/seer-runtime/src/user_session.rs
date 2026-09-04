@@ -1,4 +1,5 @@
 use crate::PaneHost;
+use crate::persistence::{self, Store};
 use portable_pty::CommandBuilder;
 use seer_core::layout::{PaneRect, rects};
 use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg};
@@ -16,9 +17,10 @@ const DEFAULT_TAB_TITLE: &str = "shell";
 pub struct UserSession {
     pub user: String,
     pub tree: Tree,
-    shell: String,
-    viewport: PaneSize,
-    pane_hosts: BTreeMap<String, PaneHost>,
+    pub(crate) shell: String,
+    pub(crate) viewport: PaneSize,
+    pub(crate) pane_hosts: BTreeMap<String, PaneHost>,
+    pub(crate) store: Option<Store>,
 }
 
 impl UserSession {
@@ -33,6 +35,7 @@ impl UserSession {
                 rows: DEFAULT_ROWS,
             },
             pane_hosts: BTreeMap::new(),
+            store: None,
         }
     }
 
@@ -74,6 +77,7 @@ impl UserSession {
             | ClientMsg::Invite { .. }
             | ClientMsg::ListPeople
             | ClientMsg::DetachClient { .. }
+            | ClientMsg::AttachRuntime
             | ClientMsg::QueryTargets { .. }
             | ClientMsg::Peek { .. }
             | ClientMsg::StopPeek
@@ -119,7 +123,7 @@ impl UserSession {
     }
 
     #[must_use]
-    pub(crate) fn targets(&self) -> Vec<PeekTarget> {
+    pub(crate) fn targets(&self, active: Option<(&str, &str)>) -> Vec<PeekTarget> {
         self.tree
             .workspaces
             .iter()
@@ -129,6 +133,7 @@ impl UserSession {
                     workspace_name: workspace.name.clone(),
                     tab: tab.id.clone(),
                     tab_title: tab.title.clone(),
+                    active: active == Some((workspace.id.as_str(), tab.id.as_str())),
                 })
             })
             .collect()
@@ -161,6 +166,7 @@ impl UserSession {
         let host = self.start_host(&pane_rect)?;
 
         self.pane_hosts.insert(pane.to_owned(), host);
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
@@ -197,6 +203,7 @@ impl UserSession {
         let host = self.start_host(&pane_rect)?;
         self.pane_hosts.insert(new_pane.to_owned(), host);
         self.resize_tab(workspace, &tab.id)?;
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
@@ -216,12 +223,14 @@ impl UserSession {
         } else {
             self.resize_tab(workspace, tab)?;
         }
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
     fn focus_pane(&mut self, workspace: &str, tab: &str, pane: &str) -> io::Result<Vec<ServerMsg>> {
         self.validate_pane(workspace, tab, pane)?;
         self.tree.focus_pane(pane).map_err(tree_error)?;
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
@@ -257,6 +266,7 @@ impl UserSession {
         self.tab(workspace, tab)?;
         self.viewport = PaneSize { cols, rows };
         self.resize_tab(workspace, tab)?;
+        persistence::persist(self)?;
         Ok(self.tree_message())
     }
 
@@ -295,7 +305,7 @@ impl UserSession {
         Ok(())
     }
 
-    fn start_host(&self, pane_rect: &PaneRect) -> io::Result<PaneHost> {
+    pub(crate) fn start_host(&self, pane_rect: &PaneRect) -> io::Result<PaneHost> {
         let mut command = CommandBuilder::new(&self.shell);
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
@@ -395,7 +405,7 @@ fn invalid_input(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 
-fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
+pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
         Ok(())
     } else {

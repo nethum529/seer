@@ -9,13 +9,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::Tree;
-use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
 
 #[path = "support/server_io.rs"]
 mod server_io;
-
-#[path = "peek.rs"]
-mod peek;
 
 use server_io::receive;
 
@@ -297,7 +294,6 @@ fn invite_prints_the_worked_example_block() {
     assert!(output.stderr.is_empty());
     server.join().expect("server must finish");
 }
-
 
 fn assert_hello(stream: &mut TcpStream) {
     assert_eq!(

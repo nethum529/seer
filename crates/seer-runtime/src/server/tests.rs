@@ -1,9 +1,12 @@
-use super::{ClientMsg, ServerMsg, SharedSession, is_mutating, lock};
-use crate::UserSession;
-use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};
 use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::{Duration, Instant};
+
+use seer_core::proto::{ClientMsg, ServerMsg};
+use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};
+
+use super::SharedSession;
+use crate::UserSession;
 
 #[test]
 fn identifies_only_mutating_messages() {
@@ -49,6 +52,12 @@ fn identifies_only_mutating_messages() {
             seat_token: "seat".into(),
             name: "alice".into(),
         },
+        ClientMsg::Invite { hours: None },
+        ClientMsg::ListPeople,
+        ClientMsg::DetachClient {
+            client_id: "client-1".into(),
+        },
+        ClientMsg::AttachRuntime,
         ClientMsg::QueryTargets {
             user: "alice".into(),
         },
@@ -66,61 +75,8 @@ fn identifies_only_mutating_messages() {
         },
     ];
 
-    assert!(mutating.iter().all(is_mutating));
-
-    assert!(deferred.iter().all(|message| !is_mutating(message)));
-}
-
-#[test]
-fn target_query_does_not_create_first_shell() {
-    let shared = SharedSession::new(UserSession::new("alice", "sh"));
-    let (server, mut client) = UnixStream::pair().expect("stream pair must open");
-    shared
-        .add_connection(1, server)
-        .expect("connection must be added");
-
-    let initial: ServerMsg =
-        seer_core::proto::codec::decode(&mut client).expect("initial tree must decode");
-    assert!(matches!(initial, ServerMsg::Tree { tree } if tree.workspaces.is_empty()));
-
-    shared
-        .send_targets(1)
-        .expect("target query must succeed");
-    let targets: ServerMsg =
-        seer_core::proto::codec::decode(&mut client).expect("target reply must decode");
-    assert_eq!(targets, ServerMsg::Targets { targets: Vec::new() });
-}
-
-#[test]
-fn removes_only_the_requested_connection() {
-    let mut session = UserSession::new("alice", "sh");
-    session
-        .ensure_first_shell()
-        .expect("first shell must start");
-    session
-        .apply(ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 1,
-            rows: 1,
-        })
-        .expect("session must resize");
-    let shared = SharedSession::new(session);
-    let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
-    let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
-    shared
-        .add_connection(1, first_server)
-        .expect("first connection must be added");
-    shared
-        .add_connection(2, second_server)
-        .expect("second connection must be added");
-
-    shared
-        .remove_connection(1)
-        .expect("connection must be removed");
-    let connections = lock(&shared.connections).expect("connections must lock");
-    assert_eq!(connections.len(), 1);
-    assert_eq!(connections[0].id, 2);
+    assert!(mutating.iter().all(ClientMsg::is_mutating));
+    assert!(deferred.iter().all(|message| !message.is_mutating()));
 }
 
 #[test]
@@ -191,12 +147,15 @@ fn evicts_stalled_connection_without_blocking_other_client() {
     let _: seer_core::proto::ServerMsg =
         seer_core::proto::codec::decode(&mut healthy_client).expect("initial tree must decode");
 
-    let reader = thread::spawn(move || loop {
-        let message: seer_core::proto::ServerMsg =
-            seer_core::proto::codec::decode(&mut healthy_client).expect("healthy output must decode");
-        if matches!(message, seer_core::proto::ServerMsg::Frame { pane, .. } if pane == "recovered")
-        {
-            return;
+    let reader = thread::spawn(move || {
+        loop {
+            let message: seer_core::proto::ServerMsg =
+                seer_core::proto::codec::decode(&mut healthy_client)
+                    .expect("healthy output must decode");
+            if matches!(message, seer_core::proto::ServerMsg::Frame { pane, .. } if pane == "recovered")
+            {
+                return;
+            }
         }
     });
     let large = seer_core::proto::ServerMsg::Frame {

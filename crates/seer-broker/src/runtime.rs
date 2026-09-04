@@ -124,6 +124,7 @@ impl RuntimeManager {
             .arg(socket_path)
             .arg(user_id)
             .arg(identity.shell())
+            .env("SEER_SNAPSHOT_DIR", state_directory)
             .current_dir(state_directory)
             .stdin(Stdio::from(reader));
         identity.apply(&mut command)?;
