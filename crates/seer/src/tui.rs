@@ -108,6 +108,9 @@ fn run_loop<S: Stream>(
         if received != LoopControl::Continue {
             return Ok(received);
         }
+        if drawer.tick_preview() {
+            dirty = true;
+        }
         if dirty {
             terminal.draw(|frame| draw(frame, &mut state, &drawer))?;
             set_cursor_style(&state)?;
@@ -482,7 +485,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState, drawer: &Drawer
 }
 
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 #[cfg(test)]
 mod tests;

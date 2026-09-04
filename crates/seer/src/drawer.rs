@@ -6,7 +6,8 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use seer_core::proto::{Person, PersonState};
 
-use crate::render::draw_tree;
+use crate::preview::Preview;
+use crate::render::{PaneCells, draw_tree};
 use crate::state::ClientState;
 
 const HANDLE_WIDTH: u16 = 1;
@@ -17,6 +18,8 @@ pub(crate) struct Drawer {
     open: bool,
     people: Vec<Person>,
     selected: usize,
+    preview: Option<Preview>,
+    preview_target: Option<String>,
 }
 
 impl Drawer {
@@ -31,6 +34,39 @@ impl Drawer {
     pub(crate) fn set_people(&mut self, people: Vec<Person>) {
         self.people = people;
         self.selected = self.selected.min(self.people.len().saturating_sub(1));
+    }
+
+    pub(crate) fn tick_preview(&mut self) -> bool {
+        self.sync_preview();
+        match self.preview.as_mut().map(Preview::tick) {
+            Some(Ok(redraw)) => redraw,
+            Some(Err(_)) => {
+                self.preview = None;
+                true
+            }
+            None => false,
+        }
+    }
+
+    fn sync_preview(&mut self) {
+        let wanted = self.highlighted().map(|person| person.user_id.clone());
+        if wanted == self.preview_target {
+            return;
+        }
+        self.preview = None;
+        self.preview_target = wanted;
+        if let Some(person) = self.highlighted() {
+            self.preview = Preview::open(person).ok();
+        }
+    }
+
+    fn highlighted(&self) -> Option<&Person> {
+        if !self.open {
+            return None;
+        }
+        self.people
+            .get(self.selected)
+            .filter(|person| person.peekable)
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
@@ -80,13 +116,58 @@ pub(crate) fn draw(
         handle_area(full_area),
     );
     if drawer.is_open() {
-        let area = drawer_area(full_area);
-        frame.render_widget(Clear, area);
-        let block = Block::default().borders(Borders::ALL).title("People");
-        let inner = block.inner(area);
-        frame.render_widget(block, area);
-        frame.render_widget(Paragraph::new(people_lines(drawer, inner.width)), inner);
+        draw_drawer(frame, drawer, drawer_area(full_area));
     }
+}
+
+fn draw_drawer(frame: &mut Frame<'_>, drawer: &Drawer, area: Rect) {
+    frame.render_widget(Clear, area);
+    let list_height = list_height(drawer, area);
+    let list = Rect::new(area.x, area.y, area.width, list_height);
+    let block = Block::default().borders(Borders::ALL).title("People");
+    let inner = block.inner(list);
+    frame.render_widget(block, list);
+    frame.render_widget(Paragraph::new(people_lines(drawer, inner.width)), inner);
+    draw_preview(
+        frame,
+        drawer,
+        Rect::new(
+            area.x,
+            area.y.saturating_add(list_height),
+            area.width,
+            area.height.saturating_sub(list_height),
+        ),
+    );
+}
+
+fn list_height(drawer: &Drawer, area: Rect) -> u16 {
+    if drawer.preview.is_none() {
+        return area.height;
+    }
+    let rows = u16::try_from(drawer.people.len()).unwrap_or(u16::MAX);
+    rows.saturating_add(2).min(area.height / 2).min(area.height)
+}
+
+fn draw_preview(frame: &mut Frame<'_>, drawer: &Drawer, area: Rect) {
+    let (Some(preview), Some(person)) = (drawer.preview.as_ref(), drawer.highlighted()) else {
+        return;
+    };
+    if area.height == 0 {
+        return;
+    }
+    frame.render_widget(
+        Paragraph::new(format!("{} live", person.name)),
+        Rect::new(area.x, area.y, area.width, 1),
+    );
+    frame.render_widget(
+        PaneCells::new(preview.rows()),
+        Rect::new(
+            area.x,
+            area.y.saturating_add(1),
+            area.width,
+            area.height.saturating_sub(1),
+        ),
+    );
 }
 
 fn people_lines(drawer: &Drawer, width: u16) -> Vec<Line<'static>> {

@@ -12,9 +12,9 @@ use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
-pub(crate) use selection::peek;
+pub(crate) use selection::{peek, selected_server};
 mod selection;
-use selection::{select_client, selected_server};
+use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
 const INSTALL_URL: &str =
     "https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh";
@@ -296,7 +296,7 @@ fn edit_distance_at_most_one(left: &[u8], right: &[u8]) -> bool {
     differences == 0 || long_index == longer.len()
 }
 
-fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
+pub(crate) fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
     let mut stream = connect(&server.endpoint)?;
     let hello = ClientMsg::Hello {
         user_id: server.user_id.clone(),

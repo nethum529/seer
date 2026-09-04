@@ -61,7 +61,7 @@ fn pick_client(
         .ok_or_else(|| CommandError::usage("no client selected"))
 }
 
-pub(super) fn selected_server() -> Result<ServerEntry, CommandError> {
+pub(crate) fn selected_server() -> Result<ServerEntry, CommandError> {
     let store = ServerStore::load().map_err(CommandError::system)?;
     if store.servers.is_empty() {
         return Err(CommandError::usage("run seer join first"));
