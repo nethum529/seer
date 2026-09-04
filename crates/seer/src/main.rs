@@ -3,6 +3,7 @@ use std::process::ExitCode;
 mod capsule;
 mod cli;
 mod commands;
+mod drawer;
 mod input;
 mod prompt;
 mod render;
