@@ -1,5 +1,5 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
@@ -51,14 +51,14 @@ fn help_detach_and_missing_attach_have_exact_results() {
 }
 
 #[test]
-fn join_retries_the_name_once_saves_private_store_and_attaches() {
+fn join_persists_private_store_without_seat_token_and_reconnects_after_restart() {
     let config = TestConfig::new();
-    let listener = listener();
-    let address = listener
-        .local_addr()
-        .expect("listener must have an address");
+    let listener =
+        seer_net::Listener::bind(seer_net::SecretKey::generate()).expect("iroh listener must bind");
+    let endpoint = listener.id().to_string();
+    let alias = endpoint[..8].to_owned();
     let server = thread::spawn(move || {
-        let mut first = accept(&listener);
+        let (device_id, mut first) = listener.accept().expect("first client must connect");
         assert_eq!(
             receive(&mut first),
             ClientMsg::Join {
@@ -73,7 +73,8 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
             },
         );
 
-        let mut second = accept(&listener);
+        let (retry_id, mut second) = listener.accept().expect("retry client must connect");
+        assert_eq!(retry_id, device_id);
         assert_eq!(
             receive(&mut second),
             ClientMsg::Join {
@@ -91,7 +92,8 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
         );
         drop(second);
 
-        let mut attached = accept(&listener);
+        let (attached_id, mut attached) = listener.accept().expect("first attach must connect");
+        assert_eq!(attached_id, device_id);
         assert_eq!(
             receive(&mut attached),
             ClientMsg::Hello {
@@ -101,44 +103,41 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
             }
         );
         send_welcome(&mut attached, "user-bob", "bob");
+        let (restarted_id, mut restarted) = listener.accept().expect("second attach must connect");
+        assert_eq!(restarted_id, device_id);
+        assert_hello(&mut restarted);
+        send_welcome(&mut restarted, "user-bob", "bob");
     });
-    let capsule = format!(
-        "SEER1-127.0.0.1-{}-seat-token\nalice\nbob\n",
-        address.port()
-    );
-
+    let capsule = format!("SEER2-{endpoint}-seat-token\nalice\nbob\n");
     let output = run(&config, &["join"], &capsule);
 
-    assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.is_empty());
+    assert!(output.status.success() && output.stderr.is_empty());
     assert_eq!(
         text(&output.stdout),
         format!(
-            "Invitation: Server: 127.0.0.1:{}\nName: That name is in use.\nName: Joined as bob. Attaching...\n",
-            address.port()
+            "Invitation: Server: iroh:{endpoint}\nName: That name is in use.\nName: Joined as bob. Attaching...\n"
         )
     );
-    server.join().expect("server must finish");
     let store_path = config.root.join("seer/servers.toml");
     let store = fs::read_to_string(&store_path).expect("store must be readable");
-    assert!(store.contains("name = \"bob\""));
     assert!(store.contains("credential = \"device-secret\""));
+    assert!(!store.contains("seat-token"));
+    let key_path = config.root.join("seer/device.key");
     assert_eq!(
-        fs::metadata(&store_path)
-            .expect("store metadata must load")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o600
+        fs::read(&key_path)
+            .expect("device key must be readable")
+            .len(),
+        32
     );
+    assert_eq!(mode(&key_path), 0o600);
+    let restarted = run(&config, &["attach"], "");
     assert_eq!(
-        fs::metadata(config.root.join("seer"))
-            .expect("directory metadata must load")
-            .permissions()
-            .mode()
-            & 0o777,
-        0o700
+        text(&restarted.stdout),
+        format!("Attached to {alias} as bob.\n")
     );
+    server.join().expect("server must finish");
+    assert_eq!(mode(&store_path), 0o600);
+    assert_eq!(mode(&config.root.join("seer")), 0o700);
 }
 
 #[test]
@@ -343,7 +342,7 @@ fn peek_requires_an_exact_name_and_sends_the_user_id() {
     server.join().expect("server must finish");
 }
 
-fn assert_hello(stream: &mut TcpStream) {
+fn assert_hello(stream: &mut impl Read) {
     assert_eq!(
         receive(stream),
         ClientMsg::Hello {
@@ -354,7 +353,7 @@ fn assert_hello(stream: &mut TcpStream) {
     );
 }
 
-fn send_welcome(stream: &mut TcpStream, user_id: &str, name: &str) {
+fn send_welcome(stream: &mut impl Write, user_id: &str, name: &str) {
     send(
         stream,
         &ServerMsg::Welcome {
@@ -375,7 +374,7 @@ fn person(user_id: &str, name: &str, attached_clients: u32) -> Person {
     }
 }
 
-fn send(stream: &mut TcpStream, message: &ServerMsg) {
+fn send(stream: &mut impl Write, message: &ServerMsg) {
     codec::encode(stream, message).expect("server message must encode");
 }
 
@@ -492,4 +491,9 @@ impl Drop for TestConfig {
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8(bytes.to_vec()).expect("output must be UTF-8")
+}
+
+fn mode(path: &Path) -> u32 {
+    let metadata = fs::metadata(path).expect("metadata must load");
+    metadata.permissions().mode() & 0o777
 }
