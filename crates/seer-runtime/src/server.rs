@@ -16,7 +16,8 @@ mod util;
 mod writer;
 
 use connection::{
-    Connection, ReportedViewport, evict_connection, grant_next_owner, reported_viewport,
+    Connection, ReportedViewport, evict_connection, grant_next_owner, handle_target_query,
+    reported_viewport,
 };
 use util::{connection_closed, lock, stop_after_snapshot_failure};
 
@@ -69,7 +70,21 @@ fn handle_connection(
     shared: &SharedSession,
     connection_id: u64,
 ) -> io::Result<()> {
-    shared.add_connection(connection_id, stream.try_clone()?)?;
+    let Ok(first) = codec::decode(&mut stream) else {
+        return Ok(());
+    };
+    match first {
+        ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
+        ClientMsg::QueryTargets { .. } => {
+            return handle_target_query(&mut stream, shared, connection_id);
+        }
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected runtime attach",
+            ));
+        }
+    }
     let result = connection_loop(&mut stream, shared, connection_id);
     shared.remove_connection(connection_id)?;
     let _ = stream.shutdown(std::net::Shutdown::Both);
@@ -117,21 +132,9 @@ fn handle_message(
         ClientMsg::TerminalCapabilities { capabilities } => {
             shared.record_capabilities(connection_id, capabilities)
         }
-        message if is_mutating(&message) => shared.dispatch_input(connection_id, message),
+        message if message.is_mutating() => shared.dispatch_input(connection_id, message),
         _ => Ok(false),
     }
-}
-
-fn is_mutating(message: &ClientMsg) -> bool {
-    matches!(
-        message,
-        ClientMsg::TerminalInput { .. }
-            | ClientMsg::CreateTab { .. }
-            | ClientMsg::SplitPane { .. }
-            | ClientMsg::ClosePane { .. }
-            | ClientMsg::FocusPane { .. }
-            | ClientMsg::Resize { .. }
-    )
 }
 
 fn start_poll_driver(shared: Arc<SharedSession>) -> io::Result<()> {

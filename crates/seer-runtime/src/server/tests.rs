@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};
 
-use super::{SharedSession, is_mutating};
+use super::SharedSession;
 use crate::UserSession;
 
 #[test]
@@ -57,6 +57,10 @@ fn identifies_only_mutating_messages() {
         ClientMsg::DetachClient {
             client_id: "client-1".into(),
         },
+        ClientMsg::AttachRuntime,
+        ClientMsg::QueryTargets {
+            user: "alice".into(),
+        },
         ClientMsg::Peek {
             user: "alice".into(),
             workspace: "w1".into(),
@@ -71,8 +75,8 @@ fn identifies_only_mutating_messages() {
         },
     ];
 
-    assert!(mutating.iter().all(is_mutating));
-    assert!(deferred.iter().all(|message| !is_mutating(message)));
+    assert!(mutating.iter().all(ClientMsg::is_mutating));
+    assert!(deferred.iter().all(|message| !message.is_mutating()));
 }
 
 #[test]

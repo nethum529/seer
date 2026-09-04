@@ -12,6 +12,7 @@ use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
+pub(crate) use selection::peek;
 mod selection;
 use selection::{select_client, selected_server};
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -215,33 +216,6 @@ fn list_server(server: &ServerEntry) -> ListRow {
             people: String::new(),
         },
     }
-}
-
-pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
-    let server = selected_server()?;
-    let (mut stream, tree) = authenticate(&server)?;
-    send(&mut stream, &ClientMsg::ListPeople)?;
-    let people = people_reply(receive_reply(&mut stream)?)?;
-    let Some(person) = people.iter().find(|person| person.name == target) else {
-        print_close_names(target, &people);
-        return Err(CommandError::usage(format!("no person named {target}")));
-    };
-    let peek = ClientMsg::Peek {
-        user: person.user_id.clone(),
-        workspace: "w1".into(),
-        tab: "w1:t1".into(),
-    };
-    send(&mut stream, &peek)?;
-    println!("PEEK: {} - READ ONLY", person.name);
-    println!("Workspace: {}/w1", person.name);
-    finish_session(
-        io::stdout().is_terminal(),
-        stream,
-        tree,
-        Some(&person.name),
-        &server.alias,
-        tui::run,
-    )
 }
 
 fn receive_clients(stream: &mut impl Stream) -> Result<Vec<ClientInfo>, CommandError> {

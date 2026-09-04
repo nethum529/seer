@@ -1,22 +1,19 @@
 use std::fs;
-use std::io::{Read, Write};
-use std::net::{TcpListener, TcpStream};
 use std::os::unix::fs::PermissionsExt;
-use std::path::{Path, PathBuf};
-use std::process::{Command, Output, Stdio};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::path::Path;
 use std::thread;
-use std::time::{Duration, Instant};
 
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg};
 
+#[path = "support/cli.rs"]
+mod cli_support;
 #[path = "support/server_io.rs"]
 mod server_io;
 
+use cli_support::{
+    TestConfig, accept, assert_hello, listener, person, run, send, send_welcome, text,
+};
 use server_io::receive;
-
-static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn help_detach_and_missing_attach_have_exact_results() {
@@ -294,155 +291,6 @@ fn invite_prints_the_worked_example_block() {
     server.join().expect("server must finish");
 }
 
-#[test]
-fn peek_requires_an_exact_name_and_sends_the_user_id() {
-    let config = TestConfig::new();
-    let listener = listener();
-    let address = listener
-        .local_addr()
-        .expect("listener must have an address");
-    write_store(&config, &[saved(address.port(), "team.example.com", true)]);
-    let server = thread::spawn(move || {
-        for exact in [false, true] {
-            let mut stream = accept(&listener);
-            assert_hello(&mut stream);
-            send_welcome(&mut stream, "user-bob", "bob");
-            assert_eq!(receive(&mut stream), ClientMsg::ListPeople);
-            send(
-                &mut stream,
-                &ServerMsg::People {
-                    people: vec![person("user-alice", "alice", 1)],
-                },
-            );
-            if exact {
-                assert_eq!(
-                    receive(&mut stream),
-                    ClientMsg::Peek {
-                        user: "user-alice".into(),
-                        workspace: "w1".into(),
-                        tab: "w1:t1".into(),
-                    }
-                );
-            }
-        }
-    });
-
-    let close = run(&config, &["peek", "alic"], "");
-    assert_eq!(close.status.code(), Some(1));
-    assert!(close.stdout.is_empty());
-    assert_eq!(close.stderr, b"Close names: alice\nno person named alic\n");
-
-    let exact = run(&config, &["peek", "alice"], "");
-    assert_eq!(exact.status.code(), Some(0));
-    assert_eq!(
-        exact.stdout,
-        b"PEEK: alice - READ ONLY\nWorkspace: alice/w1\n"
-    );
-    assert!(exact.stderr.is_empty());
-    server.join().expect("server must finish");
-}
-
-fn assert_hello(stream: &mut impl Read) {
-    assert_eq!(
-        receive(stream),
-        ClientMsg::Hello {
-            user_id: "user-bob".into(),
-            credential: "device-secret".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        }
-    );
-}
-
-fn send_welcome(stream: &mut impl Write, user_id: &str, name: &str) {
-    send(
-        stream,
-        &ServerMsg::Welcome {
-            user_id: user_id.into(),
-            name: name.into(),
-            client_id: "client-1".into(),
-            tree: Tree::new(),
-        },
-    );
-}
-
-fn person(user_id: &str, name: &str, attached_clients: u32) -> Person {
-    Person {
-        user_id: user_id.into(),
-        name: name.into(),
-        attached_clients,
-        peekable: true,
-    }
-}
-
-fn send(stream: &mut impl Write, message: &ServerMsg) {
-    codec::encode(stream, message).expect("server message must encode");
-}
-
-fn listener() -> TcpListener {
-    TcpListener::bind("127.0.0.1:0").expect("listener must bind")
-}
-
-fn accept(listener: &TcpListener) -> TcpStream {
-    listener
-        .set_nonblocking(true)
-        .expect("listener must become nonblocking");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        match listener.accept() {
-            Ok((stream, _)) => {
-                stream
-                    .set_nonblocking(false)
-                    .expect("accepted stream must become blocking");
-                stream
-                    .set_read_timeout(Some(Duration::from_millis(100)))
-                    .expect("read timeout must be set");
-                stream
-                    .set_write_timeout(Some(Duration::from_secs(5)))
-                    .expect("write timeout must be set");
-                return stream;
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::WouldBlock => {
-                assert!(Instant::now() < deadline, "server accept timed out");
-                thread::sleep(Duration::from_millis(10));
-            }
-            Err(error) => panic!("server accept failed: {error}"),
-        }
-    }
-}
-
-fn run(config: &TestConfig, arguments: &[&str], input: &str) -> Output {
-    let mut child = Command::new(env!("CARGO_BIN_EXE_seer"))
-        .args(arguments)
-        .env("XDG_CONFIG_HOME", &config.root)
-        .stdin(Stdio::piped())
-        .stdout(Stdio::piped())
-        .stderr(Stdio::piped())
-        .spawn()
-        .expect("seer must start");
-    child
-        .stdin
-        .take()
-        .expect("stdin must be piped")
-        .write_all(input.as_bytes())
-        .expect("input must be written");
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if child
-            .try_wait()
-            .expect("seer status must be available")
-            .is_some()
-        {
-            return child.wait_with_output().expect("seer output must be read");
-        }
-        if Instant::now() >= deadline {
-            child.kill().expect("seer must be killed after timeout");
-            let _ = child.wait();
-            panic!("seer did not finish before timeout");
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
 fn write_store(config: &TestConfig, servers: &[SavedServer]) {
     let directory = config.root.join("seer");
     fs::create_dir_all(&directory).expect("config directory must exist");
@@ -468,29 +316,6 @@ struct SavedServer {
     endpoint: String,
     alias: String,
     current: bool,
-}
-
-struct TestConfig {
-    root: PathBuf,
-}
-
-impl TestConfig {
-    fn new() -> Self {
-        let number = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
-        let root = Path::new("/tmp").join(format!("s2-{}-{number}", std::process::id()));
-        fs::create_dir_all(&root).expect("test directory must exist");
-        Self { root }
-    }
-}
-
-impl Drop for TestConfig {
-    fn drop(&mut self) {
-        let _ = fs::remove_dir_all(&self.root);
-    }
-}
-
-fn text(bytes: &[u8]) -> String {
-    String::from_utf8(bytes.to_vec()).expect("output must be UTF-8")
 }
 
 fn mode(path: &Path) -> u32 {

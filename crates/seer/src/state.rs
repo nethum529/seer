@@ -35,7 +35,9 @@ impl ClientState {
         }
     }
 
-    pub(crate) fn replace_tree(&mut self, tree: Tree) {
+    pub(crate) fn replace_tree(&mut self, tree: Tree) -> bool {
+        let previous_workspace = self.selected_workspace.clone();
+        let previous_tab = self.selected_tab.clone();
         self.tree = tree;
         if self.visible_tab().is_none() {
             (self.selected_workspace, self.selected_tab) = first_selection(&self.tree)
@@ -50,6 +52,7 @@ impl ClientState {
         if !focus_is_valid {
             self.focused = self.visible_tab().and_then(preferred_focus);
         }
+        previous_workspace != self.selected_workspace || previous_tab != self.selected_tab
     }
 
     pub(crate) fn apply_frame(&mut self, pane: String, frame: TerminalFrame) {

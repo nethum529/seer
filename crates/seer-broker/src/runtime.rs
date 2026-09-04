@@ -50,6 +50,17 @@ impl RuntimeManager {
         self.connect_with_retries(user_id, person_name, CONNECT_RETRIES)
     }
 
+    pub(crate) fn connect_existing(
+        &self,
+        user_id: &str,
+        person_name: &str,
+    ) -> io::Result<UnixStream> {
+        let identity = self.identity(person_name)?;
+        identity.check_switch_rights()?;
+        let socket_path = runtime_socket_path(user_id, &identity, &self.state_dir)?;
+        UnixStream::connect(socket_path)
+    }
+
     fn connect_with_retries(
         &self,
         user_id: &str,
@@ -58,20 +69,21 @@ impl RuntimeManager {
     ) -> io::Result<UnixStream> {
         let identity = self.identity(person_name)?;
         identity.check_switch_rights()?;
+        let socket_path = runtime_socket_path(user_id, &identity, &self.state_dir)?;
+        if let Ok(stream) = UnixStream::connect(&socket_path) {
+            return Ok(stream);
+        }
+
         let users_directory = self.state_dir.join("users");
         create_private_directory(&users_directory)?;
         let state_directory = self.user_state_directory(user_id);
         identity.prepare_directory(&state_directory)?;
         allow_identity_traversal(&users_directory, &identity)?;
-        let socket_path = runtime_socket_path(user_id, &identity, &self.state_dir)?;
+        prepare_runtime_socket_path(&socket_path, &identity)?;
         let mut processes = self
             .processes
             .lock()
             .map_err(|_| io::Error::other("runtime process lock is poisoned"))?;
-
-        if let Ok(stream) = UnixStream::connect(&socket_path) {
-            return Ok(stream);
-        }
 
         let process_is_running = match processes.get_mut(user_id) {
             Some(process) => runtime_is_running(user_id, process)?,
@@ -205,16 +217,22 @@ fn runtime_socket_path(user: &str, identity: &OsIdentity, state_dir: &Path) -> i
     let xdg_runtime_dir = env::var_os("XDG_RUNTIME_DIR").filter(|value| !value.is_empty());
     let broker_uid = process_uid();
     let directory = runtime_directory_path(state_dir, xdg_runtime_dir, broker_uid, identity.uid());
+    let path = directory.join(format!("{user}.sock"));
+    validate_socket_path(&path)?;
+    Ok(path)
+}
+
+fn prepare_runtime_socket_path(path: &Path, identity: &OsIdentity) -> io::Result<()> {
+    let directory = path
+        .parent()
+        .ok_or_else(|| io::Error::other("runtime socket directory has no parent"))?;
     let parent = directory
         .parent()
         .ok_or_else(|| io::Error::other("runtime socket directory has no parent"))?;
     if !parent.exists() {
         create_private_directory(parent)?;
     }
-    identity.prepare_directory(&directory)?;
-    let path = directory.join(format!("{user}.sock"));
-    validate_socket_path(&path)?;
-    Ok(path)
+    identity.prepare_directory(directory)
 }
 
 fn allow_identity_traversal(directory: &Path, identity: &OsIdentity) -> io::Result<()> {

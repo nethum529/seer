@@ -40,6 +40,7 @@ struct Coordinator<'a> {
     events: Receiver<Event>,
     runtime: Option<RuntimeConnection>,
     peeking: bool,
+    querying_targets: Option<String>,
 }
 
 impl<'a> Coordinator<'a> {
@@ -62,19 +63,26 @@ impl<'a> Coordinator<'a> {
                 tree: Tree::new(),
             },
         )?;
-        let runtime =
-            match connect_runtime(broker, &owner.user_id, &owner.name, None, &event_sender) {
-                Ok(runtime) => runtime,
-                Err(error) => {
-                    write_client(
-                        &client,
-                        &ServerMsg::Refused {
-                            reason: error.to_string(),
-                        },
-                    )?;
-                    return Err(error);
-                }
-            };
+        let attach = ClientMsg::AttachRuntime;
+        let runtime = match connect_runtime(
+            broker,
+            &owner.user_id,
+            &owner.name,
+            Some(&attach),
+            true,
+            &event_sender,
+        ) {
+            Ok(runtime) => runtime,
+            Err(error) => {
+                write_client(
+                    &client,
+                    &ServerMsg::Refused {
+                        reason: error.to_string(),
+                    },
+                )?;
+                return Err(error);
+            }
+        };
         let client_reader = spawn_client_reader(client_reader, event_sender.clone());
         Ok(Self {
             client,
@@ -89,6 +97,7 @@ impl<'a> Coordinator<'a> {
             events,
             runtime: Some(runtime),
             peeking: false,
+            querying_targets: None,
         })
     }
 
@@ -142,16 +151,49 @@ impl<'a> Coordinator<'a> {
                     })?;
                 }
             }
+            ClientMsg::QueryTargets { ref user } if !self.peeking => {
+                let Some(person) = self.person(user)? else {
+                    self.write_client(&ServerMsg::Refused {
+                        reason: "person not found".into(),
+                    })?;
+                    return Ok(Action::Continue);
+                };
+                match self.switch_runtime(&person.user_id, &person.name, Some(&message), false) {
+                    Ok(()) => self.querying_targets = Some(person.user_id),
+                    Err(error) => {
+                        self.write_client(&ServerMsg::Refused {
+                            reason: error.to_string(),
+                        })?;
+                    }
+                }
+            }
             ClientMsg::Peek { ref user, .. } => {
                 let Some(person) = self.person(user)? else {
                     eprintln!("broker dropped Peek for unknown user: {user}");
                     return Ok(Action::Continue);
                 };
-                self.switch_runtime(&person.user_id, &person.name, Some(&message))?;
-                self.peeking = true;
+                let result = if self.querying_targets.as_deref() == Some(&person.user_id) {
+                    self.send_to_runtime(&message)
+                } else {
+                    self.switch_runtime(&person.user_id, &person.name, Some(&message), false)
+                };
+                match result {
+                    Ok(()) => {
+                        self.querying_targets = None;
+                        self.peeking = true;
+                    }
+                    Err(error) => {
+                        self.write_client(&ServerMsg::Refused {
+                            reason: error.to_string(),
+                        })?;
+                    }
+                }
             }
             ClientMsg::StopPeek if self.peeking => self.stop_peek()?,
             ClientMsg::StopPeek => {}
+            message if self.querying_targets.is_some() && message.is_mutating() => {
+                eprintln!("broker dropped input while target selection is pending");
+            }
             ClientMsg::TerminalCapabilities { .. } if self.peeking => {}
             ClientMsg::TerminalInput { .. } if self.peeking => {
                 eprintln!("broker dropped Input while user {} peeks", self.owner);
@@ -206,7 +248,9 @@ impl<'a> Coordinator<'a> {
 
     fn stop_peek(&mut self) -> io::Result<()> {
         self.peeking = false;
-        self.switch_runtime(self.owner, self.owner_name, None)
+        self.querying_targets = None;
+        let attach = ClientMsg::AttachRuntime;
+        self.switch_runtime(self.owner, self.owner_name, Some(&attach), true)
     }
 
     fn switch_runtime(
@@ -214,15 +258,18 @@ impl<'a> Coordinator<'a> {
         user: &str,
         person_name: &str,
         first: Option<&ClientMsg>,
+        start: bool,
     ) -> io::Result<()> {
-        self.close_runtime()?;
-        self.runtime = Some(connect_runtime(
+        let runtime = connect_runtime(
             self.broker,
             user,
             person_name,
             first,
+            start,
             &self.event_sender,
-        )?);
+        )?;
+        self.close_runtime()?;
+        self.runtime = Some(runtime);
         Ok(())
     }
 
@@ -265,9 +312,14 @@ fn connect_runtime(
     user: &str,
     person_name: &str,
     first: Option<&ClientMsg>,
+    start: bool,
     sender: &SyncSender<Event>,
 ) -> io::Result<RuntimeConnection> {
-    let mut stream = broker.runtimes().connect(user, person_name)?;
+    let mut stream = if start {
+        broker.runtimes().connect(user, person_name)?
+    } else {
+        broker.runtimes().connect_existing(user, person_name)?
+    };
     if let Some(message) = first {
         codec::encode(&mut stream, message)?;
     }

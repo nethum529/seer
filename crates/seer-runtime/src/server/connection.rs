@@ -5,9 +5,9 @@ use std::sync::mpsc::{self, SyncSender};
 use std::time::Instant;
 
 use seer_core::TerminalCapabilities;
-use seer_core::proto::ServerMsg;
+use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, codec};
 
-use super::writer;
+use super::{SharedSession, connection_closed, connection_loop, lock, writer};
 
 // A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
 const OUTPUT_QUEUE_CAPACITY: usize = 64;
@@ -94,4 +94,80 @@ pub(super) fn evict_connection(connections: &mut Vec<Connection>, position: usiz
     let removed_owner = connections[position].size_owner;
     connections.remove(position);
     removed_owner
+}
+
+pub(super) fn handle_target_query(
+    stream: &mut UnixStream,
+    shared: &SharedSession,
+    connection_id: u64,
+) -> io::Result<()> {
+    shared.write_targets(stream)?;
+    let Ok(message) = codec::decode(stream) else {
+        return Ok(());
+    };
+    let ClientMsg::Peek { workspace, tab, .. } = message else {
+        return Ok(());
+    };
+    match shared.add_peek_connection(connection_id, stream.try_clone()?, &workspace, &tab) {
+        Ok(()) => {}
+        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+            codec::encode(
+                stream,
+                &ServerMsg::Refused {
+                    reason: error.to_string(),
+                },
+            )?;
+            return Ok(());
+        }
+        Err(error) => return Err(error),
+    }
+    let result = connection_loop(stream, shared, connection_id);
+    shared.remove_connection(connection_id)?;
+    result
+}
+
+impl SharedSession {
+    fn add_peek_connection(
+        &self,
+        id: u64,
+        stream: UnixStream,
+        workspace: &str,
+        tab: &str,
+    ) -> io::Result<()> {
+        let messages = {
+            let session = lock(&self.session)?;
+            let tree = session.selected_tree(workspace, tab)?;
+            session.snapshot_for(tree)
+        };
+        let mut connection = Connection::new(id, stream)?;
+        connection.read_only = true;
+        if !connection.send_messages(&messages)? {
+            return Err(connection_closed());
+        }
+        lock(&self.connections)?.push(connection);
+        Ok(())
+    }
+
+    fn write_targets(&self, stream: &mut UnixStream) -> io::Result<()> {
+        codec::encode(
+            stream,
+            &ServerMsg::Targets {
+                targets: self.targets()?,
+            },
+        )
+    }
+
+    fn targets(&self) -> io::Result<Vec<PeekTarget>> {
+        let active = lock(&self.connections)?
+            .iter()
+            .find(|connection| connection.size_owner)
+            .and_then(|connection| connection.viewport.as_ref())
+            .map(|viewport| (viewport.workspace.clone(), viewport.tab.clone()));
+        let session = lock(&self.session)?;
+        Ok(session.targets(
+            active
+                .as_ref()
+                .map(|(workspace, tab)| (workspace.as_str(), tab.as_str())),
+        ))
+    }
 }

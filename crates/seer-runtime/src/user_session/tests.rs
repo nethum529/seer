@@ -127,6 +127,8 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
         ClientMsg::DetachClient {
             client_id: "client-1".into(),
         },
+        ClientMsg::AttachRuntime,
+        ClientMsg::QueryTargets { user: "bob".into() },
         ClientMsg::Peek {
             user: "bob".into(),
             workspace: "w1".into(),

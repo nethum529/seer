@@ -60,7 +60,11 @@ pub fn connect_when_ready(path: &Path) -> UnixStream {
     let deadline = Instant::now() + CONNECT_TIMEOUT;
     loop {
         match UnixStream::connect(path) {
-            Ok(stream) => return stream,
+            Ok(mut stream) => {
+                codec::encode(&mut stream, &ClientMsg::AttachRuntime)
+                    .expect("runtime attach must encode");
+                return stream;
+            }
             Err(error) => last_error = Some(error),
         }
         if Instant::now() >= deadline {
