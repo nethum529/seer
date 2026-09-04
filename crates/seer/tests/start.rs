@@ -193,6 +193,14 @@ fn prompt_defaults_create_config_and_owner_store() {
             .stdout
             .contains("Server started at 127.0.0.1:7321.\nYou are alice.\n")
     );
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("Ready in ") && line.ends_with(" s.")),
+        "{}",
+        output.stdout
+    );
     let broker: toml::Value = read_toml(directory.config_home().join("seer/broker.toml"));
     assert_eq!(broker["listen"].as_str(), Some("127.0.0.1:7321"));
     assert_eq!(broker["published_addr"].as_str(), Some("127.0.0.1:7321"));

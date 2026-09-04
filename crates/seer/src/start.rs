@@ -66,6 +66,7 @@ fn run_linux() -> io::Result<()> {
     secure_directory(&config_dir)?;
     let config_path = config_dir.join("broker.toml");
     let (config, first_start) = load_or_create_config(&config_path)?;
+    let started = Instant::now();
     secure_directory(&config.state_dir)?;
 
     if running_broker(&config) {
@@ -73,7 +74,7 @@ fn run_linux() -> io::Result<()> {
         return Ok(());
     }
 
-    start_broker(&config_path, &config, &config_dir, first_start)
+    start_broker(&config_path, &config, &config_dir, first_start, started)
 }
 #[cfg(target_os = "linux")]
 fn config_dir() -> io::Result<PathBuf> {
@@ -248,6 +249,7 @@ fn start_broker(
     config: &BrokerConfig,
     config_dir: &Path,
     first_start: bool,
+    started: Instant,
 ) -> io::Result<()> {
     let broker = find_broker()?;
     let log_path = config.state_dir.join("broker.log");
@@ -270,7 +272,17 @@ fn start_broker(
     }
     println!("Server started at {}.", config.published_addr);
     println!("You are {}.", config.owner_name);
-    crate::commands::first_invite(first_start).map_err(|error| io::Error::other(error.message))
+    println!("Ready in {:.2} s.", started.elapsed().as_secs_f64());
+    let invite_started = Instant::now();
+    let result =
+        crate::commands::first_invite(first_start).map_err(|error| io::Error::other(error.message));
+    if first_start {
+        println!(
+            "Invite ready in {:.2} s.",
+            invite_started.elapsed().as_secs_f64()
+        );
+    }
+    result
 }
 
 #[cfg(target_os = "linux")]
