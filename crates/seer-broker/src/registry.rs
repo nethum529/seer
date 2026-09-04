@@ -1,5 +1,6 @@
-use std::fs::{self, File};
+use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, BufReader, BufWriter, Write};
+use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
 use std::sync::{Mutex, MutexGuard};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -9,6 +10,9 @@ use sha2::{Digest, Sha256};
 
 const SEAT_LIFETIME_SECS: u64 = 3_600;
 pub(crate) const MAX_SEAT_LIFETIME_SECS: u64 = 604_800;
+const DIRECTORY_MODE: u32 = 0o700;
+const FILE_MODE: u32 = 0o600;
+const REGISTRY_FILE: &str = "registry.json";
 const PEOPLE_FILE: &str = "people.json";
 const SEATS_FILE: &str = "seats.json";
 
@@ -28,6 +32,7 @@ struct SeatRecord {
     used: bool,
 }
 
+#[derive(Clone, Default, Deserialize, Serialize)]
 struct RegistryData {
     people: Vec<PersonRecord>,
     seats: Vec<SeatRecord>,
@@ -64,32 +69,43 @@ impl Registry {
     pub(crate) fn open(
         state_dir: impl AsRef<Path>,
         owner_name: &str,
-    ) -> io::Result<(Self, Option<String>)> {
+    ) -> io::Result<(Self, Option<(String, String)>)> {
         validate_name(owner_name)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.reason()))?;
         let state_dir = state_dir.as_ref().to_owned();
         fs::create_dir_all(&state_dir)?;
+        fs::set_permissions(&state_dir, Permissions::from_mode(DIRECTORY_MODE))?;
         let people_path = state_dir.join(PEOPLE_FILE);
         let seats_path = state_dir.join(SEATS_FILE);
-        let mut people: Vec<PersonRecord> = load_json(&people_path)?;
-        let seats: Vec<SeatRecord> = load_json(&seats_path)?;
-        let owner_credential = if people.is_empty() {
+        let registry_path = state_dir.join(REGISTRY_FILE);
+        let registry_exists = registry_path.exists();
+        let mut data = if registry_exists {
+            set_private_file(&registry_path)?;
+            load_json(&registry_path)?
+        } else {
+            RegistryData {
+                people: load_json(&people_path)?,
+                seats: load_json(&seats_path)?,
+            }
+        };
+        let owner_identity = if data.people.is_empty() {
             let credential = random_hex::<32>()?;
-            people.push(new_person(owner_name, &credential, true, now_secs()?)?);
-            write_json_atomically(&people_path, &people)?;
-            Some(credential)
+            let person = new_person(owner_name, &credential, true, now_secs()?)?;
+            let user_id = person.user_id.clone();
+            data.people.push(person);
+            Some((user_id, credential))
         } else {
             None
         };
-        if !seats_path.exists() {
-            write_json_atomically(&seats_path, &seats)?;
+        if !registry_exists || owner_identity.is_some() {
+            write_json_atomically(&registry_path, &data)?;
         }
         Ok((
             Self {
                 state_dir,
-                data: Mutex::new(RegistryData { people, seats }),
+                data: Mutex::new(data),
             },
-            owner_credential,
+            owner_identity,
         ))
     }
 
@@ -141,8 +157,10 @@ impl Registry {
             used: false,
         };
         let mut data = self.lock()?;
-        data.seats.push(seat);
-        write_json_atomically(&self.state_dir.join(SEATS_FILE), &data.seats)?;
+        let mut next = data.clone();
+        next.seats.push(seat);
+        write_json_atomically(&self.state_dir.join(REGISTRY_FILE), &next)?;
+        *data = next;
         Ok(token)
     }
 
@@ -172,10 +190,11 @@ impl Registry {
 
         let credential = random_hex::<32>()?;
         let person = new_person(name, &credential, false, now)?;
-        data.people.push(person.clone());
-        data.seats[seat_index].used = true;
-        write_json_atomically(&self.state_dir.join(PEOPLE_FILE), &data.people)?;
-        write_json_atomically(&self.state_dir.join(SEATS_FILE), &data.seats)?;
+        let mut next = data.clone();
+        next.people.push(person.clone());
+        next.seats[seat_index].used = true;
+        write_json_atomically(&self.state_dir.join(REGISTRY_FILE), &next)?;
+        *data = next;
         Ok(Ok(JoinResult { person, credential }))
     }
 
@@ -256,18 +275,41 @@ fn load_json<T: DeserializeOwned + Default>(path: &Path) -> io::Result<T> {
     }
 }
 
+fn set_private_file(path: &Path) -> io::Result<()> {
+    fs::set_permissions(path, Permissions::from_mode(FILE_MODE))
+}
+
 fn write_json_atomically<T: Serialize + ?Sized>(path: &Path, value: &T) -> io::Result<()> {
     let file_name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "state file has no name"))?;
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "state file has no directory")
+    })?;
     let temporary = path.with_file_name(format!(".{}.tmp", file_name.to_string_lossy()));
-    let file = File::create(&temporary)?;
-    let mut writer = BufWriter::new(file);
-    serde_json::to_writer(&mut writer, value).map_err(invalid_json)?;
-    writer.write_all(b"\n")?;
-    writer.flush()?;
-    writer.get_ref().sync_all()?;
-    fs::rename(&temporary, path)
+    let result = (|| {
+        {
+            let file = OpenOptions::new()
+                .write(true)
+                .create(true)
+                .truncate(true)
+                .mode(FILE_MODE)
+                .open(&temporary)?;
+            file.set_permissions(Permissions::from_mode(FILE_MODE))?;
+            let mut writer = BufWriter::new(file);
+            serde_json::to_writer(&mut writer, value).map_err(invalid_json)?;
+            writer.write_all(b"\n")?;
+            writer.flush()?;
+            writer.get_ref().sync_all()?;
+        }
+        fs::rename(&temporary, path)?;
+        let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        Ok(())
+    })();
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
 }
 
 fn invalid_json(error: serde_json::Error) -> io::Error {

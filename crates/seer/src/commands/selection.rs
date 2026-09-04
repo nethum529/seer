@@ -1,14 +1,120 @@
 use std::io::{self, BufRead, IsTerminal, Write};
 
 use seer_core::Tree;
-use seer_core::proto::{ClientMsg, PeekTarget, Person, ServerMsg};
-use seer_net::{Socket, Stream};
+use seer_core::proto::{ClientInfo, ClientMsg, PeekTarget, ServerMsg};
+
+use crate::store::ServerStore;
 
 use super::{
-    CommandError, authenticate, print_detached, receive, receive_reply, selected_server, send,
-    unexpected_reply,
+    CommandError, ServerEntry, authenticate, finish_session, people_reply, print_close_names,
+    receive, receive_reply, send, unexpected_reply,
 };
-use crate::tui;
+
+pub(super) fn select_client(clients: &[ClientInfo]) -> Result<ClientInfo, CommandError> {
+    match clients {
+        [] => Err(CommandError::usage("no attached client")),
+        [client] => Ok(client.clone()),
+        _ => {
+            let stdin = io::stdin();
+            let mut input = stdin.lock();
+            let stdout = io::stdout();
+            let mut output = stdout.lock();
+            pick_client(clients, &mut input, &mut output)
+        }
+    }
+}
+
+fn pick_client(
+    clients: &[ClientInfo],
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<ClientInfo, CommandError> {
+    writeln!(output, "Select a client:").map_err(CommandError::system)?;
+    for (index, client) in clients.iter().enumerate() {
+        writeln!(
+            output,
+            "  {}. {} (connected {} seconds)",
+            index + 1,
+            client.client_id,
+            client.connected_secs
+        )
+        .map_err(CommandError::system)?;
+    }
+    write!(output, "Client: ").map_err(CommandError::system)?;
+    output.flush().map_err(CommandError::system)?;
+    let mut selection = String::new();
+    if input
+        .read_line(&mut selection)
+        .map_err(CommandError::system)?
+        == 0
+    {
+        return Err(CommandError::usage("no client selected"));
+    }
+    let index = selection
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| CommandError::usage("no client selected"))?;
+    index
+        .checked_sub(1)
+        .and_then(|index| clients.get(index))
+        .cloned()
+        .ok_or_else(|| CommandError::usage("no client selected"))
+}
+
+pub(super) fn selected_server() -> Result<ServerEntry, CommandError> {
+    let store = ServerStore::load().map_err(CommandError::system)?;
+    if store.servers.is_empty() {
+        return Err(CommandError::usage("run seer join first"));
+    }
+    if store.servers.len() == 1 {
+        return Ok(store.servers[0].clone());
+    }
+    if let Some(server) = store.servers.iter().find(|server| server.current) {
+        return Ok(server.clone());
+    }
+    let stdin = io::stdin();
+    let mut input = stdin.lock();
+    let stdout = io::stdout();
+    let mut output = stdout.lock();
+    pick_server(&store.servers, &mut input, &mut output)
+}
+
+fn pick_server(
+    servers: &[ServerEntry],
+    input: &mut impl BufRead,
+    output: &mut impl Write,
+) -> Result<ServerEntry, CommandError> {
+    writeln!(output, "Select a server:").map_err(CommandError::system)?;
+    for (index, server) in servers.iter().enumerate() {
+        writeln!(
+            output,
+            "  {}. {} ({})",
+            index + 1,
+            server.alias,
+            server.name
+        )
+        .map_err(CommandError::system)?;
+    }
+    write!(output, "Server: ").map_err(CommandError::system)?;
+    output.flush().map_err(CommandError::system)?;
+    let mut selection = String::new();
+    if input
+        .read_line(&mut selection)
+        .map_err(CommandError::system)?
+        == 0
+    {
+        return Err(CommandError::usage("no server selected"));
+    }
+    let index = selection
+        .trim()
+        .parse::<usize>()
+        .map_err(|_| CommandError::usage("no server selected"))?;
+    index
+        .checked_sub(1)
+        .and_then(|index| servers.get(index))
+        .cloned()
+        .ok_or_else(|| CommandError::usage("no server selected"))
+}
 
 pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
     let server = selected_server()?;
@@ -44,7 +150,7 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
         tree,
         Some(&person.name),
         &server.alias,
-        tui::run,
+        crate::tui::run,
     )
 }
 
@@ -56,42 +162,12 @@ fn targets_reply(reply: ServerMsg) -> Result<Vec<PeekTarget>, CommandError> {
     }
 }
 
-pub(super) fn people_reply(reply: ServerMsg) -> Result<Vec<Person>, CommandError> {
-    match reply {
-        ServerMsg::People { people } => Ok(people),
-        ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
-        _ => Err(unexpected_reply()),
-    }
-}
-
 fn peek_reply(reply: ServerMsg) -> Result<Tree, CommandError> {
     match reply {
         ServerMsg::Tree { tree } => Ok(tree),
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
         _ => Err(unexpected_reply()),
     }
-}
-
-pub(super) fn finish_session(
-    terminal: bool,
-    stream: Socket,
-    tree: Tree,
-    peek_person: Option<&str>,
-    alias: &str,
-    run: impl FnOnce(Socket, Tree) -> io::Result<tui::SessionExit>,
-) -> Result<(), CommandError> {
-    if !terminal {
-        return Ok(());
-    }
-    stream
-        .set_read_timeout(None)
-        .map_err(CommandError::system)?;
-    tui::set_peek_person(peek_person);
-    let exit = run(stream, tree).map_err(CommandError::system)?;
-    if exit == tui::SessionExit::Detached {
-        print_detached(alias);
-    }
-    Ok(())
 }
 
 fn select_target(targets: &[PeekTarget]) -> Result<PeekTarget, CommandError> {
@@ -149,53 +225,4 @@ fn pick_target(
         )
         .cloned()
         .ok_or_else(|| CommandError::usage("no target selected"))
-}
-
-fn print_close_names(target: &str, people: &[Person]) {
-    let mut names: Vec<&str> = people
-        .iter()
-        .filter(|person| is_close(target, &person.name))
-        .map(|person| person.name.as_str())
-        .collect();
-    names.sort_unstable_by_key(|name| name.to_ascii_lowercase());
-    if !names.is_empty() {
-        eprintln!("Close names: {}", names.join(", "));
-    }
-}
-
-pub(super) fn is_close(target: &str, candidate: &str) -> bool {
-    let target = target.to_ascii_lowercase();
-    let candidate = candidate.to_ascii_lowercase();
-    candidate.starts_with(&target)
-        || target.starts_with(&candidate)
-        || edit_distance_at_most_one(target.as_bytes(), candidate.as_bytes())
-}
-
-pub(super) fn edit_distance_at_most_one(left: &[u8], right: &[u8]) -> bool {
-    if left.len().abs_diff(right.len()) > 1 {
-        return false;
-    }
-    let (shorter, longer) = if left.len() <= right.len() {
-        (left, right)
-    } else {
-        (right, left)
-    };
-    let mut differences = 0;
-    let mut short_index = 0;
-    let mut long_index = 0;
-    while short_index < shorter.len() {
-        if shorter[short_index] == longer[long_index] {
-            short_index += 1;
-        } else {
-            differences += 1;
-            if differences == 2 {
-                return false;
-            }
-            if shorter.len() == longer.len() {
-                short_index += 1;
-            }
-        }
-        long_index += 1;
-    }
-    differences == 0 || long_index == longer.len()
 }

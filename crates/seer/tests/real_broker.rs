@@ -8,8 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use serde_json::Value;
-
 const WAIT_TIMEOUT: Duration = Duration::from_secs(7);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -222,12 +220,12 @@ impl TestFiles {
 
     fn read_owner_identity(&self) -> Option<(String, String)> {
         let output = fs::read_to_string(&self.broker_output).ok()?;
+        let user_id = output
+            .lines()
+            .find_map(|line| line.strip_prefix("owner-id: "))?;
         let credential = output
             .lines()
             .find_map(|line| line.strip_prefix("owner-credential: "))?;
-        let people: Value =
-            serde_json::from_slice(&fs::read(self.state_dir.join("people.json")).ok()?).ok()?;
-        let user_id = people.as_array()?.first()?.get("user_id")?.as_str()?;
         Some((user_id.to_owned(), credential.to_owned()))
     }
 }
