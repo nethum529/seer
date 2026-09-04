@@ -76,6 +76,7 @@ impl UserSession {
             | ClientMsg::Join { .. }
             | ClientMsg::Invite { .. }
             | ClientMsg::ListPeople
+            | ClientMsg::QueryStatus
             | ClientMsg::DetachClient { .. }
             | ClientMsg::AttachRuntime
             | ClientMsg::QueryTargets { .. }
@@ -96,6 +97,26 @@ impl UserSession {
                 })
             })
             .collect()
+    }
+
+    #[must_use]
+    pub(crate) fn tab_count(&self) -> u32 {
+        let tabs: usize = self
+            .tree
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.tabs.len())
+            .sum();
+        u32::try_from(tabs).unwrap_or(u32::MAX)
+    }
+
+    #[must_use]
+    pub(crate) fn foreground(&self, workspace: &str, tab: &str) -> String {
+        self.focused_pane(workspace, tab)
+            .ok()
+            .and_then(|pane| self.pane_hosts.get(pane))
+            .map(PaneHost::foreground)
+            .unwrap_or_default()
     }
 
     #[must_use]

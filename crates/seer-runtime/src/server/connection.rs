@@ -157,7 +157,7 @@ impl SharedSession {
         )
     }
 
-    fn targets(&self) -> io::Result<Vec<PeekTarget>> {
+    pub(super) fn targets(&self) -> io::Result<Vec<PeekTarget>> {
         let active = lock(&self.connections)?
             .iter()
             .find(|connection| connection.size_owner)

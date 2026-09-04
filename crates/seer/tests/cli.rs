@@ -298,7 +298,9 @@ fn list_prints_people_and_marks_an_unreachable_server() {
     assert_eq!(output.status.code(), Some(0));
     let stdout = text(&output.stdout);
     assert!(stdout.contains("SERVER            YOU  STATE        PEOPLE\n"));
-    assert!(stdout.contains("team.example.com  bob  detached     alice, bob\n"));
+    assert!(stdout.contains(
+        "team.example.com  bob  detached     alice idle 2 bash 90s, bob idle 2 bash 90s\n"
+    ));
     assert!(stdout.contains("offline           bob  unreachable"));
     assert!(stdout.contains("second            bob  detached"));
     assert!(

@@ -1,6 +1,5 @@
 use seer_core::TerminalCapabilities;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use std::fs;
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
@@ -12,6 +11,7 @@ use crate::UserSession;
 use crate::user_session::validate_capabilities;
 
 mod connection;
+mod status;
 mod util;
 mod writer;
 
@@ -19,7 +19,8 @@ use connection::{
     Connection, ReportedViewport, evict_connection, grant_next_owner, handle_target_query,
     reported_viewport,
 };
-use util::{connection_closed, lock, stop_after_snapshot_failure};
+use status::handle_status_query;
+use util::{connection_closed, lock, remove_stale_socket, stop_after_snapshot_failure};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -51,20 +52,6 @@ pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
     Ok(())
 }
 
-fn remove_stale_socket(path: &Path) -> io::Result<()> {
-    if !path.exists() {
-        return Ok(());
-    }
-
-    match UnixStream::connect(path) {
-        Ok(_) => Err(io::Error::new(
-            io::ErrorKind::AddrInUse,
-            "runtime socket is already in use",
-        )),
-        Err(_) => fs::remove_file(path),
-    }
-}
-
 fn handle_connection(
     mut stream: UnixStream,
     shared: &SharedSession,
@@ -78,6 +65,7 @@ fn handle_connection(
         ClientMsg::QueryTargets { .. } => {
             return handle_target_query(&mut stream, shared, connection_id);
         }
+        ClientMsg::QueryStatus => return handle_status_query(&mut stream, shared),
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -132,7 +120,10 @@ fn handle_message(
         ClientMsg::TerminalCapabilities { capabilities } => {
             shared.record_capabilities(connection_id, capabilities)
         }
-        message if message.is_mutating() => shared.dispatch_input(connection_id, message),
+        message if message.is_mutating() => {
+            shared.record_input(&message);
+            shared.dispatch_input(connection_id, message)
+        }
         _ => Ok(false),
     }
 }
@@ -166,6 +157,7 @@ struct SharedSession {
     session: Mutex<UserSession>,
     connections: Mutex<Vec<Connection>>,
     lease: Mutex<()>,
+    last_input: Mutex<Instant>,
 }
 
 impl SharedSession {
@@ -174,6 +166,7 @@ impl SharedSession {
             session: Mutex::new(session),
             connections: Mutex::new(Vec::new()),
             lease: Mutex::new(()),
+            last_input: Mutex::new(Instant::now()),
         }
     }
 

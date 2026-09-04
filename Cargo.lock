@@ -3547,6 +3547,7 @@ name = "seer-runtime"
 version = "0.3.0"
 dependencies = [
  "alacritty_terminal",
+ "libc",
  "portable-pty",
  "seer-core",
  "serde",

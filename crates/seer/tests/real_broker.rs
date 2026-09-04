@@ -54,7 +54,7 @@ fn commands_work_with_stream_messages_from_the_real_broker() {
     assert!(list.stderr.is_empty());
     assert_eq!(
         text(&list.stdout),
-        "SERVER     YOU  STATE     PEOPLE\n127.0.0.1  bob  detached  bob, owner\n"
+        "SERVER     YOU  STATE     PEOPLE\n127.0.0.1  bob  detached  bob active 0 - 0s, owner away 0 - 0s\n"
     );
 
     let guest_invite = run_seer(&files.guest_config, &["invite"], "");

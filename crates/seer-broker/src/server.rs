@@ -1,10 +1,11 @@
+use std::collections::HashMap;
 use std::io::{self, Read, Write};
 use std::net::TcpListener;
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientInfo, ClientMsg, Person, PersonState, ServerMsg, codec};
 use seer_net::{EndpointId, Listener, Socket, Stream, load_or_create_secret_key};
 
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
@@ -17,6 +18,10 @@ use crate::{
 };
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
+const STATUS_INTERVAL: Duration = Duration::from_secs(1);
+const STATUS_TIMEOUT: Duration = Duration::from_millis(500);
+const ACTIVE_LIMIT_SECS: u64 = 60;
+const IDLE_LIMIT_SECS: u64 = 600;
 const INVALID_CREDENTIALS: &str = "invalid credentials";
 const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
@@ -34,6 +39,7 @@ pub fn serve(
         writeln!(stdout, "owner-credential: {credential}")?;
     }
     let broker = Arc::new(broker);
+    spawn_status_ticker(Arc::clone(&broker));
     if let Some(remote_listener) = remote_listener {
         spawn_remote_accept_loop(remote_listener, Arc::clone(&broker));
     }
@@ -52,6 +58,14 @@ pub(crate) struct BrokerState {
     published: PublishedAddress,
     remote_endpoint: Option<EndpointId>,
     connection_limit: ConnectionLimit,
+    statuses: Mutex<HashMap<String, PersonStatus>>,
+    published_people: Mutex<Vec<Person>>,
+}
+
+struct PersonStatus {
+    tabs: u32,
+    foreground: String,
+    idle_secs: u64,
 }
 
 impl BrokerState {
@@ -67,6 +81,8 @@ impl BrokerState {
                 published,
                 remote_endpoint: None,
                 connection_limit: ConnectionLimit::default(),
+                statuses: Mutex::new(HashMap::new()),
+                published_people: Mutex::new(Vec::new()),
             },
             owner_identity,
         ))
@@ -97,18 +113,75 @@ impl BrokerState {
     }
 
     pub(crate) fn people(&self) -> io::Result<ServerMsg> {
+        let statuses = lock_statuses(&self.statuses)?;
         let people = self
             .registry
             .people()?
             .into_iter()
-            .map(|person| Person {
-                attached_clients: self.attachments.count(&person.user_id),
-                peekable: self.runtimes.is_running(&person.user_id, &person.name),
-                user_id: person.user_id,
-                name: person.name,
+            .map(|person| {
+                let attached_clients = self.attachments.count(&person.user_id);
+                let status = statuses.get(&person.user_id);
+                let idle_secs = status.map_or(0, |status| status.idle_secs);
+                Person {
+                    attached_clients,
+                    peekable: self.runtimes.is_running(&person.user_id, &person.name),
+                    state: person_state(attached_clients, idle_secs),
+                    tabs: status.map_or(0, |status| status.tabs),
+                    foreground: status
+                        .map(|status| status.foreground.clone())
+                        .unwrap_or_default(),
+                    idle_secs,
+                    user_id: person.user_id,
+                    name: person.name,
+                }
             })
             .collect();
         Ok(ServerMsg::People { people })
+    }
+
+    fn refresh_statuses(&self) -> io::Result<()> {
+        let mut statuses = HashMap::new();
+        for person in self.registry.people()? {
+            if self.attachments.count(&person.user_id) == 0 {
+                continue;
+            }
+            if let Some(status) = self.query_status(&person.user_id, &person.name) {
+                statuses.insert(person.user_id, status);
+            }
+        }
+        *lock_statuses(&self.statuses)? = statuses;
+        self.publish_people()
+    }
+
+    fn query_status(&self, user_id: &str, person_name: &str) -> Option<PersonStatus> {
+        let mut stream = self.runtimes.connect_existing(user_id, person_name).ok()?;
+        stream.set_read_timeout(Some(STATUS_TIMEOUT)).ok()?;
+        codec::encode(&mut stream, &ClientMsg::QueryStatus).ok()?;
+        let ServerMsg::People { people } = codec::decode(&mut stream).ok()? else {
+            return None;
+        };
+        let person = people.into_iter().next()?;
+        Some(PersonStatus {
+            tabs: person.tabs,
+            foreground: person.foreground,
+            idle_secs: person.idle_secs,
+        })
+    }
+
+    fn publish_people(&self) -> io::Result<()> {
+        let ServerMsg::People { people } = self.people()? else {
+            return Ok(());
+        };
+        let mut published = self
+            .published_people
+            .lock()
+            .map_err(|_| io::Error::other("published people lock is poisoned"))?;
+        if *published == people {
+            return Ok(());
+        }
+        published.clone_from(&people);
+        drop(published);
+        self.attachments.broadcast(&ServerMsg::People { people })
     }
 
     pub(crate) fn attach_client(
@@ -126,6 +199,35 @@ impl BrokerState {
     pub(crate) fn detach_client(&self, user_id: &str, client_id: &str) -> io::Result<bool> {
         self.attachments.detach_client(user_id, client_id)
     }
+}
+
+fn person_state(attached_clients: u32, idle_secs: u64) -> PersonState {
+    if attached_clients == 0 {
+        PersonState::Away
+    } else if idle_secs < ACTIVE_LIMIT_SECS {
+        PersonState::Active
+    } else if idle_secs < IDLE_LIMIT_SECS {
+        PersonState::Idle
+    } else {
+        PersonState::Away
+    }
+}
+
+fn lock_statuses(
+    statuses: &Mutex<HashMap<String, PersonStatus>>,
+) -> io::Result<std::sync::MutexGuard<'_, HashMap<String, PersonStatus>>> {
+    statuses
+        .lock()
+        .map_err(|_| io::Error::other("status lock is poisoned"))
+}
+
+fn spawn_status_ticker(broker: Arc<BrokerState>) {
+    thread::spawn(move || {
+        loop {
+            thread::sleep(STATUS_INTERVAL);
+            let _ = broker.refresh_statuses();
+        }
+    });
 }
 
 struct PublishedAddress {
