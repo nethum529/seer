@@ -28,7 +28,7 @@ fn requires_config_path() {
 }
 
 #[test]
-fn prints_the_owner_credential_only_on_first_start() {
+fn prints_the_owner_identity_only_on_first_start() {
     let address = unused_address();
     let config = TemporaryConfig::new_empty(address);
     let first_log = config.directory.join("first.out");
@@ -39,10 +39,18 @@ fn prints_the_owner_credential_only_on_first_start() {
         assert!(wait_for_file(&first_log));
     }
     let first_output = fs::read_to_string(&first_log).expect("first output must read");
-    let credential = first_output
-        .strip_prefix("owner-credential: ")
-        .and_then(|value| value.strip_suffix('\n'))
+    let mut lines = first_output.lines();
+    let user_id = lines
+        .next()
+        .and_then(|line| line.strip_prefix("owner-id: "))
+        .expect("owner ID must print once");
+    let credential = lines
+        .next()
+        .and_then(|line| line.strip_prefix("owner-credential: "))
         .expect("owner credential must print once");
+    assert!(lines.next().is_none());
+    assert_eq!(user_id.len(), 32);
+    assert!(user_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
     assert_eq!(credential.len(), 64);
     assert!(credential.bytes().all(|byte| byte.is_ascii_hexdigit()));
 

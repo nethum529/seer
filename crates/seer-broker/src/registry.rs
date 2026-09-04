@@ -32,7 +32,7 @@ struct SeatRecord {
     used: bool,
 }
 
-#[derive(Clone, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+#[derive(Clone, Default, Deserialize, Serialize)]
 struct RegistryData {
     people: Vec<PersonRecord>,
     seats: Vec<SeatRecord>,
@@ -69,7 +69,7 @@ impl Registry {
     pub(crate) fn open(
         state_dir: impl AsRef<Path>,
         owner_name: &str,
-    ) -> io::Result<(Self, Option<String>)> {
+    ) -> io::Result<(Self, Option<(String, String)>)> {
         validate_name(owner_name)
             .map_err(|error| io::Error::new(io::ErrorKind::InvalidInput, error.reason()))?;
         let state_dir = state_dir.as_ref().to_owned();
@@ -88,21 +88,16 @@ impl Registry {
                 seats: load_json(&seats_path)?,
             }
         };
-        let owner_credential = if data.people.is_empty() {
+        let owner_identity = if data.people.is_empty() {
             let credential = random_hex::<32>()?;
-            data.people
-                .push(new_person(owner_name, &credential, true, now_secs()?)?);
-            Some(credential)
+            let person = new_person(owner_name, &credential, true, now_secs()?)?;
+            let user_id = person.user_id.clone();
+            data.people.push(person);
+            Some((user_id, credential))
         } else {
             None
         };
-        if !people_path.exists() {
-            write_json_atomically(&people_path, &data.people)?;
-        }
-        if !seats_path.exists() {
-            write_json_atomically(&seats_path, &data.seats)?;
-        }
-        if !registry_exists || owner_credential.is_some() {
+        if !registry_exists || owner_identity.is_some() {
             write_json_atomically(&registry_path, &data)?;
         }
         Ok((
@@ -110,7 +105,7 @@ impl Registry {
                 state_dir,
                 data: Mutex::new(data),
             },
-            owner_credential,
+            owner_identity,
         ))
     }
 
@@ -288,6 +283,9 @@ fn write_json_atomically<T: Serialize + ?Sized>(path: &Path, value: &T) -> io::R
     let file_name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "state file has no name"))?;
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput, "state file has no directory")
+    })?;
     let temporary = path.with_file_name(format!(".{}.tmp", file_name.to_string_lossy()));
     let result = (|| {
         {
@@ -305,10 +303,8 @@ fn write_json_atomically<T: Serialize + ?Sized>(path: &Path, value: &T) -> io::R
             writer.get_ref().sync_all()?;
         }
         fs::rename(&temporary, path)?;
-        let parent = path.parent().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "state file has no directory")
-        })?;
-        File::open(parent)?.sync_all()
+        let _ = File::open(parent).and_then(|directory| directory.sync_all());
+        Ok(())
     })();
     if result.is_err() {
         let _ = fs::remove_file(&temporary);

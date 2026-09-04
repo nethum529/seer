@@ -83,6 +83,7 @@ fn joins_commit_person_and_seat_atomically() {
         .local_addr()
         .expect("listener must have an address");
     let (config, state_dir) = test_config(address);
+    let mut reopened_config = config.clone();
     let _server = thread::spawn(move || serve(listener, &config));
 
     let (_, joined) = exchange(
@@ -92,7 +93,7 @@ fn joins_commit_person_and_seat_atomically() {
             name: "Guest_1".into(),
         },
     );
-    let joined_user = match joined {
+    let (joined_user, joined_credential) = match joined {
         ServerMsg::Joined {
             user_id,
             credential,
@@ -101,7 +102,7 @@ fn joins_commit_person_and_seat_atomically() {
             assert_eq!(user_id.len(), 32);
             assert_eq!(credential.len(), 64);
             assert_eq!(name, "Guest_1");
-            user_id
+            (user_id, credential)
         }
         other => panic!("expected Joined, got {other:?}"),
     };
@@ -149,24 +150,32 @@ fn joins_commit_person_and_seat_atomically() {
     );
     assert!(matches!(after_collision, ServerMsg::Joined { .. }));
 
-    let registry: serde_json::Value = serde_json::from_slice(
-        &fs::read(state_dir.join("registry.json")).expect("registry must read"),
-    )
-    .expect("registry must decode");
-    let people = registry["people"]
-        .as_array()
-        .expect("registry people must be an array");
-    assert!(
-        people
-            .iter()
-            .any(|person| person["user_id"] == joined_user)
+    let reopened_listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
+    let reopened_address = reopened_listener
+        .local_addr()
+        .expect("listener must have an address");
+    reopened_config.listen = reopened_address;
+    let _reopened_server = thread::spawn(move || serve(reopened_listener, &reopened_config));
+    let (_, authenticated) = exchange(
+        reopened_address,
+        &ClientMsg::Hello {
+            user_id: joined_user.clone(),
+            credential: joined_credential,
+            version: env!("CARGO_PKG_VERSION").into(),
+        },
     );
-    let seats = registry["seats"]
-        .as_array()
-        .expect("registry seats must be an array");
-    assert!(seats.iter().any(|seat| {
-        seat["token_hash"] == hash("seat-one") && seat["used"].as_bool() == Some(true)
-    }));
+    assert!(matches!(
+        authenticated,
+        ServerMsg::Welcome { user_id, .. } if user_id == joined_user
+    ));
+    let (reused_stream, reused) = exchange(
+        reopened_address,
+        &ClientMsg::Join {
+            seat_token: "seat-one".into(),
+            name: "Reused".into(),
+        },
+    );
+    assert_refused_and_closed(reused_stream, reused, "invalid seat");
     assert_eq!(
         fs::metadata(&state_dir)
             .expect("state directory metadata must read")
