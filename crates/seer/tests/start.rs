@@ -86,6 +86,9 @@ fn fake_broker_process() {
     };
     let contents = fs::read_to_string(config_path).expect("fake broker config must be read");
     let config: FakeConfig = toml::from_str(&contents).expect("fake broker config must parse");
+    if std::env::var_os("SEER_FAKE_REMOTE_FAILURE").is_some() {
+        panic!("fake remote listener failed");
+    }
     fs::create_dir_all(&config.state_dir).expect("fake broker state must be created");
     OpenOptions::new()
         .create(true)
@@ -253,13 +256,24 @@ fn failed_broker_prints_only_the_last_twenty_log_lines() {
     let address = unused_address();
     write_config(&directory, address);
     let executable = install_binaries(&directory);
-
     let output = run_start(&executable, &directory, "", &[("SEER_FAKE_FAIL", "1")]);
 
     assert_eq!(output.status.code(), Some(1));
     assert!(!output.stderr.contains("failure-line-1\n"));
     assert!(output.stderr.contains("failure-line-6\n"));
     assert!(output.stderr.contains("failure-line-25\n"));
+}
+
+#[test]
+fn remote_listener_failure_does_not_report_start_success() {
+    let _serial = PROCESS_TEST.lock().expect("process test lock must work");
+    let directory = TestDirectory::new();
+    write_config(&directory, unused_address());
+    let executable = install_binaries(&directory);
+    let environment = [("SEER_FAKE_REMOTE_FAILURE", "1")];
+    let output = run_start(&executable, &directory, "", &environment);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!output.stdout.contains("Server started"));
 }
 
 #[test]

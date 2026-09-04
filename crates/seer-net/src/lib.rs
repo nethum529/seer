@@ -20,6 +20,7 @@ pub use iroh::{EndpointId, SecretKey};
 pub use stream::{Socket, Stream};
 
 pub const ALPN: &[u8] = b"seer/1";
+const ONLINE_TIMEOUT: Duration = Duration::from_secs(4);
 
 const PRE_STREAM_CONNECTION_LIMIT: usize = 32;
 const PRE_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
@@ -86,7 +87,7 @@ impl Listener {
             .name("seer-net-listener".to_owned())
             .spawn(move || listener_thread(secret_key, worker_control, ready_tx, accepted_tx))?;
 
-        match ready_rx.recv() {
+        match ready_rx.recv_timeout(ONLINE_TIMEOUT) {
             Ok(Ok(id)) => Ok(Self {
                 id,
                 accepted: accepted_rx,
@@ -97,10 +98,14 @@ impl Listener {
                 let _ = thread.join();
                 Err(error)
             }
-            Err(_) => {
+            Err(mpsc::RecvTimeoutError::Disconnected) => {
                 let _ = thread.join();
                 Err(io::Error::other("listener thread stopped"))
             }
+            Err(mpsc::RecvTimeoutError::Timeout) => Err(io::Error::new(
+                io::ErrorKind::TimedOut,
+                "endpoint did not become ready within 4 seconds",
+            )),
         }
     }
 
@@ -109,7 +114,6 @@ impl Listener {
     }
 
     pub fn accept(&self) -> AcceptedStream {
-        // Only a stopped listener makes accept return an error.
         self.accepted
             .recv()
             .map_err(|_| io::Error::other("listener stopped"))?
@@ -195,13 +199,19 @@ async fn run_listener(
             return;
         }
     };
-    endpoint.online().await;
+    let mut control_byte = [0_u8; 1];
+    tokio::select! {
+        _ = endpoint.online() => {}
+        _ = control.read(&mut control_byte) => {
+            endpoint.close().await;
+            return;
+        }
+    }
     if ready.send(Ok(endpoint.id())).is_err() {
         endpoint.close().await;
         return;
     }
 
-    let mut control_byte = [0_u8; 1];
     let mut connections = tokio::task::JoinSet::new();
     let pre_streams = PreStreamLimit::default();
     loop {

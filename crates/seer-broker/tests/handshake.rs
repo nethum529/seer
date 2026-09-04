@@ -26,7 +26,7 @@ fn handles_required_handshake_outcomes() {
         .local_addr()
         .expect("listener must have an address");
     let (config, state_dir) = test_config(address);
-    let _server = thread::spawn(move || serve(listener, &config));
+    let _server = thread::spawn(move || serve(listener, None, &config));
     let _silent = TcpStream::connect(address).expect("silent client must connect");
 
     let (_, welcome) = exchange(
@@ -96,7 +96,7 @@ fn joins_commit_person_and_seat_atomically() {
         .expect("listener must have an address");
     let (config, state_dir) = test_config(address);
     let mut reopened_config = config.clone();
-    let _server = thread::spawn(move || serve(listener, &config));
+    let _server = thread::spawn(move || serve(listener, None, &config));
 
     let (_, joined) = exchange(
         address,
@@ -167,7 +167,7 @@ fn joins_commit_person_and_seat_atomically() {
         .local_addr()
         .expect("listener must have an address");
     reopened_config.listen = reopened_address;
-    let _reopened_server = thread::spawn(move || serve(reopened_listener, &reopened_config));
+    let _reopened_server = thread::spawn(move || serve(reopened_listener, None, &reopened_config));
     let (_, authenticated) = exchange(
         reopened_address,
         &ClientMsg::Hello {

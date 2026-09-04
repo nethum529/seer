@@ -21,9 +21,12 @@ const INVALID_CREDENTIALS: &str = "invalid credentials";
 const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
 
-pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
+pub fn serve(
+    listener: TcpListener,
+    remote_listener: Option<Listener>,
+    config: &Config,
+) -> io::Result<()> {
     let (mut broker, owner_identity) = BrokerState::new(config)?;
-    let remote_listener = bind_remote_listener(config);
     broker.remote_endpoint = remote_listener.as_ref().map(Listener::id);
     if let Some((user_id, credential)) = owner_identity {
         let mut stdout = io::stdout().lock();
@@ -155,19 +158,13 @@ fn invalid_published_addr() -> io::Error {
     )
 }
 
-fn bind_remote_listener(config: &Config) -> Option<Listener> {
+pub(crate) fn bind_remote_listener(config: &Config) -> io::Result<Option<Listener>> {
     if !config.remote {
-        return None;
+        return Ok(None);
     }
-    let result =
-        load_or_create_secret_key(&config.state_dir.join("iroh.key")).and_then(Listener::bind);
-    match result {
-        Ok(listener) => Some(listener),
-        Err(error) => {
-            eprintln!("broker remote listener error: {error}");
-            None
-        }
-    }
+    let listener =
+        load_or_create_secret_key(&config.state_dir.join("iroh.key")).and_then(Listener::bind)?;
+    Ok(Some(listener))
 }
 
 fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
