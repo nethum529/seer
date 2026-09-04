@@ -58,6 +58,39 @@ fn prints_the_owner_credential_only_on_first_start() {
     );
 }
 
+#[test]
+fn required_remote_listener_failure_exits_before_owner_credential() {
+    let address = unused_address();
+    let config = TemporaryConfig::new_empty(address);
+    let state_dir = config.directory.join("state");
+    fs::create_dir(&state_dir).expect("state directory must be created");
+    fs::write(state_dir.join("iroh.key"), [0_u8]).expect("invalid iroh key must be written");
+    let contents = fs::read_to_string(&config.path).expect("config must read");
+    fs::write(
+        &config.path,
+        contents.replace("remote = false", "remote = true"),
+    )
+    .expect("remote config must write");
+
+    let output = wait_for_output(start_broker_capture(&config));
+
+    assert!(!output.status.success());
+    assert!(output.stdout.is_empty());
+    assert!(stderr(&output).contains("secret key must contain 32 bytes"));
+    assert!(TcpStream::connect(address).is_err());
+}
+
+fn start_broker_capture(config: &TemporaryConfig) -> Child {
+    broker_command()
+        .arg(&config.path)
+        .env("XDG_RUNTIME_DIR", &config.directory)
+        .env("SEER_RUNTIME_BIN", config.directory.join("missing-runtime"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("broker must start")
+}
+
 fn start_broker(config: &TemporaryConfig, output: &PathBuf) -> Child {
     let output = fs::File::create(output).expect("broker output must open");
     broker_command()

@@ -358,13 +358,13 @@ fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> 
 #[cfg(target_os = "linux")]
 fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io::Result<()> {
     loop {
-        if port_accepts(listen) {
-            return Ok(());
-        }
         if let Some(status) = child.try_wait()? {
             return Err(io::Error::other(format!(
                 "seer-broker exited with {status}"
             )));
+        }
+        if port_accepts(listen) {
+            return Ok(());
         }
         if Instant::now() >= deadline {
             return Err(io::Error::new(

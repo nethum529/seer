@@ -104,6 +104,9 @@ fn fake_broker_process() {
     )
     .expect("fake pid must be written");
     let listener = TcpListener::bind(config.listen).expect("fake broker must listen");
+    if std::env::var_os("SEER_FAKE_REMOTE_FAILURE").is_some() {
+        return;
+    }
     let mut worker = if std::env::var_os("SEER_FAKE_DESCENDANT").is_some() {
         let child = Command::new("sleep")
             .arg("30")
@@ -264,6 +267,17 @@ fn failed_broker_prints_only_the_last_twenty_log_lines() {
     assert!(!output.stderr.contains("failure-line-1\n"));
     assert!(output.stderr.contains("failure-line-6\n"));
     assert!(output.stderr.contains("failure-line-25\n"));
+}
+#[test]
+fn remote_listener_failure_does_not_report_start_success() {
+    let _serial = PROCESS_TEST.lock().expect("process test lock must work");
+    let directory = TestDirectory::new();
+    write_config(&directory, unused_address());
+    let executable = install_binaries(&directory);
+    let output = run_start(&executable, &directory, "", &[("SEER_FAKE_REMOTE_FAILURE", "1")]);
+    assert_eq!(output.status.code(), Some(1));
+    assert!(!output.stdout.contains("Server started"));
+    assert!(!output.stdout.contains("Seat ready."));
 }
 
 #[test]
