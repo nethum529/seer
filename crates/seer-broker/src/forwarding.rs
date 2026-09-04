@@ -61,10 +61,10 @@ impl<'a> Coordinator<'a> {
                 tree: Tree::new(),
             },
         )?;
-        write_client(&client, &broker.grants.message(&owner.user_id)?)?;
         let runtime = match RuntimeConnection::connect(broker, owner, true, &event_sender) {
             Ok(runtime) => runtime,
             Err(error) => {
+                write_client(&client, &broker.grants.message(&owner.user_id)?)?;
                 write_client(
                     &client,
                     &ServerMsg::Refused {
@@ -74,6 +74,7 @@ impl<'a> Coordinator<'a> {
                 return Err(error);
             }
         };
+        write_client(&client, &broker.grants.message(&owner.user_id)?)?;
         write_client(
             &client,
             &ServerMsg::Tree {

@@ -28,8 +28,13 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     let mut runtime = spawn_runtime(&socket_path, &state);
     let mut owner = connect_with_timeout(&socket_path);
     let initial = read_tree(&mut owner);
-    assert_eq!(initial.workspaces[0].tabs.len(), 1);
-    assert_eq!(initial.workspaces[0].tabs[0].panes.len(), 1);
+    assert_eq!(
+        (
+            initial.workspaces[0].tabs.len(),
+            initial.workspaces[0].tabs[0].panes.len()
+        ),
+        (1, 1)
+    );
     assert!(snapshot_path.exists(), "first shell must be saved");
 
     let workspace = initial.workspaces[0].id.clone();
@@ -103,11 +108,13 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     let mut corrupt_client = connect_with_timeout(&socket_path);
     let safe = read_tree(&mut corrupt_client);
     assert_eq!(
-        safe.workspaces[0].tabs.len(),
-        1,
+        (
+            safe.workspaces[0].tabs.len(),
+            safe.workspaces[0].tabs[0].panes.len()
+        ),
+        (1, 1),
         "corrupt snapshot must start a safe default session"
     );
-    assert_eq!(safe.workspaces[0].tabs[0].panes.len(), 1);
     assert!(
         wait_for_cells(&mut corrupt_client),
         "default shell must run"
@@ -124,11 +131,13 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     let mut unsupported_client = connect_with_timeout(&socket_path);
     let safe_again = read_tree(&mut unsupported_client);
     assert_eq!(
-        safe_again.workspaces[0].tabs.len(),
-        1,
+        (
+            safe_again.workspaces[0].tabs.len(),
+            safe_again.workspaces[0].tabs[0].panes.len()
+        ),
+        (1, 1),
         "unsupported snapshot version must start a safe default session"
     );
-    assert_eq!(safe_again.workspaces[0].tabs[0].panes.len(), 1);
     assert!(
         wait_for_cells(&mut unsupported_client),
         "default shell must run"
@@ -145,11 +154,13 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     let mut counter_client = connect_with_timeout(&socket_path);
     let safe_counter = read_tree(&mut counter_client);
     assert_eq!(
-        safe_counter.workspaces[0].tabs.len(),
-        1,
+        (
+            safe_counter.workspaces[0].tabs.len(),
+            safe_counter.workspaces[0].tabs[0].panes.len()
+        ),
+        (1, 1),
         "snapshot that reuses a tab id must start a safe default session"
     );
-    assert_eq!(safe_counter.workspaces[0].tabs[0].panes.len(), 1);
     assert!(
         wait_for_cells(&mut counter_client),
         "default shell must run"
@@ -166,11 +177,13 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     let mut empty_pane_client = connect_with_timeout(&socket_path);
     let safe_empty_pane = read_tree(&mut empty_pane_client);
     assert_eq!(
-        safe_empty_pane.workspaces[0].tabs.len(),
-        1,
+        (
+            safe_empty_pane.workspaces[0].tabs.len(),
+            safe_empty_pane.workspaces[0].tabs[0].panes.len()
+        ),
+        (1, 1),
         "snapshot with an empty pane id must start a safe default session"
     );
-    assert_eq!(safe_empty_pane.workspaces[0].tabs[0].panes.len(), 1);
     assert!(
         wait_for_cells(&mut empty_pane_client),
         "default shell must run"

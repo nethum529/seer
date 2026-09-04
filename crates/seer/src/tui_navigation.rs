@@ -221,12 +221,12 @@ pub(crate) fn mouse(
     if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
         return;
     }
-    if let Some((index, _)) = state
+    if let Some((index, row)) = state
         .people_areas
         .iter()
         .find(|(_, rect)| rect.contains(position))
     {
-        state.select_person(*index);
+        crate::person_menu::open(state, *index, *row);
         return;
     }
     if let Some((index, _)) = state

@@ -141,9 +141,11 @@ fn apply_message(
 ) -> io::Result<Option<SessionExit>> {
     match message {
         ServerMsg::Grants {
-            you_may_type_into, ..
+            you_may_type_into,
+            can_type_here,
         } => {
             state.you_may_type_into = you_may_type_into.into_iter().collect();
+            state.can_type_here = can_type_here.into_iter().collect();
         }
         ServerMsg::Tree { tree } => state.replace_tree(tree),
         ServerMsg::Cells { user, pane, frame } => {
@@ -223,7 +225,9 @@ fn handle_event(
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
             state.notice.clear();
-            if state.viewer.is_some() {
+            if state.menu.is_some() {
+                crate::person_menu::key(key, stream, state)?;
+            } else if state.viewer.is_some() {
                 crate::viewer::key(key, stream, state)?;
             } else if navigation::key(key, stream, state)? {
                 send(stream, &ClientMsg::Detach)?;
@@ -235,6 +239,9 @@ fn handle_event(
             state,
             TerminalInput::new(InputEvent::Paste(text)),
         )?,
+        Event::Mouse(mouse) if state.menu.is_some() => {
+            crate::person_menu::mouse(mouse, stream, state)?
+        }
         Event::Mouse(mouse) if state.viewer.is_none() => {
             navigation::mouse(mouse, state, last_click)
         }

@@ -4,6 +4,7 @@ mod capsule;
 mod cli;
 mod commands;
 mod input;
+mod person_menu;
 mod prompt;
 mod render;
 mod start;

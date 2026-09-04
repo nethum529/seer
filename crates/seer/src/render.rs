@@ -47,6 +47,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
             &state.notice
         },
     );
+    crate::person_menu::draw(frame, state);
     if state.quit_prompt {
         dialog(frame, "Quit seer?", "enter quit   esc stay");
     }
@@ -323,6 +324,7 @@ pub(crate) fn dialog(frame: &mut Frame<'_>, title: &str, text: &str) {
         width,
         height,
     );
+    palette.clear(frame.buffer_mut(), rect);
     frame.render_widget(
         Paragraph::new(text)
             .style(palette.style())

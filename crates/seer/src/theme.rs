@@ -82,6 +82,15 @@ impl Palette {
             )
     }
 
+    pub(crate) fn clear(self, buffer: &mut ratatui::buffer::Buffer, area: ratatui::layout::Rect) {
+        for y in area.y..area.bottom() {
+            for x in area.x..area.right() {
+                buffer[(x, y)].reset();
+                buffer[(x, y)].set_style(self.style());
+            }
+        }
+    }
+
     pub(crate) fn ansi(self, index: u8) -> Color {
         let colors = [
             self.panel_bg,
