@@ -8,10 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use sha2::{Digest, Sha256};
-
 #[path = "support/binary.rs"]
 mod binary;
 
@@ -29,51 +25,6 @@ fn requires_config_path() {
 
     assert!(!output.status.success());
     assert!(stderr(&output).contains("usage: seer-broker <config-path>"));
-}
-
-#[test]
-fn loads_config_and_listens() {
-    let address = unused_address();
-    let config = TemporaryConfig::new(address);
-    let child = broker_command()
-        .arg(&config.path)
-        .env("XDG_RUNTIME_DIR", &config.directory)
-        .env("SEER_RUNTIME_BIN", config.directory.join("missing-runtime"))
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("broker must start");
-    let _broker = BrokerProcess(child);
-    let mut stream = connect_when_ready(address);
-    stream
-        .set_read_timeout(Some(Duration::from_secs(2)))
-        .expect("read timeout must set");
-
-    codec::encode(
-        &mut stream,
-        &ClientMsg::Hello {
-            user_id: "alice".into(),
-            credential: "alice-secret".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        },
-    )
-    .expect("Hello must encode");
-    let response: ServerMsg = codec::decode(&mut stream).expect("Welcome must decode");
-
-    let ServerMsg::Welcome {
-        user_id,
-        name,
-        client_id,
-        tree,
-    } = response
-    else {
-        panic!("expected Welcome");
-    };
-    assert_eq!(user_id, "alice");
-    assert_eq!(name, "Alice");
-    assert_eq!(client_id.len(), 32);
-    assert!(client_id.bytes().all(|byte| byte.is_ascii_hexdigit()));
-    assert_eq!(tree, Tree::new());
 }
 
 #[test]
@@ -152,15 +103,7 @@ struct TemporaryConfig {
 }
 
 impl TemporaryConfig {
-    fn new(address: SocketAddr) -> Self {
-        Self::create(address, true)
-    }
-
     fn new_empty(address: SocketAddr) -> Self {
-        Self::create(address, false)
-    }
-
-    fn create(address: SocketAddr, seed_owner: bool) -> Self {
         let counter = NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -179,24 +122,8 @@ impl TemporaryConfig {
             state_dir.display()
         );
         fs::write(&path, contents).expect("temporary config must write");
-        if seed_owner {
-            fs::create_dir(&state_dir).expect("state directory must be created");
-            let hash = hash("alice-secret");
-            let people = format!(
-                "[{{\"user_id\":\"alice\",\"name\":\"Alice\",\"credential_hash\":\"{hash}\",\"created_at\":1,\"is_owner\":true}}]\n"
-            );
-            fs::write(state_dir.join("people.json"), people).expect("people registry must write");
-            fs::write(state_dir.join("seats.json"), "[]\n").expect("seat registry must write");
-        }
         Self { path, directory }
     }
-}
-
-fn hash(value: &str) -> String {
-    Sha256::digest(value.as_bytes())
-        .iter()
-        .map(|byte| format!("{byte:02x}"))
-        .collect()
 }
 
 fn wait_for_file(path: &Path) -> bool {

@@ -1,7 +1,6 @@
 use std::fs;
 use std::net::{SocketAddr, TcpStream};
 use std::os::unix::fs::PermissionsExt;
-use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
@@ -9,7 +8,6 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use crate::support::{TestFiles, command_output, current_os_user, read_message, wait_for_file};
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
-const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 pub(crate) fn write_config(files: &TestFiles, address: SocketAddr) {
     let user = current_os_user();
@@ -72,22 +70,6 @@ pub(crate) fn assert_socket_directory(files: &TestFiles) {
         .mode()
         & 0o777;
     assert_eq!(mode, 0o700);
-}
-
-pub(crate) fn assert_log_contains(files: &TestFiles, expected: &str) {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    while Instant::now() < deadline {
-        if fs::read_to_string(&files.broker_log).is_ok_and(|contents| contents.contains(expected)) {
-            return;
-        }
-        thread::sleep(POLL_INTERVAL);
-    }
-    panic!("broker log did not contain {expected}");
-}
-
-pub(crate) fn assert_log_excludes(files: &TestFiles, unexpected: &str) {
-    let contents = fs::read_to_string(&files.broker_log).expect("broker log must read");
-    assert!(!contents.contains(unexpected));
 }
 
 fn current_login_shell() -> String {
