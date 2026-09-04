@@ -11,6 +11,8 @@ Goals:
 
 Research notes live in docs/research/.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) before you make a change.
+
 ## Quickstart
 
 This example uses one owner on Linux and one friend on macOS or Linux. The
