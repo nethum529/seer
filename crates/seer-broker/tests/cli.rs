@@ -58,6 +58,41 @@ fn prints_the_owner_credential_only_on_first_start() {
     );
 }
 
+#[test]
+fn rejects_non_loopback_listen_address_before_binding_or_state_changes() {
+    for address in [
+        "0.0.0.0:0",
+        "192.168.1.1:0",
+        "203.0.113.1:0",
+        "[::]:0",
+        "[fd00::1]:0",
+        "[2001:db8::1]:0",
+    ] {
+        let address = address.parse().expect("test address must parse");
+        let config = TemporaryConfig::new_empty(address);
+        let output = run_broker(&config);
+
+        assert!(!output.status.success(), "{address}");
+        assert!(
+            stderr(&output).contains("listen address must be loopback"),
+            "{address}"
+        );
+        assert!(!config.directory.join("state").exists(), "{address}");
+    }
+}
+
+fn run_broker(config: &TemporaryConfig) -> Output {
+    let child = broker_command()
+        .arg(&config.path)
+        .env("XDG_RUNTIME_DIR", &config.directory)
+        .env("SEER_RUNTIME_BIN", config.directory.join("missing-runtime"))
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("broker must start");
+    wait_for_output(child)
+}
+
 fn start_broker(config: &TemporaryConfig, output: &PathBuf) -> Child {
     let output = fs::File::create(output).expect("broker output must open");
     broker_command()
