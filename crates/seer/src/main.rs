@@ -12,6 +12,7 @@ mod start;
 mod state;
 mod store;
 mod terminal_session;
+mod theme;
 mod tui;
 mod tui_navigation;
 mod update;
