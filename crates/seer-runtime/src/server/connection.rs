@@ -9,6 +9,35 @@ use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, codec};
 
 use super::{SharedSession, connection_closed, connection_loop, lock, writer};
 
+pub(super) fn handle_connection(
+    mut stream: UnixStream,
+    shared: &SharedSession,
+    connection_id: u64,
+    generation: String,
+) -> io::Result<()> {
+    codec::encode(&mut stream, &ServerMsg::RuntimeReady { generation })?;
+    let Ok(first) = codec::decode(&mut stream) else {
+        return Ok(());
+    };
+    match first {
+        ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
+        ClientMsg::QueryTargets { .. } => {
+            return handle_target_query(&mut stream, shared, connection_id);
+        }
+        ClientMsg::QueryStatus => return super::status::handle_status_query(&mut stream, shared),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected runtime attach",
+            ));
+        }
+    }
+    let result = connection_loop(&mut stream, shared, connection_id);
+    shared.remove_connection(connection_id)?;
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    result
+}
+
 // A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
 const OUTPUT_QUEUE_CAPACITY: usize = 64;
 

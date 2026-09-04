@@ -16,10 +16,9 @@ mod util;
 mod writer;
 
 use connection::{
-    Connection, ReportedViewport, evict_connection, grant_next_owner, handle_target_query,
+    Connection, ReportedViewport, evict_connection, grant_next_owner, handle_connection,
     reported_viewport,
 };
-use status::handle_status_query;
 use util::{connection_closed, lock, remove_stale_socket, stop_after_snapshot_failure};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -32,16 +31,27 @@ pub fn bind(path: &Path) -> io::Result<UnixListener> {
 }
 
 pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
+    serve_with_generation(listener, session, String::new())
+}
+
+pub(crate) fn serve_with_generation(
+    listener: UnixListener,
+    session: UserSession,
+    generation: String,
+) -> io::Result<()> {
     let shared = Arc::new(SharedSession::new(session));
     start_poll_driver(Arc::clone(&shared))?;
 
     for connection_id in 0_u64.. {
         let (stream, _) = listener.accept()?;
         let connection = Arc::clone(&shared);
+        let generation = generation.clone();
         thread::Builder::new()
             .name(format!("runtime-connection-{connection_id}"))
             .spawn(move || {
-                if let Err(error) = handle_connection(stream, &connection, connection_id) {
+                if let Err(error) =
+                    handle_connection(stream, &connection, connection_id, generation)
+                {
                     if crate::persistence::is_fatal(&error) {
                         stop_after_snapshot_failure(&error);
                     }
@@ -50,33 +60,6 @@ pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
             })?;
     }
     Ok(())
-}
-
-fn handle_connection(
-    mut stream: UnixStream,
-    shared: &SharedSession,
-    connection_id: u64,
-) -> io::Result<()> {
-    let Ok(first) = codec::decode(&mut stream) else {
-        return Ok(());
-    };
-    match first {
-        ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
-        ClientMsg::QueryTargets { .. } => {
-            return handle_target_query(&mut stream, shared, connection_id);
-        }
-        ClientMsg::QueryStatus => return handle_status_query(&mut stream, shared),
-        _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "expected runtime attach",
-            ));
-        }
-    }
-    let result = connection_loop(&mut stream, shared, connection_id);
-    shared.remove_connection(connection_id)?;
-    let _ = stream.shutdown(std::net::Shutdown::Both);
-    result
 }
 
 fn connection_loop(

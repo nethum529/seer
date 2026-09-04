@@ -9,16 +9,16 @@ use crate::support::{TestFiles, command_output, current_os_user, read_message, w
 
 const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 
-pub(crate) fn write_config(files: &TestFiles, address: SocketAddr) {
+pub fn write_config(files: &TestFiles, address: SocketAddr) {
     let user = current_os_user();
     files.write_config_with_os_users(address, &user, &user);
 }
 
-pub(crate) fn send(stream: &mut TcpStream, message: &ClientMsg) {
+pub fn send(stream: &mut TcpStream, message: &ClientMsg) {
     codec::encode(stream, message).expect("client message must encode");
 }
 
-pub(crate) fn wait_for_cells(stream: &mut TcpStream) -> bool {
+pub fn wait_for_cells(stream: &mut TcpStream) -> bool {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while Instant::now() < deadline {
         if matches!(read_message(stream), ServerMsg::Cells { .. }) {
@@ -28,7 +28,7 @@ pub(crate) fn wait_for_cells(stream: &mut TcpStream) -> bool {
     false
 }
 
-pub(crate) fn pane_pid(files: &TestFiles, user: &str) -> u32 {
+pub fn pane_pid(files: &TestFiles, user: &str) -> u32 {
     let pid_file = files.root.join(format!("{user}-pane.pid"));
     assert!(wait_for_file(&pid_file));
     fs::read_to_string(pid_file)
@@ -38,13 +38,13 @@ pub(crate) fn pane_pid(files: &TestFiles, user: &str) -> u32 {
         .expect("pane PID must be valid")
 }
 
-pub(crate) fn assert_process_running(pid: u32) {
+pub fn assert_process_running(pid: u32) {
     let status =
         fs::read_to_string(format!("/proc/{pid}/status")).expect("process status must be readable");
     assert!(!status.lines().any(|line| line.starts_with("State:\tZ")));
 }
 
-pub(crate) fn assert_runtime_arguments(files: &TestFiles, user: &str) {
+pub fn assert_runtime_arguments(files: &TestFiles, user: &str) {
     let arguments_file = files.root.join(format!("{user}.args"));
     assert!(wait_for_file(&arguments_file));
     let arguments = fs::read_to_string(arguments_file).expect("runtime arguments must read");
@@ -57,12 +57,16 @@ pub(crate) fn assert_runtime_arguments(files: &TestFiles, user: &str) {
             expected_socket.to_string_lossy().as_ref(),
             user,
             shell.as_str(),
-            expected_state.to_string_lossy().as_ref()
+            arguments
+                .lines()
+                .nth(3)
+                .expect("generation argument must exist"),
+            expected_state.to_string_lossy().as_ref(),
         ]
     );
 }
 
-pub(crate) fn assert_socket_directory(files: &TestFiles) {
+pub fn assert_socket_directory(files: &TestFiles) {
     let directory = files.xdg_runtime_dir.join("seer");
     let mode = fs::metadata(directory)
         .expect("socket directory metadata must load")

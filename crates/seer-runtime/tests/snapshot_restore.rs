@@ -15,6 +15,7 @@ use support::*;
 
 const SNAPSHOT_FILE: &str = "session.json";
 const SNAPSHOT_DIR_VAR: &str = "SEER_SNAPSHOT_DIR";
+const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 
 #[test]
 fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
@@ -229,7 +230,12 @@ fn snapshot_save_failure_stops_before_a_queued_mutation() {
 
 fn spawn_runtime(socket_path: &Path, state_dir: &Path) -> RuntimeProcess {
     let child = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .env(SNAPSHOT_DIR_VAR, state_dir)
         .stdout(Stdio::null())
         .stderr(Stdio::null())
