@@ -23,8 +23,8 @@ use crate::peek_mode::{self, is_view_only, peek_person};
 use crate::state::ClientState;
 use crate::terminal_session::{TerminalSession, ignore_setup_disconnect, set_cursor_style};
 use crate::tui_navigation::{
-    closes_last_tab, initialize, pane_in_direction, select_tab, show_hint, show_last_tab_status,
-    status, update_tree,
+    closes_last_tab, forward_prefix, initialize, pane_in_direction, select_tab, show_hint,
+    show_last_tab_status, status, update_tree,
 };
 
 const EVENT_WAIT: Duration = Duration::from_millis(25);
@@ -47,10 +47,10 @@ pub(crate) enum SessionExit {
     Detached,
 }
 
-pub(crate) fn run(mut stream: Socket, tree: Tree) -> io::Result<SessionExit> {
+pub(crate) fn run(mut stream: Socket, tree: Tree, own_user: String) -> io::Result<SessionExit> {
     let mut terminal = TerminalSession::start()?;
     initialize(&tree);
-    let state = ClientState::new(tree);
+    let state = ClientState::new(tree, own_user);
     send_terminal_setup(&mut stream, &terminal.terminal, &state)?;
     let reader = stream.clone();
     let (receiver, reader_thread) = spawn_reader(reader);
@@ -181,7 +181,10 @@ fn apply_server_message<S: Stream>(
             return Ok(LoopControl::Detached);
         }
         ServerMsg::Bye { .. } => return Ok(LoopControl::Exit),
-        ServerMsg::People { people } => drawer.set_people(people),
+        ServerMsg::People { people } => {
+            state.note_people(&people);
+            drawer.set_people(people);
+        }
         ServerMsg::Targets { targets } if drawer.peek_pending() => {
             peek_mode::start(stream, drawer, &targets)?;
         }
@@ -259,6 +262,12 @@ fn handle_key<S: Stream>(
         return Ok(LoopControl::Continue);
     }
     if let Some(action) = action {
+        if state.herdr_in_front()
+            && !matches!(action, InputAction::ToggleDrawer | InputAction::Bytes(_))
+        {
+            forward_prefix(key, stream, state)?;
+            return Ok(LoopControl::Continue);
+        }
         show_hint();
         handle_action(action, stream, state, size, drawer)?;
     }
@@ -418,7 +427,7 @@ fn handle_mouse<S: Stream>(
     Ok(LoopControl::Continue)
 }
 
-fn send_focused_input(
+pub(crate) fn send_focused_input(
     stream: &mut impl Stream,
     state: &ClientState,
     input: TerminalInput,
@@ -470,6 +479,9 @@ fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState, drawer: &Drawer
 
 #[cfg(test)]
 pub(crate) mod test_support;
+
+#[cfg(test)]
+mod herdr_tests;
 
 #[cfg(test)]
 mod tests;

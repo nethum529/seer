@@ -151,6 +151,7 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
         tree,
         Some(&person.name),
         &server.alias,
+        server.user_id.clone(),
         crate::tui::run,
     )
 }

@@ -130,6 +130,7 @@ fn complete_join(
         tree,
         None,
         &capsule.alias,
+        server.user_id.clone(),
         tui::run,
     )
 }
@@ -144,6 +145,7 @@ pub(crate) fn attach() -> Result<(), CommandError> {
         tree,
         None,
         &server.alias,
+        server.user_id.clone(),
         tui::run,
     )
 }
@@ -418,7 +420,8 @@ fn finish_session(
     tree: Tree,
     peek_person: Option<&str>,
     alias: &str,
-    run: impl FnOnce(Socket, Tree) -> io::Result<tui::SessionExit>,
+    own_user: String,
+    run: impl FnOnce(Socket, Tree, String) -> io::Result<tui::SessionExit>,
 ) -> Result<(), CommandError> {
     if !terminal {
         return Ok(());
@@ -427,7 +430,7 @@ fn finish_session(
         .set_read_timeout(None)
         .map_err(CommandError::system)?;
     tui::set_peek_person(peek_person);
-    let exit = run(stream, tree).map_err(CommandError::system)?;
+    let exit = run(stream, tree, own_user).map_err(CommandError::system)?;
     if exit == tui::SessionExit::Detached {
         print_detached(alias);
     }
