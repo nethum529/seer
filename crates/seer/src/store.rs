@@ -1,14 +1,16 @@
 use std::env;
-use std::fs::{self, OpenOptions, Permissions};
+use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicUsize, Ordering};
 
+use seer_net::SecretKey;
 use serde::{Deserialize, Serialize};
 
 const DIRECTORY_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
-
+static NEXT_TEMPORARY: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub(crate) struct ServerEntry {
     pub(crate) endpoint: String,
@@ -44,20 +46,19 @@ impl ServerStore {
     }
 
     pub(crate) fn save_to(&self, path: &Path) -> io::Result<()> {
-        let directory = path.parent().ok_or_else(|| {
-            io::Error::new(io::ErrorKind::InvalidInput, "store path has no directory")
-        })?;
+        let directory = parent_directory(path)?;
         fs::create_dir_all(directory)?;
         fs::set_permissions(directory, Permissions::from_mode(DIRECTORY_MODE))?;
         let contents = toml::to_string(self).map_err(invalid_data)?;
-        let mut file = OpenOptions::new()
-            .write(true)
-            .create(true)
-            .truncate(true)
-            .mode(FILE_MODE)
-            .open(path)?;
-        file.set_permissions(Permissions::from_mode(FILE_MODE))?;
-        file.write_all(contents.as_bytes())
+        replace_atomically(path, contents.as_bytes())
+    }
+
+    pub(crate) fn load_or_create_device_key(path: &Path) -> io::Result<SecretKey> {
+        match fs::read(path) {
+            Ok(bytes) => load_device_key(path, &bytes),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => create_device_key(path),
+            Err(error) => Err(error),
+        }
     }
 
     pub(crate) fn make_current(&mut self, entry: ServerEntry) {
@@ -105,6 +106,92 @@ fn store_path_from(
     home: Option<std::ffi::OsString>,
 ) -> io::Result<PathBuf> {
     Ok(config_dir_from(xdg_config_home, home)?.join("servers.toml"))
+}
+
+fn parent_directory(path: &Path) -> io::Result<&Path> {
+    path.parent()
+        .filter(|directory| !directory.as_os_str().is_empty())
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no directory"))
+}
+
+fn temporary_path(path: &Path) -> io::Result<PathBuf> {
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "path has no file name"))?;
+    let number = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+    Ok(path.with_file_name(format!(
+        ".{}.tmp-{}-{number}",
+        file_name.to_string_lossy(),
+        std::process::id()
+    )))
+}
+
+fn replace_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let directory = parent_directory(path)?;
+    let temporary = temporary_path(path)?;
+    let result = write_temporary(&temporary, contents)
+        .and_then(|()| fs::rename(&temporary, path))
+        .and_then(|()| sync_directory(directory));
+    if result.is_err() {
+        let _ = fs::remove_file(&temporary);
+    }
+    result
+}
+
+fn create_device_key(path: &Path) -> io::Result<SecretKey> {
+    let directory = parent_directory(path)?;
+    fs::create_dir_all(directory)?;
+    fs::set_permissions(directory, Permissions::from_mode(DIRECTORY_MODE))?;
+    let key = SecretKey::generate();
+    let temporary = temporary_path(path)?;
+    if let Err(error) = write_temporary(&temporary, &key.to_bytes()) {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+
+    match fs::hard_link(&temporary, path) {
+        Ok(()) => {
+            let result = sync_directory(directory)
+                .and_then(|()| fs::remove_file(&temporary))
+                .and_then(|()| sync_directory(directory));
+            if let Err(error) = result {
+                let _ = fs::remove_file(&temporary);
+                return Err(error);
+            }
+            Ok(key)
+        }
+        Err(error) if error.kind() == io::ErrorKind::AlreadyExists => {
+            let _ = fs::remove_file(&temporary);
+            let bytes = fs::read(path)?;
+            load_device_key(path, &bytes)
+        }
+        Err(error) => {
+            let _ = fs::remove_file(&temporary);
+            Err(error)
+        }
+    }
+}
+
+fn write_temporary(path: &Path, contents: &[u8]) -> io::Result<()> {
+    let mut file = OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .mode(FILE_MODE)
+        .open(path)?;
+    file.set_permissions(Permissions::from_mode(FILE_MODE))?;
+    file.write_all(contents)?;
+    file.sync_all()
+}
+
+fn sync_directory(path: &Path) -> io::Result<()> {
+    File::open(path)?.sync_all()
+}
+
+fn load_device_key(path: &Path, bytes: &[u8]) -> io::Result<SecretKey> {
+    let key = SecretKey::try_from(bytes)
+        .map_err(|_| io::Error::other("secret key must contain 32 bytes"))?;
+    fs::set_permissions(path, Permissions::from_mode(FILE_MODE))?;
+    Ok(key)
 }
 
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {

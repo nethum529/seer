@@ -32,22 +32,6 @@ struct BrokerConfig {
     owner_name: String,
     state_dir: PathBuf,
 }
-#[cfg(target_os = "linux")]
-#[derive(Default, Deserialize, Serialize)]
-struct ServersFile {
-    #[serde(default)]
-    servers: Vec<ServerEntry>,
-}
-#[cfg(target_os = "linux")]
-#[derive(Deserialize, Serialize)]
-struct ServerEntry {
-    endpoint: String,
-    alias: String,
-    user_id: String,
-    name: String,
-    credential: String,
-    current: bool,
-}
 pub fn run() -> ExitCode {
     #[cfg(target_os = "macos")]
     {
@@ -429,26 +413,20 @@ fn strip_owner_credential(path: &Path) -> io::Result<()> {
 #[cfg(target_os = "linux")]
 fn save_owner(config_dir: &Path, config: &BrokerConfig, credential: String) -> io::Result<()> {
     let path = config_dir.join("servers.toml");
-    let mut store = match fs::read_to_string(&path) {
-        Ok(contents) => toml::from_str(&contents).map_err(invalid_data)?,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => ServersFile::default(),
-        Err(error) => return Err(error),
-    };
-    for server in &mut store.servers {
-        server.current = false;
-    }
+    let mut store = crate::store::ServerStore::load_from(&path)?;
     store
         .servers
         .retain(|server| server.endpoint != config.published_addr);
-    store.servers.push(ServerEntry {
+    let user_id = owner_user_id(&config.state_dir).unwrap_or_else(|| config.owner_name.clone());
+    store.make_current(crate::store::ServerEntry {
         endpoint: config.published_addr.clone(),
         alias: host_name(),
-        user_id: owner_user_id(&config.state_dir).unwrap_or_else(|| config.owner_name.clone()),
+        user_id,
         name: config.owner_name.clone(),
         credential,
         current: true,
     });
-    write_private(&path, toml_text(&store)?.as_bytes())
+    store.save_to(&path)
 }
 
 #[cfg(target_os = "linux")]

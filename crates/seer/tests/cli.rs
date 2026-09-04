@@ -51,7 +51,7 @@ fn help_detach_and_missing_attach_have_exact_results() {
 }
 
 #[test]
-fn join_retries_the_name_once_saves_private_store_and_attaches() {
+fn join_persists_private_store_without_seat_token_and_reconnects_after_restart() {
     let config = TestConfig::new();
     let listener = listener();
     let address = listener
@@ -101,6 +101,9 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
             }
         );
         send_welcome(&mut attached, "user-bob", "bob");
+        let mut restarted = accept(&listener);
+        assert_hello(&mut restarted);
+        send_welcome(&mut restarted, "user-bob", "bob");
     });
     let capsule = format!(
         "SEER1-127.0.0.1-{}-seat-token\nalice\nbob\n",
@@ -109,8 +112,7 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
 
     let output = run(&config, &["join"], &capsule);
 
-    assert_eq!(output.status.code(), Some(0));
-    assert!(output.stderr.is_empty());
+    assert!(output.status.success() && output.stderr.is_empty());
     assert_eq!(
         text(&output.stdout),
         format!(
@@ -118,11 +120,13 @@ fn join_retries_the_name_once_saves_private_store_and_attaches() {
             address.port()
         )
     );
-    server.join().expect("server must finish");
     let store_path = config.root.join("seer/servers.toml");
     let store = fs::read_to_string(&store_path).expect("store must be readable");
-    assert!(store.contains("name = \"bob\""));
     assert!(store.contains("credential = \"device-secret\""));
+    assert!(!store.contains("seat-token"));
+    let restarted = run(&config, &["attach"], "");
+    assert_eq!(restarted.stdout, b"Attached to 127.0.0.1 as bob.\n");
+    server.join().expect("server must finish");
     assert_eq!(
         fs::metadata(&store_path)
             .expect("store metadata must load")
