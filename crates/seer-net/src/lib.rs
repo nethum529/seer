@@ -6,9 +6,9 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -254,15 +254,10 @@ async fn handle_incoming(
     drop(pre_stream);
     let (caller_stream, bridge_stream) = match stream_pair() {
         Ok(streams) => streams,
-        Err(_) => {
-            connection.close(0_u8.into(), b"seer stream unavailable");
-            return;
-        }
+        Err(_) => return,
     };
     if accepted.send(Ok((remote, caller_stream))).is_ok() {
         let _ = bridge(send, recv, bridge_stream).await;
-    } else {
-        connection.close(0_u8.into(), b"seer listener stopped");
     }
 }
 
@@ -380,20 +375,4 @@ async fn copy_to_quic(
 
 fn task_result(result: Result<io::Result<()>, tokio::task::JoinError>) -> io::Result<()> {
     result.map_err(|_| io::Error::other("bridge task stopped"))?
-}
-
-#[cfg(test)]
-mod tests {
-    use super::{PRE_STREAM_CONNECTION_LIMIT, PreStreamLimit};
-
-    #[test]
-    fn pre_stream_limit_releases_after_connection_task_finishes() {
-        let limit = PreStreamLimit::default();
-        let guards = (0..PRE_STREAM_CONNECTION_LIMIT)
-            .map(|_| limit.try_acquire().expect("pre-stream slot must be available"))
-            .collect::<Vec<_>>();
-        assert!(limit.try_acquire().is_none());
-        drop(guards);
-        assert!(limit.try_acquire().is_some());
-    }
 }

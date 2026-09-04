@@ -11,7 +11,10 @@ use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
 use crate::registry::{MAX_SEAT_LIFETIME_SECS, PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
-use crate::{Config, connection_limit::{ConnectionKey, ConnectionGuard, ConnectionLimit}};
+use crate::{
+    Config,
+    connection_limit::{ConnectionGuard, ConnectionKey, ConnectionLimit},
+};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INVALID_CREDENTIALS: &str = "invalid credentials";
@@ -31,7 +34,7 @@ pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
     }
     for connection in listener.incoming() {
         let connection = connection?;
-        let source = ConnectionKey::Direct(connection.peer_addr()?.ip());
+        let source = ConnectionKey::direct(connection.peer_addr()?);
         spawn_connection(Socket::from(connection), Arc::clone(&broker), source);
     }
     Ok(())
@@ -183,11 +186,7 @@ fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
     });
 }
 
-fn spawn_connection<S: Stream + Clone>(
-    stream: S,
-    broker: Arc<BrokerState>,
-    source: ConnectionKey,
-) {
+fn spawn_connection<S: Stream + Clone>(stream: S, broker: Arc<BrokerState>, source: ConnectionKey) {
     let Some(connection) = broker.connection_limit.try_acquire_for(source) else {
         eprintln!("broker refused connection: connection limit reached");
         let _ = stream.shutdown(std::net::Shutdown::Both);
