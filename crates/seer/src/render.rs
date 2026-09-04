@@ -1,68 +1,294 @@
-use ratatui::Frame;
-use ratatui::buffer::Buffer;
-use ratatui::layout::Rect;
-use ratatui::style::{Modifier, Style};
-use ratatui::text::{Line, Span};
-use ratatui::widgets::{Paragraph, Widget};
-use seer_core::{Cell, Color};
+use crate::terminal_cells::PaneCells;
+use crate::{state::ClientState, theme::Palette};
+use ratatui::{
+    Frame,
+    layout::{Alignment, Rect},
+    style::Modifier,
+    text::{Line, Span},
+    widgets::{Paragraph, Wrap},
+};
 
-use crate::state::{ClientState, pane_rects};
-use crate::theme::Palette;
-
-pub(crate) fn draw_tree(
-    frame: &mut Frame<'_>,
-    state: &mut ClientState,
-    mut area: Rect,
-    status: &str,
-    peek_person: Option<&str>,
-) {
+pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     let palette = Palette::default();
-    frame.render_widget(Paragraph::new("").style(palette.style()), area);
-    let status_height = area.height.min(1);
-    let status_area = Rect::new(
-        area.x,
-        area.y + area.height.saturating_sub(status_height),
-        area.width,
-        status_height,
+    let full = frame.area();
+    frame.render_widget(Paragraph::new("").style(palette.style()), full);
+    state.people_areas.clear();
+    state.box_areas.clear();
+    if state.viewer.is_some() {
+        draw_viewer(frame, state);
+        return;
+    }
+    top_bar(frame, state);
+    let body = Rect::new(
+        full.x,
+        full.y.saturating_add(1),
+        full.width,
+        full.height.saturating_sub(2),
     );
-    draw_footer(frame, status_area, status);
-    area.height = area.height.saturating_sub(status_height);
-    if peek_person.is_none() {
-        let top = Rect::new(area.x, area.y, area.width, area.height.min(1));
-        frame.render_widget(
-            Paragraph::new(Line::from(Span::styled(
-                " seer",
-                palette
-                    .style()
-                    .fg(palette.accent)
-                    .add_modifier(Modifier::BOLD),
-            )))
-            .style(palette.style()),
-            top,
-        );
-        area.y = area.y.saturating_add(top.height);
-        area.height = area.height.saturating_sub(top.height);
+    let people = Rect::new(body.x, body.y, body.width.min(26), body.height);
+    let terminals = Rect::new(
+        people.right(),
+        body.y,
+        body.width.saturating_sub(people.width),
+        body.height,
+    );
+    people_column(frame, state, people);
+    terminal_area(frame, state, terminals);
+    let hints = if state.searching {
+        "enter select  esc cancel"
+    } else {
+        "j/k people  h/l terminals  enter watch  n new terminal  / search  esc back  q quit"
+    };
+    footer(
+        frame,
+        if state.notice.is_empty() {
+            hints
+        } else {
+            &state.notice
+        },
+    );
+    if state.quit_prompt {
+        dialog(frame, "Quit seer?", "enter quit   esc stay");
     }
-    if let Some(person) = peek_person {
-        let banner_height = area.height.min(2);
-        let banner = Rect::new(area.x, area.y, area.width, banner_height);
-        frame.render_widget(
-            Paragraph::new(format!(
-                "PEEK: {person} - READ ONLY\nWorkspace: {person}/{}",
-                state.selected_workspace().unwrap_or("unknown")
-            ))
-            .style(palette.style().fg(palette.subtext0)),
-            banner,
-        );
-        area.y = area.y.saturating_add(banner_height);
-        area.height = area.height.saturating_sub(banner_height);
-    }
-    draw_panes(frame, state, area);
 }
 
-fn draw_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
+fn top_bar(frame: &mut Frame<'_>, state: &ClientState) {
     let palette = Palette::default();
-    let spans: Vec<_> = status
+    let area = frame.area();
+    let left = Line::from(vec![
+        Span::styled(
+            " seer ",
+            palette
+                .style()
+                .fg(palette.accent)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Span::styled(
+            format!(" {}  {}", state.own_name, state.server),
+            palette.style().fg(palette.subtext0),
+        ),
+    ]);
+    frame.render_widget(
+        Paragraph::new(left).style(palette.style()),
+        Rect::new(area.x, area.y, area.width, area.height.min(1)),
+    );
+    let right = format!(
+        "{} online  / search ",
+        state.people.iter().filter(|person| person.online).count()
+    );
+    let width = (right.len() as u16).min(area.width / 2);
+    frame.render_widget(
+        Paragraph::new(right)
+            .style(palette.style().fg(palette.subtext0))
+            .alignment(Alignment::Right),
+        Rect::new(
+            area.right().saturating_sub(width),
+            area.y,
+            width,
+            area.height.min(1),
+        ),
+    );
+}
+
+fn people_column(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
+    let palette = Palette::default();
+    let title = if state.search.is_empty() && !state.searching {
+        " people ".into()
+    } else {
+        format!(" people /{} ", state.search)
+    };
+    let block = palette.block(true).title(title);
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    let matches = state.matches();
+    state.people_scroll = state
+        .people_scroll
+        .min(matches.len().saturating_sub(usize::from(inner.height)));
+    for (row, index) in matches
+        .into_iter()
+        .skip(state.people_scroll)
+        .take(usize::from(inner.height))
+        .enumerate()
+    {
+        let person = &state.people[index];
+        let own = person.user_id == state.own_user;
+        let label = if own { "you" } else { &person.name };
+        let marker = if state
+            .viewer
+            .as_ref()
+            .is_some_and(|(user, _)| user == &person.user_id)
+        {
+            ">"
+        } else {
+            " "
+        };
+        let mut style = palette
+            .style()
+            .fg(if own { palette.yellow } else { palette.text });
+        if index == state.selected {
+            style = style.bg(palette.surface0);
+        }
+        let rect = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
+        frame.render_widget(
+            Paragraph::new(format!("{marker} {label}")).style(style),
+            rect,
+        );
+        state.people_areas.push((index, rect));
+    }
+}
+
+fn terminal_area(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
+    let palette = Palette::default();
+    let block = palette.block(false).title(Span::styled(
+        format!(" {} ", state.person_name(state.user())),
+        palette.style().fg(palette.text),
+    ));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.is_empty() {
+        return;
+    }
+    let presence = state.people.get(state.selected).map_or("away".into(), |p| {
+        if p.online {
+            "online".into()
+        } else {
+            format!("away {}", idle_text(p.idle_secs))
+        }
+    });
+    let allowed = if state.user() == state.own_user {
+        "yes"
+    } else {
+        "no"
+    };
+    let header = format!(
+        " {presence}  {} terminals  you may type: {allowed}",
+        state.selected_terminals().len()
+    );
+    frame.render_widget(
+        Paragraph::new(header).style(palette.style().fg(palette.subtext0)),
+        Rect::new(inner.x, inner.y, inner.width, 1),
+    );
+    let content = Rect::new(
+        inner.x,
+        inner.y + 1,
+        inner.width,
+        inner.height.saturating_sub(1),
+    );
+    if state.people.len() == 1 {
+        first_run(frame, state, content);
+    } else {
+        box_grid(frame, state, content, if area.width >= 80 { 2 } else { 1 });
+    }
+}
+
+fn first_run(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
+    let palette = Palette::default();
+    let invite = state.invite.as_deref().unwrap_or("Creating an invite...");
+    let text = vec![
+        Line::styled(
+            "Nobody else is here yet.",
+            palette
+                .style()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
+        ),
+        Line::from(""),
+        Line::styled(
+            "Send this line to a friend. It expires in 24 hours.",
+            palette.style().fg(palette.subtext0),
+        ),
+        Line::from(""),
+        Line::styled(invite, palette.style().fg(palette.blue)),
+        Line::from(""),
+        Line::styled(
+            "c copy   n new invite / terminal",
+            palette.style().fg(palette.subtext0),
+        ),
+    ];
+    let width = area.width.saturating_sub(4).max(1);
+    let height = 7_u16
+        .saturating_add((invite.len() as u16).saturating_div(width))
+        .min(area.height);
+    let centered = Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width.min(area.width),
+        height,
+    );
+    frame.render_widget(
+        Paragraph::new(text)
+            .style(palette.style())
+            .alignment(Alignment::Center)
+            .wrap(Wrap { trim: false }),
+        centered,
+    );
+}
+
+fn box_grid(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, columns: usize) {
+    let palette = Palette::default();
+    let terminals = state.selected_terminals().to_vec();
+    if terminals.is_empty() {
+        frame.render_widget(
+            Paragraph::new("No terminals.")
+                .style(palette.style().fg(palette.subtext0))
+                .alignment(Alignment::Center),
+            area,
+        );
+        return;
+    }
+    state.focus = state.focus.min(terminals.len() - 1);
+    let total_rows = terminals.len().div_ceil(columns);
+    let visible_rows = total_rows.min((usize::from(area.height) / 6).max(1));
+    state.grid_scroll = state
+        .grid_scroll
+        .min(total_rows.saturating_sub(visible_rows));
+    for (index, terminal) in terminals
+        .iter()
+        .enumerate()
+        .skip(state.grid_scroll * columns)
+        .take(visible_rows * columns)
+    {
+        let row = index / columns - state.grid_scroll;
+        let column = index % columns;
+        let x = area.x + (usize::from(area.width) * column / columns) as u16;
+        let right = area.x + (usize::from(area.width) * (column + 1) / columns) as u16;
+        let y = area.y + (usize::from(area.height) * row / visible_rows) as u16;
+        let bottom = area.y + (usize::from(area.height) * (row + 1) / visible_rows) as u16;
+        let rect = Rect::new(x, y, right - x, bottom - y);
+        let title = Line::from(vec![
+            Span::styled(
+                format!(" {} ", terminal.name),
+                palette.style().fg(if terminal.name == "shell" {
+                    palette.subtext0
+                } else {
+                    palette.blue
+                }),
+            ),
+            Span::styled(
+                format!("{} ", terminal.state),
+                palette.style().fg(if terminal.state == "idle" {
+                    palette.green
+                } else {
+                    palette.yellow
+                }),
+            ),
+        ]);
+        let block = palette.block(index == state.focus).title(title);
+        let inner = block.inner(rect);
+        frame.render_widget(block, rect);
+        let rows = state
+            .frames
+            .get(&(state.user().into(), terminal.pane.clone()))
+            .map_or(&[][..], |f| f.rows.as_slice());
+        frame.render_widget(PaneCells::new(rows), inner);
+        state.box_areas.push((index, rect));
+    }
+}
+
+pub(crate) fn footer(frame: &mut Frame<'_>, hints: &str) {
+    let palette = Palette::default();
+    let area = frame.area();
+    let spans: Vec<_> = hints
         .split("  ")
         .flat_map(|hint| {
             let (key, label) = hint.split_once(' ').unwrap_or((hint, ""));
@@ -77,91 +303,71 @@ fn draw_footer(frame: &mut Frame<'_>, area: Rect, status: &str) {
         .collect();
     frame.render_widget(
         Paragraph::new(Line::from(spans)).style(palette.style()),
-        area,
+        Rect::new(
+            area.x,
+            area.bottom().saturating_sub(1),
+            area.width,
+            area.height.min(1),
+        ),
     );
 }
 
-fn draw_panes(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
-    let Some(tab) = state.visible_tab().cloned() else {
-        state.set_pane_areas(Vec::new());
+pub(crate) fn dialog(frame: &mut Frame<'_>, title: &str, text: &str) {
+    let palette = Palette::default();
+    let area = frame.area();
+    let width = 36.min(area.width);
+    let height = 5.min(area.height);
+    let rect = Rect::new(
+        area.x + area.width.saturating_sub(width) / 2,
+        area.y + area.height.saturating_sub(height) / 2,
+        width,
+        height,
+    );
+    frame.render_widget(
+        Paragraph::new(text)
+            .style(palette.style())
+            .alignment(Alignment::Center)
+            .block(palette.block(false).title(format!(" {title} "))),
+        rect,
+    );
+}
+
+pub(crate) fn idle_text(seconds: u64) -> String {
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{}h", seconds / 3600)
+    }
+}
+
+fn draw_viewer(frame: &mut Frame<'_>, state: &ClientState) {
+    let Some((user, pane)) = &state.viewer else {
         return;
     };
-    let mut input_areas = Vec::new();
-    for (pane, pane_area) in pane_rects(&tab, area) {
-        let palette = Palette::default();
-        let block = palette
-            .block(state.focused() == Some(pane.as_str()))
-            .title(Span::styled(
-                format!(" {pane} "),
-                palette.style().fg(palette.subtext0),
-            ));
-        let inner = block.inner(pane_area);
-        frame.render_widget(block, pane_area);
-        frame.render_widget(PaneCells::new(state.pane_rows(&pane)), inner);
-        set_frame_cursor(frame, state, &pane, inner);
-        input_areas.push((pane, inner));
-    }
-    state.set_pane_areas(input_areas);
-}
-
-fn set_frame_cursor(frame: &mut Frame<'_>, state: &ClientState, pane: &str, area: Rect) {
-    let Some(cursor) = state
-        .pane_cursor(pane)
-        .filter(|cursor| cursor.visible && state.focused() == Some(pane))
-    else {
-        return;
+    let palette = Palette::default();
+    let area = frame.area();
+    let area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
+    let name = state
+        .terminals
+        .get(user)
+        .into_iter()
+        .flatten()
+        .find(|t| &t.pane == pane)
+        .map_or("shell", |t| t.name.as_str());
+    let mode = if user == &state.own_user {
+        "input"
+    } else {
+        "read only"
     };
-    if cursor.column < area.width && cursor.row < area.height {
-        frame.set_cursor_position((area.x + cursor.column, area.y + cursor.row));
+    let block = palette
+        .block(true)
+        .title(format!(" {}  {name}  {mode} ", state.person_name(user)));
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if let Some(content) = state.frames.get(&(user.clone(), pane.clone())) {
+        frame.render_widget(PaneCells::new(&content.rows), inner);
     }
-}
-
-pub(crate) struct PaneCells<'a> {
-    rows: &'a [Vec<Cell>],
-}
-
-impl<'a> PaneCells<'a> {
-    pub(crate) fn new(rows: &'a [Vec<Cell>]) -> Self {
-        Self { rows }
-    }
-}
-
-impl Widget for PaneCells<'_> {
-    fn render(self, area: Rect, buffer: &mut Buffer) {
-        let palette = Palette::default();
-        buffer.set_style(area, palette.style());
-        for (row_index, row) in self.rows.iter().take(area.height as usize).enumerate() {
-            let y = area.y.saturating_add(row_index as u16);
-            for (column_index, cell) in row.iter().take(area.width as usize).enumerate() {
-                let x = area.x.saturating_add(column_index as u16);
-                buffer[(x, y)]
-                    .set_char(cell.character)
-                    .set_style(cell_style(cell, palette));
-            }
-        }
-    }
-}
-
-fn cell_style(cell: &Cell, palette: Palette) -> Style {
-    let mut modifiers = Modifier::empty();
-    modifiers.set(Modifier::BOLD, cell.bold);
-    modifiers.set(Modifier::ITALIC, cell.italic);
-    modifiers.set(Modifier::UNDERLINED, cell.underline);
-    modifiers.set(Modifier::DIM, cell.dim);
-    modifiers.set(Modifier::REVERSED, cell.inverse);
-    modifiers.set(Modifier::HIDDEN, cell.hidden);
-    modifiers.set(Modifier::CROSSED_OUT, cell.strikeout);
-    Style::default()
-        .fg(color(cell.fg, palette.text, palette))
-        .bg(color(cell.bg, palette.panel_bg, palette))
-        .add_modifier(modifiers)
-}
-
-fn color(color: Color, default: ratatui::style::Color, palette: Palette) -> ratatui::style::Color {
-    match color {
-        Color::Default => default,
-        Color::Indexed(index) if index < 16 => palette.ansi(index),
-        Color::Indexed(index) => ratatui::style::Color::Indexed(index),
-        Color::Rgb { red, green, blue } => ratatui::style::Color::Rgb(red, green, blue),
-    }
+    footer(frame, "esc back");
 }

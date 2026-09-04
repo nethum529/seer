@@ -1,94 +1,248 @@
-use std::cell::RefCell;
-use std::io;
-
-use crossterm::event::KeyEvent;
-use ratatui::layout::Rect;
-use seer_core::{InputEvent, TerminalInput, Tree};
+use crate::{state::ClientState, tui::send};
+use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Position;
+use seer_core::proto::ClientMsg;
 use seer_net::Stream;
-
-use crate::input::{
-    FocusDirection, key_to_input, pane_in_direction as find_pane_in_direction, selected_tab_tree,
+use std::{
+    cell::RefCell,
+    io,
+    io::Write,
+    time::{Duration, Instant},
 };
-use crate::state::{ClientState, pane_rects};
-use crate::tui::send_focused_input;
 
-const STATUS_HINT: &str = "Ctrl-b c new tab, % split, x close, n/p tabs";
-const LAST_TAB_STATUS: &str = "Cannot close the last tab.";
-
-thread_local! {
-    static NAVIGATION_TREE: RefCell<Option<Tree>> = const { RefCell::new(None) };
-    static STATUS: RefCell<&'static str> = const { RefCell::new(STATUS_HINT) };
+thread_local! { static START_PERSON: RefCell<Option<String>> = const { RefCell::new(None) }; }
+pub(crate) fn set_peek_person(person: Option<&str>) {
+    START_PERSON.set(person.map(str::to_owned));
+}
+pub(crate) fn take_start_person() -> Option<String> {
+    START_PERSON.take()
 }
 
-pub(crate) fn forward_prefix(
+pub(crate) fn key(
     key: KeyEvent,
     stream: &mut impl Stream,
-    state: &ClientState,
-) -> io::Result<()> {
-    let prefix = TerminalInput::new(InputEvent::Text("\u{2}".into()));
-    send_focused_input(stream, state, prefix)?;
-    match key_to_input(key) {
-        Some(input) => send_focused_input(stream, state, input),
-        None => Ok(()),
+    state: &mut ClientState,
+) -> io::Result<bool> {
+    if state.quit_prompt {
+        match key.code {
+            KeyCode::Enter | KeyCode::Char('q') => return Ok(true),
+            KeyCode::Esc => state.quit_prompt = false,
+            _ => {}
+        }
+        return Ok(false);
     }
+    if state.searching {
+        search(key, state);
+        return Ok(false);
+    }
+    match key.code {
+        KeyCode::Char('q') => return Ok(true),
+        KeyCode::Esc => state.quit_prompt = true,
+        KeyCode::Char('j') | KeyCode::Down => move_person(state, true),
+        KeyCode::Char('k') | KeyCode::Up => move_person(state, false),
+        KeyCode::Char('h') | KeyCode::Left => move_box(state, false),
+        KeyCode::Char('l') | KeyCode::Right => move_box(state, true),
+        KeyCode::Enter => state.open_focused(),
+        KeyCode::Char('/') => state.searching = true,
+        KeyCode::Char('n') => new_terminal(stream, state)?,
+        KeyCode::Char('c') if state.people.len() == 1 => copy_invite(state)?,
+        _ => {}
+    }
+    Ok(false)
 }
 
-pub(crate) fn initialize(tree: &Tree) {
-    update_tree(tree);
-    show_hint();
+fn search(key: KeyEvent, state: &mut ClientState) {
+    match key.code {
+        KeyCode::Esc => {
+            state.searching = false;
+            state.search.clear();
+        }
+        KeyCode::Enter => state.searching = false,
+        KeyCode::Backspace => {
+            state.search.pop();
+        }
+        KeyCode::Char(character) => state.search.push(character),
+        _ => {}
+    }
+    if let Some(index) = state.matches().first() {
+        state.select_person(*index);
+    }
+    state.people_scroll = 0;
 }
 
-pub(crate) fn update_tree(tree: &Tree) {
-    NAVIGATION_TREE.with_borrow_mut(|current| *current = Some(tree.clone()));
-}
-
-pub(crate) fn show_hint() {
-    STATUS.with_borrow_mut(|current| *current = STATUS_HINT);
-}
-
-pub(crate) fn show_last_tab_status() {
-    STATUS.with_borrow_mut(|current| *current = LAST_TAB_STATUS);
-}
-
-pub(crate) fn status() -> &'static str {
-    STATUS.with_borrow(|status| *status)
-}
-
-pub(crate) fn select_tab(state: &mut ClientState, forward: bool) {
-    let Some((workspace, tab)) = state
-        .selection()
-        .map(|(workspace, tab)| (workspace.to_owned(), tab.to_owned()))
-    else {
+fn move_person(state: &mut ClientState, forward: bool) {
+    let matches = state.matches();
+    if matches.is_empty() {
         return;
-    };
-    let selected = NAVIGATION_TREE.with_borrow(|tree| {
-        tree.as_ref()
-            .and_then(|tree| selected_tab_tree(tree, &workspace, &tab, forward))
-    });
-    if let Some(tree) = selected {
-        state.replace_tree(tree);
+    }
+    let index = matches
+        .iter()
+        .position(|index| *index == state.selected)
+        .unwrap_or(0);
+    let index = step(index, matches.len(), forward);
+    state.select_person(matches[index]);
+    let height = state.people_areas.len().max(1);
+    if index < state.people_scroll {
+        state.people_scroll = index;
+    }
+    if index >= state.people_scroll + height {
+        state.people_scroll = index + 1 - height;
     }
 }
 
-pub(crate) fn closes_last_tab(state: &ClientState) -> bool {
-    let Some((workspace, _)) = state.selection() else {
-        return false;
-    };
-    let last_pane = state.visible_tab().is_some_and(|tab| tab.panes.len() == 1);
-    last_pane
-        && NAVIGATION_TREE.with_borrow(|tree| {
-            tree.as_ref().is_none_or(|tree| {
-                tree.workspaces
-                    .iter()
-                    .find(|candidate| candidate.id == workspace)
-                    .is_none_or(|workspace| workspace.tabs.len() == 1)
-            })
-        })
+fn move_box(state: &mut ClientState, forward: bool) {
+    let count = state.selected_terminals().len();
+    if count == 0 {
+        return;
+    }
+    state.focus = step(state.focus, count, forward);
+    if !state
+        .box_areas
+        .iter()
+        .any(|(index, _)| *index == state.focus)
+    {
+        let columns = if state
+            .box_areas
+            .iter()
+            .take(2)
+            .map(|(_, r)| r.y)
+            .collect::<Vec<_>>()
+            .windows(2)
+            .any(|rows| rows[0] == rows[1])
+        {
+            2
+        } else {
+            1
+        };
+        state.grid_scroll = state.focus / columns;
+    }
 }
 
-pub(crate) fn pane_in_direction(state: &ClientState, direction: FocusDirection) -> Option<String> {
-    let tab = state.visible_tab()?;
-    let focused = state.focused()?;
-    let rects = pane_rects(tab, Rect::new(0, 0, 1_000, 1_000));
-    find_pane_in_direction(&rects, focused, direction)
+pub(crate) fn step(index: usize, count: usize, forward: bool) -> usize {
+    if forward {
+        (index + 1) % count
+    } else {
+        (index + count - 1) % count
+    }
+}
+
+fn new_terminal(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
+    let Some(workspace) = state.tree.workspaces.first() else {
+        state.notice = "Waiting for your terminals.".into();
+        return Ok(());
+    };
+    state.pending_new = Some(
+        state
+            .tree
+            .workspaces
+            .iter()
+            .flat_map(|w| &w.tabs)
+            .flat_map(|t| &t.panes)
+            .map(|p| p.id.clone())
+            .collect(),
+    );
+    send(
+        stream,
+        &ClientMsg::CreateTab {
+            workspace: workspace.id.clone(),
+        },
+    )?;
+    if state.people.len() == 1 {
+        invite(stream, state)?;
+    }
+    Ok(())
+}
+
+pub(crate) fn invite(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
+    if !state.invite_pending {
+        send(stream, &ClientMsg::Invite { hours: Some(24) })?;
+        state.invite_pending = true;
+    }
+    Ok(())
+}
+
+fn copy_invite(state: &mut ClientState) -> io::Result<()> {
+    let Some(invite) = &state.invite else {
+        return Ok(());
+    };
+    let mut stdout = io::stdout().lock();
+    write!(stdout, "\x1b]52;c;{}\x07", base64(invite.as_bytes()))?;
+    stdout.flush()?;
+    state.notice = "Copy requested. Your terminal must permit clipboard access.".into();
+    Ok(())
+}
+
+fn base64(bytes: &[u8]) -> String {
+    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+    let mut text = String::new();
+    for chunk in bytes.chunks(3) {
+        let first = chunk[0];
+        let second = chunk.get(1).copied().unwrap_or(0);
+        let third = chunk.get(2).copied().unwrap_or(0);
+        text.push(char::from(ALPHABET[usize::from(first >> 2)]));
+        text.push(char::from(
+            ALPHABET[usize::from(((first & 3) << 4) | (second >> 4))],
+        ));
+        text.push(if chunk.len() > 1 {
+            char::from(ALPHABET[usize::from(((second & 15) << 2) | (third >> 6))])
+        } else {
+            '='
+        });
+        text.push(if chunk.len() > 2 {
+            char::from(ALPHABET[usize::from(third & 63)])
+        } else {
+            '='
+        });
+    }
+    text
+}
+
+pub(crate) fn mouse(
+    mouse: MouseEvent,
+    state: &mut ClientState,
+    last: &mut Option<(String, usize, Instant)>,
+) {
+    let position = Position::new(mouse.column, mouse.row);
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+    ) {
+        let scroll = if mouse.column < 26 {
+            &mut state.people_scroll
+        } else {
+            &mut state.grid_scroll
+        };
+        *scroll = if mouse.kind == MouseEventKind::ScrollDown {
+            scroll.saturating_add(1)
+        } else {
+            scroll.saturating_sub(1)
+        };
+    }
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return;
+    }
+    if let Some((index, _)) = state
+        .people_areas
+        .iter()
+        .find(|(_, rect)| rect.contains(position))
+    {
+        state.select_person(*index);
+        return;
+    }
+    if let Some((index, _)) = state
+        .box_areas
+        .iter()
+        .find(|(_, rect)| rect.contains(position))
+    {
+        let index = *index;
+        state.focus = index;
+        if last.as_ref().is_some_and(|(user, old, time)| {
+            user == state.user() && *old == index && time.elapsed() < Duration::from_millis(400)
+        }) {
+            state.open_focused();
+            *last = None;
+        } else {
+            *last = Some((state.user().into(), index, Instant::now()));
+        }
+    }
 }

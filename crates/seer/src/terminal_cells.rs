@@ -1,0 +1,64 @@
+use crate::theme::Palette;
+use ratatui::{
+    buffer::Buffer,
+    layout::Rect,
+    style::{Modifier, Style},
+    widgets::Widget,
+};
+use seer_core::{Cell, Color};
+
+pub(crate) struct PaneCells<'a> {
+    rows: &'a [Vec<Cell>],
+}
+
+impl<'a> PaneCells<'a> {
+    pub(crate) fn new(rows: &'a [Vec<Cell>]) -> Self {
+        Self { rows }
+    }
+}
+
+impl Widget for PaneCells<'_> {
+    fn render(self, area: Rect, buffer: &mut Buffer) {
+        let palette = Palette::default();
+        buffer.set_style(area, palette.style());
+        for (row_index, row) in self
+            .rows
+            .iter()
+            .skip(self.rows.len().saturating_sub(area.height as usize))
+            .take(area.height as usize)
+            .enumerate()
+        {
+            let y = area.y.saturating_add(row_index as u16);
+            for (column_index, cell) in row.iter().take(area.width as usize).enumerate() {
+                let x = area.x.saturating_add(column_index as u16);
+                buffer[(x, y)]
+                    .set_char(cell.character)
+                    .set_style(cell_style(cell, palette));
+            }
+        }
+    }
+}
+
+fn cell_style(cell: &Cell, palette: Palette) -> Style {
+    let mut modifiers = Modifier::empty();
+    modifiers.set(Modifier::BOLD, cell.bold);
+    modifiers.set(Modifier::ITALIC, cell.italic);
+    modifiers.set(Modifier::UNDERLINED, cell.underline);
+    modifiers.set(Modifier::DIM, cell.dim);
+    modifiers.set(Modifier::REVERSED, cell.inverse);
+    modifiers.set(Modifier::HIDDEN, cell.hidden);
+    modifiers.set(Modifier::CROSSED_OUT, cell.strikeout);
+    Style::default()
+        .fg(color(cell.fg, palette.text, palette))
+        .bg(color(cell.bg, palette.panel_bg, palette))
+        .add_modifier(modifiers)
+}
+
+fn color(color: Color, default: ratatui::style::Color, palette: Palette) -> ratatui::style::Color {
+    match color {
+        Color::Default => default,
+        Color::Indexed(index) if index < 16 => palette.ansi(index),
+        Color::Indexed(index) => ratatui::style::Color::Indexed(index),
+        Color::Rgb { red, green, blue } => ratatui::style::Color::Rgb(red, green, blue),
+    }
+}
