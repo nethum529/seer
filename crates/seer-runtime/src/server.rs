@@ -1,3 +1,4 @@
+use seer_core::TerminalCapabilities;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::fs;
 use std::io;
@@ -8,6 +9,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::UserSession;
+use crate::user_session::validate_capabilities;
 
 mod connection;
 mod util;
@@ -109,6 +111,9 @@ fn handle_message(
             cols,
             rows,
         } => shared.client_resize(connection_id, &workspace, &tab, cols, rows),
+        ClientMsg::TerminalCapabilities { capabilities } => {
+            shared.record_capabilities(connection_id, capabilities)
+        }
         message if is_mutating(&message) => shared.dispatch_input(connection_id, message),
         _ => Ok(false),
     }
@@ -272,6 +277,24 @@ impl SharedSession {
             }
             Err(error) => Err(error),
         }
+    }
+
+    fn record_capabilities(
+        &self,
+        connection_id: u64,
+        capabilities: TerminalCapabilities,
+    ) -> io::Result<bool> {
+        if let Err(error) = validate_capabilities(capabilities) {
+            self.send_refused(connection_id, error.to_string())?;
+            return Ok(false);
+        }
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections.iter_mut().find(|c| c.id == connection_id) else {
+            return Ok(true);
+        };
+        connection.capabilities = Some(capabilities);
+        connection.last_active = Instant::now();
+        Ok(false)
     }
 
     fn client_resize(

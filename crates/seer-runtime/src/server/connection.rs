@@ -4,6 +4,7 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, SyncSender};
 use std::time::Instant;
 
+use seer_core::TerminalCapabilities;
 use seer_core::proto::ServerMsg;
 
 use super::writer;
@@ -23,6 +24,7 @@ pub(super) struct Connection {
     pub(super) id: u64,
     pub(super) output: SyncSender<Arc<[u8]>>,
     pub(super) stream: UnixStream,
+    pub(super) capabilities: Option<TerminalCapabilities>,
     pub(super) viewport: Option<ReportedViewport>,
     pub(super) read_only: bool,
     pub(super) size_owner: bool,
@@ -38,6 +40,7 @@ impl Connection {
             id,
             output,
             stream,
+            capabilities: None,
             viewport: None,
             read_only: false,
             size_owner: false,

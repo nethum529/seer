@@ -2,7 +2,7 @@ use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::{PaneSize, Tree};
+use seer_core::{PaneSize, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, Tree};
 
 use super::{SIZE_LEASE_TIMEOUT, SharedSession, handle_message, lock};
 use crate::UserSession;
@@ -31,6 +31,28 @@ fn size_lease_governs_per_client_resize_control() {
         pane_size_of(&read_until_tree(&mut peer_client)),
         PaneSize { cols: 80, rows: 24 }
     );
+
+    let capabilities = TerminalCapabilities {
+        protocol_version: TERMINAL_PROTOCOL_VERSION,
+    };
+    handle_message(&shared, 1, ClientMsg::TerminalCapabilities { capabilities })
+        .expect("valid capabilities must be accepted");
+    assert_eq!(capabilities_of(&shared, 1), Some(capabilities));
+    assert_eq!(capabilities_of(&shared, 2), None);
+
+    handle_message(
+        &shared,
+        2,
+        ClientMsg::TerminalCapabilities {
+            capabilities: TerminalCapabilities {
+                protocol_version: TERMINAL_PROTOCOL_VERSION + 1,
+            },
+        },
+    )
+    .expect("invalid capabilities must be refused");
+    read_until_refused(&mut peer_client);
+    assert_eq!(capabilities_of(&shared, 1), Some(capabilities));
+    assert_eq!(capabilities_of(&shared, 2), None);
 
     handle_message(
         &shared,
@@ -269,6 +291,14 @@ fn viewport_of(shared: &SharedSession, id: u64) -> Option<PaneSize> {
         })
 }
 
+fn capabilities_of(shared: &SharedSession, id: u64) -> Option<TerminalCapabilities> {
+    let connections = lock(&shared.connections).expect("connections must lock");
+    connections
+        .iter()
+        .find(|connection| connection.id == id)
+        .and_then(|connection| connection.capabilities)
+}
+
 fn read_only_of(shared: &SharedSession, id: u64) -> bool {
     let connections = lock(&shared.connections).expect("connections must lock");
     connections
@@ -287,6 +317,17 @@ fn read_until_tree(stream: &mut UnixStream) -> Tree {
         if let ServerMsg::Tree { tree } = codec::decode(stream).expect("server message must decode")
         {
             return tree;
+        }
+    }
+}
+
+fn read_until_refused(stream: &mut UnixStream) {
+    loop {
+        if matches!(
+            codec::decode(stream).expect("server message must decode"),
+            ServerMsg::Refused { .. }
+        ) {
+            return;
         }
     }
 }
