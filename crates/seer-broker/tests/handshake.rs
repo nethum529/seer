@@ -98,7 +98,7 @@ fn joins_commit_person_and_seat_atomically() {
     let mut reopened_config = config.clone();
     let _server = thread::spawn(move || serve(listener, None, &config));
 
-    let (_, joined) = exchange(
+    let (mut joined_stream, joined) = exchange(
         address,
         &ClientMsg::Join {
             seat_token: "seat-one".into(),
@@ -118,6 +118,16 @@ fn joins_commit_person_and_seat_atomically() {
         }
         other => panic!("expected Joined, got {other:?}"),
     };
+    joined_stream
+        .set_read_timeout(Some(Duration::from_millis(100)))
+        .expect("read timeout must set");
+    let mut byte = [0];
+    assert_eq!(
+        joined_stream
+            .read(&mut byte)
+            .expect("connection must close"),
+        0
+    );
 
     let (used_stream, used) = exchange(
         address,
