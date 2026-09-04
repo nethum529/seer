@@ -1,0 +1,237 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seer: From MVP to Final Product</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f3f2f8;
+      --surface: #ffffff;
+      --ink: #1d2030;
+      --muted: #626779;
+      --line: #d9dbe5;
+      --accent: #5544c9;
+      --accent-soft: #ebe8ff;
+      --good: #1f7150;
+      --good-soft: #def2e7;
+      --work: #8b5b0c;
+      --work-soft: #fff0ca;
+      --plan: #435674;
+      --plan-soft: #e6edf7;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-size: 16px;
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(100% - 32px, 1040px);
+      margin: 0 auto;
+      padding: 56px 0 80px;
+    }
+
+    header { max-width: 780px; }
+    .eyebrow { margin: 0 0 10px; color: var(--accent); font-size: 0.78rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; }
+    h1, h2, h3 { line-height: 1.15; }
+    h1 { margin: 0; font-size: clamp(2.3rem, 6vw, 4.7rem); letter-spacing: -0.045em; }
+    h2 { margin: 0 0 8px; font-size: clamp(1.6rem, 3vw, 2.25rem); letter-spacing: -0.025em; }
+    h3 { margin: 0 0 7px; font-size: 1.08rem; }
+    p { margin: 0; }
+    .lede { margin-top: 18px; max-width: 680px; color: var(--muted); font-size: 1.16rem; }
+    section { margin-top: 56px; }
+    section > header { margin-bottom: 20px; }
+    section > header p { color: var(--muted); }
+
+    .diagram {
+      margin: 34px 0 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: 0 18px 50px rgba(29, 32, 48, 0.08);
+    }
+
+    .diagram svg { display: block; width: 100%; min-width: 900px; height: auto; }
+    .diagram figcaption { padding: 0 24px 20px; color: var(--muted); font-size: 0.92rem; }
+
+    .status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 0.76rem; font-weight: 800; white-space: nowrap; text-transform: uppercase; letter-spacing: 0.04em; }
+    .built { background: var(--good-soft); color: var(--good); }
+    .progress { background: var(--work-soft); color: var(--work); }
+    .planned { background: var(--plan-soft); color: var(--plan); }
+
+    .card-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; }
+    .card { padding: 22px; border: 1px solid var(--line); border-radius: 16px; background: var(--surface); }
+    .card .status { margin-bottom: 14px; }
+    .card p { color: var(--muted); font-size: 0.94rem; }
+
+    .comparison-table { overflow-x: auto; border: 1px solid var(--line); border-radius: 14px; }
+    table { width: 100%; min-width: 650px; border-collapse: collapse; background: var(--surface); }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    tr:last-child td { border-bottom: 0; }
+    th { background: var(--accent-soft); font-size: 0.82rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    td:nth-child(2) { width: 150px; }
+    td:last-child { color: var(--muted); }
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+
+    .terms { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 1px; overflow: hidden; border: 1px solid var(--line); border-radius: 16px; background: var(--line); }
+    .term { padding: 18px; background: var(--surface); }
+    .term strong { display: block; margin-bottom: 4px; }
+    .term span { color: var(--muted); font-size: 0.92rem; }
+
+    .boundary { display: grid; grid-template-columns: 1fr 1fr; gap: 16px; }
+    .callout { padding: 20px; border-left: 4px solid var(--accent); background: var(--accent-soft); }
+    .callout strong { display: block; margin-bottom: 5px; }
+    .callout span { color: var(--muted); }
+    footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.86rem; }
+
+    @media (max-width: 800px) {
+      main { width: min(100% - 24px, 1040px); padding-top: 34px; }
+      .card-grid { grid-template-columns: 1fr; }
+      .terms, .boundary { grid-template-columns: 1fr 1fr; }
+    }
+
+    @media (max-width: 520px) {
+      .terms, .boundary { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Final product vision</p>
+      <h1>A shared server with a private place for each person.</h1>
+      <p class="lede">Seer grows from a working terminal multiplexer into a durable home for coding agents. The terminal UI comes first. A desktop app comes much later.</p>
+    </header>
+
+    <figure class="diagram" aria-labelledby="roadmap-title roadmap-caption">
+      <svg viewBox="0 0 1120 400" role="img">
+        <title id="roadmap-title">Roadmap from the multiplayer MVP to the final Seer product</title>
+        <defs>
+          <marker id="road-arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#85899a"></path>
+          </marker>
+        </defs>
+        <path d="M170 126 H270 M410 126 H510 M650 126 H750 M890 126 H980" stroke="#85899a" stroke-width="3" fill="none" marker-end="url(#road-arrow)"></path>
+        <path d="M580 184 V246 M580 246 H360 M580 246 H800 M360 246 V278 M800 246 V278" stroke="#85899a" stroke-width="3" fill="none" marker-end="url(#road-arrow)"></path>
+
+        <g font-family="Inter, system-ui, sans-serif">
+          <rect x="30" y="58" width="140" height="136" rx="18" fill="#def2e7" stroke="#1f7150" stroke-width="2"></rect>
+          <text x="100" y="91" text-anchor="middle" font-size="12" font-weight="800" fill="#1f7150">BUILT</text>
+          <text x="100" y="126" text-anchor="middle" font-size="18" font-weight="800" fill="#1d2030">MVP</text>
+          <text x="100" y="153" text-anchor="middle" font-size="13" fill="#626779">Private trees</text>
+          <text x="100" y="173" text-anchor="middle" font-size="13" fill="#626779">Read-only peek</text>
+
+          <rect x="270" y="58" width="140" height="136" rx="18" fill="#def2e7" stroke="#1f7150" stroke-width="2"></rect>
+          <text x="340" y="91" text-anchor="middle" font-size="12" font-weight="800" fill="#1f7150">BUILT</text>
+          <text x="340" y="122" text-anchor="middle" font-size="17" font-weight="800" fill="#1d2030">Remote join</text>
+          <text x="340" y="150" text-anchor="middle" font-size="13" fill="#626779">One line</text>
+          <text x="340" y="170" text-anchor="middle" font-size="13" fill="#626779">Encrypted path</text>
+
+          <rect x="510" y="58" width="140" height="136" rx="18" fill="#fff0ca" stroke="#8b5b0c" stroke-width="2"></rect>
+          <text x="580" y="91" text-anchor="middle" font-size="12" font-weight="800" fill="#8b5b0c">IN PROGRESS</text>
+          <text x="580" y="122" text-anchor="middle" font-size="17" font-weight="800" fill="#1d2030">Full TUI</text>
+          <text x="580" y="150" text-anchor="middle" font-size="13" fill="#626779">Mouse + keys</text>
+          <text x="580" y="170" text-anchor="middle" font-size="13" fill="#626779">Rich terminal</text>
+
+          <rect x="750" y="58" width="140" height="136" rx="18" fill="#fff0ca" stroke="#8b5b0c" stroke-width="2"></rect>
+          <text x="820" y="91" text-anchor="middle" font-size="12" font-weight="800" fill="#8b5b0c">IN PROGRESS</text>
+          <text x="820" y="122" text-anchor="middle" font-size="17" font-weight="800" fill="#1d2030">OS identity</text>
+          <text x="820" y="150" text-anchor="middle" font-size="13" fill="#626779">One account</text>
+          <text x="820" y="170" text-anchor="middle" font-size="13" fill="#626779">per person</text>
+
+          <rect x="980" y="58" width="110" height="136" rx="18" fill="#fff0ca" stroke="#8b5b0c" stroke-width="2"></rect>
+          <text x="1035" y="91" text-anchor="middle" font-size="12" font-weight="800" fill="#8b5b0c">IN PROGRESS</text>
+          <text x="1035" y="122" text-anchor="middle" font-size="17" font-weight="800" fill="#1d2030">Restore</text>
+          <text x="1035" y="150" text-anchor="middle" font-size="13" fill="#626779">State after</text>
+          <text x="1035" y="170" text-anchor="middle" font-size="13" fill="#626779">restart</text>
+
+          <rect x="270" y="278" width="180" height="92" rx="18" fill="#e6edf7" stroke="#435674" stroke-width="2"></rect>
+          <text x="360" y="308" text-anchor="middle" font-size="12" font-weight="800" fill="#435674">PLANNED</text>
+          <text x="360" y="338" text-anchor="middle" font-size="17" font-weight="800" fill="#1d2030">Herdr ecosystem</text>
+          <text x="360" y="358" text-anchor="middle" font-size="13" fill="#626779">Skills + plugins</text>
+
+          <rect x="710" y="278" width="180" height="92" rx="18" fill="#e6edf7" stroke="#435674" stroke-width="2"></rect>
+          <text x="800" y="308" text-anchor="middle" font-size="12" font-weight="800" fill="#435674">PLANNED</text>
+          <text x="800" y="338" text-anchor="middle" font-size="17" font-weight="800" fill="#1d2030">GPUI desktop</text>
+          <text x="800" y="358" text-anchor="middle" font-size="13" fill="#626779">Far future</text>
+        </g>
+      </svg>
+      <figcaption id="roadmap-caption">TUI means terminal user interface. GPUI is the Rust desktop interface framework used by Zed.</figcaption>
+    </figure>
+
+    <section>
+      <header>
+        <h2>The product model</h2>
+        <p>The server owns the work. Each client is a view and control surface.</p>
+      </header>
+      <div class="terms">
+        <div class="term"><span class="status progress">In progress</span><strong>Broker</strong><span>The one entry process. It checks identity and routes clients. Wave 2 adds full runtime supervision.</span></div>
+        <div class="term"><span class="status built">Built</span><strong>Runtime</strong><span>One server process for one person. It owns that person's workspaces and PTYs.</span></div>
+        <div class="term"><span class="status progress">In progress</span><strong>OS identity</strong><span>The Linux account, home, shell, groups, files, and process rights for one person.</span></div>
+        <div class="term"><span class="status progress">In progress</span><strong>Cold restore</strong><span>A restart rebuilds saved structure and starts replacement shells. It does not recover old process memory.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <header>
+        <h2>Seven commands stay simple</h2>
+        <p>This is the complete common command surface from the command UX research.</p>
+      </header>
+      <div class="comparison-table">
+        <table>
+          <thead><tr><th>Command</th><th>Status</th><th>One job</th></tr></thead>
+          <tbody>
+            <tr><td><code>seer start</code></td><td><span class="status built">Built</span></td><td>Start the one Linux server.</td></tr>
+            <tr><td><code>seer invite</code></td><td><span class="status built">Built</span></td><td>Make one unused seat.</td></tr>
+            <tr><td><code>seer join</code></td><td><span class="status built">Built</span></td><td>Claim a seat, pick a name, and attach.</td></tr>
+            <tr><td><code>seer list</code></td><td><span class="status built">Built</span></td><td>Show saved servers and people.</td></tr>
+            <tr><td><code>seer attach</code></td><td><span class="status built">Built</span></td><td>Connect to your own tree.</td></tr>
+            <tr><td><code>seer detach</code></td><td><span class="status built">Built</span></td><td>Remove one client. Keep panes alive.</td></tr>
+            <tr><td><code>seer peek &lt;person&gt;</code></td><td><span class="status built">Built</span></td><td>View another tree. Never send input.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <section>
+      <header>
+        <h2>What still changes</h2>
+        <p>Every item has a status based on main, feat/wave2, and the current pull request list.</p>
+      </header>
+      <div class="card-grid">
+        <article class="card"><span class="status built">Built</span><h3>Private multiplayer core</h3><p>Each person has a separate runtime and workspace tree. Cross-user peek is read-only.</p></article>
+        <article class="card"><span class="status built">Built</span><h3>Service-only connection</h3><p>Iroh gives end-to-end encryption, NAT traversal, and relay fallback. Seer creates no network route.</p></article>
+        <article class="card"><span class="status progress">In progress</span><h3>Mouse-driven TUI</h3><p>Wave 2 adds mouse, paste, more keys, cursor state, and complete cell styles. It is not on main.</p></article>
+        <article class="card"><span class="status progress">In progress</span><h3>Per-user OS identity</h3><p>Wave 2 maps a person to an allowed account before its runtime starts. Unsafe mappings fail.</p></article>
+        <article class="card"><span class="status progress">In progress</span><h3>Persistent restart</h3><p>Pull request 193 saves a versioned image. Restart makes new PTYs and replacement shells from it.</p></article>
+        <article class="card"><span class="status progress">In progress</span><h3>Many client sizes</h3><p>Pull request 194 gives each attachment a viewport and defines who can resize a shared PTY.</p></article>
+        <article class="card"><span class="status planned">Planned</span><h3>Herdr skill compatibility</h3><p>Seer must match the required commands, environment values, stable IDs, JSON results, and agent states.</p></article>
+        <article class="card"><span class="status planned">Planned</span><h3>Herdr plugins and marketplace</h3><p>A plugin is an executable directory with a Herdr manifest. Marketplace presence is not a trust review.</p></article>
+        <article class="card"><span class="status planned">Planned</span><h3>GPUI desktop app</h3><p>This is a far-future frontend. Core types stay independent from Ratatui, Crossterm, and GPUI.</p></article>
+      </div>
+    </section>
+
+    <section>
+      <header>
+        <h2>Boundaries that do not move</h2>
+        <p>These are settled project decisions.</p>
+      </header>
+      <div class="boundary">
+        <div class="callout"><span class="status built">Built</span><strong>Server work stays on the server.</strong><span>PTYs, shells, and coding agents never run on the client. The broker never owns those child processes.</span></div>
+        <div class="callout"><span class="status built">Built</span><strong>Platform scope stays small.</strong><span>The server is Linux. Clients are Linux and macOS. Windows is not supported.</span></div>
+      </div>
+    </section>
+
+    <footer>Source: README.md, AGENTS.md, ADR 0002, research notes 02, 04, 08, 09, 10, 11, 16, and 17, crate sources, and current GitHub work.</footer>
+  </main>
+</body>
+</html>
