@@ -1,7 +1,10 @@
 use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::Frame;
 use ratatui::layout::{Position, Rect, Size};
-use ratatui::widgets::{Block, Borders, Clear};
+use ratatui::style::{Modifier, Style};
+use ratatui::text::Line;
+use ratatui::widgets::{Block, Borders, Clear, Paragraph};
+use seer_core::proto::{Person, PersonState};
 
 use crate::render::draw_tree;
 use crate::state::ClientState;
@@ -12,6 +15,8 @@ const MINIMUM_DRAWER_WIDTH: u16 = 40;
 #[derive(Default)]
 pub(crate) struct Drawer {
     open: bool,
+    people: Vec<Person>,
+    selected: usize,
 }
 
 impl Drawer {
@@ -23,12 +28,25 @@ impl Drawer {
         self.open = !self.open;
     }
 
-    pub(crate) fn close_on_escape(&mut self, key: KeyEvent) -> bool {
-        if self.open && key.code == KeyCode::Esc {
-            self.open = false;
-            return true;
+    pub(crate) fn set_people(&mut self, people: Vec<Person>) {
+        self.people = people;
+        self.selected = self.selected.min(self.people.len().saturating_sub(1));
+    }
+
+    pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
+        if !self.open {
+            return false;
         }
-        false
+        match key.code {
+            KeyCode::Up => self.selected = self.selected.saturating_sub(1),
+            KeyCode::Down => {
+                self.selected = (self.selected + 1).min(self.people.len().saturating_sub(1));
+            }
+            KeyCode::Enter => {}
+            KeyCode::Esc => self.open = false,
+            _ => return false,
+        }
+        true
     }
 
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent, size: Size) -> bool {
@@ -64,7 +82,55 @@ pub(crate) fn draw(
     if drawer.is_open() {
         let area = drawer_area(full_area);
         frame.render_widget(Clear, area);
-        frame.render_widget(Block::default().borders(Borders::ALL).title("People"), area);
+        let block = Block::default().borders(Borders::ALL).title("People");
+        let inner = block.inner(area);
+        frame.render_widget(block, area);
+        frame.render_widget(Paragraph::new(people_lines(drawer, inner.width)), inner);
+    }
+}
+
+fn people_lines(drawer: &Drawer, width: u16) -> Vec<Line<'static>> {
+    drawer
+        .people
+        .iter()
+        .enumerate()
+        .map(|(index, person)| {
+            let line = Line::from(person_row(person, width));
+            if index == drawer.selected {
+                return line.style(Style::default().add_modifier(Modifier::REVERSED));
+            }
+            line
+        })
+        .collect()
+}
+
+fn person_row(person: &Person, width: u16) -> String {
+    let dot = match person.state {
+        PersonState::Active => '*',
+        PersonState::Idle => 'o',
+        PersonState::Away => '.',
+    };
+    let foreground = if person.foreground.is_empty() {
+        "-"
+    } else {
+        person.foreground.as_str()
+    };
+    let row = format!(
+        "{dot} {:<12} {:<12} {:>4}",
+        person.name,
+        foreground,
+        idle_text(person.idle_secs)
+    );
+    format!("{row:<width$}", width = usize::from(width))
+}
+
+fn idle_text(seconds: u64) -> String {
+    if seconds < 60 {
+        format!("{seconds}s")
+    } else if seconds < 3600 {
+        format!("{}m", seconds / 60)
+    } else {
+        format!("{}h", seconds / 3600)
     }
 }
 

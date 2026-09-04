@@ -140,6 +140,23 @@ fn active_events_send_input_focus_and_resize() {
         .expect("drawer key must be handled");
     }
     assert!(drawer.is_open());
+    apply_two_people(&mut client, &mut state, &mut drawer);
+    assert_eq!(highlighted_person(&drawer, &mut state), Some(0));
+    send_test_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Down,
+        &mut drawer,
+    );
+    assert_eq!(highlighted_person(&drawer, &mut state), Some(1));
+    send_test_key(
+        &mut client,
+        &mut state,
+        &mut command_pending,
+        KeyCode::Char('z'),
+        &mut drawer,
+    );
     handle_event(
         Event::Key(KeyEvent::new(KeyCode::Esc, KeyModifiers::NONE)),
         &mut client,
@@ -180,6 +197,8 @@ fn active_events_send_input_focus_and_resize() {
             rows: 40,
         }
     );
+    assert_eq!(decode(&mut server), ClientMsg::ListPeople);
+    assert_key_input(&mut server, "w1:p1", 'z');
 
     send_prefixed_key(
         &mut client,
@@ -203,6 +222,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut client,
         Size::new(120, 40),
+        &mut drawer,
     )
     .expect("split tree must apply");
     send_test_key(
@@ -236,6 +256,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut client,
         Size::new(120, 40),
+        &mut drawer,
     )
     .expect("split tree must apply");
     send_test_key(
@@ -274,6 +295,7 @@ fn active_events_send_input_focus_and_resize() {
             &mut state,
             &mut client,
             Size::new(120, 40),
+            &mut drawer,
         )
         .expect("focus tree must apply");
         send_test_key(
@@ -316,6 +338,7 @@ fn active_events_send_input_focus_and_resize() {
         &mut state,
         &mut client,
         Size::new(120, 40),
+        &mut drawer,
     )
     .expect("tree must apply");
     assert_eq!(
@@ -380,13 +403,14 @@ fn mouse_move_without_tracking_sends_no_message() {
     .expect("drawer handle click must be handled");
 
     assert!(drawer.is_open());
-    assert_no_message(&mut server);
+    assert_eq!(decode(&mut server), ClientMsg::ListPeople);
 }
 
 #[test]
 fn detached_bye_has_a_distinct_exit() {
     let (mut client, _) = socket_pair();
     let mut state = state_with_pane();
+    let mut drawer = Drawer::default();
 
     assert_eq!(
         apply_server_message(
@@ -396,6 +420,7 @@ fn detached_bye_has_a_distinct_exit() {
             &mut state,
             &mut client,
             Size::new(80, 24),
+            &mut drawer,
         )
         .expect("Bye must apply"),
         LoopControl::Detached
@@ -408,6 +433,7 @@ fn detached_bye_has_a_distinct_exit() {
             &mut state,
             &mut client,
             Size::new(80, 24),
+            &mut drawer,
         )
         .expect("Bye must apply"),
         LoopControl::Exit

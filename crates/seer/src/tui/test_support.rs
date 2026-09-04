@@ -3,13 +3,16 @@ use std::net::{TcpListener, TcpStream};
 use std::time::Duration;
 
 use crossterm::event::{Event, KeyCode, KeyEvent, KeyModifiers};
+use ratatui::Terminal;
+use ratatui::backend::TestBackend;
 use ratatui::layout::Size;
-use seer_core::proto::{ClientMsg, codec};
+use ratatui::style::Modifier;
+use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, codec};
 use seer_core::{
     InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, PaneSize, TerminalInput, Tree,
 };
 
-use super::handle_event;
+use super::{apply_server_message, draw, handle_event};
 use crate::drawer::Drawer;
 use crate::state::ClientState;
 
@@ -117,4 +120,43 @@ pub(super) fn tree_with_two_tabs() -> Tree {
     }
     crate::tui_navigation::initialize(&tree);
     tree
+}
+
+pub(super) fn apply_two_people(
+    client: &mut TcpStream,
+    state: &mut ClientState,
+    drawer: &mut Drawer,
+) {
+    let people = ["alice", "bob"]
+        .into_iter()
+        .map(|name| Person {
+            user_id: name.into(),
+            name: name.into(),
+            attached_clients: 1,
+            peekable: true,
+            state: PersonState::Active,
+            tabs: 1,
+            foreground: "nvim".into(),
+            idle_secs: 12,
+        })
+        .collect();
+    apply_server_message(
+        ServerMsg::People { people },
+        state,
+        client,
+        Size::new(80, 24),
+        drawer,
+    )
+    .expect("People must apply");
+}
+
+pub(super) fn highlighted_person(drawer: &Drawer, state: &mut ClientState) -> Option<u16> {
+    let mut terminal = Terminal::new(TestBackend::new(80, 24)).expect("terminal must start");
+    terminal
+        .draw(|frame| draw(frame, state, drawer))
+        .expect("drawer must draw");
+    let buffer = terminal.backend().buffer();
+    (1..23)
+        .find(|row| buffer[(41, *row)].modifier.contains(Modifier::REVERSED))
+        .map(|row| row - 1)
 }
