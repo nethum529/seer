@@ -1,0 +1,396 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>How Seer works</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --color-bg-page: #f4f1e8;
+      --color-bg-surface: #fffdf7;
+      --color-bg-strong: #173f40;
+      --color-bg-soft: #e2eeea;
+      --color-bg-warm: #f7e6d9;
+      --color-text-primary: #172b2c;
+      --color-text-secondary: #526261;
+      --color-text-on-strong: #ffffff;
+      --color-line: #cdd8d3;
+      --color-accent: #ad431d;
+      --color-good: #226643;
+      --radius-card: 1rem;
+      --radius-inner: 0.65rem;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    html {
+      background: var(--color-bg-page);
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+    }
+
+    body {
+      margin: 0;
+      color: var(--color-text-primary);
+      font-size: 1rem;
+      line-height: 1.6;
+    }
+
+    a {
+      color: var(--color-accent);
+      text-decoration-thickness: from-font;
+      text-underline-position: from-font;
+    }
+
+    a:focus-visible {
+      outline: 3px solid var(--color-accent);
+      outline-offset: 4px;
+    }
+
+    main {
+      width: min(100% - 2rem, 62rem);
+      margin-inline: auto;
+      padding-block: 3rem 5rem;
+    }
+
+    header { max-width: 48rem; }
+
+    .eyebrow,
+    .status {
+      display: inline-block;
+      margin: 0 0 0.8rem;
+      font-size: 0.78rem;
+      font-weight: 750;
+      letter-spacing: 0.08em;
+      text-transform: uppercase;
+    }
+
+    .eyebrow { color: var(--color-accent); }
+
+    .status {
+      margin: 0;
+      padding: 0.22rem 0.62rem;
+      border-radius: 999px;
+      color: var(--color-good);
+      background: var(--color-bg-soft);
+      letter-spacing: 0.04em;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin-block-start: 0;
+      line-height: 1.12;
+      text-wrap: balance;
+    }
+
+    h1 {
+      max-width: 14ch;
+      margin-block-end: 1rem;
+      font-size: clamp(2.6rem, 8vw, 5.4rem);
+      letter-spacing: -0.045em;
+    }
+
+    h2 {
+      margin-block-end: 0.65rem;
+      font-size: clamp(1.7rem, 4vw, 2.4rem);
+      letter-spacing: -0.025em;
+    }
+
+    h3 {
+      margin-block-end: 0.45rem;
+      font-size: 1.08rem;
+    }
+
+    p { margin-block: 0; }
+
+    code {
+      padding: 0.1rem 0.35rem;
+      border-radius: 0.35rem;
+      background: var(--color-bg-soft);
+      color: var(--color-text-primary);
+      font: 0.92em/1.4 ui-monospace, SFMono-Regular, Consolas, monospace;
+      overflow-wrap: anywhere;
+    }
+
+    .lede {
+      max-width: 62ch;
+      color: var(--color-text-secondary);
+      font-size: 1.18rem;
+      line-height: 1.55;
+      text-wrap: pretty;
+    }
+
+    .diagram {
+      overflow-x: auto;
+      margin: 2rem 0 0;
+      padding: clamp(1rem, 3vw, 1.8rem);
+      border-radius: var(--radius-card);
+      background: var(--color-bg-strong);
+      box-shadow: 0 1.2rem 3rem rgba(23, 63, 64, 0.16);
+    }
+
+    .diagram svg {
+      display: block;
+      width: 100%;
+      min-width: 48rem;
+      height: auto;
+    }
+
+    figcaption {
+      margin-block-start: 0.75rem;
+      color: #dce9e6;
+      font-size: 0.9rem;
+      text-align: center;
+    }
+
+    section { margin-block-start: 4.5rem; }
+
+    .section-intro {
+      max-width: 66ch;
+      color: var(--color-text-secondary);
+      text-wrap: pretty;
+    }
+
+    .card-grid,
+    .term-grid {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 1rem;
+      margin-block-start: 1.4rem;
+    }
+
+    .card,
+    .term {
+      padding: 1.35rem;
+      border-radius: var(--radius-card);
+      background: var(--color-bg-surface);
+      box-shadow: 0 0.45rem 1.4rem rgba(23, 43, 44, 0.07);
+    }
+
+    .card p,
+    .term p {
+      color: var(--color-text-secondary);
+      text-wrap: pretty;
+    }
+
+    .number {
+      display: grid;
+      width: 2.2rem;
+      height: 2.2rem;
+      margin-block-end: 1rem;
+      place-items: center;
+      border-radius: var(--radius-inner);
+      color: var(--color-text-on-strong);
+      background: var(--color-bg-strong);
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .steps {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1rem;
+      margin: 1.4rem 0 0;
+      padding: 0;
+      list-style: none;
+      counter-reset: join-step;
+    }
+
+    .steps li {
+      position: relative;
+      padding: 1.3rem;
+      border-radius: var(--radius-card);
+      background: var(--color-bg-surface);
+      box-shadow: 0 0.45rem 1.4rem rgba(23, 43, 44, 0.07);
+      counter-increment: join-step;
+    }
+
+    .steps li::before {
+      content: counter(join-step);
+      display: grid;
+      width: 2.2rem;
+      height: 2.2rem;
+      margin-block-end: 1rem;
+      place-items: center;
+      border-radius: var(--radius-inner);
+      color: var(--color-text-on-strong);
+      background: var(--color-accent);
+      font-weight: 750;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .steps strong {
+      display: block;
+      margin-block-end: 0.4rem;
+    }
+
+    .steps span { color: var(--color-text-secondary); }
+
+    .callout {
+      margin-block-start: 1.5rem;
+      padding: 1.2rem 1.3rem;
+      border-inline-start: 0.3rem solid var(--color-accent);
+      border-radius: 0 var(--radius-card) var(--radius-card) 0;
+      background: var(--color-bg-warm);
+    }
+
+    footer {
+      margin-block-start: 4.5rem;
+      padding-block-start: 1.2rem;
+      border-block-start: 1px solid var(--color-line);
+      color: var(--color-text-secondary);
+      font-size: 0.9rem;
+    }
+
+    @media (max-width: 50rem) {
+      .steps { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    }
+
+    @media (max-width: 42rem) {
+      main {
+        width: min(100% - 1.5rem, 62rem);
+        padding-block-start: 2rem;
+      }
+
+      .card-grid,
+      .term-grid,
+      .steps { grid-template-columns: 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Explainer 02</p>
+      <h1>How Seer works</h1>
+      <p class="lede">The Linux server does the terminal work. A client on Linux or macOS sends input and draws the terminal cells that the server sends back.</p>
+    </header>
+
+    <figure class="diagram" data-peanut-diagram="process-model">
+      <svg viewBox="0 0 1000 560" role="img" aria-labelledby="model-title model-desc">
+        <title id="model-title">One broker routes clients to one runtime per person</title>
+        <desc id="model-desc">A client uses an encrypted iroh connection to reach the broker. The broker routes normal work to that person's runtime or routes a read-only peek to another person's runtime. Each runtime owns its PTYs and shells.</desc>
+        <defs>
+          <marker id="model-arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="7" markerHeight="7" orient="auto-start-reverse">
+            <path d="M 0 0 L 10 5 L 0 10 z" fill="#f0a47f"/>
+          </marker>
+        </defs>
+
+        <rect x="24" y="195" width="170" height="170" rx="22" fill="#fffdf7"/>
+        <text x="109" y="252" text-anchor="middle" fill="#172b2c" font-size="25" font-weight="800">Client</text>
+        <text x="109" y="288" text-anchor="middle" fill="#526261" font-size="18">draws cells</text>
+        <text x="109" y="318" text-anchor="middle" fill="#526261" font-size="18">sends keys</text>
+
+        <rect x="250" y="210" width="170" height="140" rx="22" fill="#f7e6d9"/>
+        <text x="335" y="260" text-anchor="middle" fill="#172b2c" font-size="23" font-weight="800">Encrypted</text>
+        <text x="335" y="292" text-anchor="middle" fill="#172b2c" font-size="23" font-weight="800">connection</text>
+        <text x="335" y="323" text-anchor="middle" fill="#526261" font-size="17">iroh and QUIC</text>
+
+        <rect x="490" y="195" width="170" height="170" rx="22" fill="#e2eeea"/>
+        <text x="575" y="247" text-anchor="middle" fill="#172b2c" font-size="25" font-weight="800">Broker</text>
+        <text x="575" y="280" text-anchor="middle" fill="#526261" font-size="18">identity</text>
+        <text x="575" y="310" text-anchor="middle" fill="#526261" font-size="18">route</text>
+        <text x="575" y="338" text-anchor="middle" fill="#526261" font-size="18">supervise</text>
+
+        <rect x="760" y="38" width="216" height="146" rx="22" fill="#fffdf7"/>
+        <text x="868" y="87" text-anchor="middle" fill="#172b2c" font-size="23" font-weight="800">Your runtime</text>
+        <text x="868" y="121" text-anchor="middle" fill="#526261" font-size="18">your tree</text>
+        <text x="868" y="151" text-anchor="middle" fill="#526261" font-size="18">PTYs and shells</text>
+
+        <rect x="760" y="376" width="216" height="146" rx="22" fill="#fffdf7"/>
+        <text x="868" y="425" text-anchor="middle" fill="#172b2c" font-size="23" font-weight="800">Friend runtime</text>
+        <text x="868" y="459" text-anchor="middle" fill="#526261" font-size="18">friend's tree</text>
+        <text x="868" y="489" text-anchor="middle" fill="#526261" font-size="18">PTYs and shells</text>
+
+        <path d="M194 245 L250 245" fill="none" stroke="#f0a47f" stroke-width="4" marker-end="url(#model-arrow)"/>
+        <text x="222" y="227" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="700">keys</text>
+        <path d="M250 315 L194 315" fill="none" stroke="#f0a47f" stroke-width="4" marker-end="url(#model-arrow)"/>
+        <text x="222" y="342" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="700">cells</text>
+        <path d="M420 280 L490 280" fill="none" stroke="#f0a47f" stroke-width="4" marker-end="url(#model-arrow)"/>
+        <text x="455" y="258" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="700">Seer</text>
+        <path d="M660 235 C710 212 710 130 760 112" fill="none" stroke="#f0a47f" stroke-width="4" marker-end="url(#model-arrow)"/>
+        <text x="710" y="185" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="700">own route</text>
+        <path d="M660 325 C710 348 710 430 760 448" fill="none" stroke="#f0a47f" stroke-width="4" marker-end="url(#model-arrow)"/>
+        <text x="710" y="381" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="700">read-only</text>
+        <text x="710" y="403" text-anchor="middle" fill="#ffffff" font-size="16" font-weight="700">peek</text>
+      </svg>
+      <figcaption>PTY means pseudo-terminal. It is the server-side link between a pane and its shell.</figcaption>
+    </figure>
+
+    <section aria-labelledby="jobs-title">
+      <h2 id="jobs-title">Three parts, three jobs</h2>
+      <div class="card-grid">
+        <article class="card">
+          <span class="number" aria-hidden="true">1</span>
+          <h3>Broker</h3>
+          <p>The broker is the front door. It owns identity, single-use seats, routing, runtime supervision, and metadata. It never owns a PTY, shell, or coding agent process.</p>
+        </article>
+        <article class="card">
+          <span class="number" aria-hidden="true">2</span>
+          <h3>Runtime</h3>
+          <p>Each person gets one runtime process. It owns that person's workspace tree, PTYs, shells, and terminal cell grids. Work from two people stays in two runtimes.</p>
+        </article>
+        <article class="card">
+          <span class="number" aria-hidden="true">3</span>
+          <h3>Client</h3>
+          <p>The client is the local Seer view. It draws cells and sends keys or layout commands. The client does not run the server shell or own its PTY.</p>
+        </article>
+      </div>
+    </section>
+
+    <section aria-labelledby="join-title">
+      <h2 id="join-title">How a friend joins</h2>
+      <p class="section-intro">A capsule is the paste-safe invitation. It contains the server public key and one seat token. A seat is permission for one new person to join.</p>
+      <ol class="steps">
+        <li><strong>Make a seat</strong><span>The owner runs <code>seer invite</code>. The seat expires and works once.</span></li>
+        <li><strong>Send one line</strong><span>The owner sends the printed install and join line. The capsule contains no person name.</span></li>
+        <li><strong>Name the person</strong><span>The friend pastes the line. Seer asks for a name on this first join.</span></li>
+        <li><strong>Attach</strong><span>The broker marks the seat used, records the person, starts that person's runtime, and opens the first shell.</span></li>
+      </ol>
+      <div class="callout">
+        <p>The seat token is only for first join. Seer saves a separate person credential for later attach. A used or expired seat cannot add another person.</p>
+      </div>
+    </section>
+
+    <section aria-labelledby="tree-title">
+      <h2 id="tree-title">The workspace tree</h2>
+      <p class="section-intro">Tree means the ordered structure of workspaces, tabs, and panes. Each runtime owns one tree.</p>
+      <div class="term-grid">
+        <article class="term">
+          <h3>Workspace</h3>
+          <p>The top group for one area of terminal work. A workspace contains tabs.</p>
+        </article>
+        <article class="term">
+          <h3>Tab</h3>
+          <p>One view inside a workspace. A new tab starts with one pane and one shell.</p>
+        </article>
+        <article class="term">
+          <h3>Pane</h3>
+          <p>A terminal rectangle inside a tab. Each pane has a server-side PTY, shell, size, and cell grid.</p>
+        </article>
+      </div>
+    </section>
+
+    <section aria-labelledby="peek-title">
+      <p class="status">Built now</p>
+      <h2 id="peek-title">Peek shows work without control</h2>
+      <p class="section-intro"><code>seer peek &lt;name&gt;</code> asks the broker for another person's workspace. The broker routes the connection to that person's runtime in read-only mode. The broker and runtime drop terminal input and layout changes. The client keeps a read-only banner visible. Stop peek returns the client to its own runtime.</p>
+    </section>
+
+    <section aria-labelledby="encryption-title">
+      <h2 id="encryption-title">The remote path is encrypted</h2>
+      <p class="section-intro">The capsule gives the client the broker's iroh public key. Iroh authenticates that key inside an encrypted QUIC connection. It tries a direct path through home network address translation. If that path fails, it uses a relay. The relay carries encrypted bytes and cannot read terminal data. The connection accepts the Seer protocol only. It does not create a network interface, route, or DNS change.</p>
+      <div class="callout">
+        <p><strong>Server boundary:</strong> PTYs, shells, and coding agent child processes always stay on the Linux server. They never move to the client.</p>
+      </div>
+    </section>
+
+    <footer>
+      Source basis: <a href="../adr/0002-builtin-connect.md">ADR 0002</a>, <a href="../research/10-session-lifecycle.md">session lifecycle research</a>, and the <a href="../../crates/">crate sources</a>.
+    </footer>
+  </main>
+</body>
+</html>
