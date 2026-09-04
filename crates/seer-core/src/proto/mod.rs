@@ -89,6 +89,11 @@ pub enum ServerMsg {
     People {
         people: Vec<Person>,
     },
+    Status {
+        tabs: u32,
+        foreground: String,
+        idle_secs: u64,
+    },
     Clients {
         clients: Vec<ClientInfo>,
     },
@@ -316,6 +321,11 @@ mod tests {
                     foreground: "nvim".into(),
                     idle_secs: 12,
                 }],
+            },
+            ServerMsg::Status {
+                tabs: 3,
+                foreground: "nvim".into(),
+                idle_secs: 12,
             },
             ServerMsg::Targets {
                 targets: vec![PeekTarget {

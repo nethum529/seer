@@ -184,6 +184,7 @@ fn apply_server_message<S: Stream>(
         ServerMsg::Welcome { .. }
         | ServerMsg::Joined { .. }
         | ServerMsg::Seat { .. }
+        | ServerMsg::Status { .. }
         | ServerMsg::Clients { .. }
         | ServerMsg::Targets { .. }
         | ServerMsg::Refused { .. } => {

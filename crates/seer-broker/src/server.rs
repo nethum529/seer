@@ -58,14 +58,8 @@ pub(crate) struct BrokerState {
     published: PublishedAddress,
     remote_endpoint: Option<EndpointId>,
     connection_limit: ConnectionLimit,
-    statuses: Mutex<HashMap<String, PersonStatus>>,
+    statuses: Mutex<HashMap<String, ServerMsg>>,
     published_people: Mutex<Vec<Person>>,
-}
-
-struct PersonStatus {
-    tabs: u32,
-    foreground: String,
-    idle_secs: u64,
 }
 
 impl BrokerState {
@@ -120,16 +114,20 @@ impl BrokerState {
             .into_iter()
             .map(|person| {
                 let attached_clients = self.attachments.count(&person.user_id);
-                let status = statuses.get(&person.user_id);
-                let idle_secs = status.map_or(0, |status| status.idle_secs);
+                let (tabs, foreground, idle_secs) = match statuses.get(&person.user_id) {
+                    Some(ServerMsg::Status {
+                        tabs,
+                        foreground,
+                        idle_secs,
+                    }) => (*tabs, foreground.clone(), *idle_secs),
+                    _ => (0, String::new(), 0),
+                };
                 Person {
                     attached_clients,
                     peekable: self.runtimes.is_running(&person.user_id, &person.name),
                     state: person_state(attached_clients, idle_secs),
-                    tabs: status.map_or(0, |status| status.tabs),
-                    foreground: status
-                        .map(|status| status.foreground.clone())
-                        .unwrap_or_default(),
+                    tabs,
+                    foreground,
                     idle_secs,
                     user_id: person.user_id,
                     name: person.name,
@@ -153,19 +151,12 @@ impl BrokerState {
         self.publish_people()
     }
 
-    fn query_status(&self, user_id: &str, person_name: &str) -> Option<PersonStatus> {
+    fn query_status(&self, user_id: &str, person_name: &str) -> Option<ServerMsg> {
         let mut stream = self.runtimes.connect_existing(user_id, person_name).ok()?;
         stream.set_read_timeout(Some(STATUS_TIMEOUT)).ok()?;
         codec::encode(&mut stream, &ClientMsg::QueryStatus).ok()?;
-        let ServerMsg::People { people } = codec::decode(&mut stream).ok()? else {
-            return None;
-        };
-        let person = people.into_iter().next()?;
-        Some(PersonStatus {
-            tabs: person.tabs,
-            foreground: person.foreground,
-            idle_secs: person.idle_secs,
-        })
+        let status = codec::decode(&mut stream).ok()?;
+        matches!(status, ServerMsg::Status { .. }).then_some(status)
     }
 
     fn publish_people(&self) -> io::Result<()> {
@@ -214,8 +205,8 @@ fn person_state(attached_clients: u32, idle_secs: u64) -> PersonState {
 }
 
 fn lock_statuses(
-    statuses: &Mutex<HashMap<String, PersonStatus>>,
-) -> io::Result<std::sync::MutexGuard<'_, HashMap<String, PersonStatus>>> {
+    statuses: &Mutex<HashMap<String, ServerMsg>>,
+) -> io::Result<std::sync::MutexGuard<'_, HashMap<String, ServerMsg>>> {
     statuses
         .lock()
         .map_err(|_| io::Error::other("status lock is poisoned"))
