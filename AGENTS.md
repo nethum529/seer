@@ -6,7 +6,10 @@ Codex alike. Read this file before you start a task.
 ## Project
 
 - This project is a Rust multi-user terminal multiplexer for coding agents.
-  It is modeled on herdr and luvus.
+  Seer is the multiplayer and collaboration layer for coding agent terminals:
+  one person hosts, friends join with one pasted line, and each person gets
+  their own tree of shells on the host. herdr and luvus stay the reference
+  code bases for the terminal core.
 - Research is complete and lives under docs/research/. Read the relevant
   document before you design or build.
 - The first build task is the multiplayer MVP: one server on Linux, clients
@@ -22,7 +25,9 @@ Do not reopen these. The reasons are in docs/research/.
   identity, routing, supervision, and metadata. It never owns PTYs or agent
   child processes.
 - TUI stack: ratatui plus crossterm.
-- Linux and macOS only. No Windows.
+- Linux and macOS only, as host and as client. No Windows.
+- Seer is not a herdr replacement. Do not build herdr parity features unless
+  a ticket asks for one.
 - GPUI desktop app is far future. Keep core types frontend-neutral, nothing
   more.
 - Reference clones at /home/nethum/Projects/_research/herdr and
