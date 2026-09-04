@@ -90,11 +90,6 @@ fn fake_broker_process() {
         panic!("fake remote listener failed");
     }
     fs::create_dir_all(&config.state_dir).expect("fake broker state must be created");
-    fs::write(
-        config.state_dir.join("people.json"),
-        r#"[{"user_id":"owner-id","name":"alice","is_owner":true}]"#,
-    )
-    .expect("fake people file must be written");
     OpenOptions::new()
         .create(true)
         .append(true)
@@ -124,6 +119,7 @@ fn fake_broker_process() {
     if std::env::var_os("SEER_FAKE_NO_CREDENTIAL").is_none() {
         thread::sleep(Duration::from_millis(250));
         println!("broker-output");
+        println!("owner-id: owner-id");
         println!("owner-credential: owner-secret");
         std::io::stdout()
             .flush()

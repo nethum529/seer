@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -72,16 +73,29 @@ fn handles_required_handshake_outcomes() {
         .expect("invalid frame must send");
     let malformed = codec::decode(&mut malformed_stream).expect("refusal must decode");
     assert_refused_and_closed(malformed_stream, malformed, "invalid message");
+
+    let mut oversized_stream = TcpStream::connect(address).expect("client must connect");
+    oversized_stream
+        .set_read_timeout(Some(Duration::from_secs(10)))
+        .expect("read timeout must set");
+    let length =
+        u32::try_from(codec::MAX_PRE_AUTH_FRAME_SIZE + 1).expect("frame length must fit in u32");
+    oversized_stream
+        .write_all(&length.to_be_bytes())
+        .expect("frame length must send");
+    let oversized = codec::decode(&mut oversized_stream).expect("refusal must decode");
+    assert_refused_and_closed(oversized_stream, oversized, "invalid message");
     remove_state_directory(&state_dir);
 }
 
 #[test]
-fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
+fn joins_commit_person_and_seat_atomically() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
     let address = listener
         .local_addr()
         .expect("listener must have an address");
     let (config, state_dir) = test_config(address);
+    let mut reopened_config = config.clone();
     let _server = thread::spawn(move || serve(listener, None, &config));
 
     let (_, joined) = exchange(
@@ -91,7 +105,7 @@ fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
             name: "Guest_1".into(),
         },
     );
-    let joined_user = match joined {
+    let (joined_user, joined_credential) = match joined {
         ServerMsg::Joined {
             user_id,
             credential,
@@ -100,7 +114,7 @@ fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
             assert_eq!(user_id.len(), 32);
             assert_eq!(credential.len(), 64);
             assert_eq!(name, "Guest_1");
-            user_id
+            (user_id, credential)
         }
         other => panic!("expected Joined, got {other:?}"),
     };
@@ -148,16 +162,47 @@ fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
     );
     assert!(matches!(after_collision, ServerMsg::Joined { .. }));
 
-    let people: serde_json::Value = serde_json::from_slice(
-        &fs::read(state_dir.join("people.json")).expect("people registry must read"),
-    )
-    .expect("people registry must decode");
-    assert!(
-        people
-            .as_array()
-            .expect("people registry must be an array")
-            .iter()
-            .any(|person| person["user_id"] == joined_user)
+    let reopened_listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
+    let reopened_address = reopened_listener
+        .local_addr()
+        .expect("listener must have an address");
+    reopened_config.listen = reopened_address;
+    let _reopened_server = thread::spawn(move || serve(reopened_listener, None, &reopened_config));
+    let (_, authenticated) = exchange(
+        reopened_address,
+        &ClientMsg::Hello {
+            user_id: joined_user.clone(),
+            credential: joined_credential,
+            version: env!("CARGO_PKG_VERSION").into(),
+        },
+    );
+    assert!(matches!(
+        authenticated,
+        ServerMsg::Welcome { user_id, .. } if user_id == joined_user
+    ));
+    let (reused_stream, reused) = exchange(
+        reopened_address,
+        &ClientMsg::Join {
+            seat_token: "seat-one".into(),
+            name: "Reused".into(),
+        },
+    );
+    assert_refused_and_closed(reused_stream, reused, "invalid seat");
+    assert_eq!(
+        fs::metadata(&state_dir)
+            .expect("state directory metadata must read")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::metadata(state_dir.join("registry.json"))
+            .expect("registry metadata must read")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
     );
     remove_state_directory(&state_dir);
 }

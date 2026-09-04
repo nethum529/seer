@@ -3,6 +3,7 @@ use std::io::{self, Read, Write};
 use serde::{Serialize, de::DeserializeOwned};
 
 const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
+pub const MAX_PRE_AUTH_FRAME_SIZE: usize = 4 * 1024;
 
 pub fn encode<W, T>(writer: &mut W, message: &T) -> io::Result<()>
 where
@@ -11,7 +12,7 @@ where
 {
     let body = serde_json::to_vec(message).map_err(invalid_data)?;
     if body.len() > MAX_FRAME_SIZE {
-        return Err(frame_too_large());
+        return Err(frame_too_large(MAX_FRAME_SIZE));
     }
     let length = body.len() as u32;
     writer.write_all(&length.to_be_bytes())?;
@@ -23,23 +24,37 @@ where
     R: Read,
     T: DeserializeOwned,
 {
+    decode_with_limit(reader, MAX_FRAME_SIZE)
+}
+
+pub fn decode_with_limit<R, T>(reader: &mut R, max_frame_size: usize) -> io::Result<T>
+where
+    R: Read,
+    T: DeserializeOwned,
+{
+    let max_frame_size = max_frame_size.min(MAX_FRAME_SIZE);
     let mut prefix = [0; 4];
     reader.read_exact(&mut prefix)?;
     let length = u32::from_be_bytes(prefix) as usize;
-    if length > MAX_FRAME_SIZE {
-        return Err(frame_too_large());
+    if length > max_frame_size {
+        return Err(frame_too_large(max_frame_size));
     }
     let mut body = vec![0; length];
     reader.read_exact(&mut body)?;
     serde_json::from_slice(&body).map_err(invalid_data)
 }
 
-fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, error)
+fn frame_too_large(max_frame_size: usize) -> io::Error {
+    let size = match max_frame_size {
+        MAX_FRAME_SIZE => "16 MiB".to_owned(),
+        MAX_PRE_AUTH_FRAME_SIZE => "4 KiB".to_owned(),
+        _ => format!("{max_frame_size} bytes"),
+    };
+    io::Error::new(io::ErrorKind::InvalidData, format!("frame exceeds {size}"))
 }
 
-fn frame_too_large() -> io::Error {
-    io::Error::new(io::ErrorKind::InvalidData, "frame exceeds 16 MiB")
+fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error)
 }
 
 #[cfg(test)]

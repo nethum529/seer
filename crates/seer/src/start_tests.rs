@@ -2,7 +2,8 @@ use std::fs;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
 
-use super::{BrokerConfig, ServersFile, save_owner};
+use super::{BrokerConfig, save_owner};
+use crate::store::ServerStore;
 
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 
@@ -17,11 +18,16 @@ fn owner_save_creates_a_missing_store() {
         state_dir: directory.join("state"),
     };
 
-    save_owner(&directory, &config, "secret".to_owned()).expect("owner must be saved");
+    save_owner(
+        &directory,
+        &config,
+        "owner-id".to_owned(),
+        "secret".to_owned(),
+    )
+    .expect("owner must be saved");
 
-    let contents =
-        fs::read_to_string(directory.join("servers.toml")).expect("server store must be written");
-    let store: ServersFile = toml::from_str(&contents).expect("server store must parse");
+    let store =
+        ServerStore::load_from(&directory.join("servers.toml")).expect("server store must parse");
     assert_eq!(store.servers.len(), 1);
     fs::remove_dir_all(directory).expect("test directory must be removed");
 }
