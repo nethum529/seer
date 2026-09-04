@@ -162,6 +162,31 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
 }
 
 #[test]
+fn removes_its_socket_on_sigterm() {
+    let temporary = TemporaryDirectory::new();
+    let socket_path = temporary.path.join("runtime.sock");
+    let mut runtime = runtime_command()
+        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("runtime must start");
+    let _connection = connect_when_ready(&socket_path);
+
+    let pid = runtime.id() as libc::pid_t;
+    // SAFETY: kill only reads the pid of a child this test started.
+    let sent = unsafe { libc::kill(pid, libc::SIGTERM) };
+    assert_eq!(sent, 0, "SIGTERM must be sent");
+
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while socket_path.exists() && Instant::now() < deadline {
+        thread::sleep(RETRY_INTERVAL);
+    }
+    assert!(!socket_path.exists(), "runtime must remove its socket");
+    runtime.wait().expect("runtime must exit");
+}
+
+#[test]
 fn rejects_wrong_argument_counts() {
     let cases: &[&[&str]] = &[
         &[],
