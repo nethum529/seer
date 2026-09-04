@@ -45,7 +45,32 @@ fn detach_reports_zero_clients_and_detaches_one_client() {
     assert!(output.stderr.is_empty());
 }
 
+#[test]
+fn detach_reports_server_refusal() {
+    let output = run_detach_with_reply(
+        vec![client("client-one", 4)],
+        "",
+        ServerMsg::Refused {
+            reason: "client is no longer attached".into(),
+        },
+    );
+
+    assert_eq!(output.status.code(), Some(1));
+    assert!(output.stdout.is_empty());
+    assert_eq!(output.stderr, b"client is no longer attached\n");
+}
+
 fn run_detach(clients: Vec<ClientInfo>, input: &str) -> Output {
+    run_detach_with_reply(
+        clients,
+        input,
+        ServerMsg::Clients {
+            clients: Vec::new(),
+        },
+    )
+}
+
+fn run_detach_with_reply(clients: Vec<ClientInfo>, input: &str, reply: ServerMsg) -> Output {
     let config = TestConfig::new();
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
     let port = listener
@@ -58,7 +83,7 @@ fn run_detach(clients: Vec<ClientInfo>, input: &str) -> Output {
         [client] => Some(client.client_id.clone()),
         [_, second, ..] => Some(second.client_id.clone()),
     };
-    let server = thread::spawn(move || serve_detach(listener, clients, expected_client));
+    let server = thread::spawn(move || serve_detach(listener, clients, expected_client, reply));
 
     let output = run(&config, input);
 
@@ -66,7 +91,12 @@ fn run_detach(clients: Vec<ClientInfo>, input: &str) -> Output {
     output
 }
 
-fn serve_detach(listener: TcpListener, clients: Vec<ClientInfo>, expected_client: Option<String>) {
+fn serve_detach(
+    listener: TcpListener,
+    clients: Vec<ClientInfo>,
+    expected_client: Option<String>,
+    reply: ServerMsg,
+) {
     let mut stream = accept(&listener);
     assert_eq!(
         receive(&mut stream),
@@ -94,6 +124,7 @@ fn serve_detach(listener: TcpListener, clients: Vec<ClientInfo>, expected_client
     send(&mut stream, &ServerMsg::Clients { clients });
     if let Some(client_id) = expected_client {
         assert_eq!(receive(&mut stream), ClientMsg::DetachClient { client_id });
+        send(&mut stream, &reply);
     }
 }
 
