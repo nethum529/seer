@@ -2,13 +2,14 @@ use std::process::ExitCode;
 
 use crate::commands::{self, CommandError};
 
-const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start          Start the server\n  invite [--hours N]\n                 Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Attach to your tree\n  detach         Detach this client\n  peek <person>  View another person's tree\n";
+const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start          Start the server\n  stop           Stop the server\n  invite [--hours N]\n                 Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Attach to your tree\n  detach         Detach this client\n  peek <person>  View another person's tree\n";
 
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
     Bare,
     Help,
     Start,
+    Stop,
     Invite(Option<String>),
     Join,
     JoinWithInvitation(String),
@@ -47,6 +48,7 @@ fn execute(command: Command) -> ExitCode {
             Ok(())
         }
         Command::Start => return crate::start::run(),
+        Command::Stop => return crate::start::stop(),
         Command::Invite(hours) => commands::invite(hours.as_deref()),
         Command::Join => commands::join(None),
         Command::JoinWithInvitation(invitation) => commands::join(Some(&invitation)),
@@ -63,6 +65,7 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ()> {
     let command = match first.as_str() {
         "--help" | "-h" if arguments.next().is_none() => Command::Help,
         "start" if arguments.next().is_none() => Command::Start,
+        "stop" if arguments.next().is_none() => Command::Stop,
         "invite" => match arguments.next() {
             None => Command::Invite(None),
             Some(flag) if flag == "--hours" => {
