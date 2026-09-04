@@ -16,8 +16,8 @@ mod util;
 mod writer;
 
 use connection::{
-    Connection, ReportedViewport, evict_connection, grant_next_owner, handle_target_query,
-    reported_viewport,
+    Connection, PeekTarget, ReportedViewport, evict_connection, flush_messages,
+    grant_next_owner, handle_target_query, reported_viewport,
 };
 use status::handle_status_query;
 use util::{connection_closed, lock, remove_stale_socket, stop_after_snapshot_failure};
@@ -102,8 +102,8 @@ fn handle_message(
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
         ClientMsg::Peek { workspace, tab, .. } => {
-            match shared.send_snapshot(connection_id, &workspace, &tab) {
-                Ok(()) => shared.enter_peek(connection_id)?,
+            match shared.enter_peek(connection_id, &workspace, &tab) {
+                Ok(()) => {}
                 Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
                     shared.send_refused(connection_id, error.to_string())?;
                 }
@@ -358,30 +358,21 @@ impl SharedSession {
         }
     }
 
-    fn enter_peek(&self, id: u64) -> io::Result<()> {
+    fn enter_peek(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
         let _lease = lock(&self.lease)?;
-        let demoted = {
-            let mut connections = lock(&self.connections)?;
-            let Some(position) = connections.iter().position(|c| c.id == id) else {
-                return Ok(());
+        {
+            let connections = lock(&self.connections)?;
+            let Some(connection) = connections.iter().find(|connection| connection.id == id) else {
+                return Err(connection_closed());
             };
-            connections[position].read_only = true;
-            let demoted = connections[position].size_owner;
-            connections[position].size_owner = false;
-            demoted
-        };
-        if demoted {
-            self.recover_locked()?;
+            if connection.peek_ended {
+                return Err(connection_closed());
+            }
         }
-        Ok(())
-    }
-
-    fn send_snapshot(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
-        let session = lock(&self.session)?;
-        let tree = session.selected_tree(workspace, tab)?;
-        let messages = session.snapshot_for(tree);
-        drop(session);
-        let owner_lost = {
+        let (owner_lost, entered) = {
+            let session = lock(&self.session)?;
+            let tree = session.selected_tree(workspace, tab)?;
+            let messages = session.snapshot_for(tree);
             let mut connections = lock(&self.connections)?;
             let Some(position) = connections
                 .iter()
@@ -390,14 +381,23 @@ impl SharedSession {
                 return Err(connection_closed());
             };
             if connections[position].send_messages(&messages)? {
-                return Ok(());
+                let owner_lost = connections[position].size_owner;
+                connections[position].size_owner = false;
+                connections[position].read_only = true;
+                connections[position].peek_target = Some(PeekTarget::new(workspace, tab));
+                (owner_lost, true)
+            } else {
+                (evict_connection(&mut connections, position), false)
             }
-            evict_connection(&mut connections, position)
         };
         if owner_lost {
-            self.recover()?;
+            self.recover_locked()?;
         }
-        Err(connection_closed())
+        if entered {
+            Ok(())
+        } else {
+            Err(connection_closed())
+        }
     }
 
     fn send_refused(&self, id: u64, reason: String) -> io::Result<()> {
@@ -458,17 +458,9 @@ impl SharedSession {
 
     fn flush_messages(&self, messages: &[ServerMsg]) -> io::Result<()> {
         let adopt = {
+            let session = lock(&self.session)?;
             let mut connections = lock(&self.connections)?;
-            let owner_present = connections.iter().any(|connection| connection.size_owner);
-            for message in messages {
-                let output = writer::encode(message)?;
-                connections.retain(|connection| connection.send(Arc::clone(&output)));
-            }
-            if owner_present && !connections.iter().any(|connection| connection.size_owner) {
-                grant_next_owner(&mut connections)
-            } else {
-                None
-            }
+            flush_messages(&session, &mut connections, messages)?
         };
         if let Some(viewport) = adopt {
             self.adopt_locked(viewport)?;
