@@ -92,6 +92,7 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
     };
     assert_eq!(clients.len(), 1);
     assert_eq!(clients[0].client_id, alice_client);
+    let detach_started = Instant::now();
     send(
         &mut controller,
         &ClientMsg::DetachClient {
@@ -108,6 +109,16 @@ fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
         }
     );
     wait_for_disconnect(&mut alice);
+    assert!(detach_started.elapsed() < Duration::from_secs(1));
+    assert_eq!(
+        wait_for(&mut controller, |message| matches!(
+            message,
+            ServerMsg::Clients { .. }
+        )),
+        ServerMsg::Clients {
+            clients: Vec::new()
+        }
+    );
 
     assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
     assert_process_running(pane_pid);

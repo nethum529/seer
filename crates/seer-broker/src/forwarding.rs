@@ -144,7 +144,10 @@ impl<'a> Coordinator<'a> {
                 self.write_client(&ServerMsg::Clients { clients })?;
             }
             ClientMsg::DetachClient { client_id } => {
-                if !self.broker.detach_client(self.owner, &client_id)? {
+                if self.broker.detach_client(self.owner, &client_id)? {
+                    let clients = self.broker.clients(self.owner, &self.client_id)?;
+                    self.write_client(&ServerMsg::Clients { clients })?;
+                } else {
                     eprintln!("broker refused DetachClient for user {}", self.owner);
                     self.write_client(&ServerMsg::Refused {
                         reason: "client does not belong to this person".into(),
