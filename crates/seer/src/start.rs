@@ -25,6 +25,11 @@ const START_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(target_os = "linux")]
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 #[cfg(target_os = "linux")]
+const WORDMARK: &str = r" ___  ___  ___ _ _
+(_-< / -_)/ -_) '_|
+/__/ \___|\___|_|
+";
+#[cfg(target_os = "linux")]
 #[derive(Deserialize, Serialize)]
 struct BrokerConfig {
     listen: SocketAddr,
@@ -270,6 +275,8 @@ fn start_broker(
         print_log_tail(&log_path);
         return Err(error);
     }
+    print!("{WORDMARK}");
+    println!();
     println!("Server started at {}.", config.published_addr);
     println!("You are {}.", config.owner_name);
     println!("Ready in {:.2} s.", started.elapsed().as_secs_f64());
