@@ -67,7 +67,7 @@ fn view_only_events_send_no_session_changes() {
 fn active_events_send_input_focus_and_resize() {
     let (mut client, mut server) = socket_pair();
     let mut tree = tree_with_two_tabs();
-    let mut state = ClientState::new(tree.clone());
+    let mut state = ClientState::new(tree.clone(), "alice".into());
     let mut command_pending = false;
     let mut drawer = Drawer::default();
     set_view_only(false);

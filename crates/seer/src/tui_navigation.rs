@@ -1,12 +1,16 @@
 use std::cell::RefCell;
+use std::io;
 
+use crossterm::event::KeyEvent;
 use ratatui::layout::Rect;
-use seer_core::Tree;
+use seer_core::{InputEvent, TerminalInput, Tree};
+use seer_net::Stream;
 
 use crate::input::{
-    FocusDirection, pane_in_direction as find_pane_in_direction, selected_tab_tree,
+    FocusDirection, key_to_input, pane_in_direction as find_pane_in_direction, selected_tab_tree,
 };
 use crate::state::{ClientState, pane_rects};
+use crate::tui::send_focused_input;
 
 const STATUS_HINT: &str = "Ctrl-b c new tab, % split, x close, n/p tabs";
 const LAST_TAB_STATUS: &str = "Cannot close the last tab.";
@@ -14,6 +18,19 @@ const LAST_TAB_STATUS: &str = "Cannot close the last tab.";
 thread_local! {
     static NAVIGATION_TREE: RefCell<Option<Tree>> = const { RefCell::new(None) };
     static STATUS: RefCell<&'static str> = const { RefCell::new(STATUS_HINT) };
+}
+
+pub(crate) fn forward_prefix(
+    key: KeyEvent,
+    stream: &mut impl Stream,
+    state: &ClientState,
+) -> io::Result<()> {
+    let prefix = TerminalInput::new(InputEvent::Text("\u{2}".into()));
+    send_focused_input(stream, state, prefix)?;
+    match key_to_input(key) {
+        Some(input) => send_focused_input(stream, state, input),
+        None => Ok(()),
+    }
 }
 
 pub(crate) fn initialize(tree: &Tree) {

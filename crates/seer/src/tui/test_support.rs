@@ -107,7 +107,7 @@ pub(super) fn state_with_pane() -> ClientState {
         .expect("workspace must be created");
     tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
         .expect("tab must be created");
-    ClientState::new(tree)
+    ClientState::new(tree, "alice".into())
 }
 
 pub(super) fn tree_with_two_tabs() -> Tree {
@@ -129,17 +129,39 @@ pub(super) fn apply_two_people(
 ) {
     let people = ["alice", "bob"]
         .into_iter()
-        .map(|name| Person {
-            user_id: name.into(),
-            name: name.into(),
-            attached_clients: 1,
-            peekable: true,
-            state: PersonState::Active,
-            tabs: 1,
-            foreground: "nvim".into(),
-            idle_secs: 12,
-        })
+        .map(|name| person(name, "nvim"))
         .collect();
+    apply_people(client, state, drawer, people);
+}
+
+pub(super) fn apply_own_foreground(
+    client: &mut TcpStream,
+    state: &mut ClientState,
+    drawer: &mut Drawer,
+    foreground: &str,
+) {
+    apply_people(client, state, drawer, vec![person("alice", foreground)]);
+}
+
+fn person(name: &str, foreground: &str) -> Person {
+    Person {
+        user_id: name.into(),
+        name: name.into(),
+        attached_clients: 1,
+        peekable: true,
+        state: PersonState::Active,
+        tabs: 1,
+        foreground: foreground.into(),
+        idle_secs: 12,
+    }
+}
+
+fn apply_people(
+    client: &mut TcpStream,
+    state: &mut ClientState,
+    drawer: &mut Drawer,
+    people: Vec<Person>,
+) {
     apply_server_message(
         ServerMsg::People { people },
         state,

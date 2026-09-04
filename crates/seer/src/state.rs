@@ -1,6 +1,7 @@
 use std::collections::HashMap;
 
 use ratatui::layout::Rect;
+use seer_core::proto::Person;
 use seer_core::{Cell, Cursor, MouseTracking, Tab, TerminalFrame, Tree};
 
 #[derive(Debug)]
@@ -11,10 +12,12 @@ pub(crate) struct ClientState {
     selected_tab: Option<String>,
     focused: Option<String>,
     pane_areas: Vec<(String, Rect)>,
+    own_user: String,
+    foreground: String,
 }
 
 impl ClientState {
-    pub(crate) fn new(tree: Tree) -> Self {
+    pub(crate) fn new(tree: Tree, own_user: String) -> Self {
         let (selected_workspace, selected_tab) = first_selection(&tree)
             .map_or((None, None), |(workspace, tab)| {
                 (Some(workspace), Some(tab))
@@ -32,7 +35,19 @@ impl ClientState {
             selected_tab,
             focused,
             pane_areas: Vec::new(),
+            own_user,
+            foreground: String::new(),
         }
+    }
+
+    pub(crate) fn note_people(&mut self, people: &[Person]) {
+        if let Some(person) = people.iter().find(|person| person.user_id == self.own_user) {
+            self.foreground = person.foreground.clone();
+        }
+    }
+
+    pub(crate) fn herdr_in_front(&self) -> bool {
+        self.foreground == "herdr"
     }
 
     pub(crate) fn replace_tree(&mut self, tree: Tree) -> bool {

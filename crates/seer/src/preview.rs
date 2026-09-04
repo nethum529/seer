@@ -52,7 +52,7 @@ impl Preview {
         stream.set_read_timeout(Some(POLL_TIMEOUT))?;
         Ok(Self {
             stream,
-            state: ClientState::new(tree),
+            state: ClientState::new(tree, String::new()),
             buffer: Vec::new(),
             pending: true,
             last_draw: Instant::now() - DRAW_INTERVAL,
@@ -170,7 +170,7 @@ impl Preview {
     pub(super) fn with_stream(stream: Socket) -> Self {
         Self {
             stream,
-            state: ClientState::new(seer_core::Tree::new()),
+            state: ClientState::new(seer_core::Tree::new(), String::new()),
             buffer: Vec::new(),
             pending: false,
             last_draw: Instant::now(),
