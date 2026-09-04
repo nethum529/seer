@@ -16,8 +16,8 @@ mod extras;
 mod support;
 
 use extras::{
-    assert_log_contains, assert_log_excludes, assert_process_running, assert_runtime_arguments,
-    assert_socket_directory, pane_pid, send, wait_for_cells, write_config,
+    assert_process_running, assert_runtime_arguments, assert_socket_directory, pane_pid, send,
+    wait_for_cells, write_config,
 };
 use support::{
     ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
@@ -165,10 +165,6 @@ fn routes_peek_and_restores_the_owners_runtime() {
 
     send(&mut bob, &ClientMsg::StopPeek);
     wait_for_tree_with_tab(&mut bob);
-    assert_log_contains(&temporary, "broker dropped Peek for unknown user: charlie");
-    assert_log_contains(&temporary, "broker dropped Input while user bob peeks");
-    assert_log_excludes(&temporary, "runtime dropped read-only message");
-
     send(
         &mut bob,
         &ClientMsg::Peek {

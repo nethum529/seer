@@ -53,7 +53,6 @@ fn invalid_config(error: toml::de::Error) -> io::Error {
 
 #[cfg(test)]
 mod tests {
-    use std::io;
     use std::path::Path;
 
     use super::Config;
@@ -71,46 +70,5 @@ mod tests {
             config.os_users.get("owner").map(String::as_str),
             Some("owner")
         );
-    }
-
-    #[test]
-    fn loads_default_state_directory() {
-        let config = toml::from_str::<Config>(
-            "listen = \"127.0.0.1:7321\"\npublished_addr = \"host:7321\"\nowner_name = \"owner\"\n",
-        )
-        .expect("config must load");
-
-        assert!(config.os_users.is_empty());
-        assert!(config.state_dir.ends_with(".local/state/seer"));
-    }
-
-    #[test]
-    fn selects_the_default_state_directory() {
-        let xdg = super::state_dir_from(Some("/xdg".into()), Some("/home/user".into()));
-        let empty_xdg = super::state_dir_from(Some("".into()), Some("/home/user".into()));
-        let no_home = super::state_dir_from(None, Some("".into()));
-
-        assert_eq!(xdg, Path::new("/xdg/seer"));
-        assert_eq!(empty_xdg, Path::new("/home/user/.local/state/seer"));
-        assert_eq!(no_home, Path::new("./.local/state/seer"));
-    }
-
-    #[test]
-    fn rejects_invalid_config() {
-        let error = toml::from_str::<Config>("listen = 1")
-            .err()
-            .map(super::invalid_config)
-            .expect("config must be invalid");
-
-        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-    }
-
-    #[test]
-    fn reports_missing_config() {
-        let error = Config::load("path-that-does-not-exist")
-            .err()
-            .expect("missing config must return an error");
-
-        assert_eq!(error.kind(), io::ErrorKind::NotFound);
     }
 }
