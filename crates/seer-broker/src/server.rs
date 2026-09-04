@@ -341,7 +341,9 @@ fn handshake<S: Stream>(
             }
             authenticate(stream, broker.registry(), &user_id, &credential)
         }
-        ClientMsg::Join { seat_token, name } => join(stream, broker.registry(), &seat_token, &name),
+        ClientMsg::Join { seat_token, name } => {
+            join(stream, broker.registry(), &seat_token, &name).map(|()| None)
+        }
         _ => refuse(stream, EXPECTED_HELLO).map(|()| None),
     }
 }
@@ -376,20 +378,19 @@ fn join<S: Stream>(
     registry: &Registry,
     seat_token: &str,
     name: &str,
-) -> io::Result<Option<PersonRecord>> {
+) -> io::Result<()> {
     let result = match registry.join(seat_token, name)? {
         Ok(result) => result,
-        Err(error) => return refuse(stream, error.reason()).map(|()| None),
+        Err(error) => return refuse(stream, error.reason()),
     };
     codec::encode(
         stream,
         &ServerMsg::Joined {
-            user_id: result.person.user_id.clone(),
+            user_id: result.person.user_id,
             credential: result.credential,
-            name: result.person.name.clone(),
+            name: result.person.name,
         },
-    )?;
-    Ok(Some(result.person))
+    )
 }
 
 pub(crate) fn refuse<S: Stream>(stream: &mut S, reason: &str) -> io::Result<()> {
