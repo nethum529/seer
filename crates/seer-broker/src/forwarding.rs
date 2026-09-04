@@ -52,12 +52,9 @@ impl<'a> Coordinator<'a> {
         let (event_sender, events) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         let client_reader = client.clone();
         let client = Arc::new(Mutex::new(Box::new(client) as Box<dyn Stream>));
-        let attachment = match broker.attach_client(&owner.user_id, Arc::clone(&client)) {
-            Ok(attachment) => attachment,
-            Err(error) => return Err(error),
-        };
+        let attachment = broker.attach_client(&owner.user_id, Arc::clone(&client))?;
         let client_id = attachment.client_id().to_owned();
-        if let Err(error) = write_client(
+        write_client(
             &client,
             &ServerMsg::Welcome {
                 user_id: owner.user_id.clone(),
@@ -65,9 +62,7 @@ impl<'a> Coordinator<'a> {
                 client_id: client_id.clone(),
                 tree: Tree::new(),
             },
-        ) {
-            return Err(error);
-        }
+        )?;
         let attach = ClientMsg::AttachRuntime;
         let runtime = match connect_runtime(
             broker,

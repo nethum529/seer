@@ -4,6 +4,7 @@ use std::os::unix::net::UnixStream;
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::sync::OnceLock;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -16,6 +17,7 @@ pub const PROCESS_TIMEOUT: Duration = Duration::from_secs(2);
 pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(10);
 
 static RUNTIME_BINARY: OnceLock<PathBuf> = OnceLock::new();
+static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 pub fn runtime_command() -> Command {
     let mut command = Command::new(runtime_binary());
@@ -144,12 +146,15 @@ pub struct TemporaryDirectory {
 impl TemporaryDirectory {
     #[must_use]
     pub fn new() -> Self {
+        let counter = NEXT_TEMPORARY_DIRECTORY.fetch_add(1, Ordering::Relaxed);
         let timestamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("system time must be after the Unix epoch")
             .as_nanos();
-        let path =
-            std::env::temp_dir().join(format!("seer-runtime-{}-{timestamp}", std::process::id()));
+        let path = std::env::temp_dir().join(format!(
+            "seer-runtime-{}-{timestamp}-{counter}",
+            std::process::id()
+        ));
         fs::create_dir(&path).expect("temporary directory must be created");
         Self { path }
     }
