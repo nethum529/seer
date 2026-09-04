@@ -17,7 +17,6 @@ pub struct PtySession {
 
 #[derive(Default)]
 struct OutputBuffers {
-    snapshot: VecDeque<u8>,
     pending: VecDeque<u8>,
 }
 
@@ -54,17 +53,8 @@ impl PtySession {
             .map_err(to_io_error)
     }
 
-    pub fn is_alive(&mut self) -> io::Result<bool> {
-        self.child.try_wait().map(|status| status.is_none())
-    }
-
     pub fn kill(&mut self) -> io::Result<()> {
         self.child.kill()
-    }
-
-    pub fn snapshot(&self) -> Vec<u8> {
-        let output = lock_mutex(&self.output);
-        output.snapshot.iter().copied().collect()
     }
 
     pub fn drain_output(&self) -> Vec<u8> {
@@ -97,7 +87,6 @@ fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<OutputBuffers>) 
 
 fn append_output(output: &Mutex<OutputBuffers>, bytes: &[u8]) {
     let mut output = lock_mutex(output);
-    append_bounded(&mut output.snapshot, bytes);
     append_bounded(&mut output.pending, bytes);
 }
 
@@ -122,36 +111,6 @@ fn to_io_error(error: impl Display) -> io::Error {
 #[cfg(all(test, target_os = "linux"))]
 mod tests {
     use super::*;
-    use std::time::{Duration, Instant};
-
-    const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
-    const POLL_INTERVAL: Duration = Duration::from_millis(10);
-
-    #[test]
-    fn session_captures_output_accepts_input_resizes_and_stops() {
-        let mut command = CommandBuilder::new("sh");
-        command.args(["-c", "echo hello; cat"]);
-        let mut session = PtySession::start(command, 80, 24).expect("PTY must start");
-
-        assert!(wait_for_output(&session, b"hello"));
-        assert!(
-            session
-                .drain_output()
-                .windows(5)
-                .any(|bytes| bytes == b"hello")
-        );
-        assert!(session.drain_output().is_empty());
-        assert!(session.snapshot().windows(5).any(|bytes| bytes == b"hello"));
-        session
-            .write_input(b"input text\n")
-            .expect("input write must succeed");
-        assert!(wait_for_output(&session, b"input text"));
-        session.resize(100, 40).expect("resize must succeed");
-        assert!(session.is_alive().expect("process state must be readable"));
-
-        session.kill().expect("kill must succeed");
-        assert!(wait_for_exit(&mut session));
-    }
 
     #[test]
     fn output_buffers_keep_last_mebibyte_while_not_drained() {
@@ -162,14 +121,6 @@ mod tests {
         append_output(&output, &bytes);
 
         let output = output.into_inner().expect("output lock must be valid");
-        assert_eq!(output.snapshot.len(), OUTPUT_LIMIT);
-        assert!(
-            output
-                .snapshot
-                .iter()
-                .copied()
-                .eq(bytes[1..].iter().copied())
-        );
         assert_eq!(output.pending.len(), OUTPUT_LIMIT);
         assert!(
             output
@@ -178,32 +129,5 @@ mod tests {
                 .copied()
                 .eq(bytes[1..].iter().copied())
         );
-    }
-
-    fn wait_for_output(session: &PtySession, expected: &[u8]) -> bool {
-        let deadline = Instant::now() + WAIT_TIMEOUT;
-        while Instant::now() < deadline {
-            if session
-                .snapshot()
-                .windows(expected.len())
-                .any(|window| window == expected)
-            {
-                return true;
-            }
-            thread::sleep(POLL_INTERVAL);
-        }
-        false
-    }
-
-    fn wait_for_exit(session: &mut PtySession) -> bool {
-        let deadline = Instant::now() + WAIT_TIMEOUT;
-        while Instant::now() < deadline {
-            match session.is_alive() {
-                Ok(false) => return true,
-                Ok(true) => thread::sleep(POLL_INTERVAL),
-                Err(_) => return false,
-            }
-        }
-        false
     }
 }
