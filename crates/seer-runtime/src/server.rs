@@ -1,20 +1,28 @@
+use seer_core::TerminalCapabilities;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::fs;
-use std::io::{self, Write};
+use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::mpsc::{self, Receiver, SyncSender};
-use std::sync::{Arc, Mutex, MutexGuard};
+use std::sync::{Arc, Mutex};
 use std::thread;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use crate::UserSession;
+use crate::user_session::validate_capabilities;
+
+mod connection;
+mod util;
+mod writer;
+
+use connection::{
+    Connection, ReportedViewport, evict_connection, grant_next_owner, reported_viewport,
+};
+use util::{connection_closed, lock};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
-// A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
-const OUTPUT_QUEUE_CAPACITY: usize = 64;
-const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
+const SIZE_LEASE_TIMEOUT: Duration = Duration::from_secs(30);
 
 pub fn bind(path: &Path) -> io::Result<UnixListener> {
     remove_stale_socket(path)?;
@@ -70,12 +78,11 @@ fn connection_loop(
     shared: &SharedSession,
     connection_id: u64,
 ) -> io::Result<()> {
-    let mut read_only = false;
     loop {
         let Ok(message) = codec::decode(stream) else {
             return Ok(());
         };
-        if handle_message(shared, connection_id, &mut read_only, message)? {
+        if handle_message(shared, connection_id, message)? {
             return Ok(());
         }
     }
@@ -84,14 +91,13 @@ fn connection_loop(
 fn handle_message(
     shared: &SharedSession,
     connection_id: u64,
-    read_only: &mut bool,
     message: ClientMsg,
 ) -> io::Result<bool> {
     match message {
         ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
         ClientMsg::Peek { workspace, tab, .. } => {
             match shared.send_snapshot(connection_id, &workspace, &tab) {
-                Ok(()) => *read_only = true,
+                Ok(()) => shared.enter_peek(connection_id)?,
                 Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
                     shared.send_refused(connection_id, error.to_string())?;
                 }
@@ -99,28 +105,17 @@ fn handle_message(
             }
             Ok(false)
         }
-        message if *read_only && is_mutating(&message) => {
-            eprintln!("runtime dropped read-only message: {message:?}");
-            Ok(false)
+        ClientMsg::Resize {
+            workspace,
+            tab,
+            cols,
+            rows,
+        } => shared.client_resize(connection_id, &workspace, &tab, cols, rows),
+        ClientMsg::TerminalCapabilities { capabilities } => {
+            shared.record_capabilities(connection_id, capabilities)
         }
-        message => {
-            apply_or_refuse(shared, connection_id, message)?;
-            Ok(false)
-        }
-    }
-}
-
-fn apply_or_refuse(
-    shared: &SharedSession,
-    connection_id: u64,
-    message: ClientMsg,
-) -> io::Result<()> {
-    match shared.apply_and_broadcast(message) {
-        Ok(()) => Ok(()),
-        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-            shared.send_refused(connection_id, error.to_string())
-        }
-        Err(error) => Err(error),
+        message if is_mutating(&message) => shared.dispatch_input(connection_id, message),
+        _ => Ok(false),
     }
 }
 
@@ -164,6 +159,7 @@ fn poll_driver(shared: &SharedSession) {
 struct SharedSession {
     session: Mutex<UserSession>,
     connections: Mutex<Vec<Connection>>,
+    lease: Mutex<()>,
 }
 
 impl SharedSession {
@@ -171,6 +167,7 @@ impl SharedSession {
         Self {
             session: Mutex::new(session),
             connections: Mutex::new(Vec::new()),
+            lease: Mutex::new(()),
         }
     }
 
@@ -180,17 +177,198 @@ impl SharedSession {
             session.ensure_first_shell()?;
             session.snapshot()
         };
-        let connection = Connection::new(id, stream)?;
+        let mut connection = Connection::new(id, stream)?;
         if !connection.send_messages(&messages)? {
             return Err(connection_closed());
         }
+        let _lease = lock(&self.lease)?;
         let mut connections = lock(&self.connections)?;
+        let owner_stale = connections
+            .iter()
+            .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
+        if owner_stale {
+            for owner in connections.iter_mut() {
+                owner.size_owner = false;
+            }
+            connection.size_owner = true;
+        } else {
+            connection.size_owner = !connections.iter().any(|c| c.size_owner);
+        }
         connections.push(connection);
         Ok(())
     }
 
     fn remove_connection(&self, id: u64) -> io::Result<()> {
-        lock(&self.connections)?.retain(|connection| connection.id != id);
+        let _lease = lock(&self.lease)?;
+        let owner_removed = {
+            let mut connections = lock(&self.connections)?;
+            let removed_owner = connections.iter().any(|c| c.id == id && c.size_owner);
+            connections.retain(|connection| connection.id != id);
+            removed_owner
+        };
+        if owner_removed {
+            self.recover_locked()?;
+        }
+        Ok(())
+    }
+
+    fn recover(&self) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
+        self.recover_locked()
+    }
+
+    fn recover_locked(&self) -> io::Result<()> {
+        let adopt = {
+            let mut connections = lock(&self.connections)?;
+            if connections.iter().any(|connection| connection.size_owner) {
+                None
+            } else {
+                grant_next_owner(&mut connections)
+            }
+        };
+        if let Some(viewport) = adopt {
+            self.adopt_locked(viewport)?;
+        }
+        Ok(())
+    }
+
+    fn adopt_locked(&self, viewport: ReportedViewport) -> io::Result<()> {
+        let messages = match lock(&self.session)?.apply(ClientMsg::Resize {
+            workspace: viewport.workspace,
+            tab: viewport.tab,
+            cols: viewport.cols,
+            rows: viewport.rows,
+        }) {
+            Ok(messages) => messages,
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        self.flush_messages(&messages)
+    }
+
+    fn refresh_read_only(&self, id: u64) -> io::Result<Option<bool>> {
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections.iter_mut().find(|c| c.id == id) else {
+            return Ok(None);
+        };
+        connection.last_active = Instant::now();
+        Ok(Some(connection.read_only))
+    }
+
+    fn dispatch_input(&self, connection_id: u64, message: ClientMsg) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        let Some(read_only) = self.refresh_read_only(connection_id)? else {
+            return Ok(true);
+        };
+        if read_only {
+            eprintln!("runtime dropped read-only message: {message:?}");
+            return Ok(false);
+        }
+        let applied = lock(&self.session)?.apply(message);
+        match applied {
+            Ok(messages) => {
+                self.flush_messages(&messages)?;
+                Ok(false)
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                drop(_lease);
+                self.send_refused(connection_id, error.to_string())?;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn record_capabilities(
+        &self,
+        connection_id: u64,
+        capabilities: TerminalCapabilities,
+    ) -> io::Result<bool> {
+        if let Err(error) = validate_capabilities(capabilities) {
+            self.send_refused(connection_id, error.to_string())?;
+            return Ok(false);
+        }
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections.iter_mut().find(|c| c.id == connection_id) else {
+            return Ok(true);
+        };
+        connection.capabilities = Some(capabilities);
+        connection.last_active = Instant::now();
+        Ok(false)
+    }
+
+    fn client_resize(
+        &self,
+        id: u64,
+        workspace: &str,
+        tab: &str,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections.iter().position(|c| c.id == id) else {
+                return Ok(false);
+            };
+            if connections[position].read_only {
+                return Ok(false);
+            }
+            connections[position].last_active = Instant::now();
+            let lease_vacant = !connections.iter().any(|c| c.size_owner);
+            let owner_stale = connections
+                .iter()
+                .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
+            if !connections[position].size_owner && !lease_vacant && !owner_stale {
+                connections[position].viewport =
+                    Some(reported_viewport(workspace, tab, cols, rows));
+                return Ok(false);
+            }
+        }
+        let message = ClientMsg::Resize {
+            workspace: workspace.to_owned(),
+            tab: tab.to_owned(),
+            cols,
+            rows,
+        };
+        let applied = lock(&self.session)?.apply(message);
+        match applied {
+            Ok(messages) => {
+                let mut connections = lock(&self.connections)?;
+                for connection in connections.iter_mut() {
+                    connection.size_owner = connection.id == id;
+                }
+                if let Some(connection) = connections.iter_mut().find(|c| c.id == id) {
+                    connection.viewport = Some(reported_viewport(workspace, tab, cols, rows));
+                }
+                drop(connections);
+                self.flush_messages(&messages)?;
+                Ok(false)
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                drop(_lease);
+                self.send_refused(id, error.to_string())?;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn enter_peek(&self, id: u64) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
+        let demoted = {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections.iter().position(|c| c.id == id) else {
+                return Ok(());
+            };
+            connections[position].read_only = true;
+            let demoted = connections[position].size_owner;
+            connections[position].size_owner = false;
+            demoted
+        };
+        if demoted {
+            self.recover_locked()?;
+        }
         Ok(())
     }
 
@@ -199,16 +377,23 @@ impl SharedSession {
         let tree = session.selected_tree(workspace, tab)?;
         let messages = session.snapshot_for(tree);
         drop(session);
-        let mut connections = lock(&self.connections)?;
-        let position = connections
-            .iter()
-            .position(|connection| connection.id == id)
-            .ok_or_else(connection_closed)?;
-        if !connections[position].send_messages(&messages)? {
-            connections.remove(position);
-            return Err(connection_closed());
+        let owner_lost = {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections
+                .iter()
+                .position(|connection| connection.id == id)
+            else {
+                return Err(connection_closed());
+            };
+            if connections[position].send_messages(&messages)? {
+                return Ok(());
+            }
+            evict_connection(&mut connections, position)
+        };
+        if owner_lost {
+            self.recover()?;
         }
-        Ok(())
+        Err(connection_closed())
     }
 
     fn send_refused(&self, id: u64, reason: String) -> io::Result<()> {
@@ -216,19 +401,27 @@ impl SharedSession {
     }
 
     fn send_to(&self, id: u64, message: &ServerMsg) -> io::Result<()> {
-        let output = encode_message(message)?;
-        let mut connections = lock(&self.connections)?;
-        let position = connections
-            .iter()
-            .position(|connection| connection.id == id)
-            .ok_or_else(connection_closed)?;
-        if !connections[position].send(output) {
-            connections.remove(position);
-            return Err(connection_closed());
+        let output = writer::encode(message)?;
+        let owner_lost = {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections
+                .iter()
+                .position(|connection| connection.id == id)
+            else {
+                return Err(connection_closed());
+            };
+            if connections[position].send(output) {
+                return Ok(());
+            }
+            evict_connection(&mut connections, position)
+        };
+        if owner_lost {
+            self.recover()?;
         }
-        Ok(())
+        Err(connection_closed())
     }
 
+    #[cfg(test)]
     fn apply_and_broadcast(&self, message: ClientMsg) -> io::Result<()> {
         let messages = lock(&self.session)?.apply(message)?;
         self.broadcast(&messages)
@@ -244,300 +437,38 @@ impl SharedSession {
     }
 
     fn broadcast(&self, messages: &[ServerMsg]) -> io::Result<()> {
-        for message in messages {
-            let output = encode_message(message)?;
+        let _lease = lock(&self.lease)?;
+        self.flush_messages(messages)
+    }
+
+    fn flush_messages(&self, messages: &[ServerMsg]) -> io::Result<()> {
+        let adopt = {
             let mut connections = lock(&self.connections)?;
-            connections.retain(|connection| connection.send(Arc::clone(&output)));
+            let owner_present = connections.iter().any(|connection| connection.size_owner);
+            for message in messages {
+                let output = writer::encode(message)?;
+                connections.retain(|connection| connection.send(Arc::clone(&output)));
+            }
+            if owner_present && !connections.iter().any(|connection| connection.size_owner) {
+                grant_next_owner(&mut connections)
+            } else {
+                None
+            }
+        };
+        if let Some(viewport) = adopt {
+            self.adopt_locked(viewport)?;
         }
         Ok(())
     }
 
     #[cfg(test)]
     fn connection_count(&self) -> usize {
-        self.connections
-            .lock()
-            .map(|connections| connections.len())
-            .unwrap_or(0)
+        self.connections.lock().map(|c| c.len()).unwrap_or(0)
     }
-}
-
-struct Connection {
-    id: u64,
-    output: SyncSender<Arc<[u8]>>,
-    stream: UnixStream,
-}
-
-impl Connection {
-    fn new(id: u64, stream: UnixStream) -> io::Result<Self> {
-        let writer = stream.try_clone()?;
-        let (output, queued) = mpsc::sync_channel(OUTPUT_QUEUE_CAPACITY);
-        spawn_writer(id, writer, queued)?;
-        Ok(Self { id, output, stream })
-    }
-
-    fn send(&self, output: Arc<[u8]>) -> bool {
-        self.output.try_send(output).is_ok()
-    }
-
-    fn send_messages(&self, messages: &[ServerMsg]) -> io::Result<bool> {
-        for message in messages {
-            if !self.send(encode_message(message)?) {
-                return Ok(false);
-            }
-        }
-        Ok(true)
-    }
-}
-
-impl Drop for Connection {
-    fn drop(&mut self) {
-        let _ = self.stream.shutdown(std::net::Shutdown::Both);
-    }
-}
-
-fn spawn_writer(id: u64, mut stream: UnixStream, output: Receiver<Arc<[u8]>>) -> io::Result<()> {
-    stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
-    thread::Builder::new()
-        .name(format!("runtime-writer-{id}"))
-        .spawn(move || write_output(id, &mut stream, &output))?;
-    Ok(())
-}
-
-fn write_output(id: u64, stream: &mut UnixStream, output: &Receiver<Arc<[u8]>>) {
-    while let Ok(bytes) = output.recv() {
-        if let Err(error) = stream.write_all(&bytes) {
-            eprintln!("runtime evicted slow connection {id}: {error}");
-            break;
-        }
-    }
-    let _ = stream.shutdown(std::net::Shutdown::Both);
-}
-
-fn encode_message(message: &ServerMsg) -> io::Result<Arc<[u8]>> {
-    let mut output = Vec::new();
-    codec::encode(&mut output, message)?;
-    Ok(Arc::from(output))
-}
-
-fn lock<T>(mutex: &Mutex<T>) -> io::Result<MutexGuard<'_, T>> {
-    mutex.lock().map_err(|_| lock_poisoned())
-}
-
-fn lock_poisoned() -> io::Error {
-    io::Error::other("runtime shared state lock is poisoned")
-}
-
-fn connection_closed() -> io::Error {
-    io::Error::new(io::ErrorKind::NotConnected, "runtime connection is closed")
 }
 
 #[cfg(test)]
-mod tests {
-    use super::{ClientMsg, ServerMsg, SharedSession, is_mutating, lock};
-    use crate::UserSession;
-    use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};
-    use std::os::unix::net::UnixStream;
-    use std::thread;
-    use std::time::{Duration, Instant};
+mod tests;
 
-    #[test]
-    fn identifies_only_mutating_messages() {
-        let mutating = [
-            ClientMsg::TerminalInput {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                pane: "p1".into(),
-                input: TerminalInput::new(InputEvent::Text(String::new())),
-            },
-            ClientMsg::CreateTab {
-                workspace: "w1".into(),
-            },
-            ClientMsg::SplitPane {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                direction: seer_core::SplitDirection::Right,
-            },
-            ClientMsg::ClosePane {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                pane: "p1".into(),
-            },
-            ClientMsg::FocusPane {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                pane: "p1".into(),
-            },
-            ClientMsg::Resize {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                cols: 80,
-                rows: 24,
-            },
-        ];
-        let deferred = [
-            ClientMsg::Hello {
-                user_id: "alice".into(),
-                credential: "token".into(),
-                version: "0.1.0".into(),
-            },
-            ClientMsg::Join {
-                seat_token: "seat".into(),
-                name: "alice".into(),
-            },
-            ClientMsg::Invite { hours: None },
-            ClientMsg::ListPeople,
-            ClientMsg::DetachClient {
-                client_id: "client-1".into(),
-            },
-            ClientMsg::Peek {
-                user: "alice".into(),
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-            },
-            ClientMsg::StopPeek,
-            ClientMsg::Detach,
-            ClientMsg::TerminalCapabilities {
-                capabilities: TerminalCapabilities {
-                    protocol_version: TERMINAL_PROTOCOL_VERSION,
-                },
-            },
-        ];
-
-        assert!(mutating.iter().all(is_mutating));
-        assert!(deferred.iter().all(|message| !is_mutating(message)));
-    }
-
-    #[test]
-    fn removes_only_the_requested_connection() {
-        let mut session = UserSession::new("alice", "sh");
-        session
-            .ensure_first_shell()
-            .expect("first shell must start");
-        session
-            .apply(ClientMsg::Resize {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                cols: 1,
-                rows: 1,
-            })
-            .expect("session must resize");
-        let shared = SharedSession::new(session);
-        let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
-        let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
-        shared
-            .add_connection(1, first_server)
-            .expect("first connection must be added");
-        shared
-            .add_connection(2, second_server)
-            .expect("second connection must be added");
-
-        shared
-            .remove_connection(1)
-            .expect("connection must be removed");
-        let connections = lock(&shared.connections).expect("connections must lock");
-        assert_eq!(connections.len(), 1);
-        assert_eq!(connections[0].id, 2);
-    }
-
-    #[test]
-    fn polls_output_without_connections() {
-        let mut session = UserSession::new("alice", "sh");
-        session
-            .ensure_first_shell()
-            .expect("first shell must start");
-        let shared = SharedSession::new(session);
-        shared
-            .apply_and_broadcast(ClientMsg::TerminalInput {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                pane: "w1:p1".into(),
-                input: TerminalInput::new(InputEvent::Text("printf detached-output\\n".into())),
-            })
-            .expect("input must succeed");
-
-        let deadline = Instant::now() + Duration::from_secs(5);
-        let mut updated = false;
-        while Instant::now() < deadline {
-            let (messages, has_connections) = shared
-                .poll_and_broadcast()
-                .expect("session poll must succeed");
-            assert!(!has_connections);
-            updated = messages.iter().any(|message| match message {
-                ServerMsg::Cells { frame, .. } => frame
-                    .rows
-                    .iter()
-                    .flatten()
-                    .map(|cell| cell.character)
-                    .collect::<String>()
-                    .contains("detached-output"),
-                _ => false,
-            });
-            if updated {
-                break;
-            }
-            thread::sleep(Duration::from_millis(10));
-        }
-
-        assert!(updated);
-        shared
-            .apply_and_broadcast(ClientMsg::ClosePane {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                pane: "w1:p1".into(),
-            })
-            .expect("pane close must succeed");
-    }
-
-    #[test]
-    fn evicts_stalled_connection_without_blocking_other_client() {
-        let shared = SharedSession::new(UserSession::new("alice", "sh"));
-        let (stalled_server, _stalled_client) =
-            UnixStream::pair().expect("stalled stream pair must open");
-        let (healthy_server, mut healthy_client) =
-            UnixStream::pair().expect("healthy stream pair must open");
-        healthy_client
-            .set_read_timeout(Some(Duration::from_secs(2)))
-            .expect("read timeout must set");
-        shared
-            .add_connection(1, stalled_server)
-            .expect("stalled connection must be added");
-        shared
-            .add_connection(2, healthy_server)
-            .expect("healthy connection must be added");
-        let _: seer_core::proto::ServerMsg =
-            seer_core::proto::codec::decode(&mut healthy_client).expect("initial tree must decode");
-
-        let reader = thread::spawn(move || {
-            loop {
-                let message: seer_core::proto::ServerMsg =
-                    seer_core::proto::codec::decode(&mut healthy_client)
-                        .expect("healthy output must decode");
-                if matches!(message, seer_core::proto::ServerMsg::Frame { pane, .. } if pane == "recovered")
-                {
-                    return;
-                }
-            }
-        });
-        let large = seer_core::proto::ServerMsg::Frame {
-            pane: "fill".into(),
-            bytes: vec![b'x'; 256 * 1024],
-        };
-        for _ in 0..68 {
-            shared
-                .broadcast(std::slice::from_ref(&large))
-                .expect("large output must broadcast");
-            if shared.connection_count() == 1 {
-                break;
-            }
-        }
-
-        assert_eq!(shared.connection_count(), 1);
-        shared
-            .broadcast(&[seer_core::proto::ServerMsg::Frame {
-                pane: "recovered".into(),
-                bytes: Vec::new(),
-            }])
-            .expect("recovery output must broadcast");
-        reader.join().expect("healthy reader must finish");
-    }
-}
+#[cfg(test)]
+mod size_lease;
