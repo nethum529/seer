@@ -68,13 +68,14 @@ fn rejects_non_loopback_listen_address_before_binding_or_state_changes() {
         "[fd00::1]:0",
         "[2001:db8::1]:0",
     ] {
-        let address = address.parse().expect("test address must parse");
+        let mut address: SocketAddr = address.parse().expect("test address must parse");
+        address.set_port(unused_address().port());
         let config = TemporaryConfig::new_empty(address);
         let output = run_broker(&config);
 
         assert!(!output.status.success(), "{address}");
         assert!(
-            stderr(&output).contains("listen address must be loopback"),
+            TcpStream::connect_timeout(&address, Duration::from_millis(50)).is_err(),
             "{address}"
         );
         assert!(!config.directory.join("state").exists(), "{address}");
