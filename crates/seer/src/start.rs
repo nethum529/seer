@@ -2,6 +2,8 @@
 use serde::{Deserialize, Serialize};
 use std::process::ExitCode;
 #[cfg(target_os = "linux")]
+mod stop;
+#[cfg(target_os = "linux")]
 use std::{
     env,
     fs::{self, File, OpenOptions},
@@ -47,6 +49,16 @@ pub fn run() -> ExitCode {
             ExitCode::FAILURE
         }
     }
+}
+pub fn stop() -> ExitCode {
+    #[cfg(target_os = "macos")]
+    {
+        eprintln!("the server runs on Linux only");
+        ExitCode::FAILURE
+    }
+
+    #[cfg(target_os = "linux")]
+    stop::run()
 }
 #[cfg(target_os = "linux")]
 fn run_linux() -> io::Result<()> {
@@ -164,14 +176,17 @@ fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
 }
 #[cfg(target_os = "linux")]
 fn running_broker(config: &BrokerConfig) -> bool {
+    live_broker(config).is_some()
+}
+#[cfg(target_os = "linux")]
+fn live_broker(config: &BrokerConfig) -> Option<i32> {
+    let pid = broker_pid(config)?;
+    (owns_listen_socket(pid, config.listen) && port_accepts(config.listen)).then_some(pid)
+}
+#[cfg(target_os = "linux")]
+fn broker_pid(config: &BrokerConfig) -> Option<i32> {
     let pid_path = config.state_dir.join("broker.pid");
-    let Ok(contents) = fs::read_to_string(pid_path) else {
-        return false;
-    };
-    let Ok(pid) = contents.trim().parse::<i32>() else {
-        return false;
-    };
-    owns_listen_socket(pid, config.listen) && port_accepts(config.listen)
+    fs::read_to_string(pid_path).ok()?.trim().parse().ok()
 }
 #[cfg(target_os = "linux")]
 fn owns_listen_socket(pid: i32, listen: SocketAddr) -> bool {

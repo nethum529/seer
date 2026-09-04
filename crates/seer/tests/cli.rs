@@ -1,18 +1,23 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
+use std::process::{Child, Command, Stdio};
 use std::thread;
+use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg};
 
+#[path = "support/cli_harness.rs"]
+mod cli_harness;
 #[path = "support/cli.rs"]
 mod cli_support;
 #[path = "support/server_io.rs"]
 mod server_io;
 
-use cli_support::{
+use cli_harness::{
     TestConfig, accept, assert_hello, listener, person, run, send, send_welcome, text,
 };
+use cli_support::read_owner_identity;
 use server_io::receive;
 
 #[test]
@@ -23,7 +28,7 @@ fn help_detach_and_missing_attach_have_exact_results() {
     assert_eq!(help.status.code(), Some(0));
     let help_text = text(&help.stdout);
     for command in [
-        "start", "invite", "join", "list", "attach", "detach", "peek",
+        "start", "stop", "invite", "join", "list", "attach", "detach", "peek",
     ] {
         assert!(help_text.contains(command));
     }
@@ -45,6 +50,56 @@ fn help_detach_and_missing_attach_have_exact_results() {
         assert_eq!(extra.status.code(), Some(2));
         assert!(text(&extra.stderr).contains("join [capsule] Join a server"));
     }
+}
+
+#[test]
+fn stop_ends_the_local_server_and_attached_client() {
+    let config = TestConfig::new();
+    let listener = listener();
+    let address = listener
+        .local_addr()
+        .expect("listener must have an address");
+    drop(listener);
+    let state_dir = config.root.join("state");
+    let config_dir = config.root.join("seer");
+    fs::create_dir_all(&config_dir).expect("config directory must exist");
+    fs::write(
+        config_dir.join("broker.toml"),
+        format!(
+            "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nowner_name = \"alice\"\nstate_dir = {:?}\n",
+            state_dir
+        ),
+    )
+    .expect("broker config must be written");
+
+    let start = run(&config, &["start"], "");
+    assert!(start.status.success(), "{}", text(&start.stderr));
+    let pid_path = state_dir.join("broker.pid");
+    let broker_pid = read_pid(&pid_path);
+    let _broker = ProcessGroup(broker_pid);
+    let (user_id, credential) = owner_identity(&state_dir.join("broker.log"));
+    write_identity(&config, address.port(), &user_id, &credential);
+    let mut attached = Command::new(env!("CARGO_BIN_EXE_seer"))
+        .arg("attach")
+        .env("XDG_CONFIG_HOME", &config.root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("attached client must start");
+    let runtime_pid = wait_for_child_pid(broker_pid);
+
+    let started = Instant::now();
+    let stop = run(&config, &["stop"], "");
+
+    assert!(started.elapsed() < Duration::from_secs(5));
+    assert_eq!(stop.status.code(), Some(0));
+    assert_eq!(stop.stdout, b"Server stopped.\n");
+    assert!(stop.stderr.is_empty());
+    assert!(!pid_path.exists());
+    wait_for_process_end(broker_pid);
+    wait_for_process_end(runtime_pid);
+    wait_for_child_exit(&mut attached);
 }
 
 #[test]
@@ -289,6 +344,94 @@ fn invite_prints_the_worked_example_block() {
     );
     assert!(output.stderr.is_empty());
     server.join().expect("server must finish");
+}
+
+fn read_pid(path: &Path) -> i32 {
+    fs::read_to_string(path)
+        .expect("pid file must be readable")
+        .trim()
+        .parse()
+        .expect("pid must be valid")
+}
+
+fn owner_identity(path: &Path) -> (String, String) {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Some(identity) = read_owner_identity(path) {
+            return identity;
+        }
+        assert!(Instant::now() < deadline, "owner identity must be ready");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn write_identity(config: &TestConfig, port: u16, user_id: &str, credential: &str) {
+    fs::write(
+        config.root.join("seer/servers.toml"),
+        format!(
+            "[[servers]]\nendpoint = \"127.0.0.1:{port}\"\nalias = \"local\"\nuser_id = \"{user_id}\"\nname = \"alice\"\ncredential = \"{credential}\"\ncurrent = true\n"
+        ),
+    )
+    .expect("owner identity must be written");
+}
+
+fn wait_for_child_pid(parent: i32) -> i32 {
+    let deadline = Instant::now() + Duration::from_secs(5);
+    let path = format!("/proc/{parent}/task/{parent}/children");
+    loop {
+        if let Some(pid) = fs::read_to_string(&path)
+            .ok()
+            .and_then(|contents| contents.split_whitespace().next()?.parse().ok())
+        {
+            return pid;
+        }
+        assert!(Instant::now() < deadline, "runtime must start");
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+fn wait_for_process_end(pid: i32) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while process_exists(pid) && Instant::now() < deadline {
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert!(!process_exists(pid), "process must stop");
+}
+
+fn process_exists(pid: i32) -> bool {
+    fs::read_to_string(format!("/proc/{pid}/stat"))
+        .ok()
+        .is_some_and(|stat| stat.split_whitespace().nth(2) != Some("Z"))
+}
+
+fn wait_for_child_exit(child: &mut Child) {
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        if child
+            .try_wait()
+            .expect("attached client status must be available")
+            .is_some()
+        {
+            return;
+        }
+        if Instant::now() >= deadline {
+            child.kill().expect("attached client must be killed");
+            let _ = child.wait();
+            panic!("attached client must exit");
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+}
+
+struct ProcessGroup(i32);
+
+impl Drop for ProcessGroup {
+    fn drop(&mut self) {
+        // Safety: kill receives the broker process group created by seer start.
+        unsafe {
+            libc::kill(-self.0, libc::SIGKILL);
+        }
+    }
 }
 
 fn write_store(config: &TestConfig, servers: &[SavedServer]) {
