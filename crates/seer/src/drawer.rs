@@ -17,6 +17,13 @@ pub(crate) struct Drawer {
     open: bool,
     people: Vec<Person>,
     selected: usize,
+    pending_peek: Option<Person>,
+}
+
+pub(crate) enum DrawerAction {
+    Ignored,
+    Handled,
+    Peek(Person),
 }
 
 impl Drawer {
@@ -33,20 +40,45 @@ impl Drawer {
         self.selected = self.selected.min(self.people.len().saturating_sub(1));
     }
 
-    pub(crate) fn handle_key(&mut self, key: KeyEvent) -> bool {
+    pub(crate) fn handle_key(&mut self, key: KeyEvent) -> DrawerAction {
         if !self.open {
-            return false;
+            return DrawerAction::Ignored;
         }
         match key.code {
             KeyCode::Up => self.selected = self.selected.saturating_sub(1),
             KeyCode::Down => {
                 self.selected = (self.selected + 1).min(self.people.len().saturating_sub(1));
             }
-            KeyCode::Enter => {}
+            KeyCode::Enter => return self.take_highlighted_peek(),
             KeyCode::Esc => self.open = false,
-            _ => return false,
+            _ => return DrawerAction::Ignored,
         }
-        true
+        DrawerAction::Handled
+    }
+
+    fn take_highlighted_peek(&mut self) -> DrawerAction {
+        let Some(person) = self
+            .people
+            .get(self.selected)
+            .filter(|person| person.peekable)
+        else {
+            return DrawerAction::Handled;
+        };
+        let person = person.clone();
+        self.open = false;
+        DrawerAction::Peek(person)
+    }
+
+    pub(crate) fn set_pending_peek(&mut self, person: Person) {
+        self.pending_peek = Some(person);
+    }
+
+    pub(crate) fn take_pending_peek(&mut self) -> Option<Person> {
+        self.pending_peek.take()
+    }
+
+    pub(crate) fn peek_pending(&self) -> bool {
+        self.pending_peek.is_some()
     }
 
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent, size: Size) -> bool {
