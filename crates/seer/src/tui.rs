@@ -8,17 +8,16 @@ use std::time::Duration;
 use crossterm::event::{self, Event, KeyEvent, KeyEventKind, MouseEvent, MouseEventKind};
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
-use ratatui::layout::{Rect, Size};
-use ratatui::widgets::{Block, Borders, Paragraph};
+use ratatui::layout::Size;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput, Tree};
 use seer_net::{Socket, Stream};
 
+use crate::drawer::{self, Drawer};
 use crate::input::{
     InputAction, is_control_char, key_to_action, mouse_event_is_tracked, mouse_to_input,
 };
-use crate::render::PaneCells;
-use crate::state::{ClientState, pane_rects};
+use crate::state::ClientState;
 use crate::terminal_session::{TerminalSession, ignore_setup_disconnect, set_cursor_style};
 use crate::tui_navigation::{
     closes_last_tab, initialize, pane_in_direction, select_tab, show_hint, show_last_tab_status,
@@ -100,6 +99,7 @@ fn run_loop<S: Stream>(
 ) -> io::Result<LoopControl> {
     let mut command_pending = false;
     let mut dirty = true;
+    let mut drawer = Drawer::default();
 
     loop {
         let size = terminal.size()?;
@@ -108,16 +108,21 @@ fn run_loop<S: Stream>(
             return Ok(received);
         }
         if dirty {
-            terminal.draw(|frame| draw(frame, &mut state))?;
+            terminal.draw(|frame| draw(frame, &mut state, &drawer))?;
             set_cursor_style(&state)?;
             dirty = false;
         }
         if event::poll(EVENT_WAIT)? {
             let event = event::read()?;
             let size = terminal.size()?;
-            if let LoopControl::Exit =
-                handle_event(event, stream, &mut state, &mut command_pending, size)?
-            {
+            if let LoopControl::Exit = handle_event(
+                event,
+                stream,
+                &mut state,
+                &mut command_pending,
+                size,
+                &mut drawer,
+            )? {
                 return Ok(LoopControl::Exit);
             }
             dirty = true;
@@ -194,16 +199,17 @@ fn handle_event<S: Stream>(
     state: &mut ClientState,
     command_pending: &mut bool,
     size: Size,
+    drawer: &mut Drawer,
 ) -> io::Result<LoopControl> {
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
-            handle_key(key, stream, state, command_pending, size)
+            handle_key(key, stream, state, command_pending, size, drawer)
         }
         Event::Resize(cols, rows) if !is_view_only() => {
             send_resize(stream, state, Size::new(cols, rows))?;
             Ok(LoopControl::Continue)
         }
-        Event::Mouse(mouse) if !is_view_only() => handle_mouse(mouse, stream, state),
+        Event::Mouse(mouse) => handle_mouse(mouse, stream, state, size, drawer),
         Event::Paste(text) if !is_view_only() => {
             send_focused_input(stream, state, TerminalInput::new(InputEvent::Paste(text)))?;
             Ok(LoopControl::Continue)
@@ -226,17 +232,25 @@ fn handle_key<S: Stream>(
     state: &mut ClientState,
     command_pending: &mut bool,
     size: Size,
+    drawer: &mut Drawer,
 ) -> io::Result<LoopControl> {
     if is_control_char(key, 'q') {
         send(stream, &ClientMsg::Detach)?;
         return Ok(LoopControl::Exit);
     }
-    if is_view_only() {
+    if drawer.close_on_escape(key) {
         return Ok(LoopControl::Continue);
     }
-    if let Some(action) = key_to_action(key, command_pending) {
+    let action = key_to_action(key, command_pending);
+    if is_view_only() {
+        if matches!(action, Some(InputAction::ToggleDrawer)) {
+            drawer.toggle();
+        }
+        return Ok(LoopControl::Continue);
+    }
+    if let Some(action) = action {
         show_hint();
-        handle_action(action, stream, state, size)?;
+        handle_action(action, stream, state, size, drawer)?;
     }
     Ok(LoopControl::Continue)
 }
@@ -246,6 +260,7 @@ fn handle_action(
     stream: &mut impl Stream,
     state: &mut ClientState,
     size: Size,
+    drawer: &mut Drawer,
 ) -> io::Result<()> {
     let message = match action {
         InputAction::CreateTab => {
@@ -269,6 +284,10 @@ fn handle_action(
             let forward = action == InputAction::NextTab;
             select_tab(state, forward);
             return send_resize(stream, state, size);
+        }
+        InputAction::ToggleDrawer => {
+            drawer.toggle();
+            return Ok(());
         }
         InputAction::FocusPane(direction) => {
             pane_in_direction(state, direction).and_then(|pane| focus_message(state, pane))
@@ -303,7 +322,7 @@ fn send_resize(stream: &mut impl Stream, state: &ClientState, size: Size) -> io:
         &ClientMsg::Resize {
             workspace: workspace.to_owned(),
             tab: tab.to_owned(),
-            cols: size.width,
+            cols: drawer::pane_size(size).width,
             rows: size.height,
         },
     )
@@ -338,7 +357,12 @@ fn handle_mouse<S: Stream>(
     mouse: MouseEvent,
     stream: &mut S,
     state: &mut ClientState,
+    size: Size,
+    drawer: &mut Drawer,
 ) -> io::Result<LoopControl> {
+    if drawer.handle_mouse(mouse, size) || is_view_only() {
+        return Ok(LoopControl::Continue);
+    }
     let Some((pane, column, row)) = state.mouse_target(mouse.column, mouse.row) else {
         return Ok(LoopControl::Continue);
     };
@@ -439,56 +463,9 @@ fn send_terminal_setup<S: Stream>(
     Ok(())
 }
 
-fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState) {
-    let mut area = frame.area();
-    let status_height = area.height.min(1);
-    let status_area = Rect::new(
-        area.x,
-        area.y + area.height.saturating_sub(status_height),
-        area.width,
-        status_height,
-    );
-    frame.render_widget(Paragraph::new(status()), status_area);
-    area.height = area.height.saturating_sub(status_height);
-    if let Some(person) = peek_person() {
-        let banner_height = area.height.min(2);
-        let banner = Rect::new(area.x, area.y, area.width, banner_height);
-        frame.render_widget(
-            Paragraph::new(format!(
-                "PEEK: {person} - READ ONLY\nWorkspace: {person}/{}",
-                state.selected_workspace().unwrap_or("unknown")
-            )),
-            banner,
-        );
-        area.y = area.y.saturating_add(banner_height);
-        area.height = area.height.saturating_sub(banner_height);
-    }
-    let Some(tab) = state.visible_tab().cloned() else {
-        state.set_pane_areas(Vec::new());
-        return;
-    };
-    let mut input_areas = Vec::new();
-    for (pane, pane_area) in pane_rects(&tab, area) {
-        let block = Block::default().borders(Borders::ALL).title(pane.as_str());
-        let inner = block.inner(pane_area);
-        frame.render_widget(block, pane_area);
-        frame.render_widget(PaneCells::new(state.pane_rows(&pane)), inner);
-        set_frame_cursor(frame, state, &pane, inner);
-        input_areas.push((pane, inner));
-    }
-    state.set_pane_areas(input_areas);
-}
-
-fn set_frame_cursor(frame: &mut ratatui::Frame<'_>, state: &ClientState, pane: &str, area: Rect) {
-    let Some(cursor) = state
-        .pane_cursor(pane)
-        .filter(|cursor| cursor.visible && state.focused() == Some(pane))
-    else {
-        return;
-    };
-    if cursor.column < area.width && cursor.row < area.height {
-        frame.set_cursor_position((area.x + cursor.column, area.y + cursor.row));
-    }
+fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState, drawer: &Drawer) {
+    let person = peek_person();
+    drawer::draw(frame, state, drawer, status(), person.as_deref());
 }
 
 #[cfg(test)]
