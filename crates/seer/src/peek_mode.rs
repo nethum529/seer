@@ -2,7 +2,7 @@ use std::cell::{Cell, RefCell};
 use std::io;
 
 use crossterm::event::{KeyCode, KeyEvent};
-use seer_core::proto::{ClientMsg, PeekTarget, Person};
+use seer_core::proto::{ClientMsg, Person, TerminalInfo};
 use seer_net::Stream;
 
 use crate::drawer::{Drawer, DrawerAction};
@@ -11,6 +11,7 @@ use crate::tui::send;
 thread_local! {
     static VIEW_ONLY: Cell<bool> = const { Cell::new(false) };
     static PEEK_PERSON: RefCell<Option<String>> = const { RefCell::new(None) };
+    static WATCH: RefCell<Option<(String, String)>> = const { RefCell::new(None) };
     static NOTICE: RefCell<Option<String>> = const { RefCell::new(None) };
 }
 
@@ -33,18 +34,6 @@ pub(crate) fn is_view_only() -> bool {
 
 pub(crate) fn peek_person() -> Option<String> {
     PEEK_PERSON.with_borrow(Clone::clone)
-}
-
-pub(crate) fn unique_target(targets: &[PeekTarget]) -> Option<&PeekTarget> {
-    let mut active = targets.iter().filter(|target| target.active);
-    match (active.next(), active.next()) {
-        (Some(target), None) => Some(target),
-        (None, None) => match targets {
-            [only] => Some(only),
-            _ => None,
-        },
-        _ => None,
-    }
 }
 
 pub(crate) fn handle_drawer_key(
@@ -70,27 +59,27 @@ pub(crate) fn handle_drawer_key(
 fn request(stream: &mut impl Stream, drawer: &mut Drawer, person: Person) -> io::Result<()> {
     let user = person.user_id.clone();
     drawer.set_pending_peek(person);
-    send(stream, &ClientMsg::QueryTargets { user })
+    send(stream, &ClientMsg::Terminals { user })
 }
 
 pub(crate) fn start(
     stream: &mut impl Stream,
     drawer: &mut Drawer,
-    targets: &[PeekTarget],
+    targets: &[TerminalInfo],
 ) -> io::Result<()> {
     let Some(person) = drawer.take_pending_peek() else {
         return Ok(());
     };
-    let Some(target) = unique_target(targets).or_else(|| first_active(targets)) else {
+    let Some(target) = targets.first() else {
         show_notice(format!("no target to peek for {}", person.name));
         return Ok(());
     };
+    WATCH.set(Some((person.user_id.clone(), target.pane.clone())));
     send(
         stream,
-        &ClientMsg::Peek {
+        &ClientMsg::Watch {
             user: person.user_id,
-            workspace: target.workspace.clone(),
-            tab: target.tab.clone(),
+            pane: target.pane.clone(),
         },
     )?;
     set_peek_person(Some(&person.name));
@@ -103,17 +92,15 @@ pub(crate) fn refuse(drawer: &mut Drawer, reason: String) {
 }
 
 fn stop(stream: &mut impl Stream) -> io::Result<()> {
-    send(stream, &ClientMsg::StopPeek)?;
+    if let Some((user, pane)) = WATCH.take() {
+        send(stream, &ClientMsg::Unwatch { user, pane })?;
+    }
     set_peek_person(None);
     Ok(())
 }
 
 pub(crate) fn take_notice() -> Option<String> {
     NOTICE.with_borrow_mut(Option::take)
-}
-
-fn first_active(targets: &[PeekTarget]) -> Option<&PeekTarget> {
-    targets.iter().find(|target| target.active)
 }
 
 fn show_notice(reason: String) {

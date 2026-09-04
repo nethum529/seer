@@ -53,6 +53,7 @@ pub fn serve(
 
 pub(crate) struct BrokerState {
     registry: Registry,
+    pub(crate) grants: crate::grants::Grants,
     runtimes: RuntimeManager,
     attachments: Attachments,
     published: PublishedAddress,
@@ -69,6 +70,7 @@ impl BrokerState {
         let (registry, owner_identity) = Registry::open(&config.state_dir, &config.owner_name)?;
         Ok((
             Self {
+                grants: crate::grants::Grants::open(&config.state_dir, &registry.people()?)?,
                 registry,
                 runtimes,
                 attachments: Attachments::default(),
@@ -123,6 +125,7 @@ impl BrokerState {
                     _ => (0, String::new(), 0),
                 };
                 Person {
+                    online: attached_clients > 0,
                     attached_clients,
                     peekable: self.runtimes.is_running(&person.user_id, &person.name),
                     state: person_state(attached_clients, idle_secs),
@@ -170,9 +173,30 @@ impl BrokerState {
         if *published == people {
             return Ok(());
         }
+        for person in &people {
+            if !published.iter().any(|old| {
+                old.user_id == person.user_id
+                    && old.online == person.online
+                    && old.idle_secs == person.idle_secs
+            }) {
+                self.attachments.broadcast(&ServerMsg::Presence {
+                    user: person.user_id.clone(),
+                    online: person.online,
+                    idle_secs: person.idle_secs,
+                })?;
+            }
+        }
         published.clone_from(&people);
         drop(published);
         self.attachments.broadcast(&ServerMsg::People { people })
+    }
+
+    pub(crate) fn publish_grants(&self) -> io::Result<()> {
+        for person in self.registry.people()? {
+            self.attachments
+                .send_to_user(&person.user_id, &self.grants.message(&person.user_id)?)?;
+        }
+        Ok(())
     }
 
     pub(crate) fn attach_client(

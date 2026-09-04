@@ -12,7 +12,6 @@ fn size_lease_governs_per_client_resize_control() {
     let shared = SharedSession::new(UserSession::new("alice", "sh"));
     let (owner_server, mut owner_client) = UnixStream::pair().expect("stream pair must open");
     let (peer_server, mut peer_client) = UnixStream::pair().expect("stream pair must open");
-    let (peek_server, mut peek_client) = UnixStream::pair().expect("stream pair must open");
 
     shared
         .add_connection(1, owner_server)
@@ -120,60 +119,6 @@ fn size_lease_governs_per_client_resize_control() {
             rows: 40
         }
     );
-
-    shared
-        .add_connection(3, peek_server)
-        .expect("peek viewer must attach");
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut peek_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-    handle_message(
-        &shared,
-        3,
-        ClientMsg::Peek {
-            user: "bob".into(),
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-        },
-    )
-    .expect("peek must start");
-    assert!(read_only_of(&shared, 3));
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut peek_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-    handle_message(
-        &shared,
-        3,
-        ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 200,
-            rows: 50,
-        },
-    )
-    .expect("peek resize must be dropped");
-    assert_eq!(viewport_of(&shared, 3), None);
-    assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(
-        session_pane_size(&shared),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-
-    shared
-        .remove_connection(3)
-        .expect("peek viewer must detach");
-    assert_eq!(owner_id(&shared), Some(1));
 
     {
         let mut connections = lock(&shared.connections).expect("connections must lock");
@@ -297,14 +242,6 @@ fn capabilities_of(shared: &SharedSession, id: u64) -> Option<TerminalCapabiliti
         .iter()
         .find(|connection| connection.id == id)
         .and_then(|connection| connection.capabilities)
-}
-
-fn read_only_of(shared: &SharedSession, id: u64) -> bool {
-    let connections = lock(&shared.connections).expect("connections must lock");
-    connections
-        .iter()
-        .find(|connection| connection.id == id)
-        .is_some_and(|connection| connection.read_only)
 }
 
 fn session_pane_size(shared: &SharedSession) -> PaneSize {

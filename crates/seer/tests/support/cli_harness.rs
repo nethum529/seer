@@ -127,6 +127,7 @@ pub(crate) fn send_welcome(stream: &mut impl Write, user_id: &str, name: &str) {
 
 pub(crate) fn person(user_id: &str, name: &str, attached_clients: u32) -> Person {
     Person {
+        online: true,
         user_id: user_id.into(),
         name: name.into(),
         attached_clients,

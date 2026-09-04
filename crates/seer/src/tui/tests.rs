@@ -449,7 +449,7 @@ fn drawer_enter_peeks_and_escape_returns() {
     assert!(!drawer.is_open());
     assert_eq!(
         decode(&mut server),
-        ClientMsg::QueryTargets {
+        ClientMsg::Terminals {
             user: "alice".into()
         }
     );
@@ -459,6 +459,12 @@ fn drawer_enter_peeks_and_escape_returns() {
     assert!(peek_banner_shown(&mut state, &drawer));
 
     press_key(&mut client, &mut state, &mut drawer, KeyCode::Esc);
-    assert_eq!(decode(&mut server), ClientMsg::StopPeek);
+    assert_eq!(
+        decode(&mut server),
+        ClientMsg::Unwatch {
+            user: "alice".into(),
+            pane: "w1:p1".into()
+        }
+    );
     assert!(!peek_banner_shown(&mut state, &drawer));
 }

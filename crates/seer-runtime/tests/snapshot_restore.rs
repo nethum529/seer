@@ -276,6 +276,7 @@ fn marked_pid(stream: &mut UnixStream, pane: &str) -> Option<u32> {
         );
         match read_message(stream) {
             ServerMsg::Cells {
+                user: _,
                 pane: cell_pane,
                 frame,
             } if cell_pane == pane => {

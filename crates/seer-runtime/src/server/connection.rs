@@ -7,7 +7,7 @@ use std::time::Instant;
 use seer_core::TerminalCapabilities;
 use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, codec};
 
-use super::{SharedSession, connection_closed, connection_loop, lock, writer};
+use super::{SharedSession, connection_loop, lock, writer};
 
 pub(super) fn handle_connection(
     mut stream: UnixStream,
@@ -130,53 +130,11 @@ pub(super) fn handle_target_query(
     shared: &SharedSession,
     connection_id: u64,
 ) -> io::Result<()> {
-    shared.write_targets(stream)?;
-    let Ok(message) = codec::decode(stream) else {
-        return Ok(());
-    };
-    let ClientMsg::Peek { workspace, tab, .. } = message else {
-        return Ok(());
-    };
-    match shared.add_peek_connection(connection_id, stream.try_clone()?, &workspace, &tab) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-            codec::encode(
-                stream,
-                &ServerMsg::Refused {
-                    reason: error.to_string(),
-                },
-            )?;
-            return Ok(());
-        }
-        Err(error) => return Err(error),
-    }
-    let result = connection_loop(stream, shared, connection_id);
-    shared.remove_connection(connection_id)?;
-    result
+    let _ = connection_id;
+    shared.write_targets(stream)
 }
 
 impl SharedSession {
-    fn add_peek_connection(
-        &self,
-        id: u64,
-        stream: UnixStream,
-        workspace: &str,
-        tab: &str,
-    ) -> io::Result<()> {
-        let messages = {
-            let session = lock(&self.session)?;
-            let tree = session.selected_tree(workspace, tab)?;
-            session.snapshot_for(tree)
-        };
-        let mut connection = Connection::new(id, stream)?;
-        connection.read_only = true;
-        if !connection.send_messages(&messages)? {
-            return Err(connection_closed());
-        }
-        lock(&self.connections)?.push(connection);
-        Ok(())
-    }
-
     fn write_targets(&self, stream: &mut UnixStream) -> io::Result<()> {
         codec::encode(
             stream,

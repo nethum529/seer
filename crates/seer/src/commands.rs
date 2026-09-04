@@ -391,7 +391,12 @@ fn receive_reply_before<S: Stream>(
             .map_err(CommandError::system)?;
         if !matches!(
             reply,
-            ServerMsg::Tree { .. } | ServerMsg::Frame { .. } | ServerMsg::Cells { .. }
+            ServerMsg::Tree { .. }
+                | ServerMsg::Frame { .. }
+                | ServerMsg::Cells { .. }
+                | ServerMsg::Grants { .. }
+                | ServerMsg::Presence { .. }
+                | ServerMsg::Terminals { .. }
         ) {
             return Ok(reply);
         }

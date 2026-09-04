@@ -58,6 +58,10 @@ fn uses_the_mapped_os_identity_and_rejects_an_unsafe_account() {
     let mut rejected = connect_when_ready(address);
     send_hello(&mut rejected, "bob", "bob-secret");
     drop(welcome_client_id(read_message(&mut rejected), "bob"));
+    assert!(matches!(
+        read_message(&mut rejected),
+        ServerMsg::Grants { .. }
+    ));
     assert!(
         matches!(read_message(&mut rejected), ServerMsg::Refused { .. }),
         "an unsafe mapping must be refused"

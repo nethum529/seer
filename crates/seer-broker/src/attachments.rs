@@ -123,6 +123,22 @@ impl Attachments {
         Ok(())
     }
 
+    pub(crate) fn send_to_user(&self, user: &str, message: &ServerMsg) -> io::Result<()> {
+        let writers: Vec<_> = self
+            .lock()?
+            .get(user)
+            .into_iter()
+            .flat_map(HashMap::values)
+            .map(|a| Arc::clone(&a.writer))
+            .collect();
+        for writer in writers {
+            if let Ok(mut stream) = lock_writer(&writer) {
+                let _ = codec::encode(&mut *stream, message);
+            }
+        }
+        Ok(())
+    }
+
     fn remove(&self, user_id: &str, client_id: &str) {
         if let Ok(mut people) = self.0.lock()
             && let Some(clients) = people.get_mut(user_id)

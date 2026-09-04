@@ -180,7 +180,7 @@ fn apply_server_message<S: Stream>(
                 send_resize(stream, state, size)?;
             }
         }
-        ServerMsg::Cells { pane, frame } => state.apply_frame(pane, frame),
+        ServerMsg::Cells { pane, frame, .. } => state.apply_frame(pane, frame),
         ServerMsg::Bye { reason } if reason == "detached" => {
             return Ok(LoopControl::Detached);
         }
@@ -189,11 +189,16 @@ fn apply_server_message<S: Stream>(
             state.note_people(&people);
             drawer.set_people(people);
         }
-        ServerMsg::Targets { targets } if drawer.peek_pending() => {
+        ServerMsg::Terminals {
+            terminals: targets, ..
+        } if drawer.peek_pending() => {
             peek_mode::start(stream, drawer, &targets)?;
         }
         ServerMsg::Refused { reason } if drawer.peek_pending() => peek_mode::refuse(drawer, reason),
-        ServerMsg::Frame { .. } => {}
+        ServerMsg::Frame { .. }
+        | ServerMsg::Terminals { .. }
+        | ServerMsg::Presence { .. }
+        | ServerMsg::Grants { .. } => {}
         ServerMsg::Welcome { .. }
         | ServerMsg::Joined { .. }
         | ServerMsg::Seat { .. }
@@ -487,9 +492,7 @@ pub(crate) mod test_support;
 
 #[cfg(test)]
 mod drawer_tests;
-
 #[cfg(test)]
 mod herdr_tests;
-
 #[cfg(test)]
 mod tests;

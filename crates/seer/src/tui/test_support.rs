@@ -7,7 +7,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Size;
 use ratatui::style::Modifier;
-use seer_core::proto::{ClientMsg, PeekTarget, Person, PersonState, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, TerminalInfo, codec};
 use seer_core::{
     InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, PaneSize, TerminalInput, Tree,
 };
@@ -145,6 +145,7 @@ pub(super) fn apply_own_foreground(
 
 fn person(name: &str, foreground: &str) -> Person {
     Person {
+        online: true,
         user_id: name.into(),
         name: name.into(),
         attached_clients: 1,
@@ -197,15 +198,18 @@ pub(super) fn apply_active_target(
     state: &mut ClientState,
     drawer: &mut Drawer,
 ) {
-    let targets = vec![PeekTarget {
-        workspace: "w1".into(),
-        workspace_name: "main".into(),
-        tab: "w1:t1".into(),
-        tab_title: "shell".into(),
-        active: true,
+    let targets = vec![TerminalInfo {
+        pane: "w1:p1".into(),
+        name: "shell".into(),
+        state: "idle".into(),
+        cols: 80,
+        rows: 24,
     }];
     apply_server_message(
-        ServerMsg::Targets { targets },
+        ServerMsg::Terminals {
+            user: "alice".into(),
+            terminals: targets,
+        },
         state,
         client,
         Size::new(80, 24),
@@ -215,10 +219,9 @@ pub(super) fn apply_active_target(
 }
 
 pub(super) fn peek_message() -> ClientMsg {
-    ClientMsg::Peek {
+    ClientMsg::Watch {
         user: "alice".into(),
-        workspace: "w1".into(),
-        tab: "w1:t1".into(),
+        pane: "w1:p1".into(),
     }
 }
 
