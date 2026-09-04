@@ -1,6 +1,7 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::VecDeque;
 use std::fmt::Display;
+use std::fs;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -57,10 +58,34 @@ impl PtySession {
         self.child.kill()
     }
 
+    pub fn foreground_name(&self) -> String {
+        let Some(descriptor) = self.master.as_raw_fd() else {
+            return String::new();
+        };
+        // SAFETY: the descriptor belongs to this session master PTY and stays open for the call.
+        let group = unsafe { libc::tcgetpgrp(descriptor) };
+        if group <= 0 {
+            return String::new();
+        }
+        process_name(group)
+    }
+
     pub fn drain_output(&self) -> Vec<u8> {
         let mut output = lock_mutex(&self.output);
         output.pending.drain(..).collect()
     }
+}
+
+#[cfg(target_os = "linux")]
+fn process_name(group: i32) -> String {
+    fs::read_to_string(format!("/proc/{group}/comm"))
+        .map(|name| name.trim().to_owned())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_name(_group: i32) -> String {
+    String::new()
 }
 
 fn pty_size(cols: u16, rows: u16) -> PtySize {

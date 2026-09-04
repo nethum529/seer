@@ -5,7 +5,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg};
+use seer_core::proto::{ClientMsg, PeekTarget, PersonState, ServerMsg};
 use seer_core::{InputEvent, TerminalInput};
 
 #[path = "support/binary.rs"]
@@ -94,6 +94,45 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
 
     drop(second);
     temporary.terminate_runtime("alice");
+}
+
+#[test]
+fn pushes_people_to_every_client_when_a_person_types() {
+    let temporary = TestFiles::new();
+    let address = unused_address();
+    write_config(&temporary, address);
+    temporary.write_runtime_wrapper();
+    let broker = temporary.start_broker();
+    let _broker = ProcessGuard::new(broker);
+
+    let mut first = connect_when_ready(address);
+    send_hello(&mut first, "alice", "alice-secret");
+    drop(welcome_client_id(read_message(&mut first), "alice"));
+    let tree = wait_for_tree_with_tab(&mut first);
+    let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();
+
+    let mut second = connect_when_ready(address);
+    send_hello(&mut second, "alice", "alice-secret");
+    drop(welcome_client_id(read_message(&mut second), "alice"));
+    wait_for_tree_with_tab(&mut second);
+
+    send_input(&mut first, "w1", "w1:t1", &pane, "\n");
+
+    wait_for_active_person(&mut first);
+    wait_for_active_person(&mut second);
+
+    drop(first);
+    drop(second);
+    temporary.terminate_runtime("alice");
+}
+
+fn wait_for_active_person(stream: &mut TcpStream) {
+    wait_for_broker_message(stream, |message| {
+        matches!(message, ServerMsg::People { people }
+        if people.iter().any(|person| {
+            person.user_id == "alice" && person.state == PersonState::Active
+        }))
+    });
 }
 
 #[test]

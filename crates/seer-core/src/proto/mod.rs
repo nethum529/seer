@@ -19,6 +19,7 @@ pub enum ClientMsg {
         hours: Option<u32>,
     },
     ListPeople,
+    QueryStatus,
     DetachClient {
         client_id: String,
     },
@@ -88,6 +89,11 @@ pub enum ServerMsg {
     People {
         people: Vec<Person>,
     },
+    Status {
+        tabs: u32,
+        foreground: String,
+        idle_secs: u64,
+    },
     Clients {
         clients: Vec<ClientInfo>,
     },
@@ -137,12 +143,28 @@ impl ClientMsg {
     }
 }
 
+#[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
+pub enum PersonState {
+    Active,
+    Idle,
+    #[default]
+    Away,
+}
+
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Person {
     pub user_id: String,
     pub name: String,
     pub attached_clients: u32,
     pub peekable: bool,
+    #[serde(default)]
+    pub state: PersonState,
+    #[serde(default)]
+    pub tabs: u32,
+    #[serde(default)]
+    pub foreground: String,
+    #[serde(default)]
+    pub idle_secs: u64,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -157,7 +179,7 @@ mod tests {
 
     use serde::{Serialize, de::DeserializeOwned};
 
-    use super::{ClientInfo, ClientMsg, PeekTarget, Person, ServerMsg, codec};
+    use super::{ClientInfo, ClientMsg, PeekTarget, Person, PersonState, ServerMsg, codec};
     use crate::{
         Cell, Color, Cursor, InputEvent, KeyCode, KeyInput, Modifiers, PaneSize, SplitDirection,
         TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, TerminalInput,
@@ -206,6 +228,7 @@ mod tests {
             },
             ClientMsg::Invite { hours: None },
             ClientMsg::ListPeople,
+            ClientMsg::QueryStatus,
             ClientMsg::DetachClient {
                 client_id: "client-1".into(),
             },
@@ -293,7 +316,16 @@ mod tests {
                     name: "Alice".into(),
                     attached_clients: 2,
                     peekable: true,
+                    state: PersonState::Active,
+                    tabs: 3,
+                    foreground: "nvim".into(),
+                    idle_secs: 12,
                 }],
+            },
+            ServerMsg::Status {
+                tabs: 3,
+                foreground: "nvim".into(),
+                idle_secs: 12,
             },
             ServerMsg::Targets {
                 targets: vec![PeekTarget {
