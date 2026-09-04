@@ -103,7 +103,8 @@ fn run_loop<S: Stream>(
 
     loop {
         let size = terminal.size()?;
-        let received = receive_messages(receiver, &mut state, &mut dirty, stream, size)?;
+        let received =
+            receive_messages(receiver, &mut state, &mut dirty, stream, size, &mut drawer)?;
         if received != LoopControl::Continue {
             return Ok(received);
         }
@@ -136,11 +137,12 @@ fn receive_messages<S: Stream>(
     dirty: &mut bool,
     stream: &mut S,
     size: Size,
+    drawer: &mut Drawer,
 ) -> io::Result<LoopControl> {
     loop {
         match receiver.try_recv() {
             Ok(ReaderEvent::Message(message)) => {
-                let control = apply_server_message(message, state, stream, size)?;
+                let control = apply_server_message(message, state, stream, size, drawer)?;
                 if control != LoopControl::Continue {
                     return Ok(control);
                 }
@@ -163,6 +165,7 @@ fn apply_server_message<S: Stream>(
     state: &mut ClientState,
     stream: &mut S,
     size: Size,
+    drawer: &mut Drawer,
 ) -> io::Result<LoopControl> {
     match message {
         ServerMsg::Tree { tree } => {
@@ -176,11 +179,11 @@ fn apply_server_message<S: Stream>(
             return Ok(LoopControl::Detached);
         }
         ServerMsg::Bye { .. } => return Ok(LoopControl::Exit),
+        ServerMsg::People { people } => drawer.set_people(people),
         ServerMsg::Frame { .. } => {}
         ServerMsg::Welcome { .. }
         | ServerMsg::Joined { .. }
         | ServerMsg::Seat { .. }
-        | ServerMsg::People { .. }
         | ServerMsg::Clients { .. }
         | ServerMsg::Targets { .. }
         | ServerMsg::Refused { .. } => {
@@ -238,13 +241,13 @@ fn handle_key<S: Stream>(
         send(stream, &ClientMsg::Detach)?;
         return Ok(LoopControl::Exit);
     }
-    if drawer.close_on_escape(key) {
+    if drawer.handle_key(key) {
         return Ok(LoopControl::Continue);
     }
     let action = key_to_action(key, command_pending);
     if is_view_only() {
         if matches!(action, Some(InputAction::ToggleDrawer)) {
-            drawer.toggle();
+            toggle_drawer(stream, drawer)?;
         }
         return Ok(LoopControl::Continue);
     }
@@ -285,10 +288,7 @@ fn handle_action(
             select_tab(state, forward);
             return send_resize(stream, state, size);
         }
-        InputAction::ToggleDrawer => {
-            drawer.toggle();
-            return Ok(());
-        }
+        InputAction::ToggleDrawer => return toggle_drawer(stream, drawer),
         InputAction::FocusPane(direction) => {
             pane_in_direction(state, direction).and_then(|pane| focus_message(state, pane))
         }
@@ -309,6 +309,14 @@ fn handle_action(
     };
     if let Some(message) = message {
         send(stream, &message)?;
+    }
+    Ok(())
+}
+
+fn toggle_drawer(stream: &mut impl Stream, drawer: &mut Drawer) -> io::Result<()> {
+    drawer.toggle();
+    if drawer.is_open() {
+        return send(stream, &ClientMsg::ListPeople);
     }
     Ok(())
 }
@@ -360,7 +368,11 @@ fn handle_mouse<S: Stream>(
     size: Size,
     drawer: &mut Drawer,
 ) -> io::Result<LoopControl> {
+    let was_open = drawer.is_open();
     if drawer.handle_mouse(mouse, size) || is_view_only() {
+        if drawer.is_open() && !was_open {
+            send(stream, &ClientMsg::ListPeople)?;
+        }
         return Ok(LoopControl::Continue);
     }
     let Some((pane, column, row)) = state.mouse_target(mouse.column, mouse.row) else {
