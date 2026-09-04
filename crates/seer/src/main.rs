@@ -5,6 +5,7 @@ mod cli;
 mod commands;
 mod drawer;
 mod input;
+mod peek_mode;
 mod prompt;
 mod render;
 mod start;
