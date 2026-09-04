@@ -1,4 +1,3 @@
-use std::cell::{Cell as ModeCell, RefCell};
 use std::io::{self, Stdout};
 use std::net::Shutdown;
 use std::sync::mpsc::{self, Receiver, TryRecvError};
@@ -17,6 +16,10 @@ use crate::drawer::{self, Drawer};
 use crate::input::{
     InputAction, is_control_char, key_to_action, mouse_event_is_tracked, mouse_to_input,
 };
+pub(crate) use crate::peek_mode::set_peek_person;
+#[cfg(test)]
+pub(crate) use crate::peek_mode::set_view_only;
+use crate::peek_mode::{self, is_view_only, peek_person};
 use crate::state::ClientState;
 use crate::terminal_session::{TerminalSession, ignore_setup_disconnect, set_cursor_style};
 use crate::tui_navigation::{
@@ -25,10 +28,6 @@ use crate::tui_navigation::{
 };
 
 const EVENT_WAIT: Duration = Duration::from_millis(25);
-thread_local! {
-    static VIEW_ONLY: ModeCell<bool> = const { ModeCell::new(false) };
-    static PEEK_PERSON: RefCell<Option<String>> = const { RefCell::new(None) };
-}
 
 enum ReaderEvent {
     Message(ServerMsg),
@@ -183,6 +182,10 @@ fn apply_server_message<S: Stream>(
         }
         ServerMsg::Bye { .. } => return Ok(LoopControl::Exit),
         ServerMsg::People { people } => drawer.set_people(people),
+        ServerMsg::Targets { targets } if drawer.peek_pending() => {
+            peek_mode::start(stream, drawer, &targets)?;
+        }
+        ServerMsg::Refused { reason } if drawer.peek_pending() => peek_mode::refuse(drawer, reason),
         ServerMsg::Frame { .. } => {}
         ServerMsg::Welcome { .. }
         | ServerMsg::Joined { .. }
@@ -245,7 +248,7 @@ fn handle_key<S: Stream>(
         send(stream, &ClientMsg::Detach)?;
         return Ok(LoopControl::Exit);
     }
-    if drawer.handle_key(key) {
+    if peek_mode::handle_drawer_key(key, stream, drawer)? {
         return Ok(LoopControl::Continue);
     }
     let action = key_to_action(key, command_pending);
@@ -434,28 +437,7 @@ fn send_focused_input(
     Ok(())
 }
 
-#[cfg(test)]
-pub(crate) fn set_view_only(view_only: bool) {
-    VIEW_ONLY.set(view_only);
-    if !view_only {
-        PEEK_PERSON.set(None);
-    }
-}
-
-pub(crate) fn set_peek_person(person: Option<&str>) {
-    VIEW_ONLY.set(person.is_some());
-    PEEK_PERSON.set(person.map(str::to_owned));
-}
-
-fn is_view_only() -> bool {
-    VIEW_ONLY.get()
-}
-
-fn peek_person() -> Option<String> {
-    PEEK_PERSON.with_borrow(Clone::clone)
-}
-
-fn send(stream: &mut impl Stream, message: &ClientMsg) -> io::Result<()> {
+pub(crate) fn send(stream: &mut impl Stream, message: &ClientMsg) -> io::Result<()> {
     codec::encode(stream, message)
 }
 
@@ -481,7 +463,9 @@ fn send_terminal_setup<S: Stream>(
 
 fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState, drawer: &Drawer) {
     let person = peek_person();
-    drawer::draw(frame, state, drawer, status(), person.as_deref());
+    let notice = peek_mode::take_notice();
+    let line = notice.as_deref().unwrap_or(status());
+    drawer::draw(frame, state, drawer, line, person.as_deref());
 }
 
 #[cfg(test)]

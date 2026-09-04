@@ -3,6 +3,7 @@ use std::io::{self, BufRead, IsTerminal, Write};
 use seer_core::Tree;
 use seer_core::proto::{ClientInfo, ClientMsg, PeekTarget, ServerMsg};
 
+use crate::peek_mode::unique_target;
 use crate::store::ServerStore;
 
 use super::{
@@ -171,11 +172,8 @@ fn peek_reply(reply: ServerMsg) -> Result<Tree, CommandError> {
 }
 
 fn select_target(targets: &[PeekTarget]) -> Result<PeekTarget, CommandError> {
-    let active: Vec<_> = targets.iter().filter(|target| target.active).collect();
-    match active.as_slice() {
-        [target] => return Ok((*target).clone()),
-        [] if targets.len() == 1 => return Ok(targets[0].clone()),
-        _ => {}
+    if let Some(target) = unique_target(targets) {
+        return Ok(target.clone());
     }
     if targets.is_empty() {
         return Err(CommandError::usage("no active target"));

@@ -469,3 +469,30 @@ fn peek_banner_and_drawer_are_fixed_over_the_tree() {
     assert!(title.starts_with("\u{250c}People"));
     set_peek_person(None);
 }
+
+#[test]
+fn drawer_enter_peeks_and_escape_returns() {
+    let (mut client, mut server) = socket_pair();
+    let mut state = state_with_pane();
+    let mut drawer = Drawer::default();
+    set_view_only(false);
+    drawer.toggle();
+    apply_two_people(&mut client, &mut state, &mut drawer);
+
+    press_key(&mut client, &mut state, &mut drawer, KeyCode::Enter);
+    assert!(!drawer.is_open());
+    assert_eq!(
+        decode(&mut server),
+        ClientMsg::QueryTargets {
+            user: "alice".into()
+        }
+    );
+
+    apply_active_target(&mut client, &mut state, &mut drawer);
+    assert_eq!(decode(&mut server), peek_message());
+    assert!(peek_banner_shown(&mut state, &drawer));
+
+    press_key(&mut client, &mut state, &mut drawer, KeyCode::Esc);
+    assert_eq!(decode(&mut server), ClientMsg::StopPeek);
+    assert!(!peek_banner_shown(&mut state, &drawer));
+}

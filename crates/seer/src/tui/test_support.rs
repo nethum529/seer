@@ -7,7 +7,7 @@ use ratatui::Terminal;
 use ratatui::backend::TestBackend;
 use ratatui::layout::Size;
 use ratatui::style::Modifier;
-use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, PeekTarget, Person, PersonState, ServerMsg, codec};
 use seer_core::{
     InputEvent, KeyCode as CoreKeyCode, KeyInput, Modifiers, PaneSize, TerminalInput, Tree,
 };
@@ -159,4 +159,53 @@ pub(super) fn highlighted_person(drawer: &Drawer, state: &mut ClientState) -> Op
     (1..23)
         .find(|row| buffer[(41, *row)].modifier.contains(Modifier::REVERSED))
         .map(|row| row - 1)
+}
+
+pub(super) fn press_key(
+    client: &mut TcpStream,
+    state: &mut ClientState,
+    drawer: &mut Drawer,
+    code: KeyCode,
+) {
+    send_test_key(client, state, &mut false, code, drawer);
+}
+
+pub(super) fn apply_active_target(
+    client: &mut TcpStream,
+    state: &mut ClientState,
+    drawer: &mut Drawer,
+) {
+    let targets = vec![PeekTarget {
+        workspace: "w1".into(),
+        workspace_name: "main".into(),
+        tab: "w1:t1".into(),
+        tab_title: "shell".into(),
+        active: true,
+    }];
+    apply_server_message(
+        ServerMsg::Targets { targets },
+        state,
+        client,
+        Size::new(80, 24),
+        drawer,
+    )
+    .expect("Targets must apply");
+}
+
+pub(super) fn peek_message() -> ClientMsg {
+    ClientMsg::Peek {
+        user: "alice".into(),
+        workspace: "w1".into(),
+        tab: "w1:t1".into(),
+    }
+}
+
+pub(super) fn peek_banner_shown(state: &mut ClientState, drawer: &Drawer) -> bool {
+    let mut terminal = Terminal::new(TestBackend::new(80, 5)).expect("terminal must start");
+    terminal
+        .draw(|frame| draw(frame, state, drawer))
+        .expect("frame must draw");
+    let buffer = terminal.backend().buffer();
+    let line: String = (0..79).map(|x| buffer[(x, 0)].symbol()).collect();
+    line.starts_with("PEEK: alice")
 }
