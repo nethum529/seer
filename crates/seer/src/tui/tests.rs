@@ -172,6 +172,31 @@ fn active_events_send_input_focus_and_resize() {
             rows: 40,
         }
     );
+    let mut tree = Tree::new();
+    tree.create_workspace("main")
+        .expect("workspace must be created");
+    for title in ["first", "removed", "third"] {
+        tree.create_tab("w1", title, PaneSize { cols: 80, rows: 24 })
+            .expect("tab must be created");
+    }
+    tree.close_tab("w1", "w1:t2")
+        .expect("selected tab must close");
+    apply_server_message(
+        ServerMsg::Tree { tree },
+        &mut state,
+        &mut client,
+        Size::new(120, 40),
+    )
+    .expect("tree must apply");
+    assert_eq!(
+        decode(&mut server),
+        ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            cols: 120,
+            rows: 40,
+        }
+    );
     assert_no_message(&mut server);
 }
 
@@ -212,6 +237,7 @@ fn mouse_move_without_tracking_sends_no_message() {
 
 #[test]
 fn detached_bye_has_a_distinct_exit() {
+    let (mut client, _) = socket_pair();
     let mut state = state_with_pane();
 
     assert_eq!(
@@ -220,6 +246,8 @@ fn detached_bye_has_a_distinct_exit() {
                 reason: "detached".into(),
             },
             &mut state,
+            &mut client,
+            Size::new(80, 24),
         )
         .expect("Bye must apply"),
         LoopControl::Detached
@@ -230,6 +258,8 @@ fn detached_bye_has_a_distinct_exit() {
                 reason: "server stopped".into(),
             },
             &mut state,
+            &mut client,
+            Size::new(80, 24),
         )
         .expect("Bye must apply"),
         LoopControl::Exit

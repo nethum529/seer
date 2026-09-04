@@ -1,18 +1,18 @@
 use std::fs;
-use std::io::{Read, Write};
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
 use std::thread;
 
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg};
 
 #[path = "support/cli.rs"]
 mod cli_support;
 #[path = "support/server_io.rs"]
 mod server_io;
 
-use cli_support::{TestConfig, accept, listener, run, text};
+use cli_support::{
+    TestConfig, accept, assert_hello, listener, person, run, send, send_welcome, text,
+};
 use server_io::receive;
 
 #[test]
@@ -289,42 +289,6 @@ fn invite_prints_the_worked_example_block() {
     );
     assert!(output.stderr.is_empty());
     server.join().expect("server must finish");
-}
-
-fn assert_hello(stream: &mut impl Read) {
-    assert_eq!(
-        receive(stream),
-        ClientMsg::Hello {
-            user_id: "user-bob".into(),
-            credential: "device-secret".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        }
-    );
-}
-
-fn send_welcome(stream: &mut impl Write, user_id: &str, name: &str) {
-    send(
-        stream,
-        &ServerMsg::Welcome {
-            user_id: user_id.into(),
-            name: name.into(),
-            client_id: "client-1".into(),
-            tree: Tree::new(),
-        },
-    );
-}
-
-fn person(user_id: &str, name: &str, attached_clients: u32) -> Person {
-    Person {
-        user_id: user_id.into(),
-        name: name.into(),
-        attached_clients,
-        peekable: true,
-    }
-}
-
-fn send(stream: &mut impl Write, message: &ServerMsg) {
-    codec::encode(stream, message).expect("server message must encode");
 }
 
 fn write_store(config: &TestConfig, servers: &[SavedServer]) {

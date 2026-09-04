@@ -102,7 +102,8 @@ fn run_loop<S: Stream>(
     let mut dirty = true;
 
     loop {
-        let received = receive_messages(receiver, &mut state, &mut dirty)?;
+        let size = terminal.size()?;
+        let received = receive_messages(receiver, &mut state, &mut dirty, stream, size)?;
         if received != LoopControl::Continue {
             return Ok(received);
         }
@@ -124,15 +125,17 @@ fn run_loop<S: Stream>(
     }
 }
 
-fn receive_messages(
+fn receive_messages<S: Stream>(
     receiver: &Receiver<ReaderEvent>,
     state: &mut ClientState,
     dirty: &mut bool,
+    stream: &mut S,
+    size: Size,
 ) -> io::Result<LoopControl> {
     loop {
         match receiver.try_recv() {
             Ok(ReaderEvent::Message(message)) => {
-                let control = apply_server_message(message, state)?;
+                let control = apply_server_message(message, state, stream, size)?;
                 if control != LoopControl::Continue {
                     return Ok(control);
                 }
@@ -150,11 +153,18 @@ fn receive_messages(
     }
 }
 
-fn apply_server_message(message: ServerMsg, state: &mut ClientState) -> io::Result<LoopControl> {
+fn apply_server_message<S: Stream>(
+    message: ServerMsg,
+    state: &mut ClientState,
+    stream: &mut S,
+    size: Size,
+) -> io::Result<LoopControl> {
     match message {
         ServerMsg::Tree { tree } => {
             update_tree(&tree);
-            state.replace_tree(tree);
+            if state.replace_tree(tree) && !is_view_only() {
+                send_resize(stream, state, size)?;
+            }
         }
         ServerMsg::Cells { pane, frame } => state.apply_frame(pane, frame),
         ServerMsg::Bye { reason } if reason == "detached" => {
@@ -190,17 +200,7 @@ fn handle_event<S: Stream>(
             handle_key(key, stream, state, command_pending, size)
         }
         Event::Resize(cols, rows) if !is_view_only() => {
-            if let Some((workspace, tab)) = state.selection() {
-                send(
-                    stream,
-                    &ClientMsg::Resize {
-                        workspace: workspace.to_owned(),
-                        tab: tab.to_owned(),
-                        cols,
-                        rows,
-                    },
-                )?;
-            }
+            send_resize(stream, state, Size::new(cols, rows))?;
             Ok(LoopControl::Continue)
         }
         Event::Mouse(mouse) if !is_view_only() => handle_mouse(mouse, stream, state),
@@ -268,12 +268,7 @@ fn handle_action(
         InputAction::NextTab | InputAction::PreviousTab => {
             let forward = action == InputAction::NextTab;
             select_tab(state, forward);
-            state.selection().map(|(workspace, tab)| ClientMsg::Resize {
-                workspace: workspace.to_owned(),
-                tab: tab.to_owned(),
-                cols: size.width,
-                rows: size.height,
-            })
+            return send_resize(stream, state, size);
         }
         InputAction::FocusPane(direction) => {
             pane_in_direction(state, direction).and_then(|pane| focus_message(state, pane))
@@ -297,6 +292,21 @@ fn handle_action(
         send(stream, &message)?;
     }
     Ok(())
+}
+
+fn send_resize(stream: &mut impl Stream, state: &ClientState, size: Size) -> io::Result<()> {
+    let Some((workspace, tab)) = state.selection() else {
+        return Ok(());
+    };
+    send(
+        stream,
+        &ClientMsg::Resize {
+            workspace: workspace.to_owned(),
+            tab: tab.to_owned(),
+            cols: size.width,
+            rows: size.height,
+        },
+    )
 }
 
 fn close_message(state: &ClientState) -> Option<ClientMsg> {
@@ -423,19 +433,7 @@ fn send_terminal_setup<S: Stream>(
     if is_view_only() {
         return Ok(());
     }
-    let Some((workspace, tab)) = state.selection() else {
-        return Ok(());
-    };
-    let size = terminal.size()?;
-    if let Err(error) = send(
-        stream,
-        &ClientMsg::Resize {
-            workspace: workspace.to_owned(),
-            tab: tab.to_owned(),
-            cols: size.width,
-            rows: size.height,
-        },
-    ) {
+    if let Err(error) = send_resize(stream, state, terminal.size()?) {
         return ignore_setup_disconnect(error);
     }
     Ok(())

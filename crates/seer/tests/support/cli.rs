@@ -1,11 +1,16 @@
 use std::fs;
-use std::io::Write;
+use std::io::{Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::path::{Path, PathBuf};
 use std::process::{Command, Output, Stdio};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
+
+use seer_core::Tree;
+use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
+
+use super::server_io::receive;
 
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
@@ -95,4 +100,40 @@ pub(crate) fn run(config: &TestConfig, arguments: &[&str], input: &str) -> Outpu
 
 pub(crate) fn text(bytes: &[u8]) -> String {
     String::from_utf8(bytes.to_vec()).expect("output must be UTF-8")
+}
+
+pub(crate) fn assert_hello(stream: &mut impl Read) {
+    assert_eq!(
+        receive(stream),
+        ClientMsg::Hello {
+            user_id: "user-bob".into(),
+            credential: "device-secret".into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+        }
+    );
+}
+
+pub(crate) fn send_welcome(stream: &mut impl Write, user_id: &str, name: &str) {
+    send(
+        stream,
+        &ServerMsg::Welcome {
+            user_id: user_id.into(),
+            name: name.into(),
+            client_id: "client-1".into(),
+            tree: Tree::new(),
+        },
+    );
+}
+
+pub(crate) fn person(user_id: &str, name: &str, attached_clients: u32) -> Person {
+    Person {
+        user_id: user_id.into(),
+        name: name.into(),
+        attached_clients,
+        peekable: true,
+    }
+}
+
+pub(crate) fn send(stream: &mut impl Write, message: &ServerMsg) {
+    codec::encode(stream, message).expect("server message must encode");
 }

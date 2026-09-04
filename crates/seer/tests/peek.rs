@@ -11,6 +11,7 @@ mod cli_support;
 mod server_io;
 
 use cli_support::{TestConfig, accept, listener, run, text};
+use cli_support::{assert_hello, person, send, send_welcome};
 use server_io::receive;
 
 #[test]
@@ -156,42 +157,6 @@ fn target(workspace: &str, tab: &str, name: &str, active: bool) -> PeekTarget {
         },
         active,
     }
-}
-
-fn assert_hello(stream: &mut TcpStream) {
-    assert_eq!(
-        receive(stream),
-        ClientMsg::Hello {
-            user_id: "user-bob".into(),
-            credential: "device-secret".into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-        }
-    );
-}
-
-fn send_welcome(stream: &mut TcpStream, user_id: &str, name: &str) {
-    send(
-        stream,
-        &ServerMsg::Welcome {
-            user_id: user_id.into(),
-            name: name.into(),
-            client_id: "client-1".into(),
-            tree: Tree::new(),
-        },
-    );
-}
-
-fn person(user_id: &str, name: &str, attached_clients: u32) -> seer_core::proto::Person {
-    seer_core::proto::Person {
-        user_id: user_id.into(),
-        name: name.into(),
-        attached_clients,
-        peekable: true,
-    }
-}
-
-fn send(stream: &mut TcpStream, message: &ServerMsg) {
-    seer_core::proto::codec::encode(stream, message).expect("server message must encode");
 }
 
 fn write_store(config: &TestConfig, port: u16) {
