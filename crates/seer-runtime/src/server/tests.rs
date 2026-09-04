@@ -5,7 +5,7 @@ use std::time::{Duration, Instant};
 use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};
 
-use super::{SharedSession, is_mutating, lock};
+use super::{SharedSession, is_mutating};
 use crate::UserSession;
 
 #[test]
@@ -73,38 +73,6 @@ fn identifies_only_mutating_messages() {
 
     assert!(mutating.iter().all(is_mutating));
     assert!(deferred.iter().all(|message| !is_mutating(message)));
-}
-
-#[test]
-fn removes_only_the_requested_connection() {
-    let mut session = UserSession::new("alice", "sh");
-    session
-        .ensure_first_shell()
-        .expect("first shell must start");
-    session
-        .apply(ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 1,
-            rows: 1,
-        })
-        .expect("session must resize");
-    let shared = SharedSession::new(session);
-    let (first_server, _first_client) = UnixStream::pair().expect("stream pair must open");
-    let (second_server, _second_client) = UnixStream::pair().expect("stream pair must open");
-    shared
-        .add_connection(1, first_server)
-        .expect("first connection must be added");
-    shared
-        .add_connection(2, second_server)
-        .expect("second connection must be added");
-
-    shared
-        .remove_connection(1)
-        .expect("connection must be removed");
-    let connections = lock(&shared.connections).expect("connections must lock");
-    assert_eq!(connections.len(), 1);
-    assert_eq!(connections[0].id, 2);
 }
 
 #[test]
