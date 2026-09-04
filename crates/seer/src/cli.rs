@@ -63,7 +63,7 @@ fn execute(command: Command) -> ExitCode {
 fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ()> {
     let first = arguments.next().ok_or(())?;
     let command = match first.as_str() {
-        "--help" | "-h" if arguments.next().is_none() => Command::Help,
+        "help" | "--help" | "-h" if arguments.next().is_none() => Command::Help,
         "start" if arguments.next().is_none() => Command::Start,
         "stop" if arguments.next().is_none() => Command::Stop,
         "invite" => match arguments.next() {
