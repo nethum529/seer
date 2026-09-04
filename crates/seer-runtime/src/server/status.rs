@@ -2,7 +2,7 @@ use std::io;
 use std::os::unix::net::UnixStream;
 use std::time::Instant;
 
-use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
 use super::{SharedSession, lock};
 
@@ -34,17 +34,10 @@ impl SharedSession {
         let foreground = active.map_or_else(String::new, |(workspace, tab)| {
             session.foreground(&workspace, &tab)
         });
-        Ok(ServerMsg::People {
-            people: vec![Person {
-                user_id: session.user.clone(),
-                name: String::new(),
-                attached_clients: 0,
-                peekable: true,
-                state: PersonState::Away,
-                tabs: session.tab_count(),
-                foreground,
-                idle_secs,
-            }],
+        Ok(ServerMsg::Status {
+            tabs: session.tab_count(),
+            foreground,
+            idle_secs,
         })
     }
 }
