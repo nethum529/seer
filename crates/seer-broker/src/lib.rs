@@ -24,6 +24,7 @@ pub fn run() -> io::Result<()> {
         )
     })?;
     let config = Config::load(config_path)?;
+    let remote_listener = server::bind_remote_listener(&config)?;
     let listener = TcpListener::bind(config.listen)?;
-    serve(listener, &config)
+    serve(listener, remote_listener, &config)
 }

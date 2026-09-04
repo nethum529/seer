@@ -25,7 +25,7 @@ fn handles_required_handshake_outcomes() {
         .local_addr()
         .expect("listener must have an address");
     let (config, state_dir) = test_config(address);
-    let _server = thread::spawn(move || serve(listener, &config));
+    let _server = thread::spawn(move || serve(listener, None, &config));
     let _silent = TcpStream::connect(address).expect("silent client must connect");
 
     let (_, welcome) = exchange(
@@ -82,7 +82,7 @@ fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
         .local_addr()
         .expect("listener must have an address");
     let (config, state_dir) = test_config(address);
-    let _server = thread::spawn(move || serve(listener, &config));
+    let _server = thread::spawn(move || serve(listener, None, &config));
 
     let (_, joined) = exchange(
         address,

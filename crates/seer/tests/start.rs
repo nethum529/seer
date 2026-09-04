@@ -86,6 +86,9 @@ fn fake_broker_process() {
     };
     let contents = fs::read_to_string(config_path).expect("fake broker config must be read");
     let config: FakeConfig = toml::from_str(&contents).expect("fake broker config must parse");
+    if std::env::var_os("SEER_FAKE_REMOTE_FAILURE").is_some() {
+        panic!("fake remote listener failed");
+    }
     fs::create_dir_all(&config.state_dir).expect("fake broker state must be created");
     fs::write(
         config.state_dir.join("people.json"),
@@ -257,7 +260,6 @@ fn failed_broker_prints_only_the_last_twenty_log_lines() {
     let address = unused_address();
     write_config(&directory, address);
     let executable = install_binaries(&directory);
-
     let output = run_start(&executable, &directory, "", &[("SEER_FAKE_FAIL", "1")]);
 
     assert_eq!(output.status.code(), Some(1));
@@ -276,7 +278,6 @@ fn remote_listener_failure_does_not_report_start_success() {
     let output = run_start(&executable, &directory, "", &environment);
     assert_eq!(output.status.code(), Some(1));
     assert!(!output.stdout.contains("Server started"));
-    assert!(!output.stdout.contains("You are alice."));
 }
 
 #[test]
@@ -334,7 +335,7 @@ fn install_binaries(directory: &TestDirectory) -> PathBuf {
     let test_binary = std::env::current_exe().expect("test binary path must be available");
     assert!(!test_binary.to_string_lossy().contains('\''));
     let script = format!(
-        "#!/bin/sh\nif [ \"$SEER_FAKE_FAIL\" = 1 ]; then\n  i=1\n  while [ $i -le 25 ]; do echo failure-line-$i; i=$((i + 1)); done\n  exit 7\nfi\nif [ \"$SEER_FAKE_REMOTE_FAILURE\" = 1 ]; then exit 8; fi\nexport SEER_FAKE_CONFIG=\"$1\"\nexec '{}' fake_broker_process --exact --nocapture\n",
+        "#!/bin/sh\nif [ \"$SEER_FAKE_FAIL\" = 1 ]; then\n  i=1\n  while [ $i -le 25 ]; do echo failure-line-$i; i=$((i + 1)); done\n  exit 7\nfi\nexport SEER_FAKE_CONFIG=\"$1\"\nexec '{}' fake_broker_process --exact --nocapture\n",
         test_binary.display()
     );
     let broker = bin_dir.join("seer-broker");

@@ -18,9 +18,12 @@ const INVALID_CREDENTIALS: &str = "invalid credentials";
 const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
 
-pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
+pub fn serve(
+    listener: TcpListener,
+    remote_listener: Option<Listener>,
+    config: &Config,
+) -> io::Result<()> {
     let (mut broker, owner_credential) = BrokerState::new(config)?;
-    let remote_listener = bind_remote_listener(config)?;
     broker.remote_endpoint = remote_listener.as_ref().map(Listener::id);
     if let Some(credential) = owner_credential {
         writeln!(io::stdout().lock(), "owner-credential: {credential}")?;
@@ -148,7 +151,7 @@ fn invalid_published_addr() -> io::Error {
     )
 }
 
-fn bind_remote_listener(config: &Config) -> io::Result<Option<Listener>> {
+pub(crate) fn bind_remote_listener(config: &Config) -> io::Result<Option<Listener>> {
     if !config.remote {
         return Ok(None);
     }
