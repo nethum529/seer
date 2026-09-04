@@ -117,13 +117,15 @@ fn pick_server(
 
 pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
     let server = selected_server()?;
-    let (mut stream, tree) = authenticate(&server)?;
+    let (mut stream, _) = authenticate(&server)?;
     send(&mut stream, &ClientMsg::ListPeople)?;
     let people = people_reply(receive_reply(&mut stream)?)?;
     let Some(person) = people.iter().find(|person| person.name == target) else {
         print_close_names(target, &people);
         return Err(CommandError::usage(format!("no person named {target}")));
     };
+    drop(stream);
+    let (stream, tree) = authenticate(&server)?;
     finish_session(
         io::stdout().is_terminal(),
         stream,

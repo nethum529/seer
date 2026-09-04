@@ -15,7 +15,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     state.people_areas.clear();
     state.box_areas.clear();
     if state.viewer.is_some() {
-        draw_viewer(frame, state);
+        crate::viewer::draw(frame, state);
         return;
     }
     top_bar(frame, state);
@@ -116,7 +116,7 @@ fn people_column(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
         let marker = if state
             .viewer
             .as_ref()
-            .is_some_and(|(user, _)| user == &person.user_id)
+            .is_some_and(|viewer| viewer.user == person.user_id)
         {
             ">"
         } else {
@@ -155,7 +155,7 @@ fn terminal_area(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
             format!("away {}", idle_text(p.idle_secs))
         }
     });
-    let allowed = if state.user() == state.own_user {
+    let allowed = if state.may_type(state.user()) {
         "yes"
     } else {
         "no"
@@ -340,34 +340,4 @@ pub(crate) fn idle_text(seconds: u64) -> String {
     } else {
         format!("{}h", seconds / 3600)
     }
-}
-
-fn draw_viewer(frame: &mut Frame<'_>, state: &ClientState) {
-    let Some((user, pane)) = &state.viewer else {
-        return;
-    };
-    let palette = Palette::default();
-    let area = frame.area();
-    let area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
-    let name = state
-        .terminals
-        .get(user)
-        .into_iter()
-        .flatten()
-        .find(|t| &t.pane == pane)
-        .map_or("shell", |t| t.name.as_str());
-    let mode = if user == &state.own_user {
-        "input"
-    } else {
-        "read only"
-    };
-    let block = palette
-        .block(true)
-        .title(format!(" {}  {name}  {mode} ", state.person_name(user)));
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    if let Some(content) = state.frames.get(&(user.clone(), pane.clone())) {
-        frame.render_widget(PaneCells::new(&content.rows), inner);
-    }
-    footer(frame, "esc back");
 }

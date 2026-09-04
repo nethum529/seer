@@ -90,3 +90,7 @@ pub(crate) fn map_modifiers(modifiers: KeyModifiers) -> Modifiers {
         meta: modifiers.contains(KeyModifiers::META),
     }
 }
+
+pub(crate) fn raw_bytes(input: &TerminalInput) -> std::io::Result<Option<Vec<u8>>> {
+    seer_runtime::PaneGrid::new(1, 1).handle_input(input)
+}

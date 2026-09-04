@@ -1,3 +1,4 @@
+use crate::viewer::Viewer;
 use ratatui::layout::Rect;
 use seer_core::proto::{Person, PersonState, TerminalInfo};
 use seer_core::{Cursor, TerminalFrame, Tree};
@@ -13,7 +14,8 @@ pub(crate) struct ClientState {
     pub(crate) focus: usize,
     pub(crate) terminals: HashMap<String, Vec<TerminalInfo>>,
     pub(crate) frames: HashMap<(String, String), TerminalFrame>,
-    pub(crate) viewer: Option<(String, String)>,
+    pub(crate) viewer: Option<Viewer>,
+    pub(crate) you_may_type_into: BTreeSet<String>,
     pub(crate) people_areas: Vec<(usize, Rect)>,
     pub(crate) box_areas: Vec<(usize, Rect)>,
     pub(crate) people_scroll: usize,
@@ -52,6 +54,7 @@ impl ClientState {
             terminals: HashMap::new(),
             frames: HashMap::new(),
             viewer: None,
+            you_may_type_into: BTreeSet::new(),
             people_areas: Vec::new(),
             box_areas: Vec::new(),
             people_scroll: 0,
@@ -87,7 +90,7 @@ impl ClientState {
     pub(crate) fn focused(&self) -> Option<&str> {
         self.viewer
             .as_ref()
-            .map(|(_, pane)| pane.as_str())
+            .map(|viewer| viewer.pane.as_str())
             .or_else(|| {
                 self.selected_terminals()
                     .get(self.focus)
@@ -96,7 +99,10 @@ impl ClientState {
     }
 
     pub(crate) fn pane_cursor(&self, pane: &str) -> Option<Cursor> {
-        let user = self.viewer.as_ref().map_or(self.user(), |(user, _)| user);
+        let user = self
+            .viewer
+            .as_ref()
+            .map_or(self.user(), |viewer| viewer.user.as_str());
         self.frames
             .get(&(user.into(), pane.into()))
             .map(|frame| frame.cursor)
@@ -138,7 +144,7 @@ impl ClientState {
 
     pub(crate) fn open_focused(&mut self) {
         if let Some(terminal) = self.selected_terminals().get(self.focus) {
-            self.viewer = Some((self.user().into(), terminal.pane.clone()));
+            self.viewer = Some(Viewer::new(self.user().into(), terminal.pane.clone()));
         }
     }
 
@@ -161,9 +167,13 @@ impl ClientState {
                 .iter()
                 .position(|p| p.user_id == self.own_user)
                 .unwrap_or(0);
-            self.viewer = Some((self.own_user.clone(), pane));
+            self.viewer = Some(Viewer::new(self.own_user.clone(), pane));
             self.pending_new = None;
         }
+    }
+
+    pub(crate) fn may_type(&self, user: &str) -> bool {
+        user == self.own_user || self.you_may_type_into.contains(user)
     }
 
     pub(crate) fn location(&self, pane: &str) -> Option<(String, String)> {

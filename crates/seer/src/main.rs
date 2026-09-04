@@ -15,6 +15,7 @@ mod theme;
 mod tui;
 mod tui_navigation;
 mod update;
+mod viewer;
 
 fn main() -> ExitCode {
     let mut arguments = std::env::args().skip(1);

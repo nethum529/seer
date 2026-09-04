@@ -1,11 +1,10 @@
 use crate::{
-    input::key_to_input,
     render,
     state::ClientState,
     terminal_session::{TerminalSession, ignore_setup_disconnect, set_cursor_style},
     tui_navigation as navigation,
 };
-use crossterm::event::{self, Event, KeyCode, KeyEventKind};
+use crossterm::event::{self, Event, KeyEventKind};
 pub(crate) use navigation::set_peek_person;
 use ratatui::{Terminal, backend::CrosstermBackend, layout::Size};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
@@ -95,7 +94,7 @@ fn run_loop(
     let mut dirty = true;
     let mut last_click = None;
     loop {
-        let was_viewing = state.viewer.clone();
+        let was_viewing = state.viewer.as_ref().map(crate::viewer::Viewer::target);
         for _ in 0..64 {
             match receiver.try_recv() {
                 Ok(message) => {
@@ -110,7 +109,7 @@ fn run_loop(
                 }
             }
         }
-        if was_viewing != state.viewer {
+        if was_viewing != state.viewer.as_ref().map(crate::viewer::Viewer::target) {
             resize(stream, state, terminal.size()?)?;
         }
         if dirty {
@@ -141,11 +140,26 @@ fn apply_message(
     start_person: &mut Option<String>,
 ) -> io::Result<Option<SessionExit>> {
     match message {
+        ServerMsg::Grants {
+            you_may_type_into, ..
+        } => {
+            state.you_may_type_into = you_may_type_into.into_iter().collect();
+        }
         ServerMsg::Tree { tree } => state.replace_tree(tree),
         ServerMsg::Cells { user, pane, frame } => {
             state.frames.insert((user, pane), frame);
         }
         ServerMsg::Terminals { user, terminals } => {
+            if let Some(viewer) = &state.viewer
+                && viewer.user == user
+            {
+                if let Some(index) = terminals.iter().position(|t| t.pane == viewer.pane) {
+                    state.focus = index;
+                } else {
+                    state.viewer = None;
+                    state.notice = "Terminal closed.".into();
+                }
+            }
             state.terminals.insert(user, terminals);
         }
         ServerMsg::People { people } => {
@@ -205,24 +219,22 @@ fn handle_event(
     last_click: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<bool> {
     let old_user = state.user().to_owned();
-    let old_viewer = state.viewer.clone();
+    let old_viewer = state.viewer.as_ref().map(crate::viewer::Viewer::target);
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
             state.notice.clear();
             if state.viewer.is_some() {
-                if key.code == KeyCode::Esc {
-                    state.viewer = None;
-                } else if let Some(input) = key_to_input(key) {
-                    send_viewer_input(stream, state, input)?;
-                }
+                crate::viewer::key(key, stream, state)?;
             } else if navigation::key(key, stream, state)? {
                 send(stream, &ClientMsg::Detach)?;
                 return Ok(true);
             }
         }
-        Event::Paste(text) => {
-            send_viewer_input(stream, state, TerminalInput::new(InputEvent::Paste(text)))?
-        }
+        Event::Paste(text) => crate::viewer::input_message(
+            stream,
+            state,
+            TerminalInput::new(InputEvent::Paste(text)),
+        )?,
         Event::Mouse(mouse) if state.viewer.is_none() => {
             navigation::mouse(mouse, state, last_click)
         }
@@ -237,7 +249,7 @@ fn handle_event(
             },
         )?;
     }
-    if old_viewer != state.viewer {
+    if old_viewer != state.viewer.as_ref().map(crate::viewer::Viewer::target) {
         resize(stream, state, size)?;
     }
     Ok(false)
@@ -248,9 +260,10 @@ pub(crate) fn send_viewer_input(
     state: &ClientState,
     input: TerminalInput,
 ) -> io::Result<()> {
-    let Some((user, pane)) = &state.viewer else {
+    let Some(viewer) = &state.viewer else {
         return Ok(());
     };
+    let (user, pane) = (&viewer.user, &viewer.pane);
     if user != &state.own_user {
         return Ok(());
     }
@@ -269,9 +282,10 @@ pub(crate) fn send_viewer_input(
 }
 
 pub(crate) fn resize(stream: &mut impl Stream, state: &ClientState, size: Size) -> io::Result<()> {
-    let Some((user, pane)) = &state.viewer else {
+    let Some(viewer) = &state.viewer else {
         return Ok(());
     };
+    let (user, pane) = (&viewer.user, &viewer.pane);
     if user != &state.own_user {
         return Ok(());
     }
@@ -290,14 +304,15 @@ pub(crate) fn resize(stream: &mut impl Stream, state: &ClientState, size: Size) 
 }
 
 fn sync_watches(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
-    let mut wanted: std::collections::BTreeSet<_> = state
-        .selected_terminals()
-        .iter()
-        .map(|t| (state.user().to_owned(), t.pane.clone()))
-        .collect();
-    if let Some(viewer) = &state.viewer {
-        wanted.insert(viewer.clone());
-    }
+    let wanted: std::collections::BTreeSet<_> = if let Some(viewer) = &state.viewer {
+        [viewer.target()].into_iter().collect()
+    } else {
+        state
+            .selected_terminals()
+            .iter()
+            .map(|t| (state.user().to_owned(), t.pane.clone()))
+            .collect()
+    };
     for (user, pane) in state.watches.difference(&wanted) {
         send(
             stream,
