@@ -5,7 +5,7 @@ use std::thread;
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg};
 
-#[path = "support/cli.rs"]
+#[path = "support/cli_harness.rs"]
 mod cli_support;
 #[path = "support/server_io.rs"]
 mod server_io;

@@ -8,6 +8,11 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
+#[path = "support/cli.rs"]
+mod cli_support;
+
+use cli_support::read_owner_identity;
+
 const WAIT_TIMEOUT: Duration = Duration::from_secs(7);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -210,23 +215,12 @@ impl TestFiles {
     fn owner_identity(&self) -> (String, String) {
         let deadline = Instant::now() + WAIT_TIMEOUT;
         while Instant::now() < deadline {
-            if let Some(identity) = self.read_owner_identity() {
+            if let Some(identity) = read_owner_identity(&self.broker_output) {
                 return identity;
             }
             thread::sleep(POLL_INTERVAL);
         }
         panic!("owner identity did not become available");
-    }
-
-    fn read_owner_identity(&self) -> Option<(String, String)> {
-        let output = fs::read_to_string(&self.broker_output).ok()?;
-        let user_id = output
-            .lines()
-            .find_map(|line| line.strip_prefix("owner-id: "))?;
-        let credential = output
-            .lines()
-            .find_map(|line| line.strip_prefix("owner-credential: "))?;
-        Some((user_id.to_owned(), credential.to_owned()))
     }
 }
 

@@ -7,14 +7,17 @@ use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg};
 
+#[path = "support/cli_harness.rs"]
+mod cli_harness;
 #[path = "support/cli.rs"]
 mod cli_support;
 #[path = "support/server_io.rs"]
 mod server_io;
 
-use cli_support::{
+use cli_harness::{
     TestConfig, accept, assert_hello, listener, person, run, send, send_welcome, text,
 };
+use cli_support::read_owner_identity;
 use server_io::receive;
 
 #[test]
@@ -354,15 +357,8 @@ fn read_pid(path: &Path) -> i32 {
 fn owner_identity(path: &Path) -> (String, String) {
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        let contents = fs::read_to_string(path).unwrap_or_default();
-        let user_id = contents
-            .lines()
-            .find_map(|line| line.strip_prefix("owner-id: "));
-        let credential = contents
-            .lines()
-            .find_map(|line| line.strip_prefix("owner-credential: "));
-        if let Some(identity) = user_id.zip(credential) {
-            return (identity.0.to_owned(), identity.1.to_owned());
+        if let Some(identity) = read_owner_identity(path) {
+            return identity;
         }
         assert!(Instant::now() < deadline, "owner identity must be ready");
         thread::sleep(Duration::from_millis(10));
