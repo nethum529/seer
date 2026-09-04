@@ -386,7 +386,7 @@ fn invalid_input(message: String) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidInput, message)
 }
 
-fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
+pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
         Ok(())
     } else {

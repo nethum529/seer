@@ -1,9 +1,12 @@
-use super::{ClientMsg, ServerMsg, SharedSession, is_mutating, lock};
-use crate::UserSession;
-use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};
 use std::os::unix::net::UnixStream;
 use std::thread;
 use std::time::{Duration, Instant};
+
+use seer_core::proto::{ClientMsg, ServerMsg};
+use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};
+
+use super::{SharedSession, is_mutating, lock};
+use crate::UserSession;
 
 #[test]
 fn identifies_only_mutating_messages() {
