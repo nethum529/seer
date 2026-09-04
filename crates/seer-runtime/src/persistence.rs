@@ -78,8 +78,6 @@ fn pane_launches(session: &UserSession) -> Vec<(String, PaneSize)> {
         .collect()
 }
 
-/// A failed save must end the runtime so a later mutation cannot claim
-/// durable state that the disk never received.
 pub(crate) fn persist(session: &mut UserSession) -> io::Result<()> {
     let Some(store) = session.store.as_mut() else {
         return Ok(());

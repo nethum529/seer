@@ -107,7 +107,6 @@ fn write_snapshot_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
     writer.get_ref().sync_all()
 }
 
-/// Makes a completed rename durable across a machine reboot.
 fn sync_parent_directory(path: &Path) -> io::Result<()> {
     let parent = path.parent().ok_or_else(|| {
         io::Error::new(

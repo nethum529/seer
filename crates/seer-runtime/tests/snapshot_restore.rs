@@ -1,10 +1,10 @@
-// The runtime PTY shells run on Linux only.
 #![cfg(target_os = "linux")]
 
 use std::fs;
+use std::io;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
-use std::process::Stdio;
+use std::process::{Command, Stdio};
 use std::time::Instant;
 
 use seer_core::proto::{ClientMsg, ServerMsg};
@@ -176,6 +176,55 @@ fn cold_restart_restores_topology_and_corrupt_snapshots_start_safely() {
     );
     drop(empty_pane_client);
     empty_pane_runtime.stop();
+}
+
+#[test]
+fn snapshot_save_failure_stops_before_a_queued_mutation() {
+    let temporary = TemporaryDirectory::new();
+    let state = temporary.path.join("state");
+    fs::create_dir(&state).expect("state directory must be created");
+    let socket_path = temporary.path.join("runtime.sock");
+
+    let mut runtime = spawn_runtime(&socket_path, &state);
+    let mut first = connect_with_timeout(&socket_path);
+    let initial = read_tree(&mut first);
+    let workspace = initial.workspaces[0].id.clone();
+    let tab = initial.workspaces[0].tabs[0].id.clone();
+    let mut second = connect_with_timeout(&socket_path);
+    assert_eq!(read_tree(&mut second), initial);
+
+    let failed_write = state.join(".session.json.tmp");
+    let status = Command::new("mkfifo")
+        .arg(&failed_write)
+        .status()
+        .expect("mkfifo must run");
+    assert!(status.success(), "snapshot failure FIFO must be created");
+
+    send(
+        &mut first,
+        &ClientMsg::Resize {
+            workspace: workspace.clone(),
+            tab,
+            cols: 81,
+            rows: 25,
+        },
+    );
+    send(&mut second, &ClientMsg::CreateTab { workspace });
+
+    let mut fifo = fs::File::open(&failed_write).expect("snapshot writer must open the FIFO");
+    io::copy(&mut fifo, &mut io::sink()).expect("snapshot bytes must drain");
+    let output = runtime.wait_for_exit();
+    assert!(!output.status.success(), "snapshot failure must be fatal");
+
+    let mut restarted = spawn_runtime(&socket_path, &state);
+    let mut client = connect_with_timeout(&socket_path);
+    assert_eq!(
+        read_tree(&mut client),
+        initial,
+        "a queued mutation must not replace the last durable snapshot"
+    );
+    drop(client);
+    restarted.stop();
 }
 
 fn spawn_runtime(socket_path: &Path, state_dir: &Path) -> RuntimeProcess {

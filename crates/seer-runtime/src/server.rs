@@ -33,8 +33,7 @@ pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
             .spawn(move || {
                 if let Err(error) = handle_connection(stream, &connection, connection_id) {
                     if crate::persistence::is_fatal(&error) {
-                        eprintln!("runtime stops after a snapshot save failure: {error}");
-                        std::process::exit(1);
+                        stop_after_snapshot_failure(&error);
                     }
                     eprintln!("runtime connection error: {error}");
                 }
@@ -181,8 +180,13 @@ impl SharedSession {
     fn add_connection(&self, id: u64, stream: UnixStream) -> io::Result<()> {
         let messages = {
             let mut session = lock(&self.session)?;
-            session.ensure_first_shell()?;
-            session.snapshot()
+            match session.ensure_first_shell() {
+                Ok(()) => session.snapshot(),
+                Err(error) if crate::persistence::is_fatal(&error) => {
+                    stop_after_snapshot_failure(&error)
+                }
+                Err(error) => return Err(error),
+            }
         };
         let connection = Connection::new(id, stream)?;
         if !connection.send_messages(&messages)? {
@@ -234,7 +238,16 @@ impl SharedSession {
     }
 
     fn apply_and_broadcast(&self, message: ClientMsg) -> io::Result<()> {
-        let messages = lock(&self.session)?.apply(message)?;
+        let messages = {
+            let mut session = lock(&self.session)?;
+            match session.apply(message) {
+                Ok(messages) => messages,
+                Err(error) if crate::persistence::is_fatal(&error) => {
+                    stop_after_snapshot_failure(&error)
+                }
+                Err(error) => return Err(error),
+            }
+        };
         self.broadcast(&messages)
     }
 
@@ -333,6 +346,11 @@ fn lock_poisoned() -> io::Error {
 
 fn connection_closed() -> io::Error {
     io::Error::new(io::ErrorKind::NotConnected, "runtime connection is closed")
+}
+
+fn stop_after_snapshot_failure(error: &io::Error) -> ! {
+    eprintln!("runtime stops after a snapshot save failure: {error}");
+    std::process::exit(1)
 }
 
 #[cfg(test)]

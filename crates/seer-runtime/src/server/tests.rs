@@ -1,4 +1,3 @@
-
 use super::{ClientMsg, ServerMsg, SharedSession, is_mutating, lock};
 use crate::UserSession;
 use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};

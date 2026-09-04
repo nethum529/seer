@@ -163,9 +163,14 @@ impl RuntimeProcess {
     }
 
     pub fn stop(&mut self) -> Output {
-        let mut child = self.0.take().expect("runtime process must exist");
+        let child = self.0.as_mut().expect("runtime process must exist");
         drop(child.stdin.take());
-        wait_until_exit(&mut child, "runtime did not exit after its lifeline closed");
+        self.wait_for_exit()
+    }
+
+    pub fn wait_for_exit(&mut self) -> Output {
+        let mut child = self.0.take().expect("runtime process must exist");
+        wait_until_exit(&mut child, "runtime did not exit");
         child
             .wait_with_output()
             .expect("runtime output must be available")
