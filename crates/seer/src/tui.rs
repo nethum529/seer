@@ -50,11 +50,18 @@ pub(crate) enum SessionExit {
 pub(crate) fn run(mut stream: Socket, tree: Tree, own_user: String) -> io::Result<SessionExit> {
     let mut terminal = TerminalSession::start()?;
     initialize(&tree);
+    let drawer = Drawer::new(own_user.clone());
     let state = ClientState::new(tree, own_user);
     send_terminal_setup(&mut stream, &terminal.terminal, &state)?;
     let reader = stream.clone();
     let (receiver, reader_thread) = spawn_reader(reader);
-    let loop_result = run_loop(&mut terminal.terminal, &mut stream, &receiver, state);
+    let loop_result = run_loop(
+        &mut terminal.terminal,
+        &mut stream,
+        &receiver,
+        state,
+        drawer,
+    );
     drop(terminal);
     let _ = stream.shutdown(Shutdown::Both);
     join_reader(reader_thread)?;
@@ -95,10 +102,10 @@ fn run_loop<S: Stream>(
     stream: &mut S,
     receiver: &Receiver<ReaderEvent>,
     mut state: ClientState,
+    mut drawer: Drawer,
 ) -> io::Result<LoopControl> {
     let mut command_pending = false;
     let mut dirty = true;
-    let mut drawer = Drawer::default();
 
     loop {
         let size = terminal.size()?;
@@ -106,9 +113,6 @@ fn run_loop<S: Stream>(
             receive_messages(receiver, &mut state, &mut dirty, stream, size, &mut drawer)?;
         if received != LoopControl::Continue {
             return Ok(received);
-        }
-        if drawer.tick_preview() {
-            dirty = true;
         }
         if dirty {
             terminal.draw(|frame| draw(frame, &mut state, &drawer))?;
@@ -346,7 +350,7 @@ fn send_resize(stream: &mut impl Stream, state: &ClientState, size: Size) -> io:
         &ClientMsg::Resize {
             workspace: workspace.to_owned(),
             tab: tab.to_owned(),
-            cols: drawer::pane_size(size).width,
+            cols: size.width,
             rows: size.height,
         },
     )
@@ -479,6 +483,9 @@ fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState, drawer: &Drawer
 
 #[cfg(test)]
 pub(crate) mod test_support;
+
+#[cfg(test)]
+mod drawer_tests;
 
 #[cfg(test)]
 mod herdr_tests;

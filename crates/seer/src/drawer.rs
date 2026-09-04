@@ -6,20 +6,19 @@ use ratatui::text::Line;
 use ratatui::widgets::{Block, Borders, Clear, Paragraph};
 use seer_core::proto::{Person, PersonState};
 
-use crate::preview::Preview;
-use crate::render::{PaneCells, draw_tree};
+use crate::render::draw_tree;
 use crate::state::ClientState;
 
-const HANDLE_WIDTH: u16 = 1;
-const MINIMUM_DRAWER_WIDTH: u16 = 40;
+const ROW_WIDTH: u16 = 32;
+const DRAWER_WIDTH: u16 = ROW_WIDTH + 2;
+const HINT: &str = "Enter peek  Esc close";
 
 #[derive(Default)]
 pub(crate) struct Drawer {
     open: bool,
+    own_user: String,
     people: Vec<Person>,
     selected: usize,
-    preview: Option<Preview>,
-    preview_target: Option<String>,
     pending_peek: Option<Person>,
 }
 
@@ -30,6 +29,13 @@ pub(crate) enum DrawerAction {
 }
 
 impl Drawer {
+    pub(crate) fn new(own_user: String) -> Self {
+        Self {
+            own_user,
+            ..Self::default()
+        }
+    }
+
     pub(crate) fn is_open(&self) -> bool {
         self.open
     }
@@ -43,37 +49,8 @@ impl Drawer {
         self.selected = self.selected.min(self.people.len().saturating_sub(1));
     }
 
-    pub(crate) fn tick_preview(&mut self) -> bool {
-        self.sync_preview();
-        match self.preview.as_mut().map(Preview::tick) {
-            Some(Ok(redraw)) => redraw,
-            Some(Err(_)) => {
-                self.preview = None;
-                true
-            }
-            None => false,
-        }
-    }
-
-    fn sync_preview(&mut self) {
-        let wanted = self.highlighted().map(|person| person.user_id.clone());
-        if wanted == self.preview_target {
-            return;
-        }
-        self.preview = None;
-        self.preview_target = wanted;
-        if let Some(person) = self.highlighted() {
-            self.preview = Preview::open(person).ok();
-        }
-    }
-
-    fn highlighted(&self) -> Option<&Person> {
-        if !self.open {
-            return None;
-        }
-        self.people
-            .get(self.selected)
-            .filter(|person| person.peekable)
+    fn is_own(&self, person: &Person) -> bool {
+        person.user_id == self.own_user
     }
 
     pub(crate) fn handle_key(&mut self, key: KeyEvent) -> DrawerAction {
@@ -96,7 +73,7 @@ impl Drawer {
         let Some(person) = self
             .people
             .get(self.selected)
-            .filter(|person| person.peekable)
+            .filter(|person| person.peekable && !self.is_own(person))
         else {
             return DrawerAction::Handled;
         };
@@ -120,7 +97,7 @@ impl Drawer {
     pub(crate) fn handle_mouse(&mut self, mouse: MouseEvent, size: Size) -> bool {
         let area = Rect::new(0, 0, size.width, size.height);
         let position = Position::new(mouse.column, mouse.row);
-        if handle_area(area).contains(position) {
+        if button_area(area, self.people.len()).contains(position) {
             if matches!(mouse.kind, MouseEventKind::Down(MouseButton::Left)) {
                 self.toggle();
             }
@@ -128,10 +105,6 @@ impl Drawer {
         }
         self.open && drawer_area(area).contains(position)
     }
-}
-
-pub(crate) fn pane_size(size: Size) -> Size {
-    Size::new(size.width.saturating_sub(HANDLE_WIDTH), size.height)
 }
 
 pub(crate) fn draw(
@@ -142,63 +115,37 @@ pub(crate) fn draw(
     peek_person: Option<&str>,
 ) {
     let full_area = frame.area();
-    draw_tree(frame, state, pane_area(full_area), status, peek_person);
-    frame.render_widget(
-        Block::default().borders(Borders::LEFT),
-        handle_area(full_area),
-    );
+    draw_tree(frame, state, full_area, status, peek_person);
     if drawer.is_open() {
         draw_drawer(frame, drawer, drawer_area(full_area));
     }
+    draw_button(frame, drawer, full_area);
+}
+
+fn draw_button(frame: &mut Frame<'_>, drawer: &Drawer, area: Rect) {
+    let button = button_area(area, drawer.people.len());
+    if button.is_empty() {
+        return;
+    }
+    frame.render_widget(Clear, button);
+    frame.render_widget(Paragraph::new(button_text(drawer.people.len())), button);
 }
 
 fn draw_drawer(frame: &mut Frame<'_>, drawer: &Drawer, area: Rect) {
     frame.render_widget(Clear, area);
-    let list_height = list_height(drawer, area);
-    let list = Rect::new(area.x, area.y, area.width, list_height);
     let block = Block::default().borders(Borders::ALL).title("People");
-    let inner = block.inner(list);
-    frame.render_widget(block, list);
-    frame.render_widget(Paragraph::new(people_lines(drawer, inner.width)), inner);
-    draw_preview(
-        frame,
-        drawer,
-        Rect::new(
-            area.x,
-            area.y.saturating_add(list_height),
-            area.width,
-            area.height.saturating_sub(list_height),
-        ),
-    );
-}
-
-fn list_height(drawer: &Drawer, area: Rect) -> u16 {
-    if drawer.preview.is_none() {
-        return area.height;
-    }
-    let rows = u16::try_from(drawer.people.len()).unwrap_or(u16::MAX);
-    rows.saturating_add(2).min(area.height / 2).min(area.height)
-}
-
-fn draw_preview(frame: &mut Frame<'_>, drawer: &Drawer, area: Rect) {
-    let (Some(preview), Some(person)) = (drawer.preview.as_ref(), drawer.highlighted()) else {
-        return;
-    };
-    if area.height == 0 {
+    let inner = block.inner(area);
+    frame.render_widget(block, area);
+    if inner.height == 0 {
         return;
     }
     frame.render_widget(
-        Paragraph::new(format!("{} live", person.name)),
-        Rect::new(area.x, area.y, area.width, 1),
+        Paragraph::new(people_lines(drawer, inner.width)),
+        Rect::new(inner.x, inner.y, inner.width, inner.height - 1),
     );
     frame.render_widget(
-        PaneCells::new(preview.rows()),
-        Rect::new(
-            area.x,
-            area.y.saturating_add(1),
-            area.width,
-            area.height.saturating_sub(1),
-        ),
+        Paragraph::new(HINT),
+        Rect::new(inner.x, inner.y + inner.height - 1, inner.width, 1),
     );
 }
 
@@ -208,7 +155,7 @@ fn people_lines(drawer: &Drawer, width: u16) -> Vec<Line<'static>> {
         .iter()
         .enumerate()
         .map(|(index, person)| {
-            let line = Line::from(person_row(person, width));
+            let line = Line::from(person_row(person, drawer.is_own(person), width));
             if index == drawer.selected {
                 return line.style(Style::default().add_modifier(Modifier::REVERSED));
             }
@@ -217,7 +164,7 @@ fn people_lines(drawer: &Drawer, width: u16) -> Vec<Line<'static>> {
         .collect()
 }
 
-fn person_row(person: &Person, width: u16) -> String {
+fn person_row(person: &Person, own: bool, width: u16) -> String {
     let dot = match person.state {
         PersonState::Active => '*',
         PersonState::Idle => 'o',
@@ -228,12 +175,12 @@ fn person_row(person: &Person, width: u16) -> String {
     } else {
         person.foreground.as_str()
     };
-    let row = format!(
-        "{dot} {:<12} {:<12} {:>4}",
-        person.name,
-        foreground,
+    let idle = if own {
+        "you".to_owned()
+    } else {
         idle_text(person.idle_secs)
-    );
+    };
+    let row = format!("{dot} {:<12} {:<12} {idle:>4}", person.name, foreground);
     format!("{row:<width$}", width = usize::from(width))
 }
 
@@ -247,28 +194,27 @@ fn idle_text(seconds: u64) -> String {
     }
 }
 
-fn pane_area(mut area: Rect) -> Rect {
-    area.width = area.width.saturating_sub(HANDLE_WIDTH);
-    area
+fn button_text(people: usize) -> String {
+    format!("[ People {people} ]")
 }
 
-fn handle_area(area: Rect) -> Rect {
-    let width = area.width.min(HANDLE_WIDTH);
+fn button_area(area: Rect, people: usize) -> Rect {
+    let text = u16::try_from(button_text(people).len()).unwrap_or(u16::MAX);
+    let width = text.min(area.width);
+    Rect::new(
+        area.x + area.width.saturating_sub(width),
+        area.y,
+        width,
+        area.height.min(1),
+    )
+}
+
+fn drawer_area(area: Rect) -> Rect {
+    let width = DRAWER_WIDTH.min(area.width);
     Rect::new(
         area.x + area.width.saturating_sub(width),
         area.y,
         width,
         area.height,
-    )
-}
-
-fn drawer_area(area: Rect) -> Rect {
-    let pane = pane_area(area);
-    let width = (area.width / 3).max(MINIMUM_DRAWER_WIDTH).min(pane.width);
-    Rect::new(
-        pane.x + pane.width.saturating_sub(width),
-        pane.y,
-        width,
-        pane.height,
     )
 }

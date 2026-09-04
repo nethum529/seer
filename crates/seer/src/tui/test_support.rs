@@ -179,7 +179,7 @@ pub(super) fn highlighted_person(drawer: &Drawer, state: &mut ClientState) -> Op
         .expect("drawer must draw");
     let buffer = terminal.backend().buffer();
     (1..23)
-        .find(|row| buffer[(41, *row)].modifier.contains(Modifier::REVERSED))
+        .find(|row| buffer[(50, *row)].modifier.contains(Modifier::REVERSED))
         .map(|row| row - 1)
 }
 
