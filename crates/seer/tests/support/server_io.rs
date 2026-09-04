@@ -1,5 +1,4 @@
 use std::io::{self, Read};
-use std::net::TcpStream;
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -8,7 +7,7 @@ use seer_core::proto::{ClientMsg, codec};
 const RECEIVE_TIMEOUT: Duration = Duration::from_secs(5);
 const RETRY_DELAY: Duration = Duration::from_millis(10);
 
-pub(crate) fn receive(stream: &mut TcpStream) -> ClientMsg {
+pub(crate) fn receive(stream: &mut impl Read) -> ClientMsg {
     let mut reader = DeadlineReader {
         inner: stream,
         deadline: Instant::now() + RECEIVE_TIMEOUT,

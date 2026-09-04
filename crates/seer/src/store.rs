@@ -129,11 +129,11 @@ fn temporary_path(path: &Path) -> io::Result<PathBuf> {
 fn replace_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
     let directory = parent_directory(path)?;
     let temporary = temporary_path(path)?;
-    let result = write_temporary(&temporary, contents)
-        .and_then(|()| fs::rename(&temporary, path))
-        .and_then(|()| sync_directory(directory));
+    let result = write_temporary(&temporary, contents).and_then(|()| fs::rename(&temporary, path));
     if result.is_err() {
         let _ = fs::remove_file(&temporary);
+    } else {
+        let _ = sync_directory(directory);
     }
     result
 }
