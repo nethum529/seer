@@ -106,14 +106,14 @@ impl RuntimeManager {
             .lock()
             .map_err(|_| io::Error::other("runtime user lock is poisoned"))?;
         let _file_lock = self.lifecycle.lock(user_id)?;
-        if let Some(record) = self.lifecycle.load(user_id)? {
-            if record.state == RuntimeState::Running {
-                if let Ok(stream) = connect_ready(&socket_path, &record.generation) {
-                    return Ok(stream);
-                }
-                self.retire_process_if_generation(user_id, &record.generation)?;
-                let _ = remove_runtime_socket(&socket_path);
+        if let Some(record) = self.lifecycle.load(user_id)?
+            && record.state == RuntimeState::Running
+        {
+            if let Ok(stream) = connect_ready(&socket_path, &record.generation) {
+                return Ok(stream);
             }
+            self.retire_process_if_generation(user_id, &record.generation)?;
+            let _ = remove_runtime_socket(&socket_path);
         }
 
         let starting = self.lifecycle.starting(user_id)?;

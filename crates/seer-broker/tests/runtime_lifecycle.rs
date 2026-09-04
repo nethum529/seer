@@ -14,6 +14,8 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 pub mod binary;
 #[path = "forwarding/extras.rs"]
 pub mod extras;
+#[path = "forwarding/lifecycle.rs"]
+mod lifecycle;
 #[path = "forwarding/support.rs"]
 pub mod support;
 
@@ -55,7 +57,13 @@ fn concurrent_first_attaches_share_one_ready_generation() {
         .map(|client| client.join().expect("concurrent attach must finish"))
         .collect::<Vec<_>>();
 
-    assert_eq!(temporary.launch_count("alice"), 1);
+    assert_eq!(
+        fs::read_to_string(temporary.root.join("alice.launches"))
+            .expect("runtime launch log must be readable")
+            .lines()
+            .count(),
+        1
+    );
     let record = temporary.wait_for_runtime_state("alice", "running");
     assert_eq!(record["generation"].as_str().map(str::len), Some(32));
     assert_eq!(record["state"].as_str(), Some("running"));

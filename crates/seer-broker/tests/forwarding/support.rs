@@ -217,34 +217,6 @@ impl TestFiles {
             .parse()
             .expect("runtime PID must be valid")
     }
-    pub(crate) fn runtime_record(&self, user: &str) -> serde_json::Value {
-        let path = self.state_dir.join(format!("runtime-records/{user}.json"));
-        assert!(wait_for_file(&path));
-        serde_json::from_str(&fs::read_to_string(path).expect("runtime record must be readable"))
-            .expect("runtime record must be valid JSON")
-    }
-    pub(crate) fn wait_for_runtime_state(&self, user: &str, expected: &str) -> serde_json::Value {
-        let path = self.state_dir.join(format!("runtime-records/{user}.json"));
-        let deadline = Instant::now() + WAIT_TIMEOUT;
-        while Instant::now() < deadline {
-            if path.is_file()
-                && let Ok(record) = fs::read_to_string(&path)
-                && let Ok(record) = serde_json::from_str::<serde_json::Value>(&record)
-                && record["state"] == expected
-            {
-                return record;
-            }
-            thread::sleep(POLL_INTERVAL);
-        }
-        panic!("runtime did not reach state {expected}");
-    }
-
-    pub(crate) fn launch_count(&self, user: &str) -> usize {
-        fs::read_to_string(self.root.join(format!("{user}.launches")))
-            .expect("runtime launch log must be readable")
-            .lines()
-            .count()
-    }
 
     pub(crate) fn terminate_runtime(&self, user: &str) -> PathBuf {
         let pid = self.runtime_pid(user);

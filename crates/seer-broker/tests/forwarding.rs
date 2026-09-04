@@ -12,6 +12,8 @@ use seer_core::{InputEvent, TerminalInput};
 mod binary;
 #[path = "forwarding/extras.rs"]
 mod extras;
+#[path = "forwarding/lifecycle.rs"]
+mod lifecycle;
 #[path = "forwarding/support.rs"]
 mod support;
 
