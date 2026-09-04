@@ -104,9 +104,6 @@ fn fake_broker_process() {
     )
     .expect("fake pid must be written");
     let listener = TcpListener::bind(config.listen).expect("fake broker must listen");
-    if std::env::var_os("SEER_FAKE_REMOTE_FAILURE").is_some() {
-        return;
-    }
     let mut worker = if std::env::var_os("SEER_FAKE_DESCENDANT").is_some() {
         let child = Command::new("sleep")
             .arg("30")
@@ -268,16 +265,18 @@ fn failed_broker_prints_only_the_last_twenty_log_lines() {
     assert!(output.stderr.contains("failure-line-6\n"));
     assert!(output.stderr.contains("failure-line-25\n"));
 }
+
 #[test]
 fn remote_listener_failure_does_not_report_start_success() {
     let _serial = PROCESS_TEST.lock().expect("process test lock must work");
     let directory = TestDirectory::new();
     write_config(&directory, unused_address());
     let executable = install_binaries(&directory);
-    let output = run_start(&executable, &directory, "", &[("SEER_FAKE_REMOTE_FAILURE", "1")]);
+    let environment = [("SEER_FAKE_REMOTE_FAILURE", "1")];
+    let output = run_start(&executable, &directory, "", &environment);
     assert_eq!(output.status.code(), Some(1));
     assert!(!output.stdout.contains("Server started"));
-    assert!(!output.stdout.contains("Seat ready."));
+    assert!(!output.stdout.contains("You are alice."));
 }
 
 #[test]
@@ -335,7 +334,7 @@ fn install_binaries(directory: &TestDirectory) -> PathBuf {
     let test_binary = std::env::current_exe().expect("test binary path must be available");
     assert!(!test_binary.to_string_lossy().contains('\''));
     let script = format!(
-        "#!/bin/sh\nif [ \"$SEER_FAKE_FAIL\" = 1 ]; then\n  i=1\n  while [ $i -le 25 ]; do echo failure-line-$i; i=$((i + 1)); done\n  exit 7\nfi\nexport SEER_FAKE_CONFIG=\"$1\"\nexec '{}' fake_broker_process --exact --nocapture\n",
+        "#!/bin/sh\nif [ \"$SEER_FAKE_FAIL\" = 1 ]; then\n  i=1\n  while [ $i -le 25 ]; do echo failure-line-$i; i=$((i + 1)); done\n  exit 7\nfi\nif [ \"$SEER_FAKE_REMOTE_FAILURE\" = 1 ]; then exit 8; fi\nexport SEER_FAKE_CONFIG=\"$1\"\nexec '{}' fake_broker_process --exact --nocapture\n",
         test_binary.display()
     );
     let broker = bin_dir.join("seer-broker");

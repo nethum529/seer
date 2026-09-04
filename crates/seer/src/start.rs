@@ -12,7 +12,7 @@ use std::{
         process::CommandExt,
     },
     path::{Path, PathBuf},
-    process::{Child, Command, Stdio},
+    process::{Child, Command, ExitStatus, Stdio},
     thread,
     time::{Duration, Instant},
 };
@@ -359,11 +359,12 @@ fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> 
 fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io::Result<()> {
     loop {
         if let Some(status) = child.try_wait()? {
-            return Err(io::Error::other(format!(
-                "seer-broker exited with {status}"
-            )));
+            return Err(broker_exit(status));
         }
         if port_accepts(listen) {
+            if let Some(status) = child.try_wait()? {
+                return Err(broker_exit(status));
+            }
             return Ok(());
         }
         if Instant::now() >= deadline {
@@ -374,6 +375,11 @@ fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io
         }
         thread::sleep(POLL_INTERVAL);
     }
+}
+
+#[cfg(target_os = "linux")]
+fn broker_exit(status: ExitStatus) -> io::Error {
+    io::Error::other(format!("seer-broker exited with {status}"))
 }
 
 #[cfg(target_os = "linux")]
