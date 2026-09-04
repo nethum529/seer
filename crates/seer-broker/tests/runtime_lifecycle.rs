@@ -86,6 +86,10 @@ fn failed_start_is_recorded_and_replacement_uses_a_new_generation() {
     send_hello(&mut failed, "alice", "alice-secret");
     assert!(matches!(
         read_message(&mut failed),
+        ServerMsg::Welcome { .. }
+    ));
+    assert!(matches!(
+        read_message(&mut failed),
         ServerMsg::Refused { .. }
     ));
     let failed_record = temporary.wait_for_runtime_state("alice", "failed");

@@ -52,6 +52,22 @@ impl<'a> Coordinator<'a> {
         let (event_sender, events) = mpsc::sync_channel(EVENT_QUEUE_CAPACITY);
         let client_reader = client.clone();
         let client = Arc::new(Mutex::new(Box::new(client) as Box<dyn Stream>));
+        let attachment = match broker.attach_client(&owner.user_id, Arc::clone(&client)) {
+            Ok(attachment) => attachment,
+            Err(error) => return Err(error),
+        };
+        let client_id = attachment.client_id().to_owned();
+        if let Err(error) = write_client(
+            &client,
+            &ServerMsg::Welcome {
+                user_id: owner.user_id.clone(),
+                name: owner.name.clone(),
+                client_id: client_id.clone(),
+                tree: Tree::new(),
+            },
+        ) {
+            return Err(error);
+        }
         let attach = ClientMsg::AttachRuntime;
         let runtime = match connect_runtime(
             broker,
@@ -72,26 +88,6 @@ impl<'a> Coordinator<'a> {
                 return Err(error);
             }
         };
-        let attachment = match broker.attach_client(&owner.user_id, Arc::clone(&client)) {
-            Ok(attachment) => attachment,
-            Err(error) => {
-                let _ = runtime.close();
-                return Err(error);
-            }
-        };
-        let client_id = attachment.client_id().to_owned();
-        if let Err(error) = write_client(
-            &client,
-            &ServerMsg::Welcome {
-                user_id: owner.user_id.clone(),
-                name: owner.name.clone(),
-                client_id: client_id.clone(),
-                tree: Tree::new(),
-            },
-        ) {
-            let _ = runtime.close();
-            return Err(error);
-        }
         let client_reader = spawn_client_reader(client_reader, event_sender.clone());
         Ok(Self {
             client,
