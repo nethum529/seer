@@ -469,4 +469,7 @@ fn draw(frame: &mut ratatui::Frame<'_>, state: &mut ClientState, drawer: &Drawer
 }
 
 #[cfg(test)]
+mod test_support;
+
+#[cfg(test)]
 mod tests;
