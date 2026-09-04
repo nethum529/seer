@@ -18,7 +18,7 @@ mod writer;
 use connection::{
     Connection, ReportedViewport, evict_connection, grant_next_owner, reported_viewport,
 };
-use util::{connection_closed, lock};
+use util::{connection_closed, lock, stop_after_snapshot_failure};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
@@ -40,6 +40,9 @@ pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
             .name(format!("runtime-connection-{connection_id}"))
             .spawn(move || {
                 if let Err(error) = handle_connection(stream, &connection, connection_id) {
+                    if crate::persistence::is_fatal(&error) {
+                        stop_after_snapshot_failure(&error);
+                    }
                     eprintln!("runtime connection error: {error}");
                 }
             })?;
@@ -174,8 +177,13 @@ impl SharedSession {
     fn add_connection(&self, id: u64, stream: UnixStream) -> io::Result<()> {
         let messages = {
             let mut session = lock(&self.session)?;
-            session.ensure_first_shell()?;
-            session.snapshot()
+            match session.ensure_first_shell() {
+                Ok(()) => session.snapshot(),
+                Err(error) if crate::persistence::is_fatal(&error) => {
+                    stop_after_snapshot_failure(&error)
+                }
+                Err(error) => return Err(error),
+            }
         };
         let mut connection = Connection::new(id, stream)?;
         if !connection.send_messages(&messages)? {
@@ -233,7 +241,7 @@ impl SharedSession {
     }
 
     fn adopt_locked(&self, viewport: ReportedViewport) -> io::Result<()> {
-        let messages = match lock(&self.session)?.apply(ClientMsg::Resize {
+        let messages = match self.apply(ClientMsg::Resize {
             workspace: viewport.workspace,
             tab: viewport.tab,
             cols: viewport.cols,
@@ -264,7 +272,7 @@ impl SharedSession {
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);
         }
-        let applied = lock(&self.session)?.apply(message);
+        let applied = self.apply(message);
         match applied {
             Ok(messages) => {
                 self.flush_messages(&messages)?;
@@ -331,7 +339,7 @@ impl SharedSession {
             cols,
             rows,
         };
-        let applied = lock(&self.session)?.apply(message);
+        let applied = self.apply(message);
         match applied {
             Ok(messages) => {
                 let mut connections = lock(&self.connections)?;
@@ -423,8 +431,19 @@ impl SharedSession {
 
     #[cfg(test)]
     fn apply_and_broadcast(&self, message: ClientMsg) -> io::Result<()> {
-        let messages = lock(&self.session)?.apply(message)?;
+        let messages = self.apply(message)?;
         self.broadcast(&messages)
+    }
+
+    fn apply(&self, message: ClientMsg) -> io::Result<Vec<ServerMsg>> {
+        let mut session = lock(&self.session)?;
+        match session.apply(message) {
+            Ok(messages) => Ok(messages),
+            Err(error) if crate::persistence::is_fatal(&error) => {
+                stop_after_snapshot_failure(&error)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {

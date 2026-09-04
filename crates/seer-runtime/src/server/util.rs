@@ -12,3 +12,8 @@ fn lock_poisoned() -> io::Error {
 pub(super) fn connection_closed() -> io::Error {
     io::Error::new(io::ErrorKind::NotConnected, "runtime connection is closed")
 }
+
+pub(super) fn stop_after_snapshot_failure(error: &io::Error) -> ! {
+    eprintln!("runtime stops after a snapshot save failure: {error}");
+    std::process::exit(1)
+}

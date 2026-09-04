@@ -3549,6 +3549,8 @@ dependencies = [
  "alacritty_terminal",
  "portable-pty",
  "seer-core",
+ "serde",
+ "serde_json",
 ]
 
 [[package]]
