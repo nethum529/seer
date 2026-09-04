@@ -5,7 +5,7 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientMsg, ServerMsg};
+use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg};
 use seer_core::{InputEvent, TerminalInput};
 
 #[path = "support/binary.rs"]
@@ -45,6 +45,8 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     let pane = &tree.workspaces[0].tabs[0].panes[0].id;
     send_input(
         &mut first,
+        "w1",
+        "w1:t1",
         pane,
         "sh -c 'printf \"%s\\n\" \"$PPID\" > \"$SEER_TEST_FILES/alice-pane.pid\"'\n",
     );
@@ -106,9 +108,29 @@ fn routes_peek_and_restores_the_owners_runtime() {
     let mut alice = connect_when_ready(address);
     send_hello(&mut alice, "alice", "alice-secret");
     drop(welcome_client_id(read_message(&mut alice), "alice"));
+    let first_tree = wait_for_tree_with_tab(&mut alice);
+    assert!(wait_for_cells(&mut alice));
+    let workspace = first_tree.workspaces[0].id.clone();
+    let first_tab = first_tree.workspaces[0].tabs[0].id.clone();
+    let first_pane = first_tree.workspaces[0].tabs[0].panes[0].id.clone();
+    send(
+        &mut alice,
+        &ClientMsg::ClosePane {
+            workspace: workspace.clone(),
+            tab: first_tab,
+            pane: first_pane,
+        },
+    );
+    wait_for_empty_tree(&mut alice);
+    send(
+        &mut alice,
+        &ClientMsg::CreateTab {
+            workspace: workspace.clone(),
+        },
+    );
     let alice_tree = wait_for_tree_with_tab(&mut alice);
     assert!(wait_for_cells(&mut alice));
-    let workspace = alice_tree.workspaces[0].id.clone();
+    let tab = alice_tree.workspaces[0].tabs[0].id.clone();
     let pane = alice_tree.workspaces[0].tabs[0].panes[0].id.clone();
 
     let mut bob = connect_when_ready(address);
@@ -125,39 +147,64 @@ fn routes_peek_and_restores_the_owners_runtime() {
 
     send(
         &mut bob,
-        &ClientMsg::Peek {
+        &ClientMsg::QueryTargets {
             user: "charlie".into(),
-            workspace: workspace.clone(),
-            tab: "w1:t1".into(),
         },
     );
-    send(
-        &mut bob,
-        &ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 90,
-            rows: 30,
-        },
+    assert_eq!(
+        wait_for_refused(&mut bob),
+        ServerMsg::Refused {
+            reason: "person not found".into()
+        }
     );
-    wait_for_tree_with_tab(&mut bob);
     assert!(!temporary.pid_file("charlie").is_file());
 
     send(
         &mut bob,
+        &ClientMsg::QueryTargets {
+            user: "alice".into(),
+        },
+    );
+    let target = wait_for_targets(&mut bob)
+        .into_iter()
+        .next()
+        .expect("alice must have a target");
+    assert_eq!(target.workspace, workspace);
+    assert_eq!(target.tab, tab);
+    send(
+        &mut bob,
         &ClientMsg::Peek {
             user: "alice".into(),
-            workspace,
-            tab: "w1:t1".into(),
+            workspace: target.workspace,
+            tab: target.tab,
         },
     );
     assert_eq!(wait_for_tree_with_tab(&mut bob), alice_tree);
-    send_input(&mut alice, &pane, "printf 'alice-before\\n'\n");
+
+    send_input(
+        &mut alice,
+        &workspace,
+        &tab,
+        &pane,
+        "printf 'alice-before\\n'\n",
+    );
     assert!(wait_for_cells_containing(&mut alice, "alice-before").contains("alice-before"));
     assert!(wait_for_cells_containing(&mut bob, "alice-before").contains("alice-before"));
 
-    send_input(&mut bob, &pane, "printf 'bob-write\\n'\n");
-    send_input(&mut alice, &pane, "printf 'alice-after\\n'\n");
+    send_input(
+        &mut bob,
+        &workspace,
+        &tab,
+        &pane,
+        "printf 'bob-write\\n'\n",
+    );
+    send_input(
+        &mut alice,
+        &workspace,
+        &tab,
+        &pane,
+        "printf 'alice-after\\n'\n",
+    );
     let alice_cells = wait_for_cells_containing(&mut alice, "alice-after");
     let bob_cells = wait_for_cells_containing(&mut bob, "alice-after");
     assert!(!alice_cells.contains("bob-write"));
@@ -167,10 +214,20 @@ fn routes_peek_and_restores_the_owners_runtime() {
     wait_for_tree_with_tab(&mut bob);
     send(
         &mut bob,
+        &ClientMsg::QueryTargets {
+            user: "alice".into(),
+        },
+    );
+    let target = wait_for_targets(&mut bob)
+        .into_iter()
+        .next()
+        .expect("alice must have a target after requery");
+    send(
+        &mut bob,
         &ClientMsg::Peek {
             user: "alice".into(),
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
+            workspace: target.workspace,
+            tab: target.tab,
         },
     );
     wait_for_tree_with_tab(&mut bob);
@@ -224,12 +281,12 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
     temporary.terminate_runtime("bob");
 }
 
-fn send_input(stream: &mut TcpStream, pane: &str, input: &str) {
+fn send_input(stream: &mut TcpStream, workspace: &str, tab: &str, pane: &str, input: &str) {
     send(
         stream,
         &ClientMsg::TerminalInput {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
+            workspace: workspace.into(),
+            tab: tab.into(),
             pane: pane.into(),
             input: TerminalInput::new(InputEvent::Text(input.into())),
         },
@@ -243,6 +300,21 @@ fn assert_tree_has_one_tab(message: ServerMsg) {
             assert_eq!(tree.workspaces[0].tabs.len(), 1);
         }
         other => panic!("expected Tree, got {other:?}"),
+    }
+}
+
+fn wait_for_empty_tree(stream: &mut TcpStream) {
+    wait_for_broker_message(stream, |message| {
+        matches!(message, ServerMsg::Tree { tree } if tree.workspaces.iter().all(|workspace| workspace.tabs.is_empty()))
+    });
+}
+
+fn wait_for_targets(stream: &mut TcpStream) -> Vec<PeekTarget> {
+    match wait_for_broker_message(stream, |message| {
+        matches!(message, ServerMsg::Targets { .. })
+    }) {
+        ServerMsg::Targets { targets } => targets,
+        other => panic!("expected Targets, got {other:?}"),
     }
 }
 

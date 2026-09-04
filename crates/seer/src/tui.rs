@@ -166,6 +166,7 @@ fn apply_server_message(message: ServerMsg, state: &mut ClientState) -> io::Resu
         | ServerMsg::Seat { .. }
         | ServerMsg::People { .. }
         | ServerMsg::Clients { .. }
+        | ServerMsg::Targets { .. }
         | ServerMsg::Refused { .. } => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,

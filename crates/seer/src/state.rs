@@ -1,7 +1,7 @@
 use std::collections::HashMap;
 
 use ratatui::layout::Rect;
-use seer_core::{Cell, Cursor, MouseTracking, Tab, TerminalFrame, Tree};
+use seer_core::{Cell, Cursor, MouseTracking, PeekTarget, Tab, TerminalFrame, Tree};
 
 #[derive(Debug)]
 pub(crate) struct ClientState {
@@ -152,6 +152,17 @@ fn selected_tab_in<'a>(
         .find(|candidate| Some(candidate.id.as_str()) == tab)
 }
 
+pub(crate) fn default_peek_target(targets: &[PeekTarget]) -> Option<PeekTarget> {
+    match targets {
+        [target] => Some(target.clone()),
+        _ => None,
+    }
+}
+
+pub(crate) fn peek_target_at(targets: &[PeekTarget], number: usize) -> Option<PeekTarget> {
+    targets.get(number.checked_sub(1)?).cloned()
+}
+
 fn preferred_focus(tab: &Tab) -> Option<String> {
     tab.layout
         .focused
@@ -181,9 +192,9 @@ pub(crate) fn pane_rects(tab: &Tab, area: Rect) -> Vec<(String, Rect)> {
 #[cfg(test)]
 mod tests {
     use ratatui::layout::Rect;
-    use seer_core::{PaneSize, SplitDirection, Tree};
+    use seer_core::{PaneSize, PeekTarget, SplitDirection, Tree};
 
-    use super::pane_rects;
+    use super::{default_peek_target, pane_rects, peek_target_at};
 
     #[test]
     fn pane_rects_use_shared_layout_with_area_offsets() {
@@ -206,5 +217,32 @@ mod tests {
                 ("w1:p3".into(), Rect::new(51, 33, 40, 12)),
             ]
         );
+    }
+
+    #[test]
+    fn target_selection_requires_a_choice_for_multiple_targets() {
+        let targets = vec![
+            PeekTarget {
+                workspace: "w1".into(),
+                workspace_name: "main".into(),
+                tab: "w1:t2".into(),
+                tab_title: "shell".into(),
+            },
+            PeekTarget {
+                workspace: "w2".into(),
+                workspace_name: "work".into(),
+                tab: "w2:t1".into(),
+                tab_title: "tests".into(),
+            },
+        ];
+
+        assert!(default_peek_target(&targets).is_none());
+        assert_eq!(
+            peek_target_at(&targets, 2)
+                .expect("second target must be selectable")
+                .workspace,
+            "w2"
+        );
+        assert!(peek_target_at(&targets, 0).is_none());
     }
 }

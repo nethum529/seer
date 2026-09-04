@@ -1,7 +1,7 @@
 use crate::PaneHost;
 use portable_pty::CommandBuilder;
 use seer_core::layout::{PaneRect, rects};
-use seer_core::proto::{ClientMsg, ServerMsg};
+use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg};
 use seer_core::{
     PaneSize, TERMINAL_PROTOCOL_VERSION, Tab, TerminalCapabilities, TerminalInput, Tree, TreeError,
 };
@@ -74,6 +74,7 @@ impl UserSession {
             | ClientMsg::Invite { .. }
             | ClientMsg::ListPeople
             | ClientMsg::DetachClient { .. }
+            | ClientMsg::QueryTargets { .. }
             | ClientMsg::Peek { .. }
             | ClientMsg::StopPeek
             | ClientMsg::Detach => Ok(Vec::new()),
@@ -115,6 +116,22 @@ impl UserSession {
         let mut messages = vec![ServerMsg::Tree { tree }];
         messages.extend(cells);
         messages
+    }
+
+    #[must_use]
+    pub(crate) fn targets(&self) -> Vec<PeekTarget> {
+        self.tree
+            .workspaces
+            .iter()
+            .flat_map(|workspace| {
+                workspace.tabs.iter().map(|tab| PeekTarget {
+                    workspace: workspace.id.clone(),
+                    workspace_name: workspace.name.clone(),
+                    tab: tab.id.clone(),
+                    tab_title: tab.title.clone(),
+                })
+            })
+            .collect()
     }
 
     pub(crate) fn ensure_first_shell(&mut self) -> io::Result<()> {

@@ -9,10 +9,13 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::Tree;
-use seer_core::proto::{ClientMsg, Person, ServerMsg, codec};
+use seer_core::proto::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
 
 #[path = "support/server_io.rs"]
 mod server_io;
+
+#[path = "peek.rs"]
+mod peek;
 
 use server_io::receive;
 
@@ -295,53 +298,6 @@ fn invite_prints_the_worked_example_block() {
     server.join().expect("server must finish");
 }
 
-#[test]
-fn peek_requires_an_exact_name_and_sends_the_user_id() {
-    let config = TestConfig::new();
-    let listener = listener();
-    let address = listener
-        .local_addr()
-        .expect("listener must have an address");
-    write_store(&config, &[saved(address.port(), "team.example.com", true)]);
-    let server = thread::spawn(move || {
-        for exact in [false, true] {
-            let mut stream = accept(&listener);
-            assert_hello(&mut stream);
-            send_welcome(&mut stream, "user-bob", "bob");
-            assert_eq!(receive(&mut stream), ClientMsg::ListPeople);
-            send(
-                &mut stream,
-                &ServerMsg::People {
-                    people: vec![person("user-alice", "alice", 1)],
-                },
-            );
-            if exact {
-                assert_eq!(
-                    receive(&mut stream),
-                    ClientMsg::Peek {
-                        user: "user-alice".into(),
-                        workspace: "w1".into(),
-                        tab: "w1:t1".into(),
-                    }
-                );
-            }
-        }
-    });
-
-    let close = run(&config, &["peek", "alic"], "");
-    assert_eq!(close.status.code(), Some(1));
-    assert!(close.stdout.is_empty());
-    assert_eq!(close.stderr, b"Close names: alice\nno person named alic\n");
-
-    let exact = run(&config, &["peek", "alice"], "");
-    assert_eq!(exact.status.code(), Some(0));
-    assert_eq!(
-        exact.stdout,
-        b"PEEK: alice - READ ONLY\nWorkspace: alice/w1\n"
-    );
-    assert!(exact.stderr.is_empty());
-    server.join().expect("server must finish");
-}
 
 fn assert_hello(stream: &mut TcpStream) {
     assert_eq!(

@@ -163,6 +163,9 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
         ClientMsg::DetachClient {
             client_id: "client-1".into(),
         },
+        ClientMsg::QueryTargets {
+            user: "bob".into(),
+        },
         ClientMsg::Peek {
             user: "bob".into(),
             workspace: "w1".into(),
@@ -220,6 +223,13 @@ fn peek_selects_one_workspace_and_tab_and_rejects_invalid_ids() {
             .expect("second tab must be created");
     }
 
+    let targets = session.targets();
+    assert_eq!(targets.len(), 4);
+    assert_eq!(targets[0].workspace, "w1");
+    assert_eq!(targets[0].tab, "w1:t1");
+    assert_eq!(targets[2].workspace, "w2");
+    assert_eq!(targets[2].tab, "w2:t1");
+
     let selected = session
         .selected_tree("w2", "w2:t2")
         .expect("selected tree must exist");
@@ -243,7 +253,6 @@ fn peek_selects_one_workspace_and_tab_and_rejects_invalid_ids() {
         io::ErrorKind::InvalidInput
     );
 }
-
 fn session_with_tab() -> UserSession {
     let mut session = UserSession::new("alice", "sh");
     session

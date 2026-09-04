@@ -55,6 +55,9 @@ pub enum ClientMsg {
         cols: u16,
         rows: u16,
     },
+    QueryTargets {
+        user: String,
+    },
     Peek {
         user: String,
         workspace: String,
@@ -87,6 +90,9 @@ pub enum ServerMsg {
     Clients {
         clients: Vec<ClientInfo>,
     },
+    Targets {
+        targets: Vec<PeekTarget>,
+    },
     Refused {
         reason: String,
     },
@@ -104,6 +110,14 @@ pub enum ServerMsg {
     Bye {
         reason: String,
     },
+}
+
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct PeekTarget {
+    pub workspace: String,
+    pub workspace_name: String,
+    pub tab: String,
+    pub tab_title: String,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -126,7 +140,7 @@ mod tests {
 
     use serde::{Serialize, de::DeserializeOwned};
 
-    use super::{ClientInfo, ClientMsg, Person, ServerMsg, codec};
+    use super::{ClientInfo, ClientMsg, PeekTarget, Person, ServerMsg, codec};
     use crate::{
         Cell, Color, Cursor, InputEvent, KeyCode, KeyInput, Modifiers, PaneSize, SplitDirection,
         TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, TerminalInput,
@@ -221,6 +235,9 @@ mod tests {
                 cols: 120,
                 rows: 40,
             },
+            ClientMsg::QueryTargets {
+                user: "bob".into(),
+            },
             ClientMsg::Peek {
                 user: "bob".into(),
                 workspace: "w1".into(),
@@ -260,6 +277,14 @@ mod tests {
                     name: "Alice".into(),
                     attached_clients: 2,
                     peekable: true,
+                }],
+            },
+            ServerMsg::Targets {
+                targets: vec![PeekTarget {
+                    workspace: "w2".into(),
+                    workspace_name: "work".into(),
+                    tab: "w2:t3".into(),
+                    tab_title: "shell".into(),
                 }],
             },
             ServerMsg::Clients {
