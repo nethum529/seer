@@ -6,9 +6,13 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::str::FromStr;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
+use std::sync::Arc;
 use std::thread::{self, JoinHandle};
+use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::time::timeout;
 
 mod stream;
 
@@ -17,7 +21,37 @@ pub use stream::{Socket, Stream};
 
 pub const ALPN: &[u8] = b"seer/1";
 
+const PRE_STREAM_CONNECTION_LIMIT: usize = 32;
+const PRE_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
+
 type AcceptedStream = io::Result<(EndpointId, UnixStream)>;
+
+struct PreStreamLimit(Arc<AtomicUsize>);
+
+impl Default for PreStreamLimit {
+    fn default() -> Self {
+        Self(Arc::new(AtomicUsize::new(0)))
+    }
+}
+
+impl PreStreamLimit {
+    fn try_acquire(&self) -> Option<PreStreamGuard> {
+        self.0
+            .fetch_update(Ordering::AcqRel, Ordering::Acquire, |active| {
+                (active < PRE_STREAM_CONNECTION_LIMIT).then_some(active + 1)
+            })
+            .ok()?;
+        Some(PreStreamGuard(Arc::clone(&self.0)))
+    }
+}
+
+struct PreStreamGuard(Arc<AtomicUsize>);
+
+impl Drop for PreStreamGuard {
+    fn drop(&mut self) {
+        self.0.fetch_sub(1, Ordering::AcqRel);
+    }
+}
 
 pub fn load_or_create_secret_key(path: &Path) -> io::Result<SecretKey> {
     match fs::read(path) {
@@ -169,6 +203,7 @@ async fn run_listener(
 
     let mut control_byte = [0_u8; 1];
     let mut connections = tokio::task::JoinSet::new();
+    let pre_streams = PreStreamLimit::default();
     loop {
         tokio::select! {
             _ = control.read(&mut control_byte) => break,
@@ -176,8 +211,12 @@ async fn run_listener(
                 let Some(incoming) = incoming else {
                     break;
                 };
+                let Some(pre_stream) = pre_streams.try_acquire() else {
+                    incoming.refuse();
+                    continue;
+                };
                 let result_sender = accepted.clone();
-                connections.spawn(handle_incoming(incoming, result_sender));
+                connections.spawn(handle_incoming(incoming, result_sender, pre_stream));
             }
             Some(_) = connections.join_next(), if !connections.is_empty() => {}
         }
@@ -195,22 +234,35 @@ async fn bind_endpoint(secret_key: SecretKey) -> io::Result<Endpoint> {
         .map_err(|_| io::Error::other("could not bind endpoint"))
 }
 
-async fn handle_incoming(incoming: Incoming, accepted: Sender<AcceptedStream>) {
-    let connection = match incoming.await {
-        Ok(connection) => connection,
-        Err(_) => return,
+async fn handle_incoming(
+    incoming: Incoming,
+    accepted: Sender<AcceptedStream>,
+    pre_stream: PreStreamGuard,
+) {
+    let connection = match timeout(PRE_STREAM_TIMEOUT, incoming).await {
+        Ok(Ok(connection)) => connection,
+        _ => return,
     };
     let remote = connection.remote_id();
-    let (send, recv) = match connection.accept_bi().await {
-        Ok(streams) => streams,
-        Err(_) => return,
+    let (send, recv) = match timeout(PRE_STREAM_TIMEOUT, connection.accept_bi()).await {
+        Ok(Ok(streams)) => streams,
+        _ => {
+            connection.close(0_u8.into(), b"seer stream deadline");
+            return;
+        }
     };
+    drop(pre_stream);
     let (caller_stream, bridge_stream) = match stream_pair() {
         Ok(streams) => streams,
-        Err(_) => return,
+        Err(_) => {
+            connection.close(0_u8.into(), b"seer stream unavailable");
+            return;
+        }
     };
     if accepted.send(Ok((remote, caller_stream))).is_ok() {
         let _ = bridge(send, recv, bridge_stream).await;
+    } else {
+        connection.close(0_u8.into(), b"seer listener stopped");
     }
 }
 
@@ -328,4 +380,20 @@ async fn copy_to_quic(
 
 fn task_result(result: Result<io::Result<()>, tokio::task::JoinError>) -> io::Result<()> {
     result.map_err(|_| io::Error::other("bridge task stopped"))?
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{PRE_STREAM_CONNECTION_LIMIT, PreStreamLimit};
+
+    #[test]
+    fn pre_stream_limit_releases_after_connection_task_finishes() {
+        let limit = PreStreamLimit::default();
+        let guards = (0..PRE_STREAM_CONNECTION_LIMIT)
+            .map(|_| limit.try_acquire().expect("pre-stream slot must be available"))
+            .collect::<Vec<_>>();
+        assert!(limit.try_acquire().is_none());
+        drop(guards);
+        assert!(limit.try_acquire().is_some());
+    }
 }

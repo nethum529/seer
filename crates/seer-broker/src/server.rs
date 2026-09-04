@@ -11,7 +11,7 @@ use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
 use crate::registry::{MAX_SEAT_LIFETIME_SECS, PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
-use crate::{Config, connection_limit::ConnectionLimit};
+use crate::{Config, connection_limit::{ConnectionKey, ConnectionGuard, ConnectionLimit}};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 const INVALID_CREDENTIALS: &str = "invalid credentials";
@@ -30,7 +30,9 @@ pub fn serve(listener: TcpListener, config: &Config) -> io::Result<()> {
         spawn_remote_accept_loop(remote_listener, Arc::clone(&broker));
     }
     for connection in listener.incoming() {
-        spawn_connection(Socket::from(connection?), Arc::clone(&broker));
+        let connection = connection?;
+        let source = ConnectionKey::Direct(connection.peer_addr()?.ip());
+        spawn_connection(Socket::from(connection), Arc::clone(&broker), source);
     }
     Ok(())
 }
@@ -167,9 +169,11 @@ fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
     thread::spawn(move || {
         loop {
             match listener.accept() {
-                Ok((_remote, stream)) => {
-                    spawn_connection(Socket::from(stream), Arc::clone(&broker))
-                }
+                Ok((remote, stream)) => spawn_connection(
+                    Socket::from(stream),
+                    Arc::clone(&broker),
+                    ConnectionKey::Relay(remote),
+                ),
                 Err(error) => {
                     eprintln!("broker remote accept error: {error}");
                     return;
@@ -179,15 +183,18 @@ fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
     });
 }
 
-fn spawn_connection<S: Stream + Clone>(stream: S, broker: Arc<BrokerState>) {
-    let Some(connection) = broker.connection_limit.try_acquire() else {
+fn spawn_connection<S: Stream + Clone>(
+    stream: S,
+    broker: Arc<BrokerState>,
+    source: ConnectionKey,
+) {
+    let Some(connection) = broker.connection_limit.try_acquire_for(source) else {
         eprintln!("broker refused connection: connection limit reached");
         let _ = stream.shutdown(std::net::Shutdown::Both);
         return;
     };
     thread::spawn(move || {
-        let _connection = connection;
-        report_connection(handle_connection(stream, &broker));
+        report_connection(handle_connection(stream, &broker, connection));
     });
 }
 
@@ -200,13 +207,18 @@ fn report_connection(result: io::Result<()>) -> bool {
     }
 }
 
-fn handle_connection<S>(mut stream: S, broker: &BrokerState) -> io::Result<()>
+fn handle_connection<S>(
+    mut stream: S,
+    broker: &BrokerState,
+    connection: ConnectionGuard,
+) -> io::Result<()>
 where
     S: Stream + Clone,
 {
     let Some(person) = handshake(&mut stream, broker, HANDSHAKE_TIMEOUT)? else {
         return Ok(());
     };
+    drop(connection);
     stream.set_read_timeout(None)?;
     forward(stream, &person, broker)
 }
@@ -250,7 +262,10 @@ fn major_minor(version: &str) -> Option<(&str, &str)> {
 }
 
 fn read_message<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ClientMsg> {
-    codec::decode(&mut DeadlineReader { stream, deadline })
+    codec::decode_with_limit(
+        &mut DeadlineReader { stream, deadline },
+        codec::MAX_PRE_AUTH_FRAME_SIZE,
+    )
 }
 
 fn authenticate<S: Stream>(
