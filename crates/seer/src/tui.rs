@@ -196,7 +196,8 @@ fn apply_server_message<S: Stream>(
         | ServerMsg::Status { .. }
         | ServerMsg::Clients { .. }
         | ServerMsg::Targets { .. }
-        | ServerMsg::Refused { .. } => {
+        | ServerMsg::Refused { .. }
+        | ServerMsg::RuntimeReady { .. } => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidData,
                 "unexpected handshake message",

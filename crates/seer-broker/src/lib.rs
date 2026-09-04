@@ -6,9 +6,12 @@ mod attachments;
 mod config;
 mod connection_limit;
 mod forwarding;
+mod lifecycle;
 mod os_identity;
 mod registry;
 mod runtime;
+mod runtime_paths;
+mod runtime_supervisor;
 mod server;
 #[cfg(test)]
 mod test_support;

@@ -63,6 +63,13 @@ pub fn connect_when_ready(path: &Path) -> UnixStream {
             Ok(mut stream) => {
                 codec::encode(&mut stream, &ClientMsg::AttachRuntime)
                     .expect("runtime attach must encode");
+                match codec::decode::<_, ServerMsg>(&mut stream).expect("runtime ready must decode")
+                {
+                    ServerMsg::RuntimeReady { generation } => {
+                        assert!(!generation.is_empty());
+                    }
+                    other => panic!("expected RuntimeReady, got {other:?}"),
+                }
                 return stream;
             }
             Err(error) => last_error = Some(error),

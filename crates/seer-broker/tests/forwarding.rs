@@ -306,6 +306,10 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
     send_hello(&mut alice, "alice", "alice-secret");
     drop(welcome_client_id(read_message(&mut alice), "alice"));
     wait_for_tree_with_tab(&mut alice);
+    let initial_generation = temporary.runtime_record("alice")["generation"]
+        .as_str()
+        .expect("initial generation must be present")
+        .to_owned();
     let alice_pid = temporary.runtime_pid("alice");
 
     let mut bob = connect_when_ready(address);
@@ -316,6 +320,11 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
 
     let alice_socket = temporary.terminate_runtime("alice");
     assert_path_removed(format!("/proc/{alice_pid}/status"));
+    let failed = temporary.wait_for_runtime_state("alice", "failed");
+    assert_eq!(
+        failed["generation"].as_str(),
+        Some(initial_generation.as_str())
+    );
     assert_path_removed(&alice_socket);
     assert_process_running(bob_pid);
 
@@ -323,6 +332,11 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
     send_hello(&mut replacement, "alice", "alice-secret");
     drop(welcome_client_id(read_message(&mut replacement), "alice"));
     wait_for_tree_with_tab(&mut replacement);
+    let replacement_record = temporary.wait_for_runtime_state("alice", "running");
+    assert_ne!(
+        replacement_record["generation"].as_str(),
+        Some(initial_generation.as_str())
+    );
     assert_ne!(temporary.runtime_pid("alice"), alice_pid);
     assert_process_running(bob_pid);
 

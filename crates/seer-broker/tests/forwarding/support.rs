@@ -52,7 +52,7 @@ pub(crate) fn send_hello(stream: &mut TcpStream, user: &str, credential: &str) {
     .expect("hello must encode");
 }
 
-pub(crate) fn welcome_client_id(message: ServerMsg, expected_user: &str) -> String {
+pub fn welcome_client_id(message: ServerMsg, expected_user: &str) -> String {
     let ServerMsg::Welcome {
         user_id,
         name,
@@ -92,7 +92,7 @@ pub(crate) fn wait_for_tree_with_tab(stream: &mut TcpStream) -> seer_core::Tree 
     panic!("Tree with a tab was not received");
 }
 
-pub(crate) fn wait_for_disconnect(stream: &mut TcpStream) {
+pub fn wait_for_disconnect(stream: &mut TcpStream) {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     let mut bytes = [0; 1_024];
     while Instant::now() < deadline {
@@ -121,7 +121,7 @@ pub(crate) fn wait_for_disconnect(stream: &mut TcpStream) {
     panic!("client did not disconnect");
 }
 
-pub(crate) struct TestFiles {
+pub struct TestFiles {
     pub(crate) root: PathBuf,
     pub(crate) state_dir: PathBuf,
     pub(crate) config: PathBuf,
@@ -181,7 +181,7 @@ impl TestFiles {
     }
 
     pub(crate) fn write_runtime_wrapper(&self) {
-        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nprintf '%s\\n%s\\n%s\\n' \"$(id -u)\" \"$HOME\" \"$SHELL\" > \"$SEER_TEST_FILES/$2.identity\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
+        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n' \"$$\" >> \"$SEER_TEST_FILES/$2.launches\"\nprintf '%s\\n%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$4\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nprintf '%s\\n%s\\n%s\\n' \"$(id -u)\" \"$HOME\" \"$SHELL\" > \"$SEER_TEST_FILES/$2.identity\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
         fs::write(&self.wrapper, script).expect("runtime wrapper must write");
         fs::set_permissions(&self.wrapper, fs::Permissions::from_mode(0o700))
             .expect("runtime wrapper mode must set");
@@ -216,6 +216,34 @@ impl TestFiles {
             .trim()
             .parse()
             .expect("runtime PID must be valid")
+    }
+    pub(crate) fn runtime_record(&self, user: &str) -> serde_json::Value {
+        let path = self.state_dir.join(format!("runtime-records/{user}.json"));
+        assert!(wait_for_file(&path));
+        serde_json::from_str(&fs::read_to_string(path).expect("runtime record must be readable"))
+            .expect("runtime record must be valid JSON")
+    }
+    pub(crate) fn wait_for_runtime_state(&self, user: &str, expected: &str) -> serde_json::Value {
+        let path = self.state_dir.join(format!("runtime-records/{user}.json"));
+        let deadline = Instant::now() + WAIT_TIMEOUT;
+        while Instant::now() < deadline {
+            if path.is_file()
+                && let Ok(record) = fs::read_to_string(&path)
+                && let Ok(record) = serde_json::from_str::<serde_json::Value>(&record)
+                && record["state"] == expected
+            {
+                return record;
+            }
+            thread::sleep(POLL_INTERVAL);
+        }
+        panic!("runtime did not reach state {expected}");
+    }
+
+    pub(crate) fn launch_count(&self, user: &str) -> usize {
+        fs::read_to_string(self.root.join(format!("{user}.launches")))
+            .expect("runtime launch log must be readable")
+            .lines()
+            .count()
     }
 
     pub(crate) fn terminate_runtime(&self, user: &str) -> PathBuf {

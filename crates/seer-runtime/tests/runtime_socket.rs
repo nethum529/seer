@@ -14,6 +14,8 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 mod support;
 use support::*;
 
+const GENERATION: &str = "0123456789abcdef0123456789abcdef";
+
 #[test]
 fn serves_cells_and_preserves_the_tree_after_disconnect() {
     let temporary = TemporaryDirectory::new();
@@ -25,7 +27,12 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
     drop(stale_listener);
 
     let runtime = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -56,7 +63,12 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
     wait_for_close(&mut reattached);
 
     let duplicate = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -71,7 +83,12 @@ fn restores_idle_cells_after_reattach() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let runtime = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -101,7 +118,12 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let runtime = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -166,7 +188,12 @@ fn removes_its_socket_on_sigterm() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let mut runtime = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -192,7 +219,8 @@ fn rejects_wrong_argument_counts() {
         &[],
         &["socket"],
         &["socket", "alice"],
-        &["socket", "alice", "sh", "extra"],
+        &["socket", "alice", "sh"],
+        &["socket", "alice", "sh", "generation", "extra"],
     ];
 
     for arguments in cases {
@@ -264,7 +292,7 @@ fn assert_usage_error(output: &Output) {
     assert!(output.stdout.is_empty());
     assert!(
         String::from_utf8_lossy(&output.stderr)
-            .contains("usage: seer-runtime <socket-path> <user> <shell>")
+            .contains("usage: seer-runtime <socket-path> <user> <shell> <generation>")
     );
 }
 

@@ -71,6 +71,9 @@ pub enum ClientMsg {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ServerMsg {
+    RuntimeReady {
+        generation: String,
+    },
     Welcome {
         user_id: String,
         name: String,
@@ -295,6 +298,9 @@ mod tests {
     fn server_messages_round_trip() {
         let tree = tree_with_two_panes();
         let messages = [
+            ServerMsg::RuntimeReady {
+                generation: "0123456789abcdef0123456789abcdef".into(),
+            },
             ServerMsg::Welcome {
                 user_id: "user-1".into(),
                 name: "Alice".into(),
