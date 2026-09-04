@@ -34,7 +34,7 @@ pub(super) fn assert_no_message(stream: &mut TcpStream) {
     ));
 }
 
-pub(super) fn socket_pair() -> (TcpStream, TcpStream) {
+pub(crate) fn socket_pair() -> (TcpStream, TcpStream) {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
     let client = TcpStream::connect(
         listener
