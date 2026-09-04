@@ -1,6 +1,7 @@
 use std::fs;
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
+use std::os::unix::fs::PermissionsExt;
 use std::path::{Path, PathBuf};
 use std::sync::Once;
 use std::sync::atomic::{AtomicUsize, Ordering};
@@ -76,7 +77,7 @@ fn handles_required_handshake_outcomes() {
 }
 
 #[test]
-fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
+fn joins_commit_person_and_seat_atomically() {
     let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
     let address = listener
         .local_addr()
@@ -148,16 +149,39 @@ fn joins_with_single_use_seats_and_preserves_a_colliding_seat() {
     );
     assert!(matches!(after_collision, ServerMsg::Joined { .. }));
 
-    let people: serde_json::Value = serde_json::from_slice(
-        &fs::read(state_dir.join("people.json")).expect("people registry must read"),
+    let registry: serde_json::Value = serde_json::from_slice(
+        &fs::read(state_dir.join("registry.json")).expect("registry must read"),
     )
-    .expect("people registry must decode");
+    .expect("registry must decode");
+    let people = registry["people"]
+        .as_array()
+        .expect("registry people must be an array");
     assert!(
         people
-            .as_array()
-            .expect("people registry must be an array")
             .iter()
             .any(|person| person["user_id"] == joined_user)
+    );
+    let seats = registry["seats"]
+        .as_array()
+        .expect("registry seats must be an array");
+    assert!(seats.iter().any(|seat| {
+        seat["token_hash"] == hash("seat-one") && seat["used"].as_bool() == Some(true)
+    }));
+    assert_eq!(
+        fs::metadata(&state_dir)
+            .expect("state directory metadata must read")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o700
+    );
+    assert_eq!(
+        fs::metadata(state_dir.join("registry.json"))
+            .expect("registry metadata must read")
+            .permissions()
+            .mode()
+            & 0o777,
+        0o600
     );
     remove_state_directory(&state_dir);
 }
