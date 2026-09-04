@@ -45,13 +45,7 @@ impl ClientState {
                     (Some(workspace), Some(tab))
                 });
         }
-        let focus_is_valid = self
-            .focused
-            .as_deref()
-            .is_some_and(|pane| self.visible_pane_ids().any(|id| id == pane));
-        if !focus_is_valid {
-            self.focused = self.visible_tab().and_then(preferred_focus);
-        }
+        self.focused = self.visible_tab().and_then(preferred_focus);
         previous_workspace != self.selected_workspace || previous_tab != self.selected_tab
     }
 

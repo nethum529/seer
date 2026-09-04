@@ -1,0 +1,318 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Seer MVP: A Working Session</title>
+  <style>
+    :root {
+      color-scheme: light;
+      --page: #f4f1e8;
+      --surface: #fffdf7;
+      --ink: #17221d;
+      --muted: #5e6b63;
+      --line: #cfd8cf;
+      --accent: #146c4e;
+      --accent-soft: #dff2e8;
+      --blue: #dceaf6;
+      --blue-ink: #245778;
+      --terminal: #14201a;
+      --terminal-ink: #d8f3e5;
+      --good: #1e6a47;
+      --work: #8a5a11;
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+    }
+
+    * { box-sizing: border-box; }
+
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-size: 16px;
+      line-height: 1.55;
+    }
+
+    main {
+      width: min(100% - 32px, 1040px);
+      margin: 0 auto;
+      padding: 56px 0 80px;
+    }
+
+    header { max-width: 760px; }
+
+    .eyebrow {
+      margin: 0 0 10px;
+      color: var(--accent);
+      font-size: 0.78rem;
+      font-weight: 800;
+      letter-spacing: 0.12em;
+      text-transform: uppercase;
+    }
+
+    h1, h2, h3 { line-height: 1.15; }
+    h1 { margin: 0; font-size: clamp(2.3rem, 6vw, 4.7rem); letter-spacing: -0.045em; }
+    h2 { margin: 0 0 8px; font-size: clamp(1.6rem, 3vw, 2.25rem); letter-spacing: -0.025em; }
+    h3 { margin: 0 0 8px; font-size: 1.05rem; }
+    p { margin: 0; }
+
+    .lede { margin-top: 18px; color: var(--muted); font-size: 1.16rem; max-width: 650px; }
+    section { margin-top: 56px; }
+    section > header { margin-bottom: 20px; }
+    section > header p { color: var(--muted); }
+
+    .diagram {
+      margin: 34px 0 0;
+      overflow-x: auto;
+      border: 1px solid var(--line);
+      border-radius: 22px;
+      background: var(--surface);
+      box-shadow: 0 18px 50px rgba(23, 34, 29, 0.08);
+    }
+
+    .diagram svg { display: block; width: 100%; min-width: 820px; height: auto; }
+    .diagram figcaption { padding: 0 24px 20px; color: var(--muted); font-size: 0.92rem; }
+
+    .term-grid, .card-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 18px;
+    }
+
+    .card {
+      padding: 22px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--surface);
+    }
+
+    .step {
+      display: inline-grid;
+      width: 28px;
+      height: 28px;
+      margin-bottom: 12px;
+      place-items: center;
+      border-radius: 50%;
+      background: var(--accent);
+      color: white;
+      font-weight: 800;
+    }
+
+    pre {
+      min-height: 100%;
+      margin: 0;
+      overflow-x: auto;
+      padding: 20px;
+      border-radius: 14px;
+      background: var(--terminal);
+      color: var(--terminal-ink);
+      font: 0.82rem/1.55 ui-monospace, SFMono-Regular, Consolas, monospace;
+      white-space: pre-wrap;
+    }
+
+    code { font-family: ui-monospace, SFMono-Regular, Consolas, monospace; }
+    .prompt { color: #8dddb5; }
+    .quiet { color: #97aa9f; }
+
+    .terms {
+      display: grid;
+      grid-template-columns: repeat(4, minmax(0, 1fr));
+      gap: 1px;
+      overflow: hidden;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--line);
+    }
+
+    .term { padding: 18px; background: var(--surface); }
+    .term strong { display: block; margin-bottom: 4px; }
+    .term span { color: var(--muted); font-size: 0.93rem; }
+
+    .checks {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .check { padding: 18px; border: 1px solid var(--line); border-radius: 14px; background: var(--surface); }
+    .check b { display: block; color: var(--accent); font-size: 0.78rem; letter-spacing: 0.08em; }
+    .check span { display: block; margin-top: 5px; font-weight: 700; }
+    .check p { margin-top: 5px; color: var(--muted); font-size: 0.9rem; }
+
+    .comparison-table { overflow-x: auto; border-radius: 14px; border: 1px solid var(--line); }
+    table { width: 100%; min-width: 620px; border-collapse: collapse; background: var(--surface); }
+    th, td { padding: 13px 15px; border-bottom: 1px solid var(--line); text-align: left; vertical-align: top; }
+    tr:last-child td { border-bottom: 0; }
+    th { background: var(--accent-soft); font-size: 0.82rem; letter-spacing: 0.06em; text-transform: uppercase; }
+    td:last-child { color: var(--muted); }
+
+    .status { display: inline-block; padding: 3px 9px; border-radius: 999px; font-size: 0.78rem; font-weight: 800; white-space: nowrap; }
+    .built { background: var(--accent-soft); color: var(--good); }
+    .progress { background: #fff0cf; color: var(--work); }
+
+    .callout { margin-top: 18px; padding: 17px 19px; border-left: 4px solid var(--accent); background: var(--accent-soft); }
+    footer { margin-top: 56px; padding-top: 20px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.86rem; }
+
+    @media (max-width: 760px) {
+      main { width: min(100% - 24px, 1040px); padding-top: 34px; }
+      .term-grid, .card-grid, .checks { grid-template-columns: 1fr; }
+      .terms { grid-template-columns: 1fr 1fr; }
+    }
+  </style>
+</head>
+<body>
+  <main>
+    <header>
+      <p class="eyebrow">Working MVP</p>
+      <h1>One line. One name. One shell.</h1>
+      <p class="lede">The owner runs Seer on Linux. A friend on Linux or macOS pastes one line. Seer gives each person a private terminal workspace on the owner's server.</p>
+    </header>
+
+    <figure class="diagram" aria-labelledby="flow-title flow-caption">
+      <svg viewBox="0 0 1040 330" role="img">
+        <title id="flow-title">The Seer join flow from owner to friend shell</title>
+        <defs>
+          <marker id="arrow" markerWidth="10" markerHeight="10" refX="8" refY="3" orient="auto" markerUnits="strokeWidth">
+            <path d="M0,0 L0,6 L9,3 z" fill="#7a8a80"></path>
+          </marker>
+        </defs>
+        <rect x="38" y="82" width="170" height="122" rx="18" fill="#dff2e8" stroke="#146c4e" stroke-width="2"></rect>
+        <text x="123" y="116" text-anchor="middle" font-size="14" font-weight="800" fill="#146c4e">OWNER</text>
+        <text x="123" y="151" text-anchor="middle" font-size="20" font-weight="800" fill="#17221d">seer start</text>
+        <text x="123" y="178" text-anchor="middle" font-size="14" fill="#5e6b63">Linux server</text>
+
+        <rect x="246" y="82" width="170" height="122" rx="18" fill="#fffdf7" stroke="#cfd8cf" stroke-width="2"></rect>
+        <text x="331" y="116" text-anchor="middle" font-size="14" font-weight="800" fill="#245778">CAPSULE</text>
+        <text x="331" y="149" text-anchor="middle" font-size="18" font-weight="800" fill="#17221d">One install line</text>
+        <text x="331" y="178" text-anchor="middle" font-size="14" fill="#5e6b63">Use once</text>
+
+        <rect x="454" y="82" width="170" height="122" rx="18" fill="#dceaf6" stroke="#4c7b99" stroke-width="2"></rect>
+        <text x="539" y="116" text-anchor="middle" font-size="14" font-weight="800" fill="#245778">FRIEND</text>
+        <text x="539" y="149" text-anchor="middle" font-size="18" font-weight="800" fill="#17221d">Paste + name</text>
+        <text x="539" y="178" text-anchor="middle" font-size="14" fill="#5e6b63">Linux or macOS</text>
+
+        <rect x="662" y="82" width="170" height="122" rx="18" fill="#fffdf7" stroke="#cfd8cf" stroke-width="2"></rect>
+        <text x="747" y="116" text-anchor="middle" font-size="14" font-weight="800" fill="#245778">BROKER</text>
+        <text x="747" y="149" text-anchor="middle" font-size="18" font-weight="800" fill="#17221d">Checks identity</text>
+        <text x="747" y="178" text-anchor="middle" font-size="14" fill="#5e6b63">Routes the client</text>
+
+        <rect x="870" y="82" width="132" height="122" rx="18" fill="#dff2e8" stroke="#146c4e" stroke-width="2"></rect>
+        <text x="936" y="116" text-anchor="middle" font-size="14" font-weight="800" fill="#146c4e">RUNTIME</text>
+        <text x="936" y="149" text-anchor="middle" font-size="18" font-weight="800" fill="#17221d">Own tree</text>
+        <text x="936" y="178" text-anchor="middle" font-size="14" fill="#5e6b63">Tab + shell</text>
+
+        <g fill="none" stroke="#7a8a80" stroke-width="2" marker-end="url(#arrow)">
+          <path d="M208 143 H238"></path><path d="M416 143 H446"></path><path d="M624 143 H654"></path><path d="M832 143 H862"></path>
+        </g>
+        <g fill="#5e6b63" font-size="12" text-anchor="middle">
+          <text x="227" y="132">prints</text><text x="435" y="132">send</text><text x="643" y="132">join</text><text x="851" y="132">open</text>
+        </g>
+        <text x="520" y="262" text-anchor="middle" font-size="17" font-weight="800" fill="#17221d">Terminal input goes to the server. Live output comes back to the friend.</text>
+        <text x="520" y="290" text-anchor="middle" font-size="14" fill="#5e6b63">The remote path is encrypted end to end. A relay cannot read terminal data.</text>
+      </svg>
+      <figcaption id="flow-caption">A capsule is a copyable invitation. It contains the server identity and one seat token. A seat is permission for one new person to join.</figcaption>
+    </figure>
+
+    <section>
+      <header>
+        <h2>What the two people type</h2>
+        <p>The text below follows the README and the current seer command output.</p>
+      </header>
+      <div class="term-grid">
+        <pre><span class="quiet">OWNER ON LINUX</span>
+<span class="prompt">alice@linux:~$</span> seer start
+Your name [alice]:
+Server started at 127.0.0.1:7321.
+You are alice.
+Seat ready. It works once and expires in 1 hour.
+Send this to a friend:
+
+Paste this in Terminal:
+curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- &lt;capsule&gt;</pre>
+        <pre><span class="quiet">FRIEND ON MACOS OR LINUX</span>
+<span class="prompt">bob@mac:~$</span> curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- &lt;capsule&gt;
+Server: iroh:&lt;server-key&gt;
+Name [bob]:
+Joined as bob. Attaching...
+
+<span class="prompt">bob@owner:~$</span> uname
+Linux</pre>
+      </div>
+      <div class="callout">The shell runs on the Linux server. The friend uses a local terminal only. The server owns the shell process and the pseudo-terminal, or PTY.</div>
+    </section>
+
+    <section>
+      <header>
+        <h2>Four small words to know</h2>
+        <p>These words describe where the state lives.</p>
+      </header>
+      <div class="terms">
+        <div class="term"><strong>Broker</strong><span>The one server process that checks identity and routes connections.</span></div>
+        <div class="term"><strong>Runtime</strong><span>The process that owns one person's terminal state.</span></div>
+        <div class="term"><strong>Tree</strong><span>A person's workspaces, tabs, and panes. A pane holds one terminal.</span></div>
+        <div class="term"><strong>Attach</strong><span>Connect a client to its own live tree. Detach removes only that client.</span></div>
+      </div>
+    </section>
+
+    <section>
+      <header>
+        <h2>Leave, look, and return</h2>
+        <p>Peek means a read-only view of another person's tree.</p>
+      </header>
+      <div class="term-grid">
+        <pre><span class="prompt">bob@mac:~$</span> seer list
+SERVER    YOU  STATE     PEOPLE
+01234567  bob  detached  alice, bob
+
+<span class="prompt">bob@mac:~$</span> seer peek alice
+PEEK: alice - READ ONLY
+Workspace: alice/current</pre>
+        <pre><span class="prompt">bob@mac:~$</span> seer detach
+Detached from 01234567. Your panes are still running.
+
+<span class="prompt">bob@mac:~$</span> seer
+Attached to 01234567 as bob.</pre>
+      </div>
+    </section>
+
+    <section>
+      <header>
+        <h2>The MVP contract</h2>
+        <p>These nine user-facing checks define a working multiplayer MVP.</p>
+      </header>
+      <div class="checks">
+        <div class="check"><b>T1 BUILT</b><span>Broker listens</span><p>One broker accepts Seer connections.</p></div>
+        <div class="check"><b>T2 BUILT</b><span>Valid login works</span><p>A saved identity gets its own tree.</p></div>
+        <div class="check"><b>T3 BUILT</b><span>Tab and shell open</span><p>An empty tree gets one tab and one shell pane.</p></div>
+        <div class="check"><b>T4 BUILT</b><span>Shell round trip works</span><p>Input reaches the shell. Output returns.</p></div>
+        <div class="check"><b>T5 BUILT</b><span>Detach keeps work alive</span><p>The client leaves. Its live panes continue.</p></div>
+        <div class="check"><b>T6 BUILT</b><span>User trees stay separate</span><p>Each person has a separate runtime and tree.</p></div>
+        <div class="check"><b>T7 BUILT</b><span>Peek is read-only</span><p>A viewer cannot send terminal input.</p></div>
+        <div class="check"><b>T8 BUILT</b><span>Bad token is refused</span><p>An invalid login does not enter.</p></div>
+        <div class="check"><b>T9 BUILT</b><span>Stop peek returns home</span><p>The client receives its own tree again.</p></div>
+      </div>
+    </section>
+
+    <section>
+      <header>
+        <h2>Built now and in progress</h2>
+        <p>Main is the current release line. Wave 2 work is not on main yet.</p>
+      </header>
+      <div class="comparison-table">
+        <table>
+          <thead><tr><th>Area</th><th>Status</th><th>Meaning</th></tr></thead>
+          <tbody>
+            <tr><td>MVP flow and T1 to T9</td><td><span class="status built">Built</span></td><td>Available on main.</td></tr>
+            <tr><td>One-line remote join</td><td><span class="status built">Built</span></td><td>Iroh gives direct or relayed encrypted transport.</td></tr>
+            <tr><td>Full terminal and OS identity</td><td><span class="status progress">In progress</span></td><td>Merged into feat/wave2, not main.</td></tr>
+            <tr><td>Cold restore after restart</td><td><span class="status progress">In progress</span></td><td>Pull request 193 is open.</td></tr>
+            <tr><td>Per-client viewport control</td><td><span class="status progress">In progress</span></td><td>Pull request 194 is open.</td></tr>
+          </tbody>
+        </table>
+      </div>
+    </section>
+
+    <footer>Source: README.md, ADR 0002, the crates under crates/, issue 218, and the current GitHub issue and pull request lists.</footer>
+  </main>
+</body>
+</html>

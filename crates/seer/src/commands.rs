@@ -58,6 +58,7 @@ pub(crate) fn detach() -> Result<(), CommandError> {
             client_id: client.client_id,
         },
     )?;
+    receive_clients(&mut stream)?;
     print_detached(&server.alias);
     Ok(())
 }
