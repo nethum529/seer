@@ -50,8 +50,11 @@ pub(crate) fn restore_owner() -> io::Result<()> {
     };
     let config: BrokerConfig = toml::from_str(&contents).map_err(invalid_data)?;
     let log = config.state_dir.join("broker.log");
-    let (user, credential) = read_owner_identity(&fs::read_to_string(log)?).ok_or_else(|| {
-        io::Error::other("Owner credential is unavailable. Restore servers.toml from backup.")
-    })?;
+    let (user, credential) = fs::read_to_string(log)
+        .ok()
+        .and_then(|contents| read_owner_identity(&contents))
+        .ok_or_else(|| {
+            io::Error::other("Owner credential is unavailable. Run seer start --restore.")
+        })?;
     save_owner(&directory, &config, user, credential)
 }
