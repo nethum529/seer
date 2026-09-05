@@ -1,8 +1,8 @@
 use crate::viewer::Viewer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Rect, Size};
 use seer_core::proto::{Person, PersonState, TerminalInfo};
 use seer_core::{Cursor, TerminalFrame, Tree};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub(crate) struct ClientState {
     pub(crate) tree: Tree,
@@ -35,7 +35,7 @@ pub(crate) struct ClientState {
     pub(crate) invite: Option<String>,
     pub(crate) invite_pending: bool,
     pub(crate) notice: String,
-    pub(crate) watches: BTreeSet<(String, String)>,
+    pub(crate) watches: BTreeMap<(String, String), Size>,
     pub(crate) pending_new: Option<BTreeSet<String>>,
 }
 
@@ -83,7 +83,7 @@ impl ClientState {
             invite: None,
             invite_pending: false,
             notice: String::new(),
-            watches: BTreeSet::new(),
+            watches: BTreeMap::new(),
             pending_new: None,
         }
     }
