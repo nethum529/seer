@@ -215,7 +215,7 @@ pub(crate) fn people_column(frame: &mut Frame<'_>, state: &mut ClientState, area
             1,
         );
         frame.render_widget(
-            Paragraph::new(format!(" {marker} {label}")).style(style),
+            Paragraph::new(format!("{marker}{label}")).style(style),
             rect,
         );
         state.people_areas.push((index, rect));
