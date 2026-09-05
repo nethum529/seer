@@ -1,5 +1,7 @@
 #![cfg(target_os = "linux")]
-
+use seer_core::Tree;
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use serde::Deserialize;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -10,31 +12,22 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
-
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use serde::Deserialize;
-
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(7);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 static PROCESS_TEST: Mutex<()> = Mutex::new(());
-
 #[derive(Deserialize)]
 struct FakeConfig {
     listen: SocketAddr,
     state_dir: PathBuf,
 }
-
 struct TestDirectory {
     path: PathBuf,
 }
-
 struct CommandOutput {
     status: ExitStatus,
     stdout: String,
     stderr: String,
 }
-
 impl TestDirectory {
     fn new() -> Self {
         let number = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
@@ -42,19 +35,15 @@ impl TestDirectory {
         fs::create_dir(&path).expect("test directory must be created");
         Self { path }
     }
-
     fn config_home(&self) -> PathBuf {
         self.path.join("c")
     }
-
     fn state_home(&self) -> PathBuf {
         self.path.join("s")
     }
-
     fn state_dir(&self) -> PathBuf {
         self.state_home().join("seer")
     }
-
     fn pid_path(&self) -> PathBuf {
         self.state_dir().join("broker.pid")
     }
@@ -207,14 +196,24 @@ fn prompt_defaults_create_config_and_owner_store() {
         "{}",
         output.stdout
     );
+    let broker: toml::Value = read_toml(directory.config_home().join("seer/broker.toml"));
+    assert_eq!(broker["listen"].as_str(), Some("127.0.0.1:7321"));
+    assert_eq!(broker["published_addr"].as_str(), Some("127.0.0.1:7321"));
+    assert_eq!(broker["remote"].as_bool(), Some(true));
+    assert_eq!(broker["owner_name"].as_str(), Some("alice"));
+    assert_eq!(broker["state_dir"].as_str(), directory.state_dir().to_str());
     let servers: toml::Value = read_toml(directory.config_home().join("seer/servers.toml"));
     let owner = &servers["servers"][0];
     assert_eq!(owner["endpoint"].as_str(), Some("other.test:8000"));
     assert_eq!(owner["current"].as_bool(), Some(false));
     let local = &servers["servers"][1];
     assert_eq!(local["endpoint"].as_str(), Some("127.0.0.1:7321"));
+    assert_eq!(local["alias"].as_str(), Some("host.test"));
+    assert_eq!(local["user_id"].as_str(), Some("owner-id"));
+    assert_eq!(local["name"].as_str(), Some("alice"));
     assert_eq!(local["credential"].as_str(), Some("owner-secret"));
     assert_eq!(local["current"].as_bool(), Some(true));
+    assert_eq!(servers["servers"].as_array().map(Vec::len), Some(2));
     assert_eq!(mode(directory.config_home().join("seer")), 0o700);
     assert_eq!(
         mode(directory.config_home().join("seer/servers.toml")),
@@ -222,6 +221,7 @@ fn prompt_defaults_create_config_and_owner_store() {
     );
     let log = fs::read_to_string(directory.state_dir().join("broker.log"))
         .expect("broker log must be read");
+    assert!(log.contains("broker-output"));
     assert!(!log.contains("owner-credential"));
 }
 
