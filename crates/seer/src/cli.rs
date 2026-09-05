@@ -20,7 +20,18 @@ enum Command {
 }
 
 pub(crate) fn run(arguments: impl Iterator<Item = String>) -> ExitCode {
-    let command = match parse(arguments) {
+    let arguments: Vec<_> = arguments.collect();
+    if let Some(first) = arguments.first()
+        && ![
+            "help", "--help", "-h", "start", "stop", "invite", "join", "list", "attach", "detach",
+            "peek",
+        ]
+        .contains(&first.as_str())
+    {
+        eprintln!("unknown command: {first}. Run seer help.");
+        return ExitCode::from(2);
+    }
+    let command = match parse(arguments.into_iter()) {
         Ok(command) => command,
         Err(()) => {
             eprint!("{HELP}");
@@ -36,9 +47,9 @@ pub(crate) fn run_bare() -> ExitCode {
 
 fn execute(command: Command) -> ExitCode {
     let result = match command {
-        Command::Bare => match commands::attach() {
+        Command::Bare => match commands::attach_bare() {
             Err(error) if error.message == "run seer join first" => {
-                eprintln!("Paste the line the owner sent you.");
+                eprintln!("Paste the line the owner sent you.\nseer start creates the owner entry");
                 return ExitCode::from(2);
             }
             result => result,
@@ -77,13 +88,14 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ()> {
             }
             Some(_) => return Err(()),
         },
-        "join" => match arguments.next() {
-            None => Command::Join,
-            Some(invitation) if arguments.next().is_none() => {
-                Command::JoinWithInvitation(invitation)
+        "join" => {
+            let line = arguments.collect::<Vec<_>>().join(" ");
+            if line.is_empty() {
+                Command::Join
+            } else {
+                Command::JoinWithInvitation(line)
             }
-            Some(_) => return Err(()),
-        },
+        }
         "list" if arguments.next().is_none() => Command::List,
         "attach" if arguments.next().is_none() => Command::Attach,
         "detach" if arguments.next().is_none() => Command::Detach,

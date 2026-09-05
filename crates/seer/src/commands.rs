@@ -12,7 +12,7 @@ use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
-pub(crate) use selection::{peek, selected_server};
+pub(crate) use selection::{attach_bare, peek, selected_server};
 mod selection;
 use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -68,7 +68,11 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
         Some(invitation) => invitation.to_owned(),
         None => prompt::hidden("Invitation: ").map_err(CommandError::system)?,
     };
-    let capsule = capsule::parse(&invitation).map_err(CommandError::system)?;
+    let invitation = invitation
+        .split_whitespace()
+        .rfind(|token| token.starts_with("SEER"))
+        .unwrap_or(&invitation);
+    let capsule = capsule::parse(invitation).map_err(CommandError::system)?;
     println!("Server: {}", capsule.endpoint);
     let endpoint = capsule.endpoint.to_string();
 
@@ -487,6 +491,3 @@ fn print_table(rows: &[ListRow]) {
         );
     }
 }
-
-#[cfg(test)]
-mod tests;

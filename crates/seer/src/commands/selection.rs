@@ -136,3 +136,15 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
         crate::tui::run,
     )
 }
+
+pub(crate) fn attach_bare() -> Result<(), CommandError> {
+    if ServerStore::load()
+        .map_err(CommandError::system)?
+        .servers
+        .is_empty()
+    {
+        #[cfg(target_os = "linux")]
+        crate::start::restore_owner().map_err(CommandError::system)?;
+    }
+    super::attach()
+}

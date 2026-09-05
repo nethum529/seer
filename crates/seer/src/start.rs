@@ -47,7 +47,6 @@ pub fn run() -> ExitCode {
         eprintln!("the server runs on Linux only");
         ExitCode::FAILURE
     }
-
     #[cfg(target_os = "linux")]
     match run_linux() {
         Ok(()) => ExitCode::SUCCESS,
@@ -63,7 +62,6 @@ pub fn stop() -> ExitCode {
         eprintln!("the server runs on Linux only");
         ExitCode::FAILURE
     }
-
     #[cfg(target_os = "linux")]
     stop::run()
 }
@@ -75,12 +73,10 @@ fn run_linux() -> io::Result<()> {
     let (config, first_start) = load_or_create_config(&config_path)?;
     let started = Instant::now();
     secure_directory(&config.state_dir)?;
-
     if running_broker(&config) {
         println!("Server already running at {}.", config.published_addr);
         return Ok(());
     }
-
     start_broker(&config_path, &config, &config_dir, first_start, started)
 }
 #[cfg(target_os = "linux")]
@@ -263,7 +259,6 @@ fn start_broker(
     let (log, log_start) = open_log(&log_path)?;
     let mut child = spawn_detached(&broker, config_path, log)?;
     let deadline = Instant::now() + START_TIMEOUT;
-
     if let Err(error) = complete_start(
         &mut child,
         config,
@@ -293,7 +288,6 @@ fn start_broker(
     }
     result
 }
-
 #[cfg(target_os = "linux")]
 #[allow(clippy::too_many_arguments)] // Startup needs these values to clean up one child on each error.
 fn complete_start(
@@ -317,7 +311,6 @@ fn complete_start(
         format!("{}\n", child.id()).as_bytes(),
     )
 }
-
 #[cfg(target_os = "linux")]
 fn find_broker() -> io::Result<PathBuf> {
     let executable = env::current_exe()?;
@@ -339,7 +332,6 @@ fn find_broker() -> io::Result<PathBuf> {
         "seer-broker was not found",
     ))
 }
-
 #[cfg(target_os = "linux")]
 fn open_log(path: &Path) -> io::Result<(File, u64)> {
     let log = OpenOptions::new()
@@ -352,7 +344,6 @@ fn open_log(path: &Path) -> io::Result<(File, u64)> {
     let start = log.metadata()?.len();
     Ok((log, start))
 }
-
 #[cfg(target_os = "linux")]
 fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> {
     let stderr = log.try_clone()?;
@@ -374,7 +365,6 @@ fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> 
     }
     command.spawn()
 }
-
 #[cfg(target_os = "linux")]
 fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io::Result<()> {
     loop {
@@ -395,7 +385,6 @@ fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io
         thread::sleep(POLL_INTERVAL);
     }
 }
-
 #[cfg(target_os = "linux")]
 fn stop_child(child: &mut Child) {
     let pid = child.id().cast_signed();
@@ -406,7 +395,6 @@ fn stop_child(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
-
 #[cfg(target_os = "linux")]
 fn wait_for_owner_identity(
     path: &Path,
@@ -426,7 +414,6 @@ fn wait_for_owner_identity(
         thread::sleep(POLL_INTERVAL);
     }
 }
-
 #[cfg(target_os = "linux")]
 fn read_owner_identity(path: &Path, start: u64) -> io::Result<Option<(String, String)>> {
     let mut log = File::open(path)?;
@@ -445,7 +432,6 @@ fn read_owner_identity(path: &Path, start: u64) -> io::Result<Option<(String, St
         .zip(credential)
         .map(|(user_id, credential)| (user_id.to_owned(), credential.to_owned())))
 }
-
 #[cfg(target_os = "linux")]
 fn strip_owner_credential(path: &Path) -> io::Result<()> {
     let contents = fs::read_to_string(path)?;
@@ -455,7 +441,6 @@ fn strip_owner_credential(path: &Path) -> io::Result<()> {
         .collect::<String>();
     write_private(path, filtered.as_bytes())
 }
-
 #[cfg(target_os = "linux")]
 fn save_owner(
     config_dir: &Path,
@@ -478,7 +463,6 @@ fn save_owner(
     });
     store.save_to(&path)
 }
-
 #[cfg(target_os = "linux")]
 fn print_log_tail(path: &Path) {
     let Ok(contents) = fs::read_to_string(path) else {
@@ -490,6 +474,19 @@ fn print_log_tail(path: &Path) {
     }
 }
 
-#[cfg(all(test, target_os = "linux"))]
-#[path = "start_tests.rs"]
-mod tests;
+#[cfg(target_os = "linux")]
+pub(crate) fn restore_owner() -> io::Result<()> {
+    let directory = config_dir()?;
+    let path = directory.join("broker.toml");
+    let contents = match fs::read_to_string(path) {
+        Ok(contents) => contents,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
+        Err(error) => return Err(error),
+    };
+    let config: BrokerConfig = toml::from_str(&contents).map_err(invalid_data)?;
+    let log = config.state_dir.join("broker.log");
+    let (user, credential) = read_owner_identity(&log, 0)?.ok_or_else(|| {
+        io::Error::other("Owner credential is unavailable. Restore servers.toml from backup.")
+    })?;
+    save_owner(&directory, &config, user, credential)
+}

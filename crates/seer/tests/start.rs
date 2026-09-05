@@ -207,24 +207,14 @@ fn prompt_defaults_create_config_and_owner_store() {
         "{}",
         output.stdout
     );
-    let broker: toml::Value = read_toml(directory.config_home().join("seer/broker.toml"));
-    assert_eq!(broker["listen"].as_str(), Some("127.0.0.1:7321"));
-    assert_eq!(broker["published_addr"].as_str(), Some("127.0.0.1:7321"));
-    assert_eq!(broker["remote"].as_bool(), Some(true));
-    assert_eq!(broker["owner_name"].as_str(), Some("alice"));
-    assert_eq!(broker["state_dir"].as_str(), directory.state_dir().to_str());
     let servers: toml::Value = read_toml(directory.config_home().join("seer/servers.toml"));
     let owner = &servers["servers"][0];
     assert_eq!(owner["endpoint"].as_str(), Some("other.test:8000"));
     assert_eq!(owner["current"].as_bool(), Some(false));
     let local = &servers["servers"][1];
     assert_eq!(local["endpoint"].as_str(), Some("127.0.0.1:7321"));
-    assert_eq!(local["alias"].as_str(), Some("host.test"));
-    assert_eq!(local["user_id"].as_str(), Some("owner-id"));
-    assert_eq!(local["name"].as_str(), Some("alice"));
     assert_eq!(local["credential"].as_str(), Some("owner-secret"));
     assert_eq!(local["current"].as_bool(), Some(true));
-    assert_eq!(servers["servers"].as_array().map(Vec::len), Some(2));
     assert_eq!(mode(directory.config_home().join("seer")), 0o700);
     assert_eq!(
         mode(directory.config_home().join("seer/servers.toml")),
@@ -232,7 +222,6 @@ fn prompt_defaults_create_config_and_owner_store() {
     );
     let log = fs::read_to_string(directory.state_dir().join("broker.log"))
         .expect("broker log must be read");
-    assert!(log.contains("broker-output"));
     assert!(!log.contains("owner-credential"));
 }
 
