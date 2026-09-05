@@ -124,6 +124,7 @@ fn backgrounds_preserve_the_host_terminal() {
 
 fn terminal_info(name: &str) -> TerminalInfo {
     TerminalInfo {
+        last_typist: None,
         pane: name.into(),
         name: name.into(),
         state: "idle".into(),
