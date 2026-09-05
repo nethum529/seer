@@ -109,6 +109,22 @@ impl Registry {
         ))
     }
 
+    pub(crate) fn remint_owner(&self) -> io::Result<(String, String)> {
+        let mut data = self.lock()?;
+        let mut next = data.clone();
+        let owner = next
+            .people
+            .iter_mut()
+            .find(|person| person.is_owner)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "owner is unavailable"))?;
+        let credential = random_hex::<32>()?;
+        owner.credential_hash = credential_hash(&credential);
+        let user_id = owner.user_id.clone();
+        write_json_atomically(&self.state_dir.join(REGISTRY_FILE), &next)?;
+        *data = next;
+        Ok((user_id, credential))
+    }
+
     pub(crate) fn authenticate(
         &self,
         user_id: &str,

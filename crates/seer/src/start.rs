@@ -2,6 +2,10 @@
 use serde::{Deserialize, Serialize};
 use std::process::ExitCode;
 #[cfg(target_os = "linux")]
+mod restore;
+#[cfg(target_os = "linux")]
+pub(crate) use restore::restore_owner;
+#[cfg(target_os = "linux")]
 mod stop;
 #[cfg(target_os = "linux")]
 mod wordmark;
@@ -41,14 +45,15 @@ struct BrokerConfig {
     owner_name: String,
     state_dir: PathBuf,
 }
-pub fn run() -> ExitCode {
+pub fn run(restore: bool) -> ExitCode {
     #[cfg(target_os = "macos")]
     {
+        let _ = restore;
         eprintln!("the server runs on Linux only");
         ExitCode::FAILURE
     }
     #[cfg(target_os = "linux")]
-    match run_linux() {
+    match run_linux(restore) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");
@@ -66,16 +71,25 @@ pub fn stop() -> ExitCode {
     stop::run()
 }
 #[cfg(target_os = "linux")]
-fn run_linux() -> io::Result<()> {
+fn run_linux(restore: bool) -> io::Result<()> {
     let config_dir = config_dir()?;
     secure_directory(&config_dir)?;
     let config_path = config_dir.join("broker.toml");
-    let (config, first_start) = load_or_create_config(&config_path)?;
+    let (config, mut first_start) = load_or_create_config(&config_path)?;
     let started = Instant::now();
     secure_directory(&config.state_dir)?;
     if running_broker(&config) {
+        if restore {
+            return Err(io::Error::other(
+                "Server is running. Run seer stop, then seer start --restore.",
+            ));
+        }
         println!("Server already running at {}.", config.published_addr);
         return Ok(());
+    }
+    if restore {
+        restore::remint_owner(&config_path, &config, &config_dir)?;
+        first_start = false;
     }
     start_broker(&config_path, &config, &config_dir, first_start, started)
 }
@@ -402,7 +416,11 @@ fn wait_for_owner_identity(
     deadline: Instant,
 ) -> io::Result<(String, String)> {
     loop {
-        if let Some(identity) = read_owner_identity(path, start)? {
+        let mut log = File::open(path)?;
+        log.seek(SeekFrom::Start(start))?;
+        let mut contents = String::new();
+        log.read_to_string(&mut contents)?;
+        if let Some(identity) = restore::read_owner_identity(&contents) {
             return Ok(identity);
         }
         if Instant::now() >= deadline {
@@ -413,24 +431,6 @@ fn wait_for_owner_identity(
         }
         thread::sleep(POLL_INTERVAL);
     }
-}
-#[cfg(target_os = "linux")]
-fn read_owner_identity(path: &Path, start: u64) -> io::Result<Option<(String, String)>> {
-    let mut log = File::open(path)?;
-    log.seek(SeekFrom::Start(start))?;
-    let mut contents = String::new();
-    log.read_to_string(&mut contents)?;
-    let user_id = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("owner-id: "))
-        .filter(|value| !value.is_empty());
-    let credential = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("owner-credential: "))
-        .filter(|value| !value.is_empty());
-    Ok(user_id
-        .zip(credential)
-        .map(|(user_id, credential)| (user_id.to_owned(), credential.to_owned())))
 }
 #[cfg(target_os = "linux")]
 fn strip_owner_credential(path: &Path) -> io::Result<()> {
@@ -472,21 +472,4 @@ fn print_log_tail(path: &Path) {
     for line in lines.iter().skip(lines.len().saturating_sub(20)) {
         eprintln!("{line}");
     }
-}
-
-#[cfg(target_os = "linux")]
-pub(crate) fn restore_owner() -> io::Result<()> {
-    let directory = config_dir()?;
-    let path = directory.join("broker.toml");
-    let contents = match fs::read_to_string(path) {
-        Ok(contents) => contents,
-        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(()),
-        Err(error) => return Err(error),
-    };
-    let config: BrokerConfig = toml::from_str(&contents).map_err(invalid_data)?;
-    let log = config.state_dir.join("broker.log");
-    let (user, credential) = read_owner_identity(&log, 0)?.ok_or_else(|| {
-        io::Error::other("Owner credential is unavailable. Restore servers.toml from backup.")
-    })?;
-    save_owner(&directory, &config, user, credential)
 }
