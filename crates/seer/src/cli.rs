@@ -2,13 +2,13 @@ use std::process::ExitCode;
 
 use crate::commands::{self, CommandError};
 
-const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start          Start the server\n  stop           Stop the server\n  invite [--hours N]\n                 Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Open people and terminals\n  detach         Detach this client\n  peek <person>  Open with this person selected\n\nBare seer opens people and terminals.\n\nMain screen: j/k people, h/l boxes, enter view, n new terminal, / search, esc back, q quit.\nViewer: esc back, tab next terminal, q quit.\nPerson menu: j/k select, enter watch, space grant, esc close.\nFirst run: c copy invite; n new terminal.\n";
+const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start [--restore]\n                 Start the server\n  stop           Stop the server\n  invite [--hours N]\n                 Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Open people and terminals\n  detach         Detach this client\n  peek <person>  Open with this person selected\n\nBare seer opens people and terminals.\n\nMain screen: j/k people, h/l boxes, enter view, n new terminal, / search, esc back, q quit.\nViewer: esc back, tab next terminal, q quit.\nPerson menu: j/k select, enter watch, space grant, esc close.\nFirst run: c copy invite; n new terminal.\n";
 
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
     Bare,
     Help,
-    Start,
+    Start(bool),
     Stop,
     Invite(Option<String>),
     Join,
@@ -55,7 +55,7 @@ fn execute(command: Command) -> ExitCode {
             print!("{HELP}");
             Ok(())
         }
-        Command::Start => return crate::start::run(),
+        Command::Start(restore) => return crate::start::run(restore),
         Command::Stop => return crate::start::stop(),
         Command::Invite(hours) => commands::invite(hours.as_deref()),
         Command::Join => commands::join(None),
@@ -72,7 +72,11 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ParseEr
     let first = arguments.next().ok_or(ParseError::Usage)?;
     let command = match first.as_str() {
         "help" | "--help" | "-h" => Command::Help,
-        "start" => Command::Start,
+        "start" => match arguments.next() {
+            None => Command::Start(false),
+            Some(flag) if flag == "--restore" => Command::Start(true),
+            Some(_) => return Err(ParseError::Usage),
+        },
         "stop" => Command::Stop,
         "invite" => match arguments.next() {
             None => Command::Invite(None),
