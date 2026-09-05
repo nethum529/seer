@@ -2,7 +2,7 @@ use crate::theme::Palette;
 use ratatui::{
     buffer::Buffer,
     layout::Rect,
-    style::{Modifier, Style},
+    style::{Color, Modifier, Style},
     widgets::Widget,
 };
 use seer_core::Cell;
@@ -21,10 +21,11 @@ impl Widget for PaneCells<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
         let palette = Palette::default();
         buffer.set_style(area, palette.style());
+        let start = content_rows(self.rows).saturating_sub(area.height as usize);
         for (row_index, row) in self
             .rows
             .iter()
-            .skip(self.rows.len().saturating_sub(area.height as usize))
+            .skip(start)
             .take(area.height as usize)
             .enumerate()
         {
@@ -39,6 +40,16 @@ impl Widget for PaneCells<'_> {
     }
 }
 
+fn content_rows(rows: &[Vec<Cell>]) -> usize {
+    rows.iter()
+        .rposition(|row| row.iter().any(is_visible))
+        .map_or(0, |index| index + 1)
+}
+
+fn is_visible(cell: &Cell) -> bool {
+    cell.character != ' ' || cell.bg != seer_core::Color::Default || cell.inverse
+}
+
 fn cell_style(cell: &Cell, palette: Palette) -> Style {
     let mut modifiers = Modifier::empty();
     modifiers.set(Modifier::BOLD, cell.bold);
@@ -50,6 +61,6 @@ fn cell_style(cell: &Cell, palette: Palette) -> Style {
     modifiers.set(Modifier::CROSSED_OUT, cell.strikeout);
     Style::default()
         .fg(palette.terminal_color(cell.fg, palette.text))
-        .bg(palette.terminal_color(cell.bg, ratatui::style::Color::Reset))
+        .bg(palette.terminal_color(cell.bg, Color::Reset))
         .add_modifier(modifiers)
 }

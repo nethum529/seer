@@ -47,6 +47,7 @@ impl TerminalSession {
 impl Drop for TerminalSession {
     fn drop(&mut self) {
         let _ = self.terminal.show_cursor();
+        let _ = execute!(io::stdout(), SetCursorStyle::DefaultUserShape);
         restore_terminal();
         let _ = disable_raw_mode();
     }
