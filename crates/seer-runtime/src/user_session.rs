@@ -66,9 +66,10 @@ impl UserSession {
                 workspace,
                 tab,
                 pane,
-                input,
-            }
-            | ClientMsg::TerminalInput {
+                bytes,
+                sender,
+            } => self.granted_input(&workspace, &tab, &pane, &bytes, sender),
+            ClientMsg::TerminalInput {
                 workspace,
                 tab,
                 pane,
@@ -410,38 +411,6 @@ impl UserSession {
         }
     }
 
-    fn terminals(&self) -> Vec<TerminalInfo> {
-        self.tree
-            .workspaces
-            .iter()
-            .flat_map(|workspace| &workspace.tabs)
-            .flat_map(|tab| &tab.panes)
-            .map(|pane| {
-                let foreground = self
-                    .pane_hosts
-                    .get(&pane.id)
-                    .map(PaneHost::foreground)
-                    .unwrap_or_default();
-                let shell = foreground.is_empty()
-                    || matches!(
-                        foreground.as_str(),
-                        "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh" | "nu"
-                    )
-                    || std::path::Path::new(&self.shell)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        == Some(foreground.as_str());
-                TerminalInfo {
-                    pane: pane.id.clone(),
-                    name: if shell { "shell".into() } else { foreground },
-                    state: if shell { "idle" } else { "busy" }.into(),
-                    cols: pane.size.cols,
-                    rows: pane.size.rows,
-                }
-            })
-            .collect()
-    }
-
     fn tree_message(&self) -> Vec<ServerMsg> {
         vec![ServerMsg::Tree {
             tree: self.tree.clone(),
@@ -488,3 +457,5 @@ pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
+
+mod terminals;

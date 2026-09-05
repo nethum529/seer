@@ -29,7 +29,7 @@ fn watch_receives_another_persons_cells_without_a_grant() {
 }
 
 #[test]
-fn type_into_requires_a_grant_and_marks_each_line() {
+fn type_into_requires_a_grant_and_names_the_sender_without_changing_bytes() {
     let files = TestFiles::new();
     let address = unused_address();
     write_config(&files, address);
@@ -45,7 +45,7 @@ fn type_into_requires_a_grant_and_marks_each_line() {
     let input = ClientMsg::TypeInto {
         user: "alice".into(),
         pane,
-        bytes: b"first-line\nsecond-line\n".to_vec(),
+        bytes: b"printf '%s%s\\n' marker free\n".to_vec(),
     };
     send(&mut bob, &input);
     assert!(matches!(
@@ -74,8 +74,19 @@ fn type_into_requires_a_grant_and_marks_each_line() {
         |message| matches!(message, ServerMsg::Terminals { user, terminals } if user == "alice" && !terminals.is_empty()),
     );
     send(&mut bob, &input);
-    let text = wait_for_cells_containing(&mut alice, "[seer: bob] second-line");
-    assert!(text.contains("[seer: bob] first-line"));
+    let state = wait_for_broker_message(&mut bob, |message| {
+        let value = serde_json::to_value(message).unwrap();
+        value["Terminals"]["terminals"]
+            .as_array()
+            .is_some_and(|terminals| {
+                terminals
+                    .iter()
+                    .any(|terminal| terminal["last_typist"] == "bob")
+            })
+    });
+    assert!(matches!(state, ServerMsg::Terminals { .. }));
+    let text = wait_for_cells_containing(&mut alice, "markerfree");
+    assert!(!text.contains("[seer:"));
 }
 
 #[test]

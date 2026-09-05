@@ -60,7 +60,8 @@ pub enum ClientMsg {
         workspace: String,
         tab: String,
         pane: String,
-        input: TerminalInput,
+        bytes: Vec<u8>,
+        sender: String,
     },
     AttachRuntime,
     QueryTargets {
@@ -214,6 +215,8 @@ pub struct ClientInfo {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalInfo {
+    #[serde(default)]
+    pub last_typist: Option<String>,
     pub pane: String,
     pub name: String,
     pub state: String,

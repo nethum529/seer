@@ -2,10 +2,12 @@ use crate::{PaneGrid, PtySession};
 use portable_pty::CommandBuilder;
 use seer_core::{TerminalFrame, TerminalInput};
 use std::io;
+use std::time::{Duration, Instant};
 
 pub struct PaneHost {
     session: PtySession,
     grid: PaneGrid,
+    last_typist: Option<(String, Instant)>,
 }
 
 impl PaneHost {
@@ -13,6 +15,7 @@ impl PaneHost {
         Ok(Self {
             session: PtySession::start(command, cols, rows)?,
             grid: PaneGrid::new(cols, rows),
+            last_typist: None,
         })
     }
 
@@ -33,6 +36,21 @@ impl PaneHost {
             self.session.write_input(&bytes)?;
         }
         Ok(self.grid.take_input_changed())
+    }
+
+    pub(crate) fn write_granted(&mut self, bytes: &[u8], sender: String) -> io::Result<()> {
+        self.session.write_input(bytes)?;
+        if !bytes.is_empty() {
+            self.last_typist = Some((sender, Instant::now()));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn last_typist(&self) -> Option<String> {
+        self.last_typist
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() < Duration::from_secs(5))
+            .map(|(name, _)| name.clone())
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {

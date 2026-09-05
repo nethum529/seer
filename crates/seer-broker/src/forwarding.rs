@@ -3,12 +3,11 @@ use std::io;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 
+use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::{InputEvent, TerminalInput, Tree};
 use seer_net::Stream;
 
 use crate::attachments::{AttachmentGuard, ClientWriter, lock_writer};
-use crate::grants::LineMarker;
 use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 
@@ -37,7 +36,6 @@ struct Coordinator<'a> {
     runtimes: HashMap<String, RuntimeConnection>,
     watches: BTreeSet<(String, String)>,
     lists: BTreeSet<String>,
-    markers: HashMap<(String, String), LineMarker>,
 }
 
 impl<'a> Coordinator<'a> {
@@ -102,7 +100,6 @@ impl<'a> Coordinator<'a> {
             runtimes: HashMap::from([(owner.user_id.clone(), runtime)]),
             watches: BTreeSet::new(),
             lists: BTreeSet::new(),
-            markers: HashMap::new(),
         })
     }
 
@@ -252,23 +249,19 @@ impl<'a> Coordinator<'a> {
     fn type_into(&mut self, user: &str, pane: &str, bytes: Vec<u8>) -> io::Result<()> {
         let person = self.person(user)?;
         if !self.broker.grants.permits(user, &self.owner.user_id)? {
-            self.markers.remove(&(user.into(), pane.into()));
             return Err(io::Error::other(format!(
                 "{} has not let you type",
                 person.name
             )));
         }
         let (workspace, tab) = self.runtime(user)?.location(pane)?;
-        let text = self
-            .markers
-            .entry((user.into(), pane.into()))
-            .or_default()
-            .prefix(&self.owner.name, bytes)?;
+        let sender = self.owner.name.clone();
         self.runtime(user)?.send(&ClientMsg::GrantedInput {
             workspace,
             tab,
             pane: pane.into(),
-            input: TerminalInput::new(InputEvent::Text(text)),
+            bytes,
+            sender,
         })
     }
 

@@ -30,6 +30,7 @@ fn main_screen_shows_people_terminals_and_input_permission() {
             .into_iter()
             .enumerate()
             .map(|(i, name)| TerminalInfo {
+                last_typist: None,
                 pane: format!("p{i}"),
                 name: name.into(),
                 state: if name == "shell" { "idle" } else { "busy" }.into(),
