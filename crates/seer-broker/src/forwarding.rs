@@ -3,8 +3,8 @@ use std::io;
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 
-use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::{PaneSize, Tree};
 use seer_net::Stream;
 
 use crate::attachments::{AttachmentGuard, ClientWriter, lock_writer};
@@ -34,7 +34,7 @@ struct Coordinator<'a> {
     event_sender: SyncSender<Event>,
     events: Receiver<Event>,
     runtimes: HashMap<String, RuntimeConnection>,
-    watches: BTreeSet<(String, String)>,
+    watches: HashMap<(String, String), PaneSize>,
     lists: BTreeSet<String>,
 }
 
@@ -98,7 +98,7 @@ impl<'a> Coordinator<'a> {
             event_sender,
             events,
             runtimes: HashMap::from([(owner.user_id.clone(), runtime)]),
-            watches: BTreeSet::new(),
+            watches: HashMap::new(),
             lists: BTreeSet::new(),
         })
     }
@@ -166,9 +166,17 @@ impl<'a> Coordinator<'a> {
 
     fn handle_client(&mut self, message: ClientMsg) -> io::Result<()> {
         match message {
-            ClientMsg::Watch { user, pane } => self.watch(&user, &pane),
+            ClientMsg::Watch {
+                user,
+                pane,
+                cols,
+                rows,
+            } => self.watch(&user, &pane, cols, rows),
             ClientMsg::Unwatch { user, pane } => {
-                self.watches.remove(&(user, pane));
+                self.watches.remove(&(user.clone(), pane.clone()));
+                if let Some(runtime) = self.runtimes.get_mut(&user) {
+                    runtime.send(&ClientMsg::Unwatch { user, pane })?;
+                }
                 Ok(())
             }
             ClientMsg::Terminals { user } => self.list(&user),
@@ -194,8 +202,18 @@ impl<'a> Coordinator<'a> {
     fn runtime(&mut self, user: &str) -> io::Result<&mut RuntimeConnection> {
         if !self.runtimes.contains_key(user) {
             let person = self.person(user)?;
-            let runtime =
+            let mut runtime =
                 RuntimeConnection::connect(self.broker, &person, false, &self.event_sender)?;
+            for ((target, pane), size) in &self.watches {
+                if target == user {
+                    runtime.send(&ClientMsg::Watch {
+                        user: user.into(),
+                        pane: pane.clone(),
+                        cols: size.cols,
+                        rows: size.rows,
+                    })?;
+                }
+            }
             self.runtimes.insert(user.to_owned(), runtime);
         }
         self.runtimes
@@ -210,11 +228,21 @@ impl<'a> Coordinator<'a> {
             .ok_or_else(|| io::Error::other("person not found"))
     }
 
-    fn watch(&mut self, user: &str, pane: &str) -> io::Result<()> {
+    fn watch(&mut self, user: &str, pane: &str, cols: u16, rows: u16) -> io::Result<()> {
+        if cols == 0 || rows == 0 {
+            return Err(io::Error::other("terminal size must be positive"));
+        }
         let runtime = self.runtime(user)?;
         runtime.location(pane)?;
         let frame = runtime.frames.get(pane).cloned();
-        self.watches.insert((user.to_owned(), pane.to_owned()));
+        runtime.send(&ClientMsg::Watch {
+            user: user.into(),
+            pane: pane.into(),
+            cols,
+            rows,
+        })?;
+        self.watches
+            .insert((user.to_owned(), pane.to_owned()), PaneSize { cols, rows });
         if let Some(frame) = frame {
             self.write(&ServerMsg::Cells {
                 user: user.into(),
@@ -308,7 +336,8 @@ impl<'a> Coordinator<'a> {
             }
             ServerMsg::Cells { pane, frame, .. } => {
                 runtime.frames.insert(pane.clone(), frame.clone());
-                if user == self.owner.user_id || self.watches.contains(&(user.into(), pane.clone()))
+                if user == self.owner.user_id
+                    || self.watches.contains_key(&(user.into(), pane.clone()))
                 {
                     self.write(&ServerMsg::Cells {
                         user: user.into(),

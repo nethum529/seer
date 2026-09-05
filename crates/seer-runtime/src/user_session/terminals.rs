@@ -1,6 +1,31 @@
 use super::*;
 
 impl UserSession {
+    pub(crate) fn apply_visible_sizes(
+        &mut self,
+        sizes: &BTreeMap<String, PaneSize>,
+    ) -> io::Result<Vec<ServerMsg>> {
+        let mut changed = false;
+        for pane in self
+            .tree
+            .workspaces
+            .iter_mut()
+            .flat_map(|workspace| &mut workspace.tabs)
+            .flat_map(|tab| &mut tab.panes)
+        {
+            let Some(host) = self.pane_hosts.get_mut(&pane.id) else {
+                continue;
+            };
+            let size = sizes.get(&pane.id).copied().unwrap_or(host.owner_size);
+            if pane.size != size {
+                host.resize_visible(size.cols, size.rows)?;
+                pane.size = size;
+                changed = true;
+            }
+        }
+        Ok(if changed { self.snapshot() } else { Vec::new() })
+    }
+
     pub(super) fn terminals(&self) -> Vec<TerminalInfo> {
         self.tree
             .workspaces

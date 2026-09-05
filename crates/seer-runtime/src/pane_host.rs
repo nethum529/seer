@@ -7,6 +7,7 @@ use std::time::{Duration, Instant};
 pub struct PaneHost {
     session: PtySession,
     grid: PaneGrid,
+    pub(crate) owner_size: seer_core::PaneSize,
     last_typist: Option<(String, Instant)>,
 }
 
@@ -15,6 +16,7 @@ impl PaneHost {
         Ok(Self {
             session: PtySession::start(command, cols, rows)?,
             grid: PaneGrid::new(cols, rows),
+            owner_size: seer_core::PaneSize { cols, rows },
             last_typist: None,
         })
     }
@@ -54,6 +56,12 @@ impl PaneHost {
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
+        self.resize_visible(cols, rows)?;
+        self.owner_size = seer_core::PaneSize { cols, rows };
+        Ok(())
+    }
+
+    pub(crate) fn resize_visible(&mut self, cols: u16, rows: u16) -> io::Result<()> {
         self.session.resize(cols, rows)?;
         self.grid.resize(cols, rows);
         Ok(())

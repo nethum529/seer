@@ -29,6 +29,8 @@ fn input_to_both_screens_latency() {
     send(
         &mut watcher,
         &ClientMsg::Watch {
+            cols: 80,
+            rows: 24,
             user: "alice".into(),
             pane: pane.clone(),
         },

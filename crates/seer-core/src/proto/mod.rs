@@ -70,6 +70,8 @@ pub enum ClientMsg {
     Watch {
         user: String,
         pane: String,
+        cols: u16,
+        rows: u16,
     },
     Unwatch {
         user: String,

@@ -84,6 +84,14 @@ fn handle_message(
 ) -> io::Result<bool> {
     match message {
         ClientMsg::Detach => Ok(true),
+        ClientMsg::Watch {
+            pane, cols, rows, ..
+        } => shared.watch_size(
+            connection_id,
+            &pane,
+            Some(seer_core::PaneSize { cols, rows }),
+        ),
+        ClientMsg::Unwatch { pane, .. } => shared.watch_size(connection_id, &pane, None),
         ClientMsg::Resize {
             workspace,
             tab,
@@ -186,7 +194,7 @@ impl SharedSession {
         if owner_removed {
             self.recover_locked()?;
         }
-        Ok(())
+        self.flush_messages(&[])
     }
 
     fn recover(&self) -> io::Result<()> {
@@ -391,7 +399,9 @@ impl SharedSession {
         let adopt = {
             let mut connections = lock(&self.connections)?;
             let owner_present = connections.iter().any(|connection| connection.size_owner);
-            for message in messages {
+            let sizes = Self::visible_sizes(&connections);
+            let resized = lock(&self.session)?.apply_visible_sizes(&sizes)?;
+            for message in messages.iter().chain(&resized) {
                 let output = writer::encode(message)?;
                 connections.retain(|connection| connection.send(Arc::clone(&output)));
             }
@@ -416,5 +426,4 @@ impl SharedSession {
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
 mod size_lease;
