@@ -188,6 +188,25 @@ fn prompt_defaults_create_config_and_owner_store() {
     assert!(output.status.success(), "{}", output.stderr);
     assert!(output.stdout.contains("Your name [alice]: "));
     assert!(!output.stdout.contains("Published address"));
+    assert!(
+        output.stdout.contains(concat!(
+            " ___  ___  ___ _ _\n",
+            "(_-< / -_)/ -_) '_|\n",
+            "/__/ \\___|\\___|_|\n",
+            "\n",
+            "Server started at 127.0.0.1:7321.\nYou are alice.\n"
+        )),
+        "{}",
+        output.stdout
+    );
+    assert!(
+        output
+            .stdout
+            .lines()
+            .any(|line| line.starts_with("Ready in ") && line.ends_with(" s.")),
+        "{}",
+        output.stdout
+    );
     let broker: toml::Value = read_toml(directory.config_home().join("seer/broker.toml"));
     assert_eq!(broker["listen"].as_str(), Some("127.0.0.1:7321"));
     assert_eq!(broker["published_addr"].as_str(), Some("127.0.0.1:7321"));
@@ -213,6 +232,7 @@ fn prompt_defaults_create_config_and_owner_store() {
     );
     let log = fs::read_to_string(directory.state_dir().join("broker.log"))
         .expect("broker log must be read");
+    assert!(log.contains("broker-output"));
     assert!(!log.contains("owner-credential"));
 }
 
