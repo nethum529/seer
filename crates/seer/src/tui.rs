@@ -112,6 +112,7 @@ fn run_loop(
         if was_viewing != state.viewer.as_ref().map(crate::viewer::Viewer::target) {
             resize(stream, state, terminal.size()?)?;
         }
+        dirty |= render::expire_notice(state);
         if dirty {
             sync_watches(stream, state)?;
             terminal.draw(|frame| render::draw(frame, state))?;
@@ -159,7 +160,7 @@ fn apply_message(
                     state.focus = index;
                 } else {
                     state.viewer = None;
-                    state.notice = "Terminal closed.".into();
+                    state.set_notice("Terminal closed.");
                 }
             }
             state.terminals.insert(user, terminals);
@@ -197,7 +198,7 @@ fn apply_message(
             state.invite = Some(crate::commands::join_line(&capsule));
         }
         ServerMsg::Refused { reason } => {
-            state.notice = reason;
+            state.set_notice(reason);
             state.pending_new = None;
             state.invite_pending = false;
         }
@@ -224,7 +225,6 @@ fn handle_event(
     let old_viewer = state.viewer.as_ref().map(crate::viewer::Viewer::target);
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
-            state.notice.clear();
             if state.menu.is_some() {
                 crate::person_menu::key(key, stream, state)?;
             } else if state.viewer.is_some() {

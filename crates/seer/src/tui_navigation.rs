@@ -57,6 +57,7 @@ pub(crate) fn key(
         KeyCode::Char('h') | KeyCode::Left => move_box(state, false),
         KeyCode::Char('l') | KeyCode::Right => move_box(state, true),
         KeyCode::Enter => state.open_focused(),
+        KeyCode::Char('p') => state.chrome.show_people = !state.chrome.show_people,
         KeyCode::Char('/') => state.searching = true,
         KeyCode::Char('n') => new_terminal(stream, state)?,
         KeyCode::Char('c') if state.people.len() == 1 => copy_invite(state)?,
@@ -85,6 +86,7 @@ fn search(key: KeyEvent, state: &mut ClientState) {
 }
 
 fn move_person(state: &mut ClientState, forward: bool) {
+    state.chrome.grid_focus = false;
     let matches = state.matches();
     if matches.is_empty() {
         return;
@@ -105,6 +107,7 @@ fn move_person(state: &mut ClientState, forward: bool) {
 }
 
 fn move_box(state: &mut ClientState, forward: bool) {
+    state.chrome.grid_focus = true;
     let count = state.selected_terminals().len();
     if count == 0 {
         return;
@@ -129,7 +132,7 @@ pub(crate) fn step(index: usize, count: usize, forward: bool) -> usize {
 
 fn new_terminal(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
     let Some(workspace) = state.tree.workspaces.first() else {
-        state.notice = "Waiting for your terminals.".into();
+        state.set_notice("Waiting for your terminals.");
         return Ok(());
     };
     state.pending_new = Some(
@@ -169,7 +172,7 @@ fn copy_invite(state: &mut ClientState) -> io::Result<()> {
     let mut stdout = io::stdout().lock();
     write!(stdout, "\x1b]52;c;{}\x07", base64(invite.as_bytes()))?;
     stdout.flush()?;
-    state.notice = "Copy requested. Your terminal must permit clipboard access.".into();
+    state.set_notice("Copy requested. Your terminal must permit clipboard access.");
     Ok(())
 }
 

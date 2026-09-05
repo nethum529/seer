@@ -153,13 +153,17 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     let lines = lines(state, &menu.user);
     let count = state.terminals.get(&menu.user).map_or(0, Vec::len);
     menu.selected = menu.selected.min(count);
-    let width = full.width.min(22);
+    let width = full
+        .width
+        .min((lines.iter().map(Line::width).max().unwrap_or(0) + 4).max(22) as u16);
     let x = menu.anchor.x.min(full.right().saturating_sub(width));
     let y = menu.anchor.y.min(full.bottom().saturating_sub(4));
     let height = (lines.len().saturating_add(2) as u16)
         .min(full.bottom().saturating_sub(y).saturating_sub(1));
     menu.area = Rect::new(x, y, width, height);
-    let block = palette.block(false);
+    let block = palette
+        .block(false)
+        .style(palette.style().bg(palette.surface0));
     let inner = block.inner(menu.area);
     palette.clear(frame.buffer_mut(), menu.area);
     frame.render_widget(block, menu.area);
@@ -177,9 +181,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
         let rect = Rect::new(inner.x, inner.y + row as u16, inner.width, 1);
         let action = (0..=count).find(|selected| action_row(*selected, count) == index);
         let style = if action == Some(menu.selected) {
-            palette.style().bg(palette.surface0)
+            palette.style().bg(palette.surface0).fg(palette.accent)
         } else {
-            palette.style()
+            palette.style().bg(palette.surface0)
         };
         frame.render_widget(Paragraph::new(line).style(style), rect);
         if let Some(action) = action {
@@ -200,39 +204,45 @@ fn lines(state: &ClientState, user: &str) -> Vec<Line<'static>> {
             if online { "online" } else { "away" },
             idle_text(idle)
         ),
-        palette.style().fg(palette.subtext0),
+        palette.style().bg(palette.surface0).fg(palette.subtext0),
     )];
     let terminals = state.terminals.get(user).map_or(&[][..], Vec::as_slice);
     for terminal in terminals {
         lines.push(Line::from(vec![
             Span::styled(
                 format!("{} ", terminal.name),
-                palette.style().fg(if terminal.name == "shell" {
-                    palette.subtext0
-                } else {
-                    palette.blue
-                }),
+                palette
+                    .style()
+                    .bg(palette.surface0)
+                    .fg(if terminal.name == "shell" {
+                        palette.subtext0
+                    } else {
+                        palette.blue
+                    }),
             ),
             Span::styled(
                 terminal.state.clone(),
-                palette.style().fg(if terminal.state == "idle" {
-                    palette.green
-                } else {
-                    palette.yellow
-                }),
+                palette
+                    .style()
+                    .bg(palette.surface0)
+                    .fg(if terminal.state == "idle" {
+                        palette.green
+                    } else {
+                        palette.yellow
+                    }),
             ),
         ]));
     }
     lines.push(Line::styled(
         "--------------------",
-        palette.style().fg(palette.overlay0),
+        palette.style().bg(palette.surface0).fg(palette.overlay0),
     ));
     for terminal in terminals {
         lines.push(Line::from(format!("watch {}", terminal.name)));
     }
     lines.push(Line::styled(
         "--------------------",
-        palette.style().fg(palette.overlay0),
+        palette.style().bg(palette.surface0).fg(palette.overlay0),
     ));
     lines.push(Line::from(format!(
         "[{}] can type here",

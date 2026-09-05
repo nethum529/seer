@@ -50,6 +50,6 @@ fn cell_style(cell: &Cell, palette: Palette) -> Style {
     modifiers.set(Modifier::CROSSED_OUT, cell.strikeout);
     Style::default()
         .fg(palette.terminal_color(cell.fg, palette.text))
-        .bg(palette.terminal_color(cell.bg, palette.panel_bg))
+        .bg(palette.terminal_color(cell.bg, ratatui::style::Color::Reset))
         .add_modifier(modifiers)
 }

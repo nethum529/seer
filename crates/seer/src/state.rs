@@ -12,6 +12,7 @@ pub(crate) struct ClientState {
     pub(crate) people: Vec<Person>,
     pub(crate) selected: usize,
     pub(crate) focus: usize,
+    pub(crate) chrome: crate::render::Chrome,
     pub(crate) terminals: HashMap<String, Vec<TerminalInfo>>,
     pub(crate) frames: HashMap<(String, String), TerminalFrame>,
     pub(crate) viewer: Option<Viewer>,
@@ -55,6 +56,7 @@ impl ClientState {
             people: vec![own],
             selected: 0,
             focus: 0,
+            chrome: crate::render::Chrome::default(),
             terminals: HashMap::new(),
             frames: HashMap::new(),
             viewer: None,
@@ -76,6 +78,11 @@ impl ClientState {
             watches: BTreeSet::new(),
             pending_new: None,
         }
+    }
+
+    pub(crate) fn set_notice(&mut self, notice: impl Into<String>) {
+        self.notice = notice.into();
+        self.chrome.notice_since = None;
     }
 
     pub(crate) fn user(&self) -> &str {
