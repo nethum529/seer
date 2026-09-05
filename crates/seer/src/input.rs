@@ -330,3 +330,45 @@ fn scroll(mouse: MouseEvent, state: &mut ClientState) {
         };
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+    use seer_core::Tree;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn people_toggle_only_changes_narrow_screens() {
+        let mut state = ClientState::new(Tree::new(), "alice".into());
+        let (mut stream, _peer) = UnixStream::pair().expect("streams must open");
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+        terminal
+            .draw(|frame| crate::render::draw(frame, &mut state))
+            .expect("screen must draw");
+        let key = KeyEvent::new(CrosstermKeyCode::Char('p'), KeyModifiers::NONE);
+        command(key, &mut stream, &mut state).expect("wide key must work");
+        terminal.backend_mut().resize(45, 30);
+        terminal
+            .draw(|frame| crate::render::draw(frame, &mut state))
+            .expect("narrow screen must draw");
+        assert!(!title_row(&terminal).contains("people"));
+        command(key, &mut stream, &mut state).expect("narrow key must work");
+        terminal
+            .draw(|frame| crate::render::draw(frame, &mut state))
+            .expect("people must draw");
+        assert!(title_row(&terminal).contains("people"));
+        command(key, &mut stream, &mut state).expect("narrow key must work");
+        terminal
+            .draw(|frame| crate::render::draw(frame, &mut state))
+            .expect("people must hide");
+        assert!(!title_row(&terminal).contains("people"));
+    }
+
+    fn title_row(terminal: &Terminal<TestBackend>) -> String {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, 1)].symbol())
+            .collect()
+    }
+}
