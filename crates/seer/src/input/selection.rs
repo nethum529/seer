@@ -81,7 +81,6 @@ pub(super) fn mouse(mouse: MouseEvent, state: &mut ClientState) -> io::Result<bo
                 && state.menu.is_none()
                 && state.chrome.context.is_none()
                 && !state.quit_prompt
-                && state.close_prompt.is_none()
             {
                 state.selection = begin(state, position);
             }

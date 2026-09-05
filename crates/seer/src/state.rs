@@ -1,8 +1,12 @@
 use crate::viewer::Viewer;
 use ratatui::layout::{Rect, Size};
-use seer_core::proto::{Person, PersonState, TerminalInfo};
+use seer_core::proto::{ClientMsg, Person, PersonState, TerminalInfo};
 use seer_core::{Cursor, TerminalFrame, Tree};
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use seer_net::Stream;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    io,
+};
 
 pub(crate) struct ClientState {
     pub(crate) tree: Tree,
@@ -28,7 +32,6 @@ pub(crate) struct ClientState {
     pub(crate) search: String,
     pub(crate) searching: bool,
     pub(crate) quit_prompt: bool,
-    pub(crate) close_prompt: Option<String>,
     pub(crate) tab_areas: Vec<(usize, Rect)>,
     pub(crate) plus_area: Rect,
     pub(crate) discard_prefix: bool,
@@ -76,7 +79,6 @@ impl ClientState {
             search: String::new(),
             searching: false,
             quit_prompt: false,
-            close_prompt: None,
             tab_areas: Vec::new(),
             plus_area: Rect::default(),
             discard_prefix: false,
@@ -190,10 +192,24 @@ impl ClientState {
         }
     }
 
-    pub(crate) fn request_close(&mut self) {
-        if self.user() == self.own_user {
-            self.close_prompt = self.focused().map(str::to_owned);
+    pub(crate) fn request_close(&self, stream: &mut impl Stream) -> io::Result<()> {
+        if self.user() != self.own_user {
+            return Ok(());
         }
+        let Some(pane) = self.focused() else {
+            return Ok(());
+        };
+        let Some((workspace, tab)) = self.location(pane) else {
+            return Ok(());
+        };
+        crate::tui::send(
+            stream,
+            &ClientMsg::ClosePane {
+                workspace,
+                tab,
+                pane: pane.to_owned(),
+            },
+        )
     }
 
     pub(crate) fn replace_tree(&mut self, tree: Tree) {

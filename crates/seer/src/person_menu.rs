@@ -269,48 +269,63 @@ pub(crate) fn open_context(state: &mut ClientState, anchor: Position) {
     });
 }
 
-pub(crate) fn context_key(key: KeyEvent, state: &mut ClientState) {
+pub(crate) fn context_key(
+    key: KeyEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+) -> io::Result<()> {
     let Some(mut menu) = state.chrome.context.take() else {
-        return;
+        return Ok(());
     };
     match key.code {
-        KeyCode::Esc => return,
+        KeyCode::Esc => return Ok(()),
         KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('k') | KeyCode::Up => {
             menu.selected = 1 - menu.selected
         }
         KeyCode::Enter => {
-            context_action(state, menu.selected);
-            return;
+            context_action(stream, state, menu.selected)?;
+            return Ok(());
         }
         _ => {}
     }
     state.chrome.context = Some(menu);
+    Ok(())
 }
 
-fn context_action(state: &mut ClientState, index: usize) {
+fn context_action(
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+    index: usize,
+) -> io::Result<()> {
     if index == 0 {
         state.open_focused();
+        Ok(())
     } else {
-        state.request_close();
+        state.request_close(stream)
     }
 }
 
-pub(crate) fn context_mouse(mouse: MouseEvent, state: &mut ClientState) {
+pub(crate) fn context_mouse(
+    mouse: MouseEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+) -> io::Result<()> {
     let Some(menu) = state.chrome.context.take() else {
-        return;
+        return Ok(());
     };
     if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
         let position = Position::new(mouse.column, mouse.row);
         if !menu.area.contains(position) {
-            return;
+            return Ok(());
         }
         let row = mouse.row.saturating_sub(menu.area.y + 1);
         if row < 2 {
-            context_action(state, usize::from(row));
-            return;
+            context_action(stream, state, usize::from(row))?;
+            return Ok(());
         }
     }
     state.chrome.context = Some(menu);
+    Ok(())
 }
 
 pub(crate) fn draw_context(frame: &mut Frame<'_>, state: &mut ClientState) {

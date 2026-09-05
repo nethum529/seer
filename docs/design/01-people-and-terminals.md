@@ -75,7 +75,7 @@ Keys: j and k select a person. h and l move focus between the boxes.
 Enter opens the focused box in the viewer. n creates a new terminal in
 the owner's own list, selects its tab, and opens it in the viewer with
 input. Number keys 1 to 9 select a tab. x closes the selected terminal
-after a confirm dialog and sends ClosePane. Slash opens a search over
+at once and sends ClosePane. Slash opens a search over
 names. Esc goes back, and on the main screen asks to quit. q quits.
 p toggles the people column at narrow widths.
 
@@ -154,7 +154,7 @@ luvus. Left click is a plain click. Right click opens a context menu.
   viewer on its first terminal.
 - Left click on a box focuses it. Double click opens it in the viewer.
 - Left click on a tab selects it. Click on the x of a tab closes that
-  terminal after the confirm dialog. Click on the + tab creates a new
+  terminal at once. Click on the + tab creates a new
   terminal.
 - Left click on a footer key hint presses that key.
 - Left click outside an open menu closes it.
@@ -344,7 +344,7 @@ and the release script. Each part is one commit.
    scroll cue, empty state, and dialog rules in 2.1. Files: render.rs,
    theme.rs, viewer.rs, person_menu.rs.
 3. Terminals: own terminals as boxes, first run rule in 2.4, the tab
-   strip, number keys, x close with ClosePane. Files: render.rs,
+   strip, number keys, x closes at once with ClosePane. Files: render.rs,
    state.rs, input.rs, tui.rs, tui_navigation.rs.
 4. Viewer: inside the terminal area, follow key removed, Watch on
    show and Unwatch on hide, footer order. Files: viewer.rs, state.rs,
