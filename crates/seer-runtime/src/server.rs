@@ -3,7 +3,7 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -21,7 +21,7 @@ use connection::{
 };
 use util::{connection_closed, lock, remove_stale_socket, stop_after_snapshot_failure};
 
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
 const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SIZE_LEASE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -118,24 +118,19 @@ fn start_poll_driver(shared: Arc<SharedSession>) -> io::Result<()> {
 
 fn poll_driver(shared: &SharedSession) {
     loop {
-        let has_connections = match shared.poll_and_broadcast() {
-            Ok((_, has_connections)) => has_connections,
-            Err(error) => {
-                eprintln!("runtime poll error: {error}");
-                return;
-            }
-        };
-        let interval = if has_connections {
-            POLL_INTERVAL
-        } else {
-            DETACHED_POLL_INTERVAL
-        };
-        thread::sleep(interval);
+        if let Err(error) = shared
+            .poll_and_broadcast()
+            .and_then(|_| shared.wait_for_poll())
+        {
+            eprintln!("runtime poll error: {error}");
+            return;
+        }
     }
 }
 
 struct SharedSession {
     session: Mutex<UserSession>,
+    poll_wake: Condvar,
     connections: Mutex<Vec<Connection>>,
     lease: Mutex<()>,
     last_input: Mutex<Instant>,
@@ -145,6 +140,7 @@ impl SharedSession {
     fn new(session: UserSession) -> Self {
         Self {
             session: Mutex::new(session),
+            poll_wake: Condvar::new(),
             connections: Mutex::new(Vec::new()),
             lease: Mutex::new(()),
             last_input: Mutex::new(Instant::now()),
@@ -152,6 +148,7 @@ impl SharedSession {
     }
 
     fn add_connection(&self, id: u64, stream: UnixStream) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
         let messages = {
             let mut session = lock(&self.session)?;
             match session.ensure_first_shell() {
@@ -166,7 +163,6 @@ impl SharedSession {
         if !connection.send_messages(&messages)? {
             return Err(connection_closed());
         }
-        let _lease = lock(&self.lease)?;
         let mut connections = lock(&self.connections)?;
         let owner_stale = connections
             .iter()
@@ -180,6 +176,7 @@ impl SharedSession {
             connection.size_owner = !connections.iter().any(|c| c.size_owner);
         }
         connections.push(connection);
+        self.poll_wake.notify_one();
         Ok(())
     }
 
@@ -381,15 +378,31 @@ impl SharedSession {
         }
     }
 
+    fn wait_for_poll(&self) -> io::Result<()> {
+        let connections = lock(&self.connections)?;
+        let interval = if connections.is_empty() {
+            DETACHED_POLL_INTERVAL
+        } else {
+            POLL_INTERVAL
+        };
+        let _wait = self
+            .poll_wake
+            .wait_timeout(connections, interval)
+            .map_err(|_| io::Error::other("runtime poll lock is poisoned"))?;
+        Ok(())
+    }
+
     fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {
+        let _lease = lock(&self.lease)?;
         let messages = lock(&self.session)?.poll();
         let has_connections = !lock(&self.connections)?.is_empty();
         if has_connections {
-            self.broadcast(&messages)?;
+            self.flush_messages(&messages)?;
         }
         Ok((messages, has_connections))
     }
 
+    #[cfg(test)]
     fn broadcast(&self, messages: &[ServerMsg]) -> io::Result<()> {
         let _lease = lock(&self.lease)?;
         self.flush_messages(messages)

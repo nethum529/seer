@@ -1,4 +1,5 @@
 pub mod codec;
+pub(crate) mod frame_rows;
 
 use serde::{Deserialize, Serialize};
 

@@ -103,6 +103,7 @@ pub enum MouseButton {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalFrame {
+    #[serde(with = "crate::proto::frame_rows")]
     pub rows: Vec<Vec<Cell>>,
     pub cursor: Cursor,
     pub modes: TerminalModes,

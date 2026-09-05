@@ -159,6 +159,7 @@ impl SharedSession {
         stream: UnixStream,
         pane: Option<&str>,
     ) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
         let messages = {
             let session = lock(&self.session)?;
             if pane.is_some_and(|id| {
@@ -183,6 +184,7 @@ impl SharedSession {
             return Err(super::connection_closed());
         }
         lock(&self.connections)?.push(connection);
+        self.poll_wake.notify_one();
         Ok(())
     }
 

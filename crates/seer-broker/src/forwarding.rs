@@ -44,6 +44,7 @@ impl<'a> Coordinator<'a> {
         owner: &'a PersonRecord,
         broker: &'a BrokerState,
     ) -> io::Result<Self> {
+        transport::configure_client(&client)?;
         client.set_write_timeout(Some(std::time::Duration::from_secs(2)))?;
         let (event_sender, events) = mpsc::sync_channel(64);
         let reader = client.clone();

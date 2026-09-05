@@ -197,3 +197,13 @@ fn join_reader(reader: JoinHandle<()>) -> io::Result<()> {
         .join()
         .map_err(|_| io::Error::other("forward reader thread panicked"))
 }
+
+pub(super) fn configure_client(stream: &impl Stream) -> io::Result<()> {
+    let stream = stream as &dyn std::any::Any;
+    if let Some(stream) = stream.downcast_ref::<std::net::TcpStream>() {
+        stream.set_nodelay(true)?;
+    } else if let Some(seer_net::Socket::Tcp(stream)) = stream.downcast_ref::<seer_net::Socket>() {
+        stream.set_nodelay(true)?;
+    }
+    Ok(())
+}

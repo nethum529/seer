@@ -12,6 +12,14 @@ fn input_to_both_screens_latency() {
     send_hello(&mut owner, "alice", "alice-secret");
     let tree = wait_for_tree_with_tab(&mut owner);
     let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();
+    send_input(
+        &mut owner,
+        "w1",
+        "w1:t1",
+        &pane,
+        "stty -echo -icanon; printf '\\033c%s%s\\n' SEER_ LATENCY_READY; exec cat\n",
+    );
+    wait_for_cells_containing(&mut owner, "SEER_LATENCY_READY");
     let mut watcher = connect_when_ready(address);
     send_hello(&mut watcher, "bob", "bob-secret");
     wait_for_tree_with_tab(&mut watcher);
@@ -35,10 +43,18 @@ fn input_to_both_screens_latency() {
             pane: pane.clone(),
         },
     );
-    wait_for_broker_message(&mut watcher, |message| {
+    let initial = wait_for_broker_message(&mut watcher, |message| {
         matches!(message,
         ServerMsg::Cells { user, .. } if user == "alice")
     });
+    if let ServerMsg::Cells { frame, .. } = initial {
+        println!(
+            "full_frame_bytes={} full_rows_bytes={} dirty_row_bytes={}",
+            serde_json::to_vec(&frame).unwrap().len(),
+            serde_json::to_vec(&frame.rows).unwrap().len(),
+            serde_json::to_vec(&frame.rows[0]).unwrap().len()
+        );
+    }
     let mut expected = String::new();
     for key in b"abcdefghijklmnopqrst" {
         expected.push(char::from(*key));
