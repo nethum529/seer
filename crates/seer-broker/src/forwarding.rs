@@ -264,16 +264,12 @@ impl<'a> Coordinator<'a> {
             .entry((user.into(), pane.into()))
             .or_default()
             .prefix(&self.owner.name, bytes)?;
-        RuntimeConnection::send_granted(
-            self.broker,
-            &person,
-            &ClientMsg::TerminalInput {
-                workspace,
-                tab,
-                pane: pane.into(),
-                input: TerminalInput::new(InputEvent::Text(text)),
-            },
-        )
+        self.runtime(user)?.send(&ClientMsg::GrantedInput {
+            workspace,
+            tab,
+            pane: pane.into(),
+            input: TerminalInput::new(InputEvent::Text(text)),
+        })
     }
 
     fn detach_client(&self, client_id: &str) -> io::Result<()> {

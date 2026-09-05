@@ -62,7 +62,13 @@ impl UserSession {
             ClientMsg::TerminalCapabilities { capabilities } => {
                 validate_capabilities(capabilities).map(|()| Vec::new())
             }
-            ClientMsg::TerminalInput {
+            ClientMsg::GrantedInput {
+                workspace,
+                tab,
+                pane,
+                input,
+            }
+            | ClientMsg::TerminalInput {
                 workspace,
                 tab,
                 pane,

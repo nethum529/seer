@@ -56,6 +56,12 @@ pub enum ClientMsg {
         cols: u16,
         rows: u16,
     },
+    GrantedInput {
+        workspace: String,
+        tab: String,
+        pane: String,
+        input: TerminalInput,
+    },
     AttachRuntime,
     QueryTargets {
         user: String,
