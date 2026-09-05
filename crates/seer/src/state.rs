@@ -27,6 +27,9 @@ pub(crate) struct ClientState {
     pub(crate) search: String,
     pub(crate) searching: bool,
     pub(crate) quit_prompt: bool,
+    pub(crate) close_prompt: Option<String>,
+    pub(crate) tab_areas: Vec<(usize, Rect)>,
+    pub(crate) plus_area: Rect,
     pub(crate) discard_prefix: bool,
     pub(crate) invite: Option<String>,
     pub(crate) invite_pending: bool,
@@ -71,6 +74,9 @@ impl ClientState {
             search: String::new(),
             searching: false,
             quit_prompt: false,
+            close_prompt: None,
+            tab_areas: Vec::new(),
+            plus_area: Rect::default(),
             discard_prefix: false,
             invite: None,
             invite_pending: false,
@@ -140,6 +146,8 @@ impl ClientState {
     pub(crate) fn select_person(&mut self, index: usize) {
         self.selected = index.min(self.people.len().saturating_sub(1));
         self.focus = 0;
+        self.viewer = None;
+        self.chrome.grid_focus = false;
         self.grid_scroll = 0;
         self.notice.clear();
     }
@@ -163,6 +171,26 @@ impl ClientState {
         }
     }
 
+    pub(crate) fn select_tab(&mut self, index: usize) {
+        if index >= self.selected_terminals().len() {
+            return;
+        }
+        self.focus = index;
+        self.chrome.grid_focus = true;
+        if self.viewer.is_some() {
+            self.open_focused();
+        }
+        if !self.box_areas.iter().any(|(i, _)| *i == index) {
+            self.grid_scroll = index / self.grid_columns.max(1);
+        }
+    }
+
+    pub(crate) fn request_close(&mut self) {
+        if self.user() == self.own_user {
+            self.close_prompt = self.focused().map(str::to_owned);
+        }
+    }
+
     pub(crate) fn replace_tree(&mut self, tree: Tree) {
         self.tree = tree;
         let Some(existing) = &self.pending_new else {
@@ -181,6 +209,11 @@ impl ClientState {
                 .people
                 .iter()
                 .position(|p| p.user_id == self.own_user)
+                .unwrap_or(0);
+            self.focus = self
+                .terminals
+                .get(&self.own_user)
+                .and_then(|list| list.iter().position(|t| t.pane == pane))
                 .unwrap_or(0);
             self.viewer = Some(Viewer::new(self.own_user.clone(), pane));
             self.pending_new = None;

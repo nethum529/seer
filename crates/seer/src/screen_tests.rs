@@ -74,8 +74,25 @@ fn first_run_shows_the_join_line() {
         .map(|cell| cell.symbol())
         .collect();
     assert!(text.contains("Nobody else is here yet."));
-    assert!(text.contains("seer join SEER1-host-7321-invite"));
+    assert!(text.contains("seer join"));
+    assert!(text.contains("SEER1-host-7321-invite"));
     assert!(text.contains("you"));
+    state
+        .terminals
+        .insert("alice".into(), vec![terminal_info("shell")]);
+    terminal
+        .draw(|frame| render::draw(frame, &mut state))
+        .expect("screen must draw");
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(!text.contains("Nobody else is here yet."));
+    assert!(text.contains("shell idle"));
+    assert!(text.contains("c copy"));
 }
 
 #[test]
@@ -103,4 +120,64 @@ fn backgrounds_preserve_the_host_terminal() {
             );
         }
     }
+}
+
+fn terminal_info(name: &str) -> TerminalInfo {
+    TerminalInfo {
+        pane: name.into(),
+        name: name.into(),
+        state: "idle".into(),
+        cols: 80,
+        rows: 24,
+    }
+}
+
+#[test]
+fn tab_strip_shows_terminals_and_number_keys_select() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    state.terminals.insert(
+        "alice".into(),
+        ["claude", "codex", "shell"]
+            .into_iter()
+            .map(terminal_info)
+            .collect(),
+    );
+    let mut terminal = Terminal::new(TestBackend::new(150, 40)).expect("backend must open");
+    terminal
+        .draw(|frame| render::draw(frame, &mut state))
+        .expect("screen must draw");
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    for label in ["claude idle x", "codex idle x", "shell idle x", " + "] {
+        assert!(text.contains(label));
+    }
+    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener must bind");
+    let mut stream =
+        std::net::TcpStream::connect(listener.local_addr().expect("address must exist"))
+            .expect("client must connect");
+    let _peer = listener.accept().expect("server must accept");
+    crate::tui_navigation::key(
+        KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE),
+        &mut stream,
+        &mut state,
+    )
+    .expect("key must work");
+    terminal
+        .draw(|frame| render::draw(frame, &mut state))
+        .expect("screen must draw");
+    let buffer = terminal.backend().buffer();
+    let selected: String = buffer
+        .content
+        .iter()
+        .filter(|cell| cell.bg == Palette::default().surface0)
+        .map(|cell| cell.symbol())
+        .collect();
+    assert!(selected.contains("codex idle x"));
+    assert!(!selected.contains("claude idle x"));
 }

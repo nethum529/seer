@@ -1,3 +1,4 @@
+mod terminals;
 use crate::terminal_cells::PaneCells;
 use crate::{state::ClientState, theme::Palette};
 use ratatui::{
@@ -5,8 +6,9 @@ use ratatui::{
     layout::{Alignment, Margin, Rect},
     style::Modifier,
     text::{Line, Span},
-    widgets::{Padding, Paragraph, Wrap},
+    widgets::{Padding, Paragraph},
 };
+use terminals::{first_run, tabs};
 
 #[derive(Default)]
 pub(crate) struct Chrome {
@@ -68,6 +70,8 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     frame.render_widget(Paragraph::new("").style(palette.style()), full);
     state.people_areas.clear();
     state.box_areas.clear();
+    state.tab_areas.clear();
+    state.plus_area = Rect::default();
     if state.viewer.is_some() {
         crate::viewer::draw(frame, state);
         return;
@@ -79,7 +83,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     let hints = if state.searching {
         "enter select  esc cancel"
     } else {
-        "j/k people  h/l boxes  enter view  n new  / find  esc back  q quit"
+        "j/k people  h/l boxes  enter view  n new  x close  1-9 tabs  / find  esc back  q quit"
     };
     let hints = if full.width < 50 {
         format!("p people  {hints}")
@@ -89,6 +93,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     footer(frame, &hints);
     notice(frame, state, &hints);
     crate::person_menu::draw(frame, state);
+    if state.close_prompt.is_some() {
+        dialog(frame, "Close terminal?", "y yes   n no   esc back");
+    }
     if state.quit_prompt {
         dialog(frame, "Quit seer?", "enter quit   esc stay");
     }
@@ -235,60 +242,36 @@ fn terminal_area(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
         Paragraph::new(header).style(palette.style()),
         Rect::new(inner.x, inner.y, inner.width, 1),
     );
-    let content = Rect::new(
+    let mut content = Rect::new(
         inner.x,
         inner.y + 2,
         inner.width,
         inner.height.saturating_sub(2),
     );
-    if state.people.len() == 1 {
-        first_run(frame, state, content);
-    } else {
-        box_grid(frame, state, content, if area.width >= 80 { 2 } else { 1 });
+    if !state.selected_terminals().is_empty() {
+        tabs(
+            frame,
+            state,
+            Rect::new(inner.x, inner.y + 1, inner.width, 1),
+        );
+        content.y = content.y.saturating_add(1);
+        content.height = content.height.saturating_sub(1);
     }
-}
-
-fn first_run(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
-    let palette = Palette::default();
-    let invite = state.invite.as_deref().unwrap_or("Creating an invite...");
-    let text = vec![
-        Line::styled(
-            "Nobody else is here yet.",
-            palette
-                .style()
-                .fg(palette.text)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Line::from(""),
-        Line::styled(
-            "Send this line to a friend. It expires in 24 hours.",
-            palette.style().fg(palette.subtext0),
-        ),
-        Line::from(""),
-        Line::styled(invite, palette.style().fg(palette.blue)),
-        Line::from(""),
-        Line::styled(
-            "c copy   n new invite / terminal",
-            palette.style().fg(palette.subtext0),
-        ),
-    ];
-    let width = area.width.saturating_sub(4).max(1);
-    let height = 7_u16
-        .saturating_add((invite.len() as u16).saturating_div(width))
-        .min(area.height);
-    let centered = Rect::new(
-        area.x + area.width.saturating_sub(width) / 2,
-        area.y + area.height.saturating_sub(height) / 2,
-        width.min(area.width),
-        height,
-    );
-    frame.render_widget(
-        Paragraph::new(text)
-            .style(palette.style())
-            .alignment(Alignment::Center)
-            .wrap(Wrap { trim: false }),
-        centered,
-    );
+    if state.people.len() == 1 && state.selected_terminals().is_empty() {
+        first_run(frame, state, content);
+        return;
+    }
+    if state.people.len() == 1
+        && let Some(invite) = &state.invite
+    {
+        frame.render_widget(
+            Paragraph::new(format!("c copy  {invite}")).style(palette.style().fg(palette.subtext0)),
+            Rect::new(content.x, content.y, content.width, content.height.min(1)),
+        );
+        content.y = content.y.saturating_add(1);
+        content.height = content.height.saturating_sub(1);
+    }
+    box_grid(frame, state, content, if area.width >= 80 { 2 } else { 1 });
 }
 
 fn box_grid(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, columns: usize) {

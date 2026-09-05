@@ -225,7 +225,9 @@ fn handle_event(
     let old_viewer = state.viewer.as_ref().map(crate::viewer::Viewer::target);
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
-            if state.menu.is_some() {
+            if state.close_prompt.is_some() {
+                navigation::close_key(key, stream, state)?;
+            } else if state.menu.is_some() {
                 crate::person_menu::key(key, stream, state)?;
             } else if state.viewer.is_some() {
                 crate::viewer::key(key, stream, state)?;
