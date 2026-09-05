@@ -4,6 +4,8 @@ use std::process::ExitCode;
 #[cfg(target_os = "linux")]
 mod stop;
 #[cfg(target_os = "linux")]
+mod wordmark;
+#[cfg(target_os = "linux")]
 use std::{
     env,
     fs::{self, File, OpenOptions},
@@ -25,9 +27,9 @@ const START_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(target_os = "linux")]
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 #[cfg(target_os = "linux")]
-const WORDMARK: &str = r" ___  ___  ___ _ _
-(_-< / -_)/ -_) '_|
-/__/ \___|\___|_|
+const WORDMARK: &str = r" ___  ___  ___  _ _
+(_-< / -_)/ -_)| '_|
+/__/ \___|\___||_|
 ";
 #[cfg(target_os = "linux")]
 #[derive(Deserialize, Serialize)]
@@ -275,7 +277,7 @@ fn start_broker(
         print_log_tail(&log_path);
         return Err(error);
     }
-    print!("{WORDMARK}");
+    wordmark::print(WORDMARK);
     println!();
     println!("Server started at {}.", config.published_addr);
     println!("You are {}.", config.owner_name);

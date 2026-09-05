@@ -190,9 +190,9 @@ fn prompt_defaults_create_config_and_owner_store() {
     assert!(!output.stdout.contains("Published address"));
     assert!(
         output.stdout.contains(concat!(
-            " ___  ___  ___ _ _\n",
-            "(_-< / -_)/ -_) '_|\n",
-            "/__/ \\___|\\___|_|\n",
+            " ___  ___  ___  _ _\n",
+            "(_-< / -_)/ -_)| '_|\n",
+            "/__/ \\___|\\___||_|\n",
             "\n",
             "Server started at 127.0.0.1:7321.\nYou are alice.\n"
         )),
