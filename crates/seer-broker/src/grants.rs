@@ -67,34 +67,3 @@ impl Grants {
             .map_err(|_| io::Error::other("grant lock is poisoned"))
     }
 }
-
-#[derive(Default)]
-pub(super) struct LineMarker {
-    started: bool,
-    after_cr: bool,
-}
-
-impl LineMarker {
-    pub(super) fn prefix(&mut self, name: &str, bytes: Vec<u8>) -> io::Result<String> {
-        let input = String::from_utf8(bytes)
-            .map_err(|_| io::Error::new(io::ErrorKind::InvalidInput, "input must be UTF-8"))?;
-        let mut output = String::new();
-        for character in input.chars() {
-            if self.after_cr && character == '\n' {
-                output.push(character);
-                self.after_cr = false;
-                continue;
-            }
-            if !self.started {
-                output.push_str(&format!("[seer: {name}] "));
-                self.started = true;
-            }
-            output.push(character);
-            self.after_cr = character == '\r';
-            if matches!(character, '\r' | '\n') {
-                self.started = false;
-            }
-        }
-        Ok(output)
-    }
-}

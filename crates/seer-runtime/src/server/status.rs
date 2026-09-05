@@ -16,8 +16,10 @@ pub(super) fn handle_status_query(
 
 impl SharedSession {
     pub(super) fn record_input(&self, message: &ClientMsg) {
-        if matches!(message, ClientMsg::TerminalInput { .. })
-            && let Ok(mut last_input) = self.last_input.lock()
+        if matches!(
+            message,
+            ClientMsg::TerminalInput { .. } | ClientMsg::GrantedInput { .. }
+        ) && let Ok(mut last_input) = self.last_input.lock()
         {
             *last_input = Instant::now();
         }

@@ -334,6 +334,8 @@ fn sync_watches(stream: &mut impl Stream, state: &mut ClientState) -> io::Result
         send(
             stream,
             &ClientMsg::Watch {
+                cols: crossterm::terminal::size()?.0.saturating_sub(2).max(1),
+                rows: crossterm::terminal::size()?.1.saturating_sub(3).max(1),
                 user: user.clone(),
                 pane: pane.clone(),
             },

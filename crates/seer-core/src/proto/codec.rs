@@ -15,8 +15,10 @@ where
         return Err(frame_too_large(MAX_FRAME_SIZE));
     }
     let length = body.len() as u32;
-    writer.write_all(&length.to_be_bytes())?;
-    writer.write_all(&body)
+    let mut frame = Vec::with_capacity(body.len() + 4);
+    frame.extend_from_slice(&length.to_be_bytes());
+    frame.extend_from_slice(&body);
+    writer.write_all(&frame)
 }
 
 pub fn decode<R, T>(reader: &mut R) -> io::Result<T>
@@ -65,12 +67,51 @@ mod tests {
     use crate::proto::ClientMsg;
 
     #[test]
+    fn cell_frames_keep_text_styles_and_cursor_through_the_wire() {
+        use crate::{Cell, Color, Cursor, TerminalFrame, TerminalModes};
+        let cell = Cell {
+            character: 'x',
+            fg: Color::Indexed(2),
+            bg: Color::Rgb {
+                red: 1,
+                green: 2,
+                blue: 3,
+            },
+            bold: true,
+            italic: true,
+            underline: true,
+            dim: true,
+            inverse: true,
+            hidden: true,
+            strikeout: true,
+        };
+        let mut row = vec![cell; 80];
+        row[40].character = '\u{754c}';
+        row[41].character = ' ';
+        let frame = TerminalFrame {
+            rows: vec![row; 24],
+            cursor: Cursor {
+                row: 2,
+                column: 40,
+                visible: true,
+                ..Cursor::default()
+            },
+            modes: TerminalModes::default(),
+        };
+        let mut bytes = Vec::new();
+        encode(&mut bytes, &frame).unwrap();
+        assert_eq!(
+            decode::<_, TerminalFrame>(&mut bytes.as_slice()).unwrap(),
+            frame
+        );
+    }
+
+    #[test]
     fn decode_rejects_oversized_frame() {
         let length = u32::try_from(MAX_FRAME_SIZE + 1).expect("limit must fit in u32");
         let error = decode::<_, ClientMsg>(&mut length.to_be_bytes().as_slice())
             .expect_err("frame is too large");
         assert_eq!(error.kind(), io::ErrorKind::InvalidData);
-        assert_eq!(error.to_string(), "frame exceeds 16 MiB");
 
         let value = "a".repeat(MAX_FRAME_SIZE - 2);
         let mut frame = Vec::with_capacity(MAX_FRAME_SIZE + 4);

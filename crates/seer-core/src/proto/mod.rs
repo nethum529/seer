@@ -1,4 +1,5 @@
 pub mod codec;
+pub(crate) mod frame_rows;
 
 use serde::{Deserialize, Serialize};
 
@@ -56,6 +57,13 @@ pub enum ClientMsg {
         cols: u16,
         rows: u16,
     },
+    GrantedInput {
+        workspace: String,
+        tab: String,
+        pane: String,
+        bytes: Vec<u8>,
+        sender: String,
+    },
     AttachRuntime,
     QueryTargets {
         user: String,
@@ -63,6 +71,8 @@ pub enum ClientMsg {
     Watch {
         user: String,
         pane: String,
+        cols: u16,
+        rows: u16,
     },
     Unwatch {
         user: String,
@@ -208,6 +218,8 @@ pub struct ClientInfo {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalInfo {
+    #[serde(default)]
+    pub last_typist: Option<String>,
     pub pane: String,
     pub name: String,
     pub state: String,

@@ -1,3 +1,5 @@
+use seer_core::PaneSize;
+use std::collections::BTreeMap;
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -21,8 +23,16 @@ pub(super) fn handle_connection(
     };
     match first {
         ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
-        ClientMsg::Watch { pane, .. } => {
-            shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane))?
+        ClientMsg::Watch {
+            pane, cols, rows, ..
+        } => {
+            shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane))?;
+            if let Err(error) =
+                shared.watch_size(connection_id, &pane, Some(PaneSize { cols, rows }))
+            {
+                shared.remove_connection(connection_id)?;
+                return Err(error);
+            }
         }
         ClientMsg::Terminals { .. } => {
             shared.add_view_connection(connection_id, stream.try_clone()?, None)?
@@ -57,6 +67,7 @@ pub(super) struct ReportedViewport {
 
 pub(super) struct Connection {
     pub(super) id: u64,
+    pub(super) watches: BTreeMap<String, PaneSize>,
     pub(super) output: SyncSender<Arc<[u8]>>,
     pub(super) stream: UnixStream,
     pub(super) capabilities: Option<TerminalCapabilities>,
@@ -73,6 +84,7 @@ impl Connection {
         writer::spawn(id, writer, queued)?;
         Ok(Self {
             id,
+            watches: BTreeMap::new(),
             output,
             stream,
             capabilities: None,
@@ -147,6 +159,7 @@ impl SharedSession {
         stream: UnixStream,
         pane: Option<&str>,
     ) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
         let messages = {
             let session = lock(&self.session)?;
             if pane.is_some_and(|id| {
@@ -171,6 +184,7 @@ impl SharedSession {
             return Err(super::connection_closed());
         }
         lock(&self.connections)?.push(connection);
+        self.poll_wake.notify_one();
         Ok(())
     }
 
