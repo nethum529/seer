@@ -1,14 +1,8 @@
 use crate::{state::ClientState, tui::send};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Position;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use seer_core::proto::ClientMsg;
 use seer_net::Stream;
-use std::{
-    cell::RefCell,
-    io,
-    io::Write,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, io};
 
 thread_local! { static START_PERSON: RefCell<Option<String>> = const { RefCell::new(None) }; }
 pub(crate) fn set_peek_person(person: Option<&str>) {
@@ -37,6 +31,10 @@ pub(crate) fn key(
             key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL;
         return Ok(false);
     }
+    if state.close_prompt.is_some() {
+        close_key(key, stream, state)?;
+        return Ok(false);
+    }
     if state.quit_prompt {
         match key.code {
             KeyCode::Enter | KeyCode::Char('q') => return Ok(true),
@@ -50,6 +48,8 @@ pub(crate) fn key(
         return Ok(false);
     }
     match key.code {
+        KeyCode::Char(number @ '1'..='9') => state.select_tab(number as usize - '1' as usize),
+        KeyCode::Char('x') => state.request_close(),
         KeyCode::Char('q') => return Ok(true),
         KeyCode::Esc => state.quit_prompt = true,
         KeyCode::Char('j') | KeyCode::Down => move_person(state, true),
@@ -63,6 +63,32 @@ pub(crate) fn key(
         _ => {}
     }
     Ok(false)
+}
+
+pub(crate) fn close_key(
+    key: KeyEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+) -> io::Result<()> {
+    match key.code {
+        KeyCode::Esc | KeyCode::Char('n') => state.close_prompt = None,
+        KeyCode::Enter | KeyCode::Char('y') => {
+            if let Some(pane) = state.close_prompt.take()
+                && let Some((workspace, tab)) = state.location(&pane)
+            {
+                send(
+                    stream,
+                    &ClientMsg::ClosePane {
+                        workspace,
+                        tab,
+                        pane,
+                    },
+                )?;
+            }
+        }
+        _ => {}
+    }
+    Ok(())
 }
 
 fn search(key: KeyEvent, state: &mut ClientState) {
@@ -85,6 +111,7 @@ fn search(key: KeyEvent, state: &mut ClientState) {
 }
 
 fn move_person(state: &mut ClientState, forward: bool) {
+    state.chrome.grid_focus = false;
     let matches = state.matches();
     if matches.is_empty() {
         return;
@@ -105,6 +132,7 @@ fn move_person(state: &mut ClientState, forward: bool) {
 }
 
 fn move_box(state: &mut ClientState, forward: bool) {
+    state.chrome.grid_focus = true;
     let count = state.selected_terminals().len();
     if count == 0 {
         return;
@@ -129,7 +157,7 @@ pub(crate) fn step(index: usize, count: usize, forward: bool) -> usize {
 
 fn new_terminal(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
     let Some(workspace) = state.tree.workspaces.first() else {
-        state.notice = "Waiting for your terminals.".into();
+        state.set_notice("Waiting for your terminals.");
         return Ok(());
     };
     state.pending_new = Some(
@@ -148,9 +176,6 @@ fn new_terminal(stream: &mut impl Stream, state: &mut ClientState) -> io::Result
             workspace: workspace.id.clone(),
         },
     )?;
-    if state.people.len() == 1 {
-        invite(stream, state)?;
-    }
     Ok(())
 }
 
@@ -166,84 +191,7 @@ fn copy_invite(state: &mut ClientState) -> io::Result<()> {
     let Some(invite) = &state.invite else {
         return Ok(());
     };
-    let mut stdout = io::stdout().lock();
-    write!(stdout, "\x1b]52;c;{}\x07", base64(invite.as_bytes()))?;
-    stdout.flush()?;
-    state.notice = "Copy requested. Your terminal must permit clipboard access.".into();
+    crate::input::copy_text(invite)?;
+    state.set_notice("Copy requested. Your terminal must permit clipboard access.");
     Ok(())
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut text = String::new();
-    for chunk in bytes.chunks(3) {
-        let first = chunk[0];
-        let second = chunk.get(1).copied().unwrap_or(0);
-        let third = chunk.get(2).copied().unwrap_or(0);
-        text.push(char::from(ALPHABET[usize::from(first >> 2)]));
-        text.push(char::from(
-            ALPHABET[usize::from(((first & 3) << 4) | (second >> 4))],
-        ));
-        text.push(if chunk.len() > 1 {
-            char::from(ALPHABET[usize::from(((second & 15) << 2) | (third >> 6))])
-        } else {
-            '='
-        });
-        text.push(if chunk.len() > 2 {
-            char::from(ALPHABET[usize::from(third & 63)])
-        } else {
-            '='
-        });
-    }
-    text
-}
-
-pub(crate) fn mouse(
-    mouse: MouseEvent,
-    state: &mut ClientState,
-    last: &mut Option<(String, usize, Instant)>,
-) {
-    let position = Position::new(mouse.column, mouse.row);
-    if matches!(
-        mouse.kind,
-        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-    ) {
-        let scroll = if mouse.column < 26 {
-            &mut state.people_scroll
-        } else {
-            &mut state.grid_scroll
-        };
-        *scroll = if mouse.kind == MouseEventKind::ScrollDown {
-            scroll.saturating_add(1)
-        } else {
-            scroll.saturating_sub(1)
-        };
-    }
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return;
-    }
-    if let Some((index, row)) = state
-        .people_areas
-        .iter()
-        .find(|(_, rect)| rect.contains(position))
-    {
-        crate::person_menu::open(state, *index, *row);
-        return;
-    }
-    if let Some((index, _)) = state
-        .box_areas
-        .iter()
-        .find(|(_, rect)| rect.contains(position))
-    {
-        let index = *index;
-        state.focus = index;
-        if last.as_ref().is_some_and(|(user, old, time)| {
-            user == state.user() && *old == index && time.elapsed() < Duration::from_millis(400)
-        }) {
-            state.open_focused();
-            *last = None;
-        } else {
-            *last = Some((state.user().into(), index, Instant::now()));
-        }
-    }
 }

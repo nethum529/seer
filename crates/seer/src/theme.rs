@@ -21,7 +21,9 @@ pub(crate) struct Palette {
 
 impl Default for Palette {
     fn default() -> Self {
-        if std::env::var("COLORTERM").is_ok_and(|value| value == "truecolor") {
+        if std::env::var("COLORTERM")
+            .is_ok_and(|value| matches!(value.as_str(), "truecolor" | "24bit"))
+        {
             Self::mocha()
         } else {
             Self::terminal()
@@ -69,7 +71,7 @@ impl Palette {
     }
 
     pub(crate) fn style(self) -> Style {
-        Style::default().fg(self.text).bg(self.panel_bg)
+        Style::default().fg(self.text).bg(Color::Reset)
     }
 
     pub(crate) fn block(self, focused: bool) -> Block<'static> {

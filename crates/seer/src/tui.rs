@@ -112,9 +112,10 @@ fn run_loop(
         if was_viewing != state.viewer.as_ref().map(crate::viewer::Viewer::target) {
             resize(stream, state, terminal.size()?)?;
         }
+        dirty |= render::expire_notice(state);
         if dirty {
-            sync_watches(stream, state)?;
             terminal.draw(|frame| render::draw(frame, state))?;
+            sync_watches(stream, state)?;
             set_cursor_style(state)?;
             dirty = false;
         }
@@ -159,7 +160,7 @@ fn apply_message(
                     state.focus = index;
                 } else {
                     state.viewer = None;
-                    state.notice = "Terminal closed.".into();
+                    state.set_notice("Terminal closed.");
                 }
             }
             state.terminals.insert(user, terminals);
@@ -197,7 +198,7 @@ fn apply_message(
             state.invite = Some(crate::commands::join_line(&capsule));
         }
         ServerMsg::Refused { reason } => {
-            state.notice = reason;
+            state.set_notice(reason);
             state.pending_new = None;
             state.invite_pending = false;
         }
@@ -224,12 +225,7 @@ fn handle_event(
     let old_viewer = state.viewer.as_ref().map(crate::viewer::Viewer::target);
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
-            state.notice.clear();
-            if state.menu.is_some() {
-                crate::person_menu::key(key, stream, state)?;
-            } else if state.viewer.is_some() {
-                crate::viewer::key(key, stream, state)?;
-            } else if navigation::key(key, stream, state)? {
+            if crate::input::command(key, stream, state)? {
                 send(stream, &ClientMsg::Detach)?;
                 return Ok(true);
             }
@@ -239,12 +235,11 @@ fn handle_event(
             state,
             TerminalInput::new(InputEvent::Paste(text)),
         )?,
-        Event::Mouse(_) if state.quit_prompt => {}
-        Event::Mouse(mouse) if state.menu.is_some() => {
-            crate::person_menu::mouse(mouse, stream, state)?
-        }
-        Event::Mouse(mouse) if state.viewer.is_none() => {
-            navigation::mouse(mouse, state, last_click)
+        Event::Mouse(mouse) => {
+            if crate::input::mouse(mouse, stream, state, last_click)? {
+                send(stream, &ClientMsg::Detach)?;
+                return Ok(true);
+            }
         }
         Event::Resize(_, _) => resize(stream, state, size)?,
         _ => {}
@@ -312,16 +307,32 @@ pub(crate) fn resize(stream: &mut impl Stream, state: &ClientState, size: Size) 
 }
 
 fn sync_watches(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
-    let wanted: std::collections::BTreeSet<_> = if let Some(viewer) = &state.viewer {
-        [viewer.target()].into_iter().collect()
+    let visible = if let Some(viewer) = &state.viewer {
+        vec![(viewer.target(), viewer.area)]
     } else {
         state
-            .selected_terminals()
+            .box_areas
             .iter()
-            .map(|t| (state.user().to_owned(), t.pane.clone()))
+            .filter_map(|(index, area)| {
+                state
+                    .selected_terminals()
+                    .get(*index)
+                    .map(|terminal| ((state.user().to_owned(), terminal.pane.clone()), *area))
+            })
             .collect()
     };
-    for (user, pane) in state.watches.difference(&wanted) {
+    let wanted: std::collections::BTreeMap<_, _> = visible
+        .into_iter()
+        .filter_map(|(target, area)| {
+            let inner = area.inner(ratatui::layout::Margin::new(1, 1));
+            (!inner.is_empty()).then_some((target, inner.as_size()))
+        })
+        .collect();
+    for (user, pane) in state
+        .watches
+        .keys()
+        .filter(|target| !wanted.contains_key(*target))
+    {
         send(
             stream,
             &ClientMsg::Unwatch {
@@ -330,16 +341,18 @@ fn sync_watches(stream: &mut impl Stream, state: &mut ClientState) -> io::Result
             },
         )?;
     }
-    for (user, pane) in wanted.difference(&state.watches) {
-        send(
-            stream,
-            &ClientMsg::Watch {
-                cols: crossterm::terminal::size()?.0.saturating_sub(2).max(1),
-                rows: crossterm::terminal::size()?.1.saturating_sub(3).max(1),
-                user: user.clone(),
-                pane: pane.clone(),
-            },
-        )?;
+    for ((user, pane), size) in &wanted {
+        if state.watches.get(&(user.clone(), pane.clone())) != Some(size) {
+            send(
+                stream,
+                &ClientMsg::Watch {
+                    user: user.clone(),
+                    pane: pane.clone(),
+                    cols: size.width,
+                    rows: size.height,
+                },
+            )?;
+        }
     }
     state.watches = wanted;
     Ok(())
@@ -347,4 +360,100 @@ fn sync_watches(stream: &mut impl Stream, state: &mut ClientState) -> io::Result
 
 pub(crate) fn send(stream: &mut impl Stream, message: &ClientMsg) -> io::Result<()> {
     codec::encode(stream, message)
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use ratatui::backend::TestBackend;
+    use seer_core::proto::TerminalInfo;
+    use std::os::unix::net::UnixStream;
+
+    #[test]
+    fn watches_follow_visible_inner_sizes() {
+        let mut state = ClientState::new(Tree::new(), "alice".into());
+        state.terminals.insert(
+            "alice".into(),
+            ["one", "two"]
+                .map(|pane| TerminalInfo {
+                    pane: pane.into(),
+                    name: "shell".into(),
+                    state: "idle".into(),
+                    cols: 80,
+                    rows: 24,
+                    last_typist: None,
+                })
+                .into(),
+        );
+        let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
+        peer.set_read_timeout(Some(Duration::from_millis(50)))
+            .expect("timeout must apply");
+        let mut terminal = Terminal::new(TestBackend::new(140, 40)).expect("backend must open");
+        terminal
+            .draw(|frame| render::draw(frame, &mut state))
+            .expect("screen must draw");
+        sync_watches(&mut stream, &mut state).expect("watches must send");
+        for (index, area) in &state.box_areas {
+            assert_eq!(
+                codec::decode::<_, ClientMsg>(&mut peer).expect("watch must arrive"),
+                ClientMsg::Watch {
+                    user: "alice".into(),
+                    pane: state.selected_terminals()[*index].pane.clone(),
+                    cols: area.width - 2,
+                    rows: area.height - 2,
+                }
+            );
+        }
+        sync_watches(&mut stream, &mut state).expect("unchanged watches must sync");
+        let mut byte = [0];
+        assert!(std::io::Read::read(&mut peer, &mut byte).is_err());
+        state.open_focused();
+        terminal
+            .draw(|frame| render::draw(frame, &mut state))
+            .expect("viewer must draw");
+        sync_watches(&mut stream, &mut state).expect("viewer watch must send");
+        assert_eq!(
+            codec::decode::<_, ClientMsg>(&mut peer).expect("unwatch must arrive"),
+            ClientMsg::Unwatch {
+                user: "alice".into(),
+                pane: "two".into()
+            }
+        );
+        assert_viewer_watch(&mut peer, &state);
+        terminal.backend_mut().resize(100, 30);
+        terminal
+            .draw(|frame| render::draw(frame, &mut state))
+            .expect("resized viewer must draw");
+        sync_watches(&mut stream, &mut state).expect("resized watch must send");
+        assert_viewer_watch(&mut peer, &state);
+        state.viewer = None;
+        terminal
+            .draw(|frame| render::draw(frame, &mut state))
+            .expect("grid must draw");
+        sync_watches(&mut stream, &mut state).expect("grid watches must send");
+        for (index, area) in &state.box_areas {
+            assert_eq!(
+                codec::decode::<_, ClientMsg>(&mut peer).expect("grid watch must arrive"),
+                ClientMsg::Watch {
+                    user: "alice".into(),
+                    pane: state.selected_terminals()[*index].pane.clone(),
+                    cols: area.width - 2,
+                    rows: area.height - 2,
+                }
+            );
+        }
+    }
+
+    fn assert_viewer_watch(peer: &mut UnixStream, state: &ClientState) {
+        let viewer = state.viewer.as_ref().expect("viewer must exist");
+        assert_eq!(
+            codec::decode::<_, ClientMsg>(peer).expect("viewer watch must arrive"),
+            ClientMsg::Watch {
+                user: viewer.user.clone(),
+                pane: viewer.pane.clone(),
+                cols: viewer.area.width - 2,
+                rows: viewer.area.height - 2,
+            }
+        );
+    }
 }

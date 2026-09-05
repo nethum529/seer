@@ -44,7 +44,10 @@ fn help_detach_and_missing_attach_have_exact_results() {
     let invalid = run(&config, &["unknown"], "");
     assert_eq!(invalid.status.code(), Some(2));
     assert!(invalid.stdout.is_empty());
-    assert!(text(&invalid.stderr).starts_with("Usage: seer <command>\n"));
+    assert_eq!(
+        text(&invalid.stderr),
+        "unknown command: unknown. Run seer help.\n"
+    );
     for command in ["start", "invite", "list", "attach", "detach"] {
         let extra = run(&config, &[command, "extra"], "");
         assert_eq!(extra.status.code(), Some(2));
@@ -160,14 +163,14 @@ fn join_persists_private_store_without_seat_token_and_reconnects_after_restart()
         assert_hello(&mut restarted);
         send_welcome(&mut restarted, "user-bob", "bob");
     });
-    let capsule = format!("SEER2-{endpoint}-seat-token\nalice\nbob\n");
-    let output = run(&config, &["join"], &capsule);
+    let capsule = format!("curl -fsSL example/install.sh | sh -s -- SEER2-{endpoint}-seat-token");
+    let output = run(&config, &["join", &capsule], "alice\nbob\n");
 
     assert!(output.status.success() && output.stderr.is_empty());
     assert_eq!(
         text(&output.stdout),
         format!(
-            "Invitation: Server: iroh:{endpoint}\nName: That name is in use.\nName: Joined as bob. Attaching...\n"
+            "Server: iroh:{endpoint}\nName: That name is in use.\nName: Joined as bob. Attaching...\n"
         )
     );
     let store_path = config.root.join("seer/servers.toml");

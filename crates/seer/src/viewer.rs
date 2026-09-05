@@ -1,6 +1,5 @@
 use crate::{
     input::key_to_input,
-    render::footer,
     state::ClientState,
     terminal_cells::PaneCells,
     theme::Palette,
@@ -13,16 +12,18 @@ use ratatui::{
     layout::Rect,
     text::{Line, Span},
 };
+use seer_core::TerminalInput;
 use seer_core::proto::ClientMsg;
-use seer_core::{TerminalFrame, TerminalInput};
 use seer_net::Stream;
 use std::io;
 
 pub(crate) struct Viewer {
     pub(crate) user: String,
     pub(crate) pane: String,
-    pub(crate) follow: bool,
-    pub(crate) frozen: Option<TerminalFrame>,
+    pub(crate) area: Rect,
+    history: Vec<Vec<seer_core::Cell>>,
+    previous: Vec<Vec<seer_core::Cell>>,
+    pub(crate) offset: usize,
 }
 
 impl Viewer {
@@ -30,10 +31,50 @@ impl Viewer {
         Self {
             user,
             pane,
-            follow: true,
-            frozen: None,
+            area: Rect::default(),
+            history: Vec::new(),
+            previous: Vec::new(),
+            offset: 0,
         }
     }
+    pub(crate) fn scroll(&mut self, up: bool) {
+        self.offset = if up {
+            (self.offset + 3).min(self.history.len())
+        } else {
+            self.offset.saturating_sub(3)
+        };
+    }
+
+    fn note_rows(&mut self, rows: &[Vec<seer_core::Cell>]) {
+        if self.previous == rows {
+            return;
+        }
+        let overlap = (1..self.previous.len()).find(|shift| {
+            let suffix = &self.previous[*shift..];
+            rows.starts_with(suffix)
+        });
+        if let Some(shift) = overlap {
+            self.history.extend_from_slice(&self.previous[..shift]);
+            if self.offset > 0 {
+                self.offset += shift;
+            }
+            let excess = self.history.len().saturating_sub(2000);
+            self.history.drain(..excess);
+            self.offset = self.offset.min(self.history.len());
+        }
+        self.previous = rows.to_vec();
+    }
+
+    pub(crate) fn visible_rows(&self, height: u16) -> Vec<Vec<seer_core::Cell>> {
+        self.history
+            .iter()
+            .chain(&self.previous)
+            .skip(self.history.len().saturating_sub(self.offset))
+            .take(usize::from(height))
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn target(&self) -> (String, String) {
         (self.user.clone(), self.pane.clone())
     }
@@ -49,16 +90,6 @@ pub(crate) fn key(
             state.viewer = None;
         }
         (KeyCode::Tab, KeyModifiers::NONE) => next(state),
-        (KeyCode::Char('f'), KeyModifiers::NONE) => {
-            if let Some(viewer) = &mut state.viewer {
-                viewer.follow = !viewer.follow;
-                viewer.frozen = if viewer.follow {
-                    None
-                } else {
-                    state.frames.get(&viewer.target()).cloned()
-                };
-            }
-        }
         _ => {
             if let Some(input) = key_to_input(key) {
                 input_message(stream, state, input)?;
@@ -117,23 +148,27 @@ pub(crate) fn input_message(
     Ok(())
 }
 
-pub(crate) fn draw(frame: &mut Frame<'_>, state: &ClientState) {
+pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
+    if let Some(viewer) = &mut state.viewer {
+        viewer.area = area;
+        if let Some(content) = state.frames.get(&viewer.target()) {
+            viewer.note_rows(&content.rows);
+        }
+    }
     let Some(viewer) = &state.viewer else {
         return;
     };
     let palette = Palette::default();
-    let area = frame.area();
-    let area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
-    let name = state
+    let terminal = state
         .terminals
         .get(&viewer.user)
         .into_iter()
         .flatten()
-        .find(|t| t.pane == viewer.pane)
-        .map_or("shell", |t| t.name.as_str());
+        .find(|t| t.pane == viewer.pane);
+    let name = terminal.map_or("shell", |t| t.name.as_str());
     let allowed = state.may_type(&viewer.user);
     let mode = if allowed { "input" } else { "read only" };
-    let title = Line::from(vec![
+    let mut title = Line::from(vec![
         Span::styled(
             format!(" {}  ", state.person_name(&viewer.user)),
             palette.style(),
@@ -155,19 +190,19 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &ClientState) {
             }),
         ),
     ]);
+    title.spans.extend(crate::render::typist_span(
+        terminal.and_then(|t| t.last_typist.as_deref()),
+    ));
+    let area = viewer.area;
     let block = palette.block(true).title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let content = if viewer.follow {
-        state.frames.get(&viewer.target())
-    } else {
-        viewer.frozen.as_ref()
-    };
+    let content = state.frames.get(&viewer.target());
     if let Some(content) = content {
-        frame.render_widget(PaneCells::new(&content.rows), inner);
-        let start = content.rows.len().saturating_sub(usize::from(inner.height));
+        frame.render_widget(PaneCells::new(&viewer.visible_rows(inner.height)), inner);
+        let start = 0;
         if allowed
-            && viewer.follow
+            && viewer.offset == 0
             && content.cursor.visible
             && let Some(row) = usize::from(content.cursor.row).checked_sub(start)
             && row < usize::from(inner.height)
@@ -176,16 +211,4 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &ClientState) {
             frame.set_cursor_position((inner.x + content.cursor.column, inner.y + row as u16));
         }
     }
-    let hints = format!(
-        "esc back  tab next terminal  f follow {}",
-        if viewer.follow { "on" } else { "off" }
-    );
-    footer(
-        frame,
-        if state.notice.is_empty() {
-            &hints
-        } else {
-            &state.notice
-        },
-    );
 }

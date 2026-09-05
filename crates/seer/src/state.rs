@@ -1,8 +1,8 @@
 use crate::viewer::Viewer;
-use ratatui::layout::Rect;
+use ratatui::layout::{Rect, Size};
 use seer_core::proto::{Person, PersonState, TerminalInfo};
 use seer_core::{Cursor, TerminalFrame, Tree};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap};
 
 pub(crate) struct ClientState {
     pub(crate) tree: Tree,
@@ -12,9 +12,11 @@ pub(crate) struct ClientState {
     pub(crate) people: Vec<Person>,
     pub(crate) selected: usize,
     pub(crate) focus: usize,
+    pub(crate) chrome: crate::render::Chrome,
     pub(crate) terminals: HashMap<String, Vec<TerminalInfo>>,
     pub(crate) frames: HashMap<(String, String), TerminalFrame>,
     pub(crate) viewer: Option<Viewer>,
+    pub(crate) selection: Option<crate::input::Selection>,
     pub(crate) menu: Option<crate::person_menu::PersonMenu>,
     pub(crate) can_type_here: BTreeSet<String>,
     pub(crate) you_may_type_into: BTreeSet<String>,
@@ -26,11 +28,14 @@ pub(crate) struct ClientState {
     pub(crate) search: String,
     pub(crate) searching: bool,
     pub(crate) quit_prompt: bool,
+    pub(crate) close_prompt: Option<String>,
+    pub(crate) tab_areas: Vec<(usize, Rect)>,
+    pub(crate) plus_area: Rect,
     pub(crate) discard_prefix: bool,
     pub(crate) invite: Option<String>,
     pub(crate) invite_pending: bool,
     pub(crate) notice: String,
-    pub(crate) watches: BTreeSet<(String, String)>,
+    pub(crate) watches: BTreeMap<(String, String), Size>,
     pub(crate) pending_new: Option<BTreeSet<String>>,
 }
 
@@ -55,9 +60,11 @@ impl ClientState {
             people: vec![own],
             selected: 0,
             focus: 0,
+            chrome: crate::render::Chrome::default(),
             terminals: HashMap::new(),
             frames: HashMap::new(),
             viewer: None,
+            selection: None,
             menu: None,
             can_type_here: BTreeSet::new(),
             you_may_type_into: BTreeSet::new(),
@@ -69,13 +76,21 @@ impl ClientState {
             search: String::new(),
             searching: false,
             quit_prompt: false,
+            close_prompt: None,
+            tab_areas: Vec::new(),
+            plus_area: Rect::default(),
             discard_prefix: false,
             invite: None,
             invite_pending: false,
             notice: String::new(),
-            watches: BTreeSet::new(),
+            watches: BTreeMap::new(),
             pending_new: None,
         }
+    }
+
+    pub(crate) fn set_notice(&mut self, notice: impl Into<String>) {
+        self.notice = notice.into();
+        self.chrome.notice_since = None;
     }
 
     pub(crate) fn user(&self) -> &str {
@@ -133,6 +148,9 @@ impl ClientState {
     pub(crate) fn select_person(&mut self, index: usize) {
         self.selected = index.min(self.people.len().saturating_sub(1));
         self.focus = 0;
+        self.viewer = None;
+        self.selection = None;
+        self.chrome.grid_focus = false;
         self.grid_scroll = 0;
         self.notice.clear();
     }
@@ -151,8 +169,30 @@ impl ClientState {
     }
 
     pub(crate) fn open_focused(&mut self) {
+        self.selection = None;
+        self.chrome.grid_focus = true;
         if let Some(terminal) = self.selected_terminals().get(self.focus) {
             self.viewer = Some(Viewer::new(self.user().into(), terminal.pane.clone()));
+        }
+    }
+
+    pub(crate) fn select_tab(&mut self, index: usize) {
+        if index >= self.selected_terminals().len() {
+            return;
+        }
+        self.focus = index;
+        self.chrome.grid_focus = true;
+        if self.viewer.is_some() {
+            self.open_focused();
+        }
+        if !self.box_areas.iter().any(|(i, _)| *i == index) {
+            self.grid_scroll = index / self.grid_columns.max(1);
+        }
+    }
+
+    pub(crate) fn request_close(&mut self) {
+        if self.user() == self.own_user {
+            self.close_prompt = self.focused().map(str::to_owned);
         }
     }
 
@@ -174,6 +214,11 @@ impl ClientState {
                 .people
                 .iter()
                 .position(|p| p.user_id == self.own_user)
+                .unwrap_or(0);
+            self.focus = self
+                .terminals
+                .get(&self.own_user)
+                .and_then(|list| list.iter().position(|t| t.pane == pane))
                 .unwrap_or(0);
             self.viewer = Some(Viewer::new(self.own_user.clone(), pane));
             self.pending_new = None;

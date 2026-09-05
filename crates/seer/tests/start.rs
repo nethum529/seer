@@ -1,5 +1,7 @@
 #![cfg(target_os = "linux")]
-
+use seer_core::Tree;
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use serde::Deserialize;
 use std::fs::{self, OpenOptions};
 use std::io::{Read, Write};
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -10,31 +12,22 @@ use std::sync::Mutex;
 use std::sync::atomic::{AtomicU64, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
-
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use serde::Deserialize;
-
 const PROCESS_TIMEOUT: Duration = Duration::from_secs(7);
 static NEXT_DIRECTORY: AtomicU64 = AtomicU64::new(0);
 static PROCESS_TEST: Mutex<()> = Mutex::new(());
-
 #[derive(Deserialize)]
 struct FakeConfig {
     listen: SocketAddr,
     state_dir: PathBuf,
 }
-
 struct TestDirectory {
     path: PathBuf,
 }
-
 struct CommandOutput {
     status: ExitStatus,
     stdout: String,
     stderr: String,
 }
-
 impl TestDirectory {
     fn new() -> Self {
         let number = NEXT_DIRECTORY.fetch_add(1, Ordering::Relaxed);
@@ -42,19 +35,15 @@ impl TestDirectory {
         fs::create_dir(&path).expect("test directory must be created");
         Self { path }
     }
-
     fn config_home(&self) -> PathBuf {
         self.path.join("c")
     }
-
     fn state_home(&self) -> PathBuf {
         self.path.join("s")
     }
-
     fn state_dir(&self) -> PathBuf {
         self.state_home().join("seer")
     }
-
     fn pid_path(&self) -> PathBuf {
         self.state_dir().join("broker.pid")
     }
