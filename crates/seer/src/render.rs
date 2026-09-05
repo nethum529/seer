@@ -363,7 +363,7 @@ fn box_grid(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, columns:
             (right - x).saturating_sub(u16::from(column + 1 < columns)),
             (bottom - y).saturating_sub(u16::from(row + 1 < visible_rows)),
         );
-        let title = Line::from(vec![
+        let mut title = Line::from(vec![
             Span::styled(
                 format!(" {} ", terminal.name),
                 palette.style().fg(if terminal.name == "shell" {
@@ -381,6 +381,9 @@ fn box_grid(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, columns:
                 }),
             ),
         ]);
+        title
+            .spans
+            .extend(typist_span(terminal.last_typist.as_deref()));
         let block = palette
             .block(state.chrome.grid_focus && index == state.focus)
             .title(title);
@@ -413,4 +416,13 @@ fn more(frame: &mut Frame<'_>, area: Rect, remaining: usize) {
             Rect::new(area.x, area.bottom() - 1, area.width, 1),
         );
     }
+}
+
+pub(crate) fn typist_span(name: Option<&str>) -> Option<Span<'static>> {
+    name.map(|name| {
+        Span::styled(
+            format!("{name} is typing "),
+            Palette::default().style().fg(Palette::default().subtext0),
+        )
+    })
 }

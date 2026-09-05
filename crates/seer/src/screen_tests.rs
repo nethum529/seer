@@ -30,7 +30,7 @@ fn main_screen_shows_people_terminals_and_input_permission() {
             .into_iter()
             .enumerate()
             .map(|(i, name)| TerminalInfo {
-                last_typist: None,
+                last_typist: (i == 0).then(|| "Carol".into()),
                 pane: format!("p{i}"),
                 name: name.into(),
                 state: if name == "shell" { "idle" } else { "busy" }.into(),
@@ -52,6 +52,7 @@ fn main_screen_shows_people_terminals_and_input_permission() {
         "codex",
         "shell",
         "input: read only",
+        "Carol is typing",
     ] {
         assert!(text.contains(expected), "screen must show {expected}");
     }
@@ -190,6 +191,11 @@ fn viewer_keeps_people_and_tabs_visible() {
     state
         .terminals
         .insert("bob".into(), vec![terminal_info("codex")]);
+    state
+        .terminals
+        .get_mut("bob")
+        .expect("terminals must exist")[0]
+        .last_typist = Some("Carol".into());
     state.select_person(1);
     state.open_focused();
     let mut terminal = Terminal::new(TestBackend::new(130, 35)).expect("backend must open");
@@ -209,6 +215,7 @@ fn viewer_keeps_people_and_tabs_visible() {
         "Bob",
         "codex idle x",
         "Bob  codex  read only",
+        "Carol is typing",
         "esc back",
         "tab next terminal",
     ] {

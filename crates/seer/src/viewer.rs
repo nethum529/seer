@@ -159,16 +159,16 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
         return;
     };
     let palette = Palette::default();
-    let name = state
+    let terminal = state
         .terminals
         .get(&viewer.user)
         .into_iter()
         .flatten()
-        .find(|t| t.pane == viewer.pane)
-        .map_or("shell", |t| t.name.as_str());
+        .find(|t| t.pane == viewer.pane);
+    let name = terminal.map_or("shell", |t| t.name.as_str());
     let allowed = state.may_type(&viewer.user);
     let mode = if allowed { "input" } else { "read only" };
-    let title = Line::from(vec![
+    let mut title = Line::from(vec![
         Span::styled(
             format!(" {}  ", state.person_name(&viewer.user)),
             palette.style(),
@@ -190,6 +190,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
             }),
         ),
     ]);
+    title.spans.extend(crate::render::typist_span(
+        terminal.and_then(|t| t.last_typist.as_deref()),
+    ));
     let area = viewer.area;
     let block = palette.block(true).title(title);
     let inner = block.inner(area);
