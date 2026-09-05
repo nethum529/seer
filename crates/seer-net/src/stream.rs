@@ -48,12 +48,17 @@ impl Write for Socket {
 }
 
 pub trait Stream: Read + Write + Send + 'static {
+    fn set_nodelay(&self, nodelay: bool) -> io::Result<()>;
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
     fn set_write_timeout(&self, timeout: Option<Duration>) -> io::Result<()>;
     fn shutdown(&self, how: Shutdown) -> io::Result<()>;
 }
 
 impl Stream for TcpStream {
+    fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+        TcpStream::set_nodelay(self, nodelay)
+    }
+
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         TcpStream::set_read_timeout(self, timeout)
     }
@@ -68,6 +73,10 @@ impl Stream for TcpStream {
 }
 
 impl Stream for UnixStream {
+    fn set_nodelay(&self, _nodelay: bool) -> io::Result<()> {
+        Ok(())
+    }
+
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         UnixStream::set_read_timeout(self, timeout)
     }
@@ -82,6 +91,13 @@ impl Stream for UnixStream {
 }
 
 impl Stream for Socket {
+    fn set_nodelay(&self, nodelay: bool) -> io::Result<()> {
+        match self {
+            Self::Tcp(stream) => stream.set_nodelay(nodelay),
+            Self::Iroh(stream) => stream.set_nodelay(nodelay),
+        }
+    }
+
     fn set_read_timeout(&self, timeout: Option<Duration>) -> io::Result<()> {
         match self {
             Self::Tcp(stream) => stream.set_read_timeout(timeout),
