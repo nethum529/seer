@@ -21,7 +21,7 @@ impl Widget for PaneCells<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
         let palette = Palette::default();
         buffer.set_style(area, palette.style());
-        let start = content_rows(self.rows).saturating_sub(area.height as usize);
+        let start = start_row(self.rows, area.height);
         for (row_index, row) in self
             .rows
             .iter()
@@ -38,6 +38,10 @@ impl Widget for PaneCells<'_> {
             }
         }
     }
+}
+
+pub(crate) fn start_row(rows: &[Vec<Cell>], height: u16) -> usize {
+    content_rows(rows).saturating_sub(usize::from(height))
 }
 
 fn content_rows(rows: &[Vec<Cell>]) -> usize {

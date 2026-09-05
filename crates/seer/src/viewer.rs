@@ -1,7 +1,7 @@
 use crate::{
     input::key_to_input,
     state::ClientState,
-    terminal_cells::PaneCells,
+    terminal_cells::{PaneCells, start_row},
     theme::Palette,
     tui::{send, send_viewer_input},
     tui_navigation::step,
@@ -199,8 +199,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     frame.render_widget(block, area);
     let content = state.frames.get(&viewer.target());
     if let Some(content) = content {
-        frame.render_widget(PaneCells::new(&viewer.visible_rows(inner.height)), inner);
-        let start = 0;
+        let rows = viewer.visible_rows(inner.height);
+        let start = start_row(&rows, inner.height);
+        frame.render_widget(PaneCells::new(&rows), inner);
         if allowed
             && viewer.offset == 0
             && content.cursor.visible
