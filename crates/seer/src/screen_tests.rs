@@ -181,3 +181,37 @@ fn tab_strip_shows_terminals_and_number_keys_select() {
     assert!(selected.contains("codex idle x"));
     assert!(!selected.contains("claude idle x"));
 }
+
+#[test]
+fn viewer_keeps_people_and_tabs_visible() {
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    state
+        .terminals
+        .insert("bob".into(), vec![terminal_info("codex")]);
+    state.select_person(1);
+    state.open_focused();
+    let mut terminal = Terminal::new(TestBackend::new(130, 35)).expect("backend must open");
+    terminal
+        .draw(|frame| render::draw(frame, &mut state))
+        .expect("screen must draw");
+    let text: String = terminal
+        .backend()
+        .buffer()
+        .content
+        .iter()
+        .map(|cell| cell.symbol())
+        .collect();
+    for label in [
+        "people",
+        "you",
+        "Bob",
+        "codex idle x",
+        "Bob  codex  read only",
+        "esc back",
+        "tab next terminal",
+    ] {
+        assert!(text.contains(label), "screen must show {label}");
+    }
+    assert!(!text.contains("follow"));
+}

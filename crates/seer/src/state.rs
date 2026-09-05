@@ -166,6 +166,7 @@ impl ClientState {
     }
 
     pub(crate) fn open_focused(&mut self) {
+        self.chrome.grid_focus = true;
         if let Some(terminal) = self.selected_terminals().get(self.focus) {
             self.viewer = Some(Viewer::new(self.user().into(), terminal.pane.clone()));
         }

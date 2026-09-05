@@ -1,6 +1,5 @@
 use crate::{
     input::key_to_input,
-    render::footer,
     state::ClientState,
     terminal_cells::PaneCells,
     theme::Palette,
@@ -13,16 +12,15 @@ use ratatui::{
     layout::Rect,
     text::{Line, Span},
 };
+use seer_core::TerminalInput;
 use seer_core::proto::ClientMsg;
-use seer_core::{TerminalFrame, TerminalInput};
 use seer_net::Stream;
 use std::io;
 
 pub(crate) struct Viewer {
     pub(crate) user: String,
     pub(crate) pane: String,
-    pub(crate) follow: bool,
-    pub(crate) frozen: Option<TerminalFrame>,
+    pub(crate) area: Rect,
 }
 
 impl Viewer {
@@ -30,8 +28,7 @@ impl Viewer {
         Self {
             user,
             pane,
-            follow: true,
-            frozen: None,
+            area: Rect::default(),
         }
     }
     pub(crate) fn target(&self) -> (String, String) {
@@ -49,16 +46,6 @@ pub(crate) fn key(
             state.viewer = None;
         }
         (KeyCode::Tab, KeyModifiers::NONE) => next(state),
-        (KeyCode::Char('f'), KeyModifiers::NONE) => {
-            if let Some(viewer) = &mut state.viewer {
-                viewer.follow = !viewer.follow;
-                viewer.frozen = if viewer.follow {
-                    None
-                } else {
-                    state.frames.get(&viewer.target()).cloned()
-                };
-            }
-        }
         _ => {
             if let Some(input) = key_to_input(key) {
                 input_message(stream, state, input)?;
@@ -117,13 +104,14 @@ pub(crate) fn input_message(
     Ok(())
 }
 
-pub(crate) fn draw(frame: &mut Frame<'_>, state: &ClientState) {
+pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
+    if let Some(viewer) = &mut state.viewer {
+        viewer.area = area;
+    }
     let Some(viewer) = &state.viewer else {
         return;
     };
     let palette = Palette::default();
-    let area = frame.area();
-    let area = Rect::new(area.x, area.y, area.width, area.height.saturating_sub(1));
     let name = state
         .terminals
         .get(&viewer.user)
@@ -155,19 +143,18 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &ClientState) {
             }),
         ),
     ]);
+    let area = viewer.area;
     let block = palette.block(true).title(title);
     let inner = block.inner(area);
     frame.render_widget(block, area);
-    let content = if viewer.follow {
-        state.frames.get(&viewer.target())
-    } else {
-        viewer.frozen.as_ref()
-    };
+    let content = state.frames.get(&viewer.target());
     if let Some(content) = content {
-        frame.render_widget(PaneCells::new(&content.rows), inner);
-        let start = content.rows.len().saturating_sub(usize::from(inner.height));
+        frame.render_widget(
+            PaneCells::new(&content.rows[..content.rows.len().min(usize::from(inner.height))]),
+            inner,
+        );
+        let start = 0;
         if allowed
-            && viewer.follow
             && content.cursor.visible
             && let Some(row) = usize::from(content.cursor.row).checked_sub(start)
             && row < usize::from(inner.height)
@@ -176,16 +163,4 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &ClientState) {
             frame.set_cursor_position((inner.x + content.cursor.column, inner.y + row as u16));
         }
     }
-    let hints = format!(
-        "esc back  tab next terminal  f follow {}",
-        if viewer.follow { "on" } else { "off" }
-    );
-    footer(
-        frame,
-        if state.notice.is_empty() {
-            &hints
-        } else {
-            &state.notice
-        },
-    );
 }

@@ -114,8 +114,8 @@ fn run_loop(
         }
         dirty |= render::expire_notice(state);
         if dirty {
-            sync_watches(stream, state)?;
             terminal.draw(|frame| render::draw(frame, state))?;
+            sync_watches(stream, state)?;
             set_cursor_style(state)?;
             dirty = false;
         }
@@ -229,6 +229,12 @@ fn handle_event(
                 navigation::close_key(key, stream, state)?;
             } else if state.menu.is_some() {
                 crate::person_menu::key(key, stream, state)?;
+            } else if state.viewer.is_some()
+                && key.code == event::KeyCode::Char('q')
+                && key.modifiers.is_empty()
+            {
+                send(stream, &ClientMsg::Detach)?;
+                return Ok(true);
             } else if state.viewer.is_some() {
                 crate::viewer::key(key, stream, state)?;
             } else if navigation::key(key, stream, state)? {
@@ -318,8 +324,9 @@ fn sync_watches(stream: &mut impl Stream, state: &mut ClientState) -> io::Result
         [viewer.target()].into_iter().collect()
     } else {
         state
-            .selected_terminals()
+            .box_areas
             .iter()
+            .filter_map(|(index, _)| state.selected_terminals().get(*index))
             .map(|t| (state.user().to_owned(), t.pane.clone()))
             .collect()
     };

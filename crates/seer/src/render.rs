@@ -72,15 +72,13 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     state.box_areas.clear();
     state.tab_areas.clear();
     state.plus_area = Rect::default();
-    if state.viewer.is_some() {
-        crate::viewer::draw(frame, state);
-        return;
-    }
     top_bar(frame, state);
     let (people, terminals) = body_areas(full, state.chrome.show_people);
     people_column(frame, state, people);
     terminal_area(frame, state, terminals);
-    let hints = if state.searching {
+    let hints = if state.viewer.is_some() {
+        "esc back  tab next terminal  q quit"
+    } else if state.searching {
         "enter select  esc cancel"
     } else {
         "j/k people  h/l boxes  enter view  n new  x close  1-9 tabs  / find  esc back  q quit"
@@ -257,7 +255,7 @@ fn terminal_area(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
         content.y = content.y.saturating_add(1);
         content.height = content.height.saturating_sub(1);
     }
-    if state.people.len() == 1 && state.selected_terminals().is_empty() {
+    if state.viewer.is_none() && state.people.len() == 1 && state.selected_terminals().is_empty() {
         first_run(frame, state, content);
         return;
     }
@@ -271,7 +269,11 @@ fn terminal_area(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
         content.y = content.y.saturating_add(1);
         content.height = content.height.saturating_sub(1);
     }
-    box_grid(frame, state, content, if area.width >= 80 { 2 } else { 1 });
+    if state.viewer.is_some() {
+        crate::viewer::draw(frame, state, content);
+    } else {
+        box_grid(frame, state, content, if area.width >= 80 { 2 } else { 1 });
+    }
 }
 
 fn box_grid(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, columns: usize) {
