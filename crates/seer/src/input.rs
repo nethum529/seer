@@ -94,3 +94,230 @@ pub(crate) fn map_modifiers(modifiers: KeyModifiers) -> Modifiers {
 pub(crate) fn raw_bytes(input: &TerminalInput) -> std::io::Result<Option<Vec<u8>>> {
     seer_runtime::PaneGrid::new(1, 1).handle_input(input)
 }
+
+use crate::{state::ClientState, tui_navigation as navigation};
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Position;
+use seer_net::Stream;
+use std::{
+    io,
+    time::{Duration, Instant},
+};
+
+pub(crate) fn command(
+    key: KeyEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+) -> io::Result<bool> {
+    if state.chrome.context.is_some() {
+        crate::person_menu::context_key(key, state);
+        return Ok(false);
+    }
+    if state.close_prompt.is_some() || state.quit_prompt {
+        return navigation::key(key, stream, state);
+    }
+    if state.menu.is_some() {
+        crate::person_menu::key(key, stream, state)?;
+        return Ok(false);
+    }
+    if key.code == CrosstermKeyCode::Char('p')
+        && key.modifiers.is_empty()
+        && state.chrome.narrow
+        && !state.searching
+    {
+        state.chrome.show_people = !state.chrome.show_people;
+        return Ok(false);
+    }
+    if key.code == CrosstermKeyCode::Char('m')
+        && key.modifiers.is_empty()
+        && state.viewer.is_none()
+        && !state.searching
+    {
+        let row = state
+            .people_areas
+            .iter()
+            .find(|(i, _)| *i == state.selected)
+            .map_or(state.chrome.people_area, |(_, row)| *row);
+        crate::person_menu::open(state, state.selected, row);
+    } else if state.viewer.is_some() {
+        if key.code == CrosstermKeyCode::Char('q') && key.modifiers.is_empty() {
+            return Ok(true);
+        }
+        crate::viewer::key(key, stream, state)?;
+    } else {
+        return navigation::key(key, stream, state);
+    }
+    Ok(false)
+}
+
+pub(crate) fn mouse(
+    mouse: MouseEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+    last: &mut Option<(String, usize, Instant)>,
+) -> io::Result<bool> {
+    let position = Position::new(mouse.column, mouse.row);
+    if state.close_prompt.is_some() || state.quit_prompt {
+        return click_hint(mouse, stream, state, true);
+    }
+    if state.chrome.context.is_some() {
+        crate::person_menu::context_mouse(mouse, state);
+        return Ok(false);
+    }
+    if state.menu.is_some() {
+        crate::person_menu::mouse(mouse, stream, state)?;
+        return Ok(false);
+    }
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+    ) {
+        scroll(mouse, state);
+        return Ok(false);
+    }
+    if !matches!(
+        mouse.kind,
+        MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
+    ) {
+        return Ok(false);
+    }
+    if state
+        .chrome
+        .footer_areas
+        .iter()
+        .any(|(_, area)| area.contains(position))
+    {
+        return click_hint(mouse, stream, state, false);
+    }
+    click_target(mouse, stream, state, last)?;
+    Ok(false)
+}
+
+fn click_hint(
+    mouse: MouseEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+    dialog: bool,
+) -> io::Result<bool> {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return Ok(false);
+    }
+    let areas = if dialog {
+        &state.chrome.dialog_areas
+    } else {
+        &state.chrome.footer_areas
+    };
+    let key = areas
+        .iter()
+        .find(|(_, area)| area.contains(Position::new(mouse.column, mouse.row)))
+        .map(|(key, _)| key.clone());
+    let Some(key) = key else {
+        return Ok(false);
+    };
+    let code = match key.as_str() {
+        "enter" => CrosstermKeyCode::Enter,
+        "esc" => CrosstermKeyCode::Esc,
+        "tab" => CrosstermKeyCode::Tab,
+        _ => match key.chars().next() {
+            Some(character) => CrosstermKeyCode::Char(character),
+            None => return Ok(false),
+        },
+    };
+    command(KeyEvent::new(code, KeyModifiers::NONE), stream, state)
+}
+
+fn click_target(
+    mouse: MouseEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+    last: &mut Option<(String, usize, Instant)>,
+) -> io::Result<()> {
+    let position = Position::new(mouse.column, mouse.row);
+    let right = mouse.kind == MouseEventKind::Down(MouseButton::Right);
+    if let Some((index, row)) = state
+        .people_areas
+        .iter()
+        .find(|(_, area)| area.contains(position))
+        .copied()
+    {
+        if right {
+            crate::person_menu::open(state, index, row);
+        } else {
+            state.select_person(index);
+            if double_click(last, format!("person:{}", state.user()), index) {
+                state.open_focused();
+            }
+        }
+        return Ok(());
+    }
+    if state.plus_area.contains(position) && !right {
+        navigation::key(
+            KeyEvent::new(CrosstermKeyCode::Char('n'), KeyModifiers::NONE),
+            stream,
+            state,
+        )?;
+        return Ok(());
+    }
+    if let Some((index, area)) = state
+        .tab_areas
+        .iter()
+        .find(|(_, area)| area.contains(position))
+        .copied()
+    {
+        state.select_tab(index);
+        if right {
+            crate::person_menu::open_context(state, position);
+        } else if mouse.column == area.right().saturating_sub(2) {
+            state.request_close();
+        }
+        return Ok(());
+    }
+    if let Some((index, _)) = state
+        .box_areas
+        .iter()
+        .find(|(_, area)| area.contains(position))
+        .copied()
+    {
+        state.select_tab(index);
+        if right {
+            crate::person_menu::open_context(state, position);
+        } else if double_click(last, format!("box:{}", state.user()), index) {
+            state.open_focused();
+        }
+    }
+    Ok(())
+}
+
+fn double_click(last: &mut Option<(String, usize, Instant)>, target: String, index: usize) -> bool {
+    if last.as_ref().is_some_and(|(old, i, time)| {
+        *old == target && *i == index && time.elapsed() < Duration::from_millis(400)
+    }) {
+        *last = None;
+        true
+    } else {
+        *last = Some((target, index, Instant::now()));
+        false
+    }
+}
+
+fn scroll(mouse: MouseEvent, state: &mut ClientState) {
+    let position = Position::new(mouse.column, mouse.row);
+    let up = mouse.kind == MouseEventKind::ScrollUp;
+    if state.chrome.people_area.contains(position) {
+        state.people_scroll = if up {
+            state.people_scroll.saturating_sub(1)
+        } else {
+            state.people_scroll.saturating_add(1)
+        };
+    } else if let Some(viewer) = &mut state.viewer {
+        if viewer.area.contains(position) {
+            viewer.scroll(up);
+        }
+    } else {
+        state.grid_scroll = if up {
+            state.grid_scroll.saturating_sub(1)
+        } else {
+            state.grid_scroll.saturating_add(1)
+        };
+    }
+}

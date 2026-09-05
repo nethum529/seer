@@ -1,14 +1,8 @@
 use crate::{state::ClientState, tui::send};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Position;
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use seer_core::proto::ClientMsg;
 use seer_net::Stream;
-use std::{
-    cell::RefCell,
-    io,
-    io::Write,
-    time::{Duration, Instant},
-};
+use std::{cell::RefCell, io, io::Write};
 
 thread_local! { static START_PERSON: RefCell<Option<String>> = const { RefCell::new(None) }; }
 pub(crate) fn set_peek_person(person: Option<&str>) {
@@ -228,54 +222,4 @@ fn base64(bytes: &[u8]) -> String {
         });
     }
     text
-}
-
-pub(crate) fn mouse(
-    mouse: MouseEvent,
-    state: &mut ClientState,
-    last: &mut Option<(String, usize, Instant)>,
-) {
-    let position = Position::new(mouse.column, mouse.row);
-    if matches!(
-        mouse.kind,
-        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
-    ) {
-        let scroll = if mouse.column < 26 {
-            &mut state.people_scroll
-        } else {
-            &mut state.grid_scroll
-        };
-        *scroll = if mouse.kind == MouseEventKind::ScrollDown {
-            scroll.saturating_add(1)
-        } else {
-            scroll.saturating_sub(1)
-        };
-    }
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return;
-    }
-    if let Some((index, row)) = state
-        .people_areas
-        .iter()
-        .find(|(_, rect)| rect.contains(position))
-    {
-        crate::person_menu::open(state, *index, *row);
-        return;
-    }
-    if let Some((index, _)) = state
-        .box_areas
-        .iter()
-        .find(|(_, rect)| rect.contains(position))
-    {
-        let index = *index;
-        state.focus = index;
-        if last.as_ref().is_some_and(|(user, old, time)| {
-            user == state.user() && *old == index && time.elapsed() < Duration::from_millis(400)
-        }) {
-            state.open_focused();
-            *last = None;
-        } else {
-            *last = Some((state.user().into(), index, Instant::now()));
-        }
-    }
 }

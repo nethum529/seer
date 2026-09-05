@@ -225,19 +225,7 @@ fn handle_event(
     let old_viewer = state.viewer.as_ref().map(crate::viewer::Viewer::target);
     match event {
         Event::Key(key) if key.kind != KeyEventKind::Release => {
-            if state.close_prompt.is_some() {
-                navigation::close_key(key, stream, state)?;
-            } else if state.menu.is_some() {
-                crate::person_menu::key(key, stream, state)?;
-            } else if state.viewer.is_some()
-                && key.code == event::KeyCode::Char('q')
-                && key.modifiers.is_empty()
-            {
-                send(stream, &ClientMsg::Detach)?;
-                return Ok(true);
-            } else if state.viewer.is_some() {
-                crate::viewer::key(key, stream, state)?;
-            } else if navigation::key(key, stream, state)? {
+            if crate::input::command(key, stream, state)? {
                 send(stream, &ClientMsg::Detach)?;
                 return Ok(true);
             }
@@ -247,12 +235,11 @@ fn handle_event(
             state,
             TerminalInput::new(InputEvent::Paste(text)),
         )?,
-        Event::Mouse(_) if state.quit_prompt => {}
-        Event::Mouse(mouse) if state.menu.is_some() => {
-            crate::person_menu::mouse(mouse, stream, state)?
-        }
-        Event::Mouse(mouse) if state.viewer.is_none() => {
-            navigation::mouse(mouse, state, last_click)
+        Event::Mouse(mouse) => {
+            if crate::input::mouse(mouse, stream, state, last_click)? {
+                send(stream, &ClientMsg::Detach)?;
+                return Ok(true);
+            }
         }
         Event::Resize(_, _) => resize(stream, state, size)?,
         _ => {}

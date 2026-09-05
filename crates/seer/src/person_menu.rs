@@ -254,3 +254,101 @@ fn lines(state: &ClientState, user: &str) -> Vec<Line<'static>> {
     )));
     lines
 }
+
+pub(crate) struct TerminalMenu {
+    anchor: Position,
+    area: Rect,
+    selected: usize,
+}
+
+pub(crate) fn open_context(state: &mut ClientState, anchor: Position) {
+    state.chrome.context = Some(TerminalMenu {
+        anchor,
+        area: Rect::default(),
+        selected: 0,
+    });
+}
+
+pub(crate) fn context_key(key: KeyEvent, state: &mut ClientState) {
+    let Some(mut menu) = state.chrome.context.take() else {
+        return;
+    };
+    match key.code {
+        KeyCode::Esc => return,
+        KeyCode::Char('j') | KeyCode::Down | KeyCode::Char('k') | KeyCode::Up => {
+            menu.selected = 1 - menu.selected
+        }
+        KeyCode::Enter => {
+            context_action(state, menu.selected);
+            return;
+        }
+        _ => {}
+    }
+    state.chrome.context = Some(menu);
+}
+
+fn context_action(state: &mut ClientState, index: usize) {
+    if index == 0 {
+        state.open_focused();
+    } else {
+        state.request_close();
+    }
+}
+
+pub(crate) fn context_mouse(mouse: MouseEvent, state: &mut ClientState) {
+    let Some(menu) = state.chrome.context.take() else {
+        return;
+    };
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left) {
+        let position = Position::new(mouse.column, mouse.row);
+        if !menu.area.contains(position) {
+            return;
+        }
+        let row = mouse.row.saturating_sub(menu.area.y + 1);
+        if row < 2 {
+            context_action(state, usize::from(row));
+            return;
+        }
+    }
+    state.chrome.context = Some(menu);
+}
+
+pub(crate) fn draw_context(frame: &mut Frame<'_>, state: &mut ClientState) {
+    let Some(menu) = &mut state.chrome.context else {
+        return;
+    };
+    let palette = Palette::default();
+    let full = frame.area();
+    let width = full.width.min(12);
+    let height = full.height.min(4);
+    menu.area = Rect::new(
+        menu.anchor.x.min(full.right().saturating_sub(width)),
+        menu.anchor.y.min(full.bottom().saturating_sub(height)),
+        width,
+        height,
+    );
+    palette.clear(frame.buffer_mut(), menu.area);
+    let block = palette
+        .block(false)
+        .style(palette.style().bg(palette.surface0));
+    let inner = block.inner(menu.area);
+    frame.render_widget(block, menu.area);
+    for (index, text) in ["Open", "Close"]
+        .into_iter()
+        .enumerate()
+        .take(usize::from(inner.height))
+    {
+        let style = palette
+            .style()
+            .bg(palette.surface0)
+            .fg(if index == menu.selected {
+                palette.accent
+            } else {
+                palette.text
+            });
+        frame.render_widget(
+            Paragraph::new(text).style(style),
+            Rect::new(inner.x, inner.y + index as u16, inner.width, 1),
+        );
+    }
+}

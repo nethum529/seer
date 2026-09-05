@@ -21,6 +21,9 @@ pub(crate) struct Viewer {
     pub(crate) user: String,
     pub(crate) pane: String,
     pub(crate) area: Rect,
+    history: Vec<Vec<seer_core::Cell>>,
+    previous: Vec<Vec<seer_core::Cell>>,
+    pub(crate) offset: usize,
 }
 
 impl Viewer {
@@ -29,8 +32,49 @@ impl Viewer {
             user,
             pane,
             area: Rect::default(),
+            history: Vec::new(),
+            previous: Vec::new(),
+            offset: 0,
         }
     }
+    pub(crate) fn scroll(&mut self, up: bool) {
+        self.offset = if up {
+            (self.offset + 3).min(self.history.len())
+        } else {
+            self.offset.saturating_sub(3)
+        };
+    }
+
+    fn note_rows(&mut self, rows: &[Vec<seer_core::Cell>]) {
+        if self.previous == rows {
+            return;
+        }
+        let overlap = (1..self.previous.len()).find(|shift| {
+            let suffix = &self.previous[*shift..];
+            rows.starts_with(suffix)
+        });
+        if let Some(shift) = overlap {
+            self.history.extend_from_slice(&self.previous[..shift]);
+            if self.offset > 0 {
+                self.offset += shift;
+            }
+            let excess = self.history.len().saturating_sub(2000);
+            self.history.drain(..excess);
+            self.offset = self.offset.min(self.history.len());
+        }
+        self.previous = rows.to_vec();
+    }
+
+    pub(crate) fn visible_rows(&self, height: u16) -> Vec<Vec<seer_core::Cell>> {
+        self.history
+            .iter()
+            .chain(&self.previous)
+            .skip(self.history.len().saturating_sub(self.offset))
+            .take(usize::from(height))
+            .cloned()
+            .collect()
+    }
+
     pub(crate) fn target(&self) -> (String, String) {
         (self.user.clone(), self.pane.clone())
     }
@@ -107,6 +151,9 @@ pub(crate) fn input_message(
 pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     if let Some(viewer) = &mut state.viewer {
         viewer.area = area;
+        if let Some(content) = state.frames.get(&viewer.target()) {
+            viewer.note_rows(&content.rows);
+        }
     }
     let Some(viewer) = &state.viewer else {
         return;
@@ -149,12 +196,10 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     frame.render_widget(block, area);
     let content = state.frames.get(&viewer.target());
     if let Some(content) = content {
-        frame.render_widget(
-            PaneCells::new(&content.rows[..content.rows.len().min(usize::from(inner.height))]),
-            inner,
-        );
+        frame.render_widget(PaneCells::new(&viewer.visible_rows(inner.height)), inner);
         let start = 0;
         if allowed
+            && viewer.offset == 0
             && content.cursor.visible
             && let Some(row) = usize::from(content.cursor.row).checked_sub(start)
             && row < usize::from(inner.height)

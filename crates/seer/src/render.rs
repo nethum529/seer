@@ -1,3 +1,5 @@
+mod chrome;
+use chrome::{dialog, footer, notice};
 mod terminals;
 use crate::terminal_cells::PaneCells;
 use crate::{state::ClientState, theme::Palette};
@@ -14,6 +16,11 @@ use terminals::{first_run, tabs};
 pub(crate) struct Chrome {
     pub(crate) grid_focus: bool,
     pub(crate) show_people: bool,
+    pub(crate) narrow: bool,
+    pub(crate) context: Option<crate::person_menu::TerminalMenu>,
+    pub(crate) footer_areas: Vec<(String, Rect)>,
+    pub(crate) dialog_areas: Vec<(String, Rect)>,
+    pub(crate) people_area: Rect,
     notice: String,
     pub(crate) notice_since: Option<std::time::Instant>,
 }
@@ -67,6 +74,7 @@ pub(crate) fn body_areas(full: Rect, show_people: bool) -> (Rect, Rect) {
 pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     let palette = Palette::default();
     let full = frame.area();
+    state.chrome.narrow = full.width < 50;
     frame.render_widget(Paragraph::new("").style(palette.style()), full);
     state.people_areas.clear();
     state.box_areas.clear();
@@ -74,6 +82,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     state.plus_area = Rect::default();
     top_bar(frame, state);
     let (people, terminals) = body_areas(full, state.chrome.show_people);
+    state.chrome.people_area = people;
     people_column(frame, state, people);
     terminal_area(frame, state, terminals);
     let hints = if state.viewer.is_some() {
@@ -83,19 +92,33 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     } else {
         "j/k people  h/l boxes  enter view  n new  x close  1-9 tabs  / find  esc back  q quit"
     };
-    let hints = if full.width < 50 {
-        format!("p people  {hints}")
+    let hints: String = if full.width < 50 {
+        if state.viewer.is_some() {
+            "esc back  tab next  p people  q quit"
+        } else {
+            "p people  enter view  n new  q quit"
+        }
+        .into()
+    } else if full.width < 90 && state.viewer.is_none() && !state.searching {
+        "j/k people  enter view  n new  x close  q quit".into()
     } else {
         hints.into()
     };
-    footer(frame, &hints);
+    let hints = if state.people.len() == 1 && state.viewer.is_none() && state.invite.is_some() {
+        hints.replace("n new", "c copy  n new")
+    } else {
+        hints
+    };
+    footer(frame, state, &hints);
     notice(frame, state, &hints);
     crate::person_menu::draw(frame, state);
+    crate::person_menu::draw_context(frame, state);
+    state.chrome.dialog_areas.clear();
     if state.close_prompt.is_some() {
-        dialog(frame, "Close terminal?", "y yes   n no   esc back");
+        dialog(frame, state, "Close terminal?", "y yes  n no  esc back");
     }
     if state.quit_prompt {
-        dialog(frame, "Quit seer?", "enter quit   esc stay");
+        dialog(frame, state, "Quit seer?", "enter quit  esc stay");
     }
 }
 
@@ -369,71 +392,6 @@ fn box_grid(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, columns:
     }
 }
 
-pub(crate) fn footer(frame: &mut Frame<'_>, hints: &str) {
-    let palette = Palette::default();
-    let area = frame.area();
-    let spans: Vec<_> = hints
-        .split("  ")
-        .flat_map(|hint| {
-            let (key, label) = hint.split_once(' ').unwrap_or((hint, ""));
-            [
-                Span::styled(
-                    format!(" {key}"),
-                    palette.style().add_modifier(Modifier::BOLD),
-                ),
-                Span::styled(format!(" {label} "), palette.style().fg(palette.subtext0)),
-            ]
-        })
-        .collect();
-    frame.render_widget(
-        Paragraph::new(Line::from(spans))
-            .style(palette.style())
-            .alignment(Alignment::Right),
-        Rect::new(
-            area.x,
-            area.bottom().saturating_sub(1),
-            area.width,
-            area.height.min(1),
-        ),
-    );
-}
-
-pub(crate) fn dialog(frame: &mut Frame<'_>, title: &str, text: &str) {
-    let palette = Palette::default();
-    let area = frame.area();
-    let width = 36.min(area.width);
-    let height = 7.min(area.height);
-    let rect = Rect::new(
-        area.x + area.width.saturating_sub(width) / 2,
-        area.y + area.height.saturating_sub(height) / 2,
-        width,
-        height,
-    );
-    palette.clear(frame.buffer_mut(), rect);
-    frame.render_widget(
-        Paragraph::new(vec![
-            Line::from(""),
-            Line::from(Span::styled(
-                text,
-                palette
-                    .style()
-                    .bg(palette.surface0)
-                    .add_modifier(Modifier::BOLD),
-            )),
-        ])
-        .style(palette.style().bg(palette.surface0))
-        .alignment(Alignment::Center)
-        .block(
-            palette
-                .block(false)
-                .style(palette.style().bg(palette.surface0))
-                .padding(Padding::uniform(1))
-                .title(format!(" {title} ")),
-        ),
-        rect,
-    );
-}
-
 pub(crate) fn idle_text(seconds: u64) -> String {
     if seconds < 60 {
         format!("{seconds}s")
@@ -452,17 +410,4 @@ fn more(frame: &mut Frame<'_>, area: Rect, remaining: usize) {
             Rect::new(area.x, area.bottom() - 1, area.width, 1),
         );
     }
-}
-
-pub(crate) fn notice(frame: &mut Frame<'_>, state: &ClientState, hints: &str) {
-    let area = frame.area();
-    frame.render_widget(
-        Paragraph::new(state.notice.as_str()).style(Palette::default().style()),
-        Rect::new(
-            area.x + 1,
-            area.bottom().saturating_sub(1),
-            area.width.saturating_sub(hints.len() as u16 + 3),
-            area.height.min(1),
-        ),
-    );
 }
