@@ -19,22 +19,19 @@ enum Command {
     Peek(String),
 }
 
+enum ParseError {
+    Unknown(String),
+    Usage,
+}
+
 pub(crate) fn run(arguments: impl Iterator<Item = String>) -> ExitCode {
-    let arguments: Vec<_> = arguments.collect();
-    if let Some(first) = arguments.first()
-        && ![
-            "help", "--help", "-h", "start", "stop", "invite", "join", "list", "attach", "detach",
-            "peek",
-        ]
-        .contains(&first.as_str())
-    {
-        eprintln!("unknown command: {first}. Run seer help.");
-        return ExitCode::from(2);
-    }
-    let command = match parse(arguments.into_iter()) {
+    let command = match parse(arguments) {
         Ok(command) => command,
-        Err(()) => {
-            eprint!("{HELP}");
+        Err(error) => {
+            match error {
+                ParseError::Unknown(name) => eprintln!("unknown command: {name}. Run seer help."),
+                ParseError::Usage => eprint!("{HELP}"),
+            }
             return ExitCode::from(2);
         }
     };
@@ -71,43 +68,46 @@ fn execute(command: Command) -> ExitCode {
     finish(result)
 }
 
-fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ()> {
-    let first = arguments.next().ok_or(())?;
+fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ParseError> {
+    let first = arguments.next().ok_or(ParseError::Usage)?;
     let command = match first.as_str() {
-        "help" | "--help" | "-h" if arguments.next().is_none() => Command::Help,
-        "start" if arguments.next().is_none() => Command::Start,
-        "stop" if arguments.next().is_none() => Command::Stop,
+        "help" | "--help" | "-h" => Command::Help,
+        "start" => Command::Start,
+        "stop" => Command::Stop,
         "invite" => match arguments.next() {
             None => Command::Invite(None),
             Some(flag) if flag == "--hours" => {
                 let hours = arguments.next().unwrap_or_default();
                 if arguments.next().is_some() {
-                    return Err(());
+                    return Err(ParseError::Usage);
                 }
                 Command::Invite(Some(hours))
             }
-            Some(_) => return Err(()),
+            Some(_) => return Err(ParseError::Usage),
         },
         "join" => {
-            let line = arguments.collect::<Vec<_>>().join(" ");
+            let line = arguments.by_ref().collect::<Vec<_>>().join(" ");
             if line.is_empty() {
                 Command::Join
             } else {
                 Command::JoinWithInvitation(line)
             }
         }
-        "list" if arguments.next().is_none() => Command::List,
-        "attach" if arguments.next().is_none() => Command::Attach,
-        "detach" if arguments.next().is_none() => Command::Detach,
+        "list" => Command::List,
+        "attach" => Command::Attach,
+        "detach" => Command::Detach,
         "peek" => {
-            let person = arguments.next().ok_or(())?;
+            let person = arguments.next().ok_or(ParseError::Usage)?;
             if arguments.next().is_some() {
-                return Err(());
+                return Err(ParseError::Usage);
             }
             Command::Peek(person)
         }
-        _ => return Err(()),
+        _ => return Err(ParseError::Unknown(first)),
     };
+    if arguments.next().is_some() {
+        return Err(ParseError::Usage);
+    }
     Ok(command)
 }
 
