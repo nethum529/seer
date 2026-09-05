@@ -114,7 +114,7 @@ fn restores_idle_cells_after_reattach() {
 }
 
 #[test]
-fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
+fn broadcasts_to_concurrent_connections() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let runtime = runtime_command()
@@ -131,7 +131,7 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     let mut runtime = RuntimeProcess::new(runtime);
 
     let mut owner = connect_with_timeout(&socket_path);
-    let created = tree(read_message(&mut owner));
+    let created = read_until_tree(&mut owner);
     assert_eq!(created.workspaces[0].tabs.len(), 1);
     assert_eq!(created.workspaces[0].tabs[0].panes.len(), 1);
     let pane = created.workspaces[0].tabs[0].panes[0].id.clone();
@@ -146,35 +146,7 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     let _ = wait_for_cells_containing(&mut owner, "owner-one");
     let _ = wait_for_cells_containing(&mut viewer, "owner-one");
 
-    send(
-        &mut viewer,
-        &ClientMsg::Peek {
-            user: "alice".into(),
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-        },
-    );
-    assert_eq!(read_until_tree(&mut viewer), created);
-    assert!(wait_for_cells(&mut viewer));
-    send_input(&mut viewer, &pane, "printf 'viewer-input\\n'\n");
-    send(
-        &mut viewer,
-        &ClientMsg::Peek {
-            user: "alice".into(),
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-        },
-    );
-    assert_eq!(read_until_tree(&mut viewer), created);
-    assert!(wait_for_cells(&mut viewer));
-
-    send_input(&mut owner, &pane, "printf 'owner-two\\n'\n");
-    let owner_cells = wait_for_cells_containing(&mut owner, "owner-two");
-    let viewer_cells = wait_for_cells_containing(&mut viewer, "owner-two");
-    assert!(!owner_cells.contains("viewer-input"));
-    assert!(!viewer_cells.contains("viewer-input"));
-
-    send(&mut viewer, &ClientMsg::StopPeek);
+    send(&mut viewer, &ClientMsg::Detach);
     wait_for_close(&mut viewer);
     send_input(&mut owner, &pane, "printf 'owner-three\\n'\n");
     let _ = wait_for_cells_containing(&mut owner, "owner-three");

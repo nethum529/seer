@@ -61,12 +61,6 @@ fn identifies_only_mutating_messages() {
         ClientMsg::QueryTargets {
             user: "alice".into(),
         },
-        ClientMsg::Peek {
-            user: "alice".into(),
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-        },
-        ClientMsg::StopPeek,
         ClientMsg::Detach,
         ClientMsg::TerminalCapabilities {
             capabilities: TerminalCapabilities {

@@ -34,6 +34,7 @@ fn command_reply_skips_all_stream_messages() {
                 bytes: vec![1],
             },
             ServerMsg::Cells {
+                user: String::new(),
                 pane: "p1".into(),
                 frame: TerminalFrame {
                     rows: vec![Vec::<Cell>::new()],

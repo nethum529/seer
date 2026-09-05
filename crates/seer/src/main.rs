@@ -3,18 +3,20 @@ use std::process::ExitCode;
 mod capsule;
 mod cli;
 mod commands;
-mod drawer;
 mod input;
-mod peek_mode;
+mod person_menu;
 mod prompt;
 mod render;
 mod start;
 mod state;
 mod store;
+mod terminal_cells;
 mod terminal_session;
+mod theme;
 mod tui;
 mod tui_navigation;
 mod update;
+mod viewer;
 
 fn main() -> ExitCode {
     let mut arguments = std::env::args().skip(1);
@@ -24,3 +26,6 @@ fn main() -> ExitCode {
         Some(command) => cli::run(std::iter::once(command).chain(arguments)),
     }
 }
+
+#[cfg(test)]
+mod screen_tests;

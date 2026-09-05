@@ -129,12 +129,6 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
         },
         ClientMsg::AttachRuntime,
         ClientMsg::QueryTargets { user: "bob".into() },
-        ClientMsg::Peek {
-            user: "bob".into(),
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-        },
-        ClientMsg::StopPeek,
         ClientMsg::Detach,
     ];
     for message in deferred {
@@ -146,48 +140,6 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
         );
     }
     close_all_panes(&mut session);
-}
-
-#[test]
-fn peek_selects_one_workspace_and_tab_and_rejects_invalid_ids() {
-    let mut session = UserSession::new("alice", "sh");
-    for name in ["first", "second"] {
-        let workspace = session
-            .tree
-            .create_workspace(name)
-            .expect("workspace must be created");
-        session
-            .tree
-            .create_tab(&workspace.id, "first", session.viewport)
-            .expect("first tab must be created");
-        session
-            .tree
-            .create_tab(&workspace.id, "second", session.viewport)
-            .expect("second tab must be created");
-    }
-
-    let selected = session
-        .selected_tree("w2", "w2:t2")
-        .expect("selected tree must exist");
-
-    assert_eq!(selected.workspaces.len(), 1);
-    assert_eq!(selected.workspaces[0].id, "w2");
-    assert_eq!(selected.workspaces[0].tabs.len(), 1);
-    assert_eq!(selected.workspaces[0].tabs[0].id, "w2:t2");
-    assert_eq!(
-        session
-            .selected_tree("w9", "w9:t1")
-            .expect_err("workspace must be rejected")
-            .kind(),
-        io::ErrorKind::InvalidInput
-    );
-    assert_eq!(
-        session
-            .selected_tree("w1", "w2:t1")
-            .expect_err("tab must be rejected")
-            .kind(),
-        io::ErrorKind::InvalidInput
-    );
 }
 
 fn session_with_tab() -> UserSession {

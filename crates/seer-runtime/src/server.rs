@@ -83,17 +83,7 @@ fn handle_message(
     message: ClientMsg,
 ) -> io::Result<bool> {
     match message {
-        ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
-        ClientMsg::Peek { workspace, tab, .. } => {
-            match shared.send_snapshot(connection_id, &workspace, &tab) {
-                Ok(()) => shared.enter_peek(connection_id)?,
-                Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-                    shared.send_refused(connection_id, error.to_string())?;
-                }
-                Err(error) => return Err(error),
-            }
-            Ok(false)
-        }
+        ClientMsg::Detach => Ok(true),
         ClientMsg::Resize {
             workspace,
             tab,
@@ -339,48 +329,6 @@ impl SharedSession {
             }
             Err(error) => Err(error),
         }
-    }
-
-    fn enter_peek(&self, id: u64) -> io::Result<()> {
-        let _lease = lock(&self.lease)?;
-        let demoted = {
-            let mut connections = lock(&self.connections)?;
-            let Some(position) = connections.iter().position(|c| c.id == id) else {
-                return Ok(());
-            };
-            connections[position].read_only = true;
-            let demoted = connections[position].size_owner;
-            connections[position].size_owner = false;
-            demoted
-        };
-        if demoted {
-            self.recover_locked()?;
-        }
-        Ok(())
-    }
-
-    fn send_snapshot(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
-        let session = lock(&self.session)?;
-        let tree = session.selected_tree(workspace, tab)?;
-        let messages = session.snapshot_for(tree);
-        drop(session);
-        let owner_lost = {
-            let mut connections = lock(&self.connections)?;
-            let Some(position) = connections
-                .iter()
-                .position(|connection| connection.id == id)
-            else {
-                return Err(connection_closed());
-            };
-            if connections[position].send_messages(&messages)? {
-                return Ok(());
-            }
-            evict_connection(&mut connections, position)
-        };
-        if owner_lost {
-            self.recover()?;
-        }
-        Err(connection_closed())
     }
 
     fn send_refused(&self, id: u64, reason: String) -> io::Result<()> {
