@@ -100,6 +100,32 @@ make_archive() {
     run tar -C "target/${target}/release" -czf "${output_directory}/${asset}" "${BINARIES[@]}"
 }
 
+write_release_notes() {
+    local target=$1
+    local notes_file=$2
+    local binary
+    local bytes
+    local crate_count
+
+    if [[ "${dry_run}" == true ]]; then
+        print_command cargo tree --workspace --prefix none --format '{p}' --no-dedupe
+        for binary in "${BINARIES[@]}"; do
+            print_command wc -c "target/${target}/release/${binary}"
+        done
+        printf '+ write binary sizes and crate count to %q\n' "${notes_file}"
+        return
+    fi
+
+    crate_count=$(cargo tree --workspace --prefix none --format '{p}' --no-dedupe | sort -u | wc -l | tr -d '[:space:]')
+    printf 'Build size for %s:\n\n' "${target}" > "${notes_file}"
+    for binary in "${BINARIES[@]}"; do
+        bytes=$(wc -c < "target/${target}/release/${binary}" | tr -d '[:space:]')
+        printf '%s: %s bytes\n' "${binary}" "${bytes}" >> "${notes_file}"
+    done
+    printf '\nCrate count from cargo tree: %s\n' "${crate_count}" >> "${notes_file}"
+    cat "${notes_file}"
+}
+
 update_release_files() {
     local checkout=$1
     local workflow_directory="${checkout}/.github/workflows"
@@ -228,11 +254,15 @@ main() {
     run git clone --branch main --single-branch "${RELEASE_REPOSITORY_URL}" "${release_checkout}"
     update_release_files "${release_checkout}"
 
+    local notes_file="${work_directory}/release-notes.txt"
+    write_release_notes x86_64-unknown-linux-gnu "${notes_file}"
+
     run gh release create "${tag}" \
         "${assets_directory}/${linux_asset}" \
         --repo "${RELEASE_REPOSITORY}" \
         --title "${tag}" \
-        --generate-notes
+        --generate-notes \
+        --notes-file "${notes_file}"
 
     run_macos_build "${tag}"
 }
