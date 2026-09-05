@@ -16,6 +16,7 @@ pub(crate) struct ClientState {
     pub(crate) terminals: HashMap<String, Vec<TerminalInfo>>,
     pub(crate) frames: HashMap<(String, String), TerminalFrame>,
     pub(crate) viewer: Option<Viewer>,
+    pub(crate) selection: Option<crate::input::Selection>,
     pub(crate) menu: Option<crate::person_menu::PersonMenu>,
     pub(crate) can_type_here: BTreeSet<String>,
     pub(crate) you_may_type_into: BTreeSet<String>,
@@ -63,6 +64,7 @@ impl ClientState {
             terminals: HashMap::new(),
             frames: HashMap::new(),
             viewer: None,
+            selection: None,
             menu: None,
             can_type_here: BTreeSet::new(),
             you_may_type_into: BTreeSet::new(),
@@ -147,6 +149,7 @@ impl ClientState {
         self.selected = index.min(self.people.len().saturating_sub(1));
         self.focus = 0;
         self.viewer = None;
+        self.selection = None;
         self.chrome.grid_focus = false;
         self.grid_scroll = 0;
         self.notice.clear();
@@ -166,6 +169,7 @@ impl ClientState {
     }
 
     pub(crate) fn open_focused(&mut self) {
+        self.selection = None;
         self.chrome.grid_focus = true;
         if let Some(terminal) = self.selected_terminals().get(self.focus) {
             self.viewer = Some(Viewer::new(self.user().into(), terminal.pane.clone()));

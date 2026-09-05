@@ -2,7 +2,7 @@ use crate::{state::ClientState, tui::send};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use seer_core::proto::ClientMsg;
 use seer_net::Stream;
-use std::{cell::RefCell, io, io::Write};
+use std::{cell::RefCell, io};
 
 thread_local! { static START_PERSON: RefCell<Option<String>> = const { RefCell::new(None) }; }
 pub(crate) fn set_peek_person(person: Option<&str>) {
@@ -192,34 +192,7 @@ fn copy_invite(state: &mut ClientState) -> io::Result<()> {
     let Some(invite) = &state.invite else {
         return Ok(());
     };
-    let mut stdout = io::stdout().lock();
-    write!(stdout, "\x1b]52;c;{}\x07", base64(invite.as_bytes()))?;
-    stdout.flush()?;
+    crate::input::copy_text(invite)?;
     state.set_notice("Copy requested. Your terminal must permit clipboard access.");
     Ok(())
-}
-
-fn base64(bytes: &[u8]) -> String {
-    const ALPHABET: &[u8] = b"ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
-    let mut text = String::new();
-    for chunk in bytes.chunks(3) {
-        let first = chunk[0];
-        let second = chunk.get(1).copied().unwrap_or(0);
-        let third = chunk.get(2).copied().unwrap_or(0);
-        text.push(char::from(ALPHABET[usize::from(first >> 2)]));
-        text.push(char::from(
-            ALPHABET[usize::from(((first & 3) << 4) | (second >> 4))],
-        ));
-        text.push(if chunk.len() > 1 {
-            char::from(ALPHABET[usize::from(((second & 15) << 2) | (third >> 6))])
-        } else {
-            '='
-        });
-        text.push(if chunk.len() > 2 {
-            char::from(ALPHABET[usize::from(third & 63)])
-        } else {
-            '='
-        });
-    }
-    text
 }

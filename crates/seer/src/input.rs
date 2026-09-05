@@ -1,5 +1,7 @@
+mod selection;
 use crossterm::event::{KeyCode as CrosstermKeyCode, KeyEvent, KeyModifiers};
 use seer_core::{InputEvent, KeyCode, KeyInput, Modifiers, TerminalInput};
+pub(crate) use selection::{Selection, copy_text};
 
 const SCROLLBACK_PAGE_LINES: i32 = 20;
 
@@ -156,6 +158,13 @@ pub(crate) fn mouse(
     state: &mut ClientState,
     last: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<bool> {
+    if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+        return Ok(false);
+    }
+    if selection::mouse(mouse, state)? {
+        *last = None;
+        return Ok(false);
+    }
     let position = Position::new(mouse.column, mouse.row);
     if state.close_prompt.is_some() || state.quit_prompt {
         return click_hint(mouse, stream, state, true);

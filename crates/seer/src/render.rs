@@ -85,6 +85,9 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     state.chrome.people_area = people;
     people_column(frame, state, people);
     terminal_area(frame, state, terminals);
+    if let Some(selection) = &state.selection {
+        selection.draw(frame.buffer_mut());
+    }
     let hints = if state.viewer.is_some() {
         "esc back  tab next terminal  q quit"
     } else if state.searching {
