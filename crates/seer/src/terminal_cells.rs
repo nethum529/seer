@@ -5,7 +5,7 @@ use ratatui::{
     style::{Modifier, Style},
     widgets::Widget,
 };
-use seer_core::{Cell, Color};
+use seer_core::Cell;
 
 pub(crate) struct PaneCells<'a> {
     rows: &'a [Vec<Cell>],
@@ -49,16 +49,7 @@ fn cell_style(cell: &Cell, palette: Palette) -> Style {
     modifiers.set(Modifier::HIDDEN, cell.hidden);
     modifiers.set(Modifier::CROSSED_OUT, cell.strikeout);
     Style::default()
-        .fg(color(cell.fg, palette.text, palette))
-        .bg(color(cell.bg, palette.panel_bg, palette))
+        .fg(palette.terminal_color(cell.fg, palette.text))
+        .bg(palette.terminal_color(cell.bg, palette.panel_bg))
         .add_modifier(modifiers)
-}
-
-fn color(color: Color, default: ratatui::style::Color, palette: Palette) -> ratatui::style::Color {
-    match color {
-        Color::Default => default,
-        Color::Indexed(index) if index < 16 => palette.ansi(index),
-        Color::Indexed(index) => ratatui::style::Color::Indexed(index),
-        Color::Rgb { red, green, blue } => ratatui::style::Color::Rgb(red, green, blue),
-    }
 }

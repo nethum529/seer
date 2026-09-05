@@ -37,7 +37,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     let hints = if state.searching {
         "enter select  esc cancel"
     } else {
-        "j/k people  h/l terminals  enter watch  n new terminal  / search  esc back  q quit"
+        "j/k people  h/l boxes  enter view  n new  / find  esc back  q quit"
     };
     footer(
         frame,
@@ -226,6 +226,7 @@ fn first_run(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
 }
 
 fn box_grid(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, columns: usize) {
+    state.grid_columns = columns;
     let palette = Palette::default();
     let terminals = state.selected_terminals().to_vec();
     if terminals.is_empty() {

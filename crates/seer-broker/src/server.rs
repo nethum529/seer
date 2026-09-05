@@ -143,7 +143,7 @@ impl BrokerState {
     fn refresh_statuses(&self) -> io::Result<()> {
         let mut statuses = HashMap::new();
         for person in self.registry.people()? {
-            if self.attachments.count(&person.user_id) == 0 {
+            if !self.runtimes.is_running(&person.user_id, &person.name) {
                 continue;
             }
             if let Some(status) = self.query_status(&person.user_id, &person.name) {

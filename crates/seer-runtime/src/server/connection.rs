@@ -21,6 +21,12 @@ pub(super) fn handle_connection(
     };
     match first {
         ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
+        ClientMsg::Watch { pane, .. } => {
+            shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane))?
+        }
+        ClientMsg::Terminals { .. } => {
+            shared.add_view_connection(connection_id, stream.try_clone()?, None)?
+        }
         ClientMsg::QueryTargets { .. } => {
             return handle_target_query(&mut stream, shared, connection_id);
         }
@@ -135,6 +141,39 @@ pub(super) fn handle_target_query(
 }
 
 impl SharedSession {
+    fn add_view_connection(
+        &self,
+        id: u64,
+        stream: UnixStream,
+        pane: Option<&str>,
+    ) -> io::Result<()> {
+        let messages = {
+            let session = lock(&self.session)?;
+            if pane.is_some_and(|id| {
+                !session
+                    .tree
+                    .workspaces
+                    .iter()
+                    .flat_map(|w| &w.tabs)
+                    .flat_map(|t| &t.panes)
+                    .any(|p| p.id == id)
+            }) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "terminal not found",
+                ));
+            }
+            session.snapshot()
+        };
+        let mut connection = Connection::new(id, stream)?;
+        connection.read_only = true;
+        if !connection.send_messages(&messages)? {
+            return Err(super::connection_closed());
+        }
+        lock(&self.connections)?.push(connection);
+        Ok(())
+    }
+
     fn write_targets(&self, stream: &mut UnixStream) -> io::Result<()> {
         codec::encode(
             stream,

@@ -194,7 +194,7 @@ fn apply_message(
         }
         ServerMsg::Seat { capsule, .. } => {
             state.invite_pending = false;
-            state.invite = Some(format!("seer join {capsule}"));
+            state.invite = Some(crate::commands::join_line(&capsule));
         }
         ServerMsg::Refused { reason } => {
             state.notice = reason;
@@ -239,6 +239,7 @@ fn handle_event(
             state,
             TerminalInput::new(InputEvent::Paste(text)),
         )?,
+        Event::Mouse(_) if state.quit_prompt => {}
         Event::Mouse(mouse) if state.menu.is_some() => {
             crate::person_menu::mouse(mouse, stream, state)?
         }

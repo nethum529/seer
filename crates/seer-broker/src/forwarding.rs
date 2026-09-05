@@ -1,6 +1,6 @@
 use std::collections::{BTreeSet, HashMap};
 use std::io;
-use std::sync::mpsc::{self, Receiver, SyncSender};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, SyncSender};
 use std::sync::{Arc, Mutex};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
@@ -50,10 +50,11 @@ impl<'a> Coordinator<'a> {
         let (event_sender, events) = mpsc::sync_channel(64);
         let reader = client.clone();
         let client = Arc::new(Mutex::new(Box::new(client) as Box<dyn Stream>));
+        let mut initial = lock_writer(&client)?;
         let attachment = broker.attach_client(&owner.user_id, Arc::clone(&client))?;
         let client_id = attachment.client_id().to_owned();
-        write_client(
-            &client,
+        codec::encode(
+            &mut *initial,
             &ServerMsg::Welcome {
                 user_id: owner.user_id.clone(),
                 name: owner.name.clone(),
@@ -64,9 +65,9 @@ impl<'a> Coordinator<'a> {
         let runtime = match RuntimeConnection::connect(broker, owner, true, &event_sender) {
             Ok(runtime) => runtime,
             Err(error) => {
-                write_client(&client, &broker.grants.message(&owner.user_id)?)?;
-                write_client(
-                    &client,
+                codec::encode(&mut *initial, &broker.grants.message(&owner.user_id)?)?;
+                codec::encode(
+                    &mut *initial,
                     &ServerMsg::Refused {
                         reason: error.to_string(),
                     },
@@ -74,13 +75,20 @@ impl<'a> Coordinator<'a> {
                 return Err(error);
             }
         };
-        write_client(&client, &broker.grants.message(&owner.user_id)?)?;
-        write_client(
-            &client,
-            &ServerMsg::Tree {
-                tree: runtime.tree.clone(),
-            },
-        )?;
+        let setup =
+            codec::encode(&mut *initial, &broker.grants.message(&owner.user_id)?).and_then(|()| {
+                codec::encode(
+                    &mut *initial,
+                    &ServerMsg::Tree {
+                        tree: runtime.tree.clone(),
+                    },
+                )
+            });
+        drop(initial);
+        if let Err(error) = setup {
+            let _ = runtime.close();
+            return Err(error);
+        }
         let client_reader = spawn_client_reader(reader, event_sender.clone());
         Ok(Self {
             client,
@@ -99,11 +107,27 @@ impl<'a> Coordinator<'a> {
     }
 
     fn run(&mut self) -> io::Result<()> {
+        let mut refreshed = std::time::Instant::now();
         loop {
-            let event = self
-                .events
-                .recv()
-                .map_err(|_| io::Error::other("forward event channel closed"))?;
+            if refreshed.elapsed() >= std::time::Duration::from_secs(1) {
+                let users: Vec<_> = self
+                    .lists
+                    .iter()
+                    .filter(|user| !self.runtimes.contains_key(*user))
+                    .cloned()
+                    .collect();
+                for user in users {
+                    let _ = self.runtime(&user);
+                }
+                refreshed = std::time::Instant::now();
+            }
+            let event = match self.events.recv_timeout(std::time::Duration::from_secs(1)) {
+                Ok(event) => event,
+                Err(RecvTimeoutError::Timeout) => continue,
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Err(io::Error::other("forward event channel closed"));
+                }
+            };
             match event {
                 Event::Client(Ok(ClientMsg::Detach)) | Event::Client(Err(_)) => return Ok(()),
                 Event::Client(Ok(message)) => {
@@ -240,12 +264,16 @@ impl<'a> Coordinator<'a> {
             .entry((user.into(), pane.into()))
             .or_default()
             .prefix(&self.owner.name, bytes)?;
-        self.runtime(user)?.send(&ClientMsg::TerminalInput {
-            workspace,
-            tab,
-            pane: pane.into(),
-            input: TerminalInput::new(InputEvent::Text(text)),
-        })
+        RuntimeConnection::send_granted(
+            self.broker,
+            &person,
+            &ClientMsg::TerminalInput {
+                workspace,
+                tab,
+                pane: pane.into(),
+                input: TerminalInput::new(InputEvent::Text(text)),
+            },
+        )
     }
 
     fn detach_client(&self, client_id: &str) -> io::Result<()> {

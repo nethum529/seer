@@ -37,7 +37,16 @@ impl RuntimeConnection {
         };
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-        codec::encode(&mut stream, &ClientMsg::AttachRuntime)?;
+        codec::encode(
+            &mut stream,
+            &if start {
+                ClientMsg::AttachRuntime
+            } else {
+                ClientMsg::Terminals {
+                    user: person.user_id.clone(),
+                }
+            },
+        )?;
         let ServerMsg::Tree { tree } = codec::decode(&mut stream)? else {
             return Err(io::Error::other("expected runtime tree"));
         };
@@ -58,6 +67,30 @@ impl RuntimeConnection {
             reader,
         })
     }
+    pub(super) fn send_granted(
+        broker: &BrokerState,
+        person: &PersonRecord,
+        message: &ClientMsg,
+    ) -> io::Result<()> {
+        let mut stream = broker
+            .runtimes()
+            .connect_existing(&person.user_id, &person.name)?;
+        stream.set_read_timeout(Some(Duration::from_secs(5)))?;
+        stream.set_write_timeout(Some(Duration::from_secs(2)))?;
+        codec::encode(&mut stream, &ClientMsg::AttachRuntime)?;
+        let _: ServerMsg = codec::decode(&mut stream)?;
+        codec::encode(&mut stream, message)?;
+        stream.shutdown(std::net::Shutdown::Write)?;
+        loop {
+            match codec::decode::<_, ServerMsg>(&mut stream) {
+                Ok(ServerMsg::Refused { reason }) => return Err(io::Error::other(reason)),
+                Ok(_) => {}
+                Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => return Ok(()),
+                Err(error) => return Err(error),
+            }
+        }
+    }
+
     pub(super) fn send(&mut self, message: &ClientMsg) -> io::Result<()> {
         codec::encode(&mut self.stream, message)
     }

@@ -174,7 +174,7 @@ pub(crate) fn invite(hours: Option<&str>) -> Result<(), CommandError> {
             println!("Send this to a friend:");
             println!();
             println!("Paste this in Terminal:");
-            println!("curl -fsSL {INSTALL_URL} | sh -s -- {capsule}");
+            println!("{}", join_line(&capsule));
             Ok(())
         }
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
@@ -440,6 +440,10 @@ fn finish_session(
         print_detached(alias);
     }
     Ok(())
+}
+
+pub(crate) fn join_line(capsule: &str) -> String {
+    format!("curl -fsSL {INSTALL_URL} | sh -s -- {capsule}")
 }
 
 fn unexpected_reply() -> CommandError {

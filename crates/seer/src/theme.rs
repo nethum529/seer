@@ -91,6 +91,48 @@ impl Palette {
         }
     }
 
+    pub(crate) fn terminal_color(self, color: seer_core::Color, default: Color) -> Color {
+        let rgb = match color {
+            seer_core::Color::Default => return default,
+            seer_core::Color::Indexed(index) if index < 16 => return self.ansi(index),
+            seer_core::Color::Indexed(index) => indexed_rgb(index),
+            seer_core::Color::Rgb { red, green, blue } => (red, green, blue),
+        };
+        let colors = self.colors();
+        Self::mocha()
+            .colors()
+            .into_iter()
+            .zip(colors)
+            .min_by_key(|(reference, _)| {
+                let Color::Rgb(red, green, blue) = reference else {
+                    return i32::MAX;
+                };
+                (i32::from(*red) - i32::from(rgb.0)).pow(2)
+                    + (i32::from(*green) - i32::from(rgb.1)).pow(2)
+                    + (i32::from(*blue) - i32::from(rgb.2)).pow(2)
+            })
+            .map_or(default, |(_, color)| color)
+    }
+
+    fn colors(self) -> [Color; 14] {
+        [
+            self.accent,
+            self.blue,
+            self.panel_bg,
+            self.surface0,
+            self.surface1,
+            self.overlay0,
+            self.text,
+            self.subtext0,
+            self.mauve,
+            self.green,
+            self.yellow,
+            self.red,
+            self.teal,
+            self.peach,
+        ]
+    }
+
     pub(crate) fn ansi(self, index: u8) -> Color {
         let colors = [
             self.panel_bg,
@@ -112,4 +154,18 @@ impl Palette {
         ];
         colors[usize::from(index % 16)]
     }
+}
+
+fn indexed_rgb(index: u8) -> (u8, u8, u8) {
+    if index >= 232 {
+        let gray = 8 + (index - 232) * 10;
+        return (gray, gray, gray);
+    }
+    let index = index.saturating_sub(16);
+    let component = |value| if value == 0 { 0 } else { 55 + value * 40 };
+    (
+        component(index / 36),
+        component((index / 6) % 6),
+        component(index % 6),
+    )
 }

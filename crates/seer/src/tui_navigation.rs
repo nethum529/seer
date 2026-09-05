@@ -1,5 +1,5 @@
 use crate::{state::ClientState, tui::send};
-use crossterm::event::{KeyCode, KeyEvent, MouseButton, MouseEvent, MouseEventKind};
+use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Position;
 use seer_core::proto::ClientMsg;
 use seer_net::Stream;
@@ -23,6 +23,20 @@ pub(crate) fn key(
     stream: &mut impl Stream,
     state: &mut ClientState,
 ) -> io::Result<bool> {
+    if std::mem::take(&mut state.discard_prefix) {
+        return Ok(false);
+    }
+    if key.modifiers.intersects(
+        KeyModifiers::CONTROL
+            | KeyModifiers::ALT
+            | KeyModifiers::SUPER
+            | KeyModifiers::HYPER
+            | KeyModifiers::META,
+    ) {
+        state.discard_prefix =
+            key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL;
+        return Ok(false);
+    }
     if state.quit_prompt {
         match key.code {
             KeyCode::Enter | KeyCode::Char('q') => return Ok(true),
@@ -101,20 +115,7 @@ fn move_box(state: &mut ClientState, forward: bool) {
         .iter()
         .any(|(index, _)| *index == state.focus)
     {
-        let columns = if state
-            .box_areas
-            .iter()
-            .take(2)
-            .map(|(_, r)| r.y)
-            .collect::<Vec<_>>()
-            .windows(2)
-            .any(|rows| rows[0] == rows[1])
-        {
-            2
-        } else {
-            1
-        };
-        state.grid_scroll = state.focus / columns;
+        state.grid_scroll = state.focus / state.grid_columns;
     }
 }
 
