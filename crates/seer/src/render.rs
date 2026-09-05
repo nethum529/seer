@@ -117,9 +117,6 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     crate::person_menu::draw(frame, state);
     crate::person_menu::draw_context(frame, state);
     state.chrome.dialog_areas.clear();
-    if state.close_prompt.is_some() {
-        dialog(frame, state, "Close terminal?", "y yes  n no  esc back");
-    }
     if state.quit_prompt {
         dialog(frame, state, "Quit seer?", "enter quit  esc stay");
     }

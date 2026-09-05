@@ -31,10 +31,6 @@ pub(crate) fn key(
             key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL;
         return Ok(false);
     }
-    if state.close_prompt.is_some() {
-        close_key(key, stream, state)?;
-        return Ok(false);
-    }
     if state.quit_prompt {
         match key.code {
             KeyCode::Enter | KeyCode::Char('q') => return Ok(true),
@@ -49,7 +45,7 @@ pub(crate) fn key(
     }
     match key.code {
         KeyCode::Char(number @ '1'..='9') => state.select_tab(number as usize - '1' as usize),
-        KeyCode::Char('x') => state.request_close(),
+        KeyCode::Char('x') => state.request_close(stream)?,
         KeyCode::Char('q') => return Ok(true),
         KeyCode::Esc => state.quit_prompt = true,
         KeyCode::Char('j') | KeyCode::Down => move_person(state, true),
@@ -63,32 +59,6 @@ pub(crate) fn key(
         _ => {}
     }
     Ok(false)
-}
-
-pub(crate) fn close_key(
-    key: KeyEvent,
-    stream: &mut impl Stream,
-    state: &mut ClientState,
-) -> io::Result<()> {
-    match key.code {
-        KeyCode::Esc | KeyCode::Char('n') => state.close_prompt = None,
-        KeyCode::Enter | KeyCode::Char('y') => {
-            if let Some(pane) = state.close_prompt.take()
-                && let Some((workspace, tab)) = state.location(&pane)
-            {
-                send(
-                    stream,
-                    &ClientMsg::ClosePane {
-                        workspace,
-                        tab,
-                        pane,
-                    },
-                )?;
-            }
-        }
-        _ => {}
-    }
-    Ok(())
 }
 
 fn search(key: KeyEvent, state: &mut ClientState) {

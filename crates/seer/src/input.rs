@@ -112,10 +112,10 @@ pub(crate) fn command(
     state: &mut ClientState,
 ) -> io::Result<bool> {
     if state.chrome.context.is_some() {
-        crate::person_menu::context_key(key, state);
+        crate::person_menu::context_key(key, stream, state)?;
         return Ok(false);
     }
-    if state.close_prompt.is_some() || state.quit_prompt {
+    if state.quit_prompt {
         return navigation::key(key, stream, state);
     }
     if state.menu.is_some() {
@@ -166,11 +166,11 @@ pub(crate) fn mouse(
         return Ok(false);
     }
     let position = Position::new(mouse.column, mouse.row);
-    if state.close_prompt.is_some() || state.quit_prompt {
+    if state.quit_prompt {
         return click_hint(mouse, stream, state, true);
     }
     if state.chrome.context.is_some() {
-        crate::person_menu::context_mouse(mouse, state);
+        crate::person_menu::context_mouse(mouse, stream, state)?;
         return Ok(false);
     }
     if state.menu.is_some() {
@@ -277,7 +277,7 @@ fn click_target(
         if right {
             crate::person_menu::open_context(state, position);
         } else if mouse.column == area.right().saturating_sub(2) {
-            state.request_close();
+            state.request_close(stream)?;
         }
         return Ok(());
     }
