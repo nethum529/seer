@@ -1,17 +1,18 @@
 #![cfg(target_os = "linux")]
 
 use std::fs;
-use std::io::{self, Read};
 use std::os::unix::fs::MetadataExt;
-use std::os::unix::net::{UnixListener, UnixStream};
-use std::path::Path;
-use std::process::{Child, Output, Stdio};
+use std::os::unix::net::UnixListener;
+use std::process::Stdio;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::SplitDirection;
+use seer_core::proto::{ClientMsg, codec};
 
+mod runtime_socket_helpers;
 mod support;
+use runtime_socket_helpers::*;
 use support::*;
 
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
@@ -134,22 +135,175 @@ fn broadcasts_to_concurrent_connections() {
     let created = read_until_tree(&mut owner);
     assert_eq!(created.workspaces[0].tabs.len(), 1);
     assert_eq!(created.workspaces[0].tabs[0].panes.len(), 1);
-    let pane = created.workspaces[0].tabs[0].panes[0].id.clone();
+    let first_tab = created.workspaces[0].tabs[0].id.clone();
+    let first_pane = created.workspaces[0].tabs[0].panes[0].id.clone();
     assert!(wait_for_cells(&mut owner));
 
-    let mut viewer = connect_with_timeout(&socket_path);
+    let mut viewer = connect_viewer(&socket_path);
     let viewer_tree = tree(read_message(&mut viewer));
     assert_eq!(viewer_tree, created);
     assert!(wait_for_cells(&mut viewer));
 
-    send_input(&mut owner, &pane, "printf 'owner-one\\n'\n");
+    send_input(&mut owner, &first_pane, "printf 'owner-one\\n'\n");
     let _ = wait_for_cells_containing(&mut owner, "owner-one");
     let _ = wait_for_cells_containing(&mut viewer, "owner-one");
 
+    send(
+        &mut viewer,
+        &ClientMsg::Watch {
+            user: "alice".into(),
+            pane: first_pane.clone(),
+            cols: 80,
+            rows: 24,
+        },
+    );
+    send_input(&mut viewer, &first_pane, "printf 'viewer-input\\n'\n");
+
+    send(
+        &mut viewer,
+        &ClientMsg::Watch {
+            user: "alice".into(),
+            pane: "w1:missing".into(),
+            cols: 80,
+            rows: 24,
+        },
+    );
+    wait_for_refused(&mut viewer);
+
+    send_input(&mut owner, &first_pane, "printf 'owner-two\\n'\n");
+    let owner_cells = wait_for_cells_containing(&mut owner, "owner-two");
+    let viewer_cells = wait_for_cells_containing(&mut viewer, "owner-two");
+    assert!(!owner_cells.contains("viewer-input"));
+    assert!(!viewer_cells.contains("viewer-input"));
+
+    send(
+        &mut owner,
+        &ClientMsg::CreateTab {
+            workspace: "w1".into(),
+        },
+    );
+    let owner_with_second = read_until_tree(&mut owner);
+    assert_eq!(owner_with_second.workspaces[0].tabs.len(), 2);
+    let second_tab = owner_with_second.workspaces[0].tabs[1].id.clone();
+    let second_pane = owner_with_second.workspaces[0].tabs[1].panes[0].id.clone();
+
+    let viewer_selected = read_until_tree(&mut viewer);
+    assert_eq!(
+        viewer_selected.workspaces[0].name,
+        created.workspaces[0].name
+    );
+    assert_eq!(viewer_selected.workspaces.len(), 1);
+    assert_eq!(viewer_selected.workspaces[0].tabs.len(), 1);
+    assert_eq!(viewer_selected.workspaces[0].tabs[0].id, first_tab);
+    assert!(
+        !viewer_selected.workspaces[0].tabs[0]
+            .panes
+            .iter()
+            .any(|pane| { pane.id == second_pane })
+    );
+
+    send_input_at(
+        &mut owner,
+        "w1",
+        &second_tab,
+        &second_pane,
+        "printf 'second-tab-output\\n'\n",
+    );
+    wait_for_pane_cells_containing(&mut owner, &second_pane, "second-tab-output");
+    assert_no_message(&mut viewer, Some(&second_pane));
+
+    for message in [
+        ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: second_tab.clone(),
+            cols: 200,
+            rows: 50,
+        },
+        ClientMsg::FocusPane {
+            workspace: "w1".into(),
+            tab: second_tab.clone(),
+            pane: second_pane.clone(),
+        },
+        ClientMsg::SplitPane {
+            workspace: "w1".into(),
+            tab: second_tab.clone(),
+            direction: SplitDirection::Right,
+        },
+        ClientMsg::ClosePane {
+            workspace: "w1".into(),
+            tab: second_tab.clone(),
+            pane: second_pane.clone(),
+        },
+        ClientMsg::CreateTab {
+            workspace: "w1".into(),
+        },
+    ] {
+        send(&mut viewer, &message);
+    }
+    send(
+        &mut owner,
+        &ClientMsg::FocusPane {
+            workspace: "w1".into(),
+            tab: first_tab.clone(),
+            pane: first_pane.clone(),
+        },
+    );
+    assert_eq!(read_until_tree(&mut owner), owner_with_second);
+    assert_eq!(read_until_tree(&mut viewer), viewer_selected);
+
+    send(
+        &mut owner,
+        &ClientMsg::Resize {
+            workspace: "w1".into(),
+            tab: first_tab.clone(),
+            cols: 120,
+            rows: 40,
+        },
+    );
+    let owner_resized = read_until_tree(&mut owner);
+    assert_eq!(
+        owner_resized.workspaces[0].tabs[0].panes[0].size,
+        seer_core::PaneSize {
+            cols: 120,
+            rows: 40
+        }
+    );
+    assert_eq!(
+        owner_resized.workspaces[0].tabs[1].panes[0].size,
+        owner_with_second.workspaces[0].tabs[1].panes[0].size
+    );
+    let viewer_resized = read_until_tree(&mut viewer);
+    assert_eq!(
+        viewer_resized.workspaces[0].tabs[0].panes[0].size,
+        seer_core::PaneSize { cols: 80, rows: 24 }
+    );
+
+    send(
+        &mut owner,
+        &ClientMsg::ClosePane {
+            workspace: "w1".into(),
+            tab: first_tab,
+            pane: first_pane,
+        },
+    );
+    let remaining = read_until_tree_with_tab_count(&mut owner, 1);
+    assert_eq!(remaining.workspaces[0].tabs.len(), 1);
+    assert_eq!(remaining.workspaces[0].tabs[0].id, second_tab);
+    wait_for_bye(&mut viewer);
+    assert_no_message(&mut viewer, None);
+
+    send_input_at(
+        &mut owner,
+        "w1",
+        &second_tab,
+        &second_pane,
+        "printf 'owner-after-close\\n'\n",
+    );
+    wait_for_pane_cells_containing(&mut owner, &second_pane, "owner-after-close");
+    assert_no_message(&mut viewer, None);
+
     send(&mut viewer, &ClientMsg::Detach);
     wait_for_close(&mut viewer);
-    send_input(&mut owner, &pane, "printf 'owner-three\\n'\n");
-    let _ = wait_for_cells_containing(&mut owner, "owner-three");
 
     drop(owner);
     let _ = runtime.stop();
@@ -204,87 +358,5 @@ fn rejects_wrong_argument_counts() {
             .expect("runtime must start");
         let output = wait_for_output(child);
         assert_usage_error(&output);
-    }
-}
-
-fn wait_for_socket_replacement(path: &Path, stale_inode: u64) {
-    let deadline = Instant::now() + CONNECT_TIMEOUT;
-    loop {
-        match fs::metadata(path) {
-            Ok(metadata) if metadata.ino() != stale_inode => return,
-            Ok(_) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => panic!("runtime socket metadata must load: {error}"),
-        }
-        assert!(
-            Instant::now() < deadline,
-            "runtime did not replace stale socket"
-        );
-        thread::sleep(RETRY_INTERVAL);
-    }
-}
-
-fn wait_for_cells_containing(stream: &mut UnixStream, expected: &str) -> String {
-    let start = Instant::now();
-    loop {
-        assert!(
-            start.elapsed() < MESSAGE_TIMEOUT,
-            "Cells did not contain {expected}"
-        );
-        if let ServerMsg::Cells { frame, .. } = read_message(stream) {
-            let text = frame
-                .rows
-                .iter()
-                .flatten()
-                .map(|cell| cell.character)
-                .collect::<String>();
-            if text.contains(expected) {
-                return text;
-            }
-        }
-    }
-}
-
-fn wait_for_close(stream: &mut UnixStream) {
-    let start = Instant::now();
-    let mut bytes = [0; 1024];
-    loop {
-        assert!(
-            start.elapsed() < MESSAGE_TIMEOUT,
-            "connection did not close"
-        );
-        if stream.read(&mut bytes).expect("connection close must read") == 0 {
-            return;
-        }
-    }
-}
-
-fn assert_usage_error(output: &Output) {
-    assert!(!output.status.success());
-    assert!(output.stdout.is_empty());
-    assert!(
-        String::from_utf8_lossy(&output.stderr)
-            .contains("usage: seer-runtime <socket-path> <user> <shell> <generation>")
-    );
-}
-
-fn wait_for_output(mut child: Child) -> Output {
-    let start = Instant::now();
-    loop {
-        if child
-            .try_wait()
-            .expect("runtime status must be available")
-            .is_some()
-        {
-            return child
-                .wait_with_output()
-                .expect("runtime output must be available");
-        }
-        if start.elapsed() >= PROCESS_TIMEOUT {
-            let _ = child.kill();
-            wait_until_exit(&mut child, "runtime did not stop after timeout");
-            panic!("runtime did not exit within 2 seconds");
-        }
-        thread::sleep(RETRY_INTERVAL);
     }
 }
