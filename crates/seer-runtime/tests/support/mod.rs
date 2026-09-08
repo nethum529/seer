@@ -11,10 +11,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, TerminalInput};
 
-pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(10);
+pub const CONNECT_TIMEOUT: Duration = Duration::from_secs(30);
 pub const RETRY_INTERVAL: Duration = Duration::from_millis(10);
 pub const PROCESS_TIMEOUT: Duration = Duration::from_secs(2);
-pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(10);
+// Full workspace runs can starve runtime startup and PTY polling.
+pub const MESSAGE_TIMEOUT: Duration = Duration::from_secs(30);
 
 static RUNTIME_BINARY: OnceLock<PathBuf> = OnceLock::new();
 static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
