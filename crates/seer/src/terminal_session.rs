@@ -3,11 +3,12 @@ use std::io::{self, Stdout};
 use crossterm::cursor::SetCursorStyle;
 use crossterm::event::{
     DisableBracketedPaste, DisableFocusChange, DisableMouseCapture, EnableBracketedPaste,
-    EnableFocusChange, EnableMouseCapture,
+    EnableFocusChange, EnableMouseCapture, KeyboardEnhancementFlags, PopKeyboardEnhancementFlags,
+    PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
 use crossterm::terminal::{
-    EnterAlternateScreen, LeaveAlternateScreen, disable_raw_mode, enable_raw_mode,
+    EnterAlternateScreen, LeaveAlternateScreen, SetTitle, disable_raw_mode, enable_raw_mode,
 };
 use ratatui::Terminal;
 use ratatui::backend::CrosstermBackend;
@@ -28,7 +29,14 @@ impl TerminalSession {
             EnterAlternateScreen,
             EnableMouseCapture,
             EnableBracketedPaste,
-            EnableFocusChange
+            EnableFocusChange,
+            PushKeyboardEnhancementFlags(
+                KeyboardEnhancementFlags::DISAMBIGUATE_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_ALL_KEYS_AS_ESCAPE_CODES
+                    | KeyboardEnhancementFlags::REPORT_ALTERNATE_KEYS
+                    | KeyboardEnhancementFlags::REPORT_EVENT_TYPES,
+            ),
+            SetTitle("Seer")
         ) {
             let _ = disable_raw_mode();
             return Err(error);
@@ -56,6 +64,7 @@ impl Drop for TerminalSession {
 fn restore_terminal() {
     let _ = execute!(
         io::stdout(),
+        PopKeyboardEnhancementFlags,
         DisableFocusChange,
         DisableBracketedPaste,
         DisableMouseCapture,

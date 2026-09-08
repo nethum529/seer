@@ -20,6 +20,7 @@ use std::time::{Duration, Instant};
 pub(crate) enum SessionExit {
     Client,
     Detached,
+    ServerStopped,
 }
 
 pub(crate) fn run(mut stream: Socket, tree: Tree, own_user: String) -> io::Result<SessionExit> {
@@ -97,16 +98,16 @@ fn run_loop(
         let was_viewing = state.viewer.as_ref().map(crate::viewer::Viewer::target);
         for _ in 0..64 {
             match receiver.try_recv() {
-                Ok(message) => {
-                    if let Some(exit) = apply_message(message?, stream, state, start_person)? {
+                Ok(Ok(message)) => {
+                    if let Some(exit) = apply_message(message, stream, state, start_person)? {
                         return Ok(exit);
                     }
                     dirty = true;
                 }
-                Err(TryRecvError::Empty) => break,
-                Err(TryRecvError::Disconnected) => {
-                    return Err(io::Error::other("server connection closed"));
+                Ok(Err(_)) | Err(TryRecvError::Disconnected) => {
+                    return Ok(SessionExit::ServerStopped);
                 }
+                Err(TryRecvError::Empty) => break,
             }
         }
         if was_viewing != state.viewer.as_ref().map(crate::viewer::Viewer::target) {
@@ -203,10 +204,10 @@ fn apply_message(
             state.invite_pending = false;
         }
         ServerMsg::Bye { reason } => {
-            return Ok(Some(if reason == "detached" {
-                SessionExit::Detached
-            } else {
-                SessionExit::Client
+            return Ok(Some(match reason.as_str() {
+                "detached" => SessionExit::Detached,
+                "server stopped" => SessionExit::ServerStopped,
+                _ => SessionExit::Client,
             }));
         }
         _ => {}
@@ -234,6 +235,16 @@ fn handle_event(
             stream,
             state,
             TerminalInput::new(InputEvent::Paste(text)),
+        )?,
+        Event::FocusGained => crate::viewer::input_message(
+            stream,
+            state,
+            TerminalInput::new(InputEvent::Focus(true)),
+        )?,
+        Event::FocusLost => crate::viewer::input_message(
+            stream,
+            state,
+            TerminalInput::new(InputEvent::Focus(false)),
         )?,
         Event::Mouse(mouse) => {
             if crate::input::mouse(mouse, stream, state, last_click)? {
@@ -442,6 +453,33 @@ mod tests {
                 }
             );
         }
+    }
+    #[test]
+    fn disconnect_returns_server_stopped() {
+        let (sender, receiver) = mpsc::sync_channel(1);
+        sender
+            .send(Err(io::Error::new(
+                io::ErrorKind::UnexpectedEof,
+                "server closed",
+            )))
+            .expect("reader channel must be open");
+        let mut terminal =
+            Terminal::new(CrosstermBackend::new(io::stdout())).expect("test terminal must open");
+        let (mut stream, _peer) = UnixStream::pair().expect("streams must open");
+        let mut state = ClientState::new(Tree::new(), "alice".into());
+        let mut start_person = None;
+
+        assert_eq!(
+            run_loop(
+                &mut terminal,
+                &mut stream,
+                &receiver,
+                &mut state,
+                &mut start_person,
+            )
+            .expect("disconnect must end the session"),
+            SessionExit::ServerStopped
+        );
     }
 
     fn assert_viewer_watch(peer: &mut UnixStream, state: &ClientState) {

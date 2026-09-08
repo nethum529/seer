@@ -77,6 +77,9 @@ fn search(key: KeyEvent, state: &mut ClientState) {
     if let Some(index) = state.matches().first() {
         state.select_person(*index);
     }
+    if key.code == KeyCode::Enter {
+        state.search.clear();
+    }
     state.people_scroll = 0;
 }
 

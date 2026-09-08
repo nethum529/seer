@@ -1,3 +1,4 @@
+use std::ffi::c_int;
 use std::fs::{self, File, OpenOptions, Permissions};
 use std::io;
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -44,6 +45,8 @@ pub(crate) struct Lifecycle {
 
 impl Lifecycle {
     pub(crate) fn new(state_dir: impl AsRef<Path>) -> io::Result<Self> {
+        install_sigterm_exit();
+
         fs::create_dir_all(state_dir.as_ref())?;
         fs::set_permissions(state_dir.as_ref(), Permissions::from_mode(DIRECTORY_MODE))?;
         let state_dir = fs::canonicalize(state_dir)?;
@@ -247,6 +250,20 @@ fn bound_reason(reason: &str) -> String {
     reason[..end].to_owned()
 }
 
+fn install_sigterm_exit() {
+    // SAFETY: `signal` installs a valid handler before broker connections start.
+    unsafe {
+        signal(15, exit_on_sigterm as *const () as usize);
+    }
+}
+
+extern "C" fn exit_on_sigterm(_signal: c_int) {
+    // SAFETY: `_exit` is async-signal-safe and ends the broker process.
+    unsafe {
+        _exit(0);
+    }
+}
+
 fn invalid_record(reason: &str) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, reason)
 }
@@ -254,4 +271,6 @@ fn invalid_record(reason: &str) -> io::Error {
 // SAFETY: these declarations match the Linux and macOS libc ABI.
 unsafe extern "C" {
     fn flock(fd: i32, operation: i32) -> i32;
+    fn signal(signal: c_int, handler: usize) -> usize;
+    fn _exit(status: c_int) -> !;
 }
