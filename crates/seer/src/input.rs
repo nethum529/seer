@@ -122,13 +122,20 @@ pub(crate) fn command(
         crate::person_menu::key(key, stream, state)?;
         return Ok(false);
     }
-    if key.code == CrosstermKeyCode::Char('p')
-        && key.modifiers.is_empty()
-        && state.viewer.is_none()
-        && !state.searching
-    {
-        toggle_people(state);
-        return Ok(false);
+    if state.chrome.panel.is_some() {
+        return crate::panels::key(key, stream, state);
+    }
+    if state.viewer.is_none() && key.modifiers.is_empty() && !state.searching {
+        let panel = match key.code {
+            CrosstermKeyCode::Char('p' | '/') => Some(crate::panels::Panel::People),
+            CrosstermKeyCode::Char('s') => Some(crate::panels::Panel::Session),
+            _ => None,
+        };
+        if let Some(panel) = panel {
+            crate::panels::open(state, panel);
+            state.searching = key.code == CrosstermKeyCode::Char('/');
+            return Ok(false);
+        }
     }
     if key.code == CrosstermKeyCode::Char('m')
         && key.modifiers.is_empty()
@@ -139,7 +146,7 @@ pub(crate) fn command(
             .people_areas
             .iter()
             .find(|(i, _)| *i == state.selected)
-            .map_or(state.chrome.people_area, |(_, row)| *row);
+            .map_or(state.chrome.panel_area, |(_, row)| *row);
         crate::person_menu::open(state, state.selected, row);
     } else if state.viewer.is_some() {
         crate::viewer::key(key, stream, state)?;
@@ -158,13 +165,8 @@ pub(crate) fn mouse(
     if mouse.modifiers.contains(KeyModifiers::SHIFT) {
         return Ok(false);
     }
-    if selection::mouse(mouse, state)? {
-        *last = None;
-        return Ok(false);
-    }
-    let position = Position::new(mouse.column, mouse.row);
     if state.quit_prompt {
-        return click_hint(mouse, stream, state, true);
+        return click_hint(mouse, stream, state);
     }
     if state.chrome.context.is_some() {
         crate::person_menu::context_mouse(mouse, stream, state)?;
@@ -172,6 +174,15 @@ pub(crate) fn mouse(
     }
     if state.menu.is_some() {
         crate::person_menu::mouse(mouse, stream, state)?;
+        return Ok(false);
+    }
+    match crate::panels::mouse(mouse, stream, state, last)? {
+        crate::panels::Handled::Consumed => return Ok(false),
+        crate::panels::Handled::Quit => return Ok(true),
+        crate::panels::Handled::Passed => {}
+    }
+    if selection::mouse(mouse, state)? {
+        *last = None;
         return Ok(false);
     }
     if matches!(
@@ -187,15 +198,7 @@ pub(crate) fn mouse(
     ) {
         return Ok(false);
     }
-    if state
-        .chrome
-        .footer_areas
-        .iter()
-        .any(|(_, area)| area.contains(position))
-    {
-        return click_hint(mouse, stream, state, false);
-    }
-    click_target(mouse, stream, state, last)?;
+    click_target(mouse, state, last);
     Ok(false)
 }
 
@@ -203,16 +206,11 @@ fn click_hint(
     mouse: MouseEvent,
     stream: &mut impl Stream,
     state: &mut ClientState,
-    dialog: bool,
 ) -> io::Result<bool> {
     if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
         return Ok(false);
     }
-    let areas = if dialog {
-        &state.chrome.dialog_areas
-    } else {
-        &state.chrome.footer_areas
-    };
+    let areas = &state.chrome.dialog_areas;
     let key = areas
         .iter()
         .find(|(_, area)| area.contains(Position::new(mouse.column, mouse.row)))
@@ -232,61 +230,13 @@ fn click_hint(
     command(KeyEvent::new(code, modifiers), stream, state)
 }
 
-fn toggle_people(state: &mut ClientState) {
-    state.selection = None;
-    state.chrome.show_people = Some(!state.chrome.people_open);
-}
-
 fn click_target(
     mouse: MouseEvent,
-    stream: &mut impl Stream,
     state: &mut ClientState,
     last: &mut Option<(String, usize, Instant)>,
-) -> io::Result<()> {
+) {
     let position = Position::new(mouse.column, mouse.row);
     let right = mouse.kind == MouseEventKind::Down(MouseButton::Right);
-    if !right && state.chrome.people_toggle_area.contains(position) {
-        toggle_people(state);
-        return Ok(());
-    }
-    if let Some((index, row)) = state
-        .people_areas
-        .iter()
-        .find(|(_, area)| area.contains(position))
-        .copied()
-    {
-        if right {
-            crate::person_menu::open(state, index, row);
-        } else {
-            state.select_person(index);
-            if double_click(last, format!("person:{}", state.user()), index) {
-                state.open_focused();
-            }
-        }
-        return Ok(());
-    }
-    if state.plus_area.contains(position) && !right {
-        navigation::key(
-            KeyEvent::new(CrosstermKeyCode::Char('n'), KeyModifiers::NONE),
-            stream,
-            state,
-        )?;
-        return Ok(());
-    }
-    if let Some((index, area)) = state
-        .tab_areas
-        .iter()
-        .find(|(_, area)| area.contains(position))
-        .copied()
-    {
-        state.select_tab(index);
-        if right {
-            crate::person_menu::open_context(state, position);
-        } else if state.user() == state.own_user && mouse.column == area.right().saturating_sub(2) {
-            state.request_close(stream)?;
-        }
-        return Ok(());
-    }
     if let Some(index) = state
         .box_areas
         .iter()
@@ -300,10 +250,13 @@ fn click_target(
             state.open_focused();
         }
     }
-    Ok(())
 }
 
-fn double_click(last: &mut Option<(String, usize, Instant)>, target: String, index: usize) -> bool {
+pub(crate) fn double_click(
+    last: &mut Option<(String, usize, Instant)>,
+    target: String,
+    index: usize,
+) -> bool {
     if last.as_ref().is_some_and(|(old, i, time)| {
         *old == target && *i == index && time.elapsed() < Duration::from_millis(400)
     }) {
@@ -318,13 +271,7 @@ fn double_click(last: &mut Option<(String, usize, Instant)>, target: String, ind
 fn scroll(mouse: MouseEvent, state: &mut ClientState) {
     let position = Position::new(mouse.column, mouse.row);
     let up = mouse.kind == MouseEventKind::ScrollUp;
-    if state.chrome.people_area.contains(position) {
-        state.people_scroll = if up {
-            state.people_scroll.saturating_sub(1)
-        } else {
-            state.people_scroll.saturating_add(1)
-        };
-    } else if let Some(viewer) = &mut state.viewer {
+    if let Some(viewer) = &mut state.viewer {
         if viewer.area.contains(position) {
             viewer.scroll(up);
         }
@@ -338,123 +285,4 @@ fn scroll(mouse: MouseEvent, state: &mut ClientState) {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
-    use seer_core::Tree;
-    use std::os::unix::net::UnixStream;
-
-    fn draw(terminal: &mut Terminal<TestBackend>, state: &mut ClientState) -> String {
-        terminal
-            .draw(|frame| crate::render::draw(frame, state))
-            .expect("screen must draw");
-        let buffer = terminal.backend().buffer();
-        buffer.content.iter().map(|cell| cell.symbol()).collect()
-    }
-
-    fn click(state: &mut ClientState, stream: &mut UnixStream, area: Rect) {
-        let event = MouseEvent {
-            kind: MouseEventKind::Down(MouseButton::Left),
-            column: area.x + area.width / 2,
-            row: area.y,
-            modifiers: KeyModifiers::NONE,
-        };
-        mouse(event, stream, state, &mut None).expect("click must work");
-    }
-
-    #[test]
-    fn people_toggle_works_on_every_width_by_key_and_click() {
-        let mut state = ClientState::new(Tree::new(), "alice".into());
-        let (mut stream, _peer) = UnixStream::pair().expect("streams must open");
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
-        let key = KeyEvent::new(CrosstermKeyCode::Char('p'), KeyModifiers::NONE);
-        assert!(draw(&mut terminal, &mut state).contains("people"));
-        command(key, &mut stream, &mut state).expect("wide key must work");
-        assert!(!draw(&mut terminal, &mut state).contains("people /"));
-        assert!(!state.chrome.people_open);
-        let reopen = state.chrome.people_toggle_area;
-        assert!(reopen.width >= 2, "hidden sidebar must keep a click target");
-        click(&mut state, &mut stream, reopen);
-        assert!(draw(&mut terminal, &mut state).contains("people"));
-        assert!(state.chrome.people_open);
-
-        terminal.backend_mut().resize(45, 30);
-        assert!(
-            draw(&mut terminal, &mut state).contains("people"),
-            "the preference must survive a resize"
-        );
-        let toggle = state.chrome.people_toggle_area;
-        click(&mut state, &mut stream, toggle);
-        draw(&mut terminal, &mut state);
-        assert!(!state.chrome.people_open);
-        command(key, &mut stream, &mut state).expect("narrow key must work");
-        draw(&mut terminal, &mut state);
-        assert!(state.chrome.people_open);
-    }
-
-    #[test]
-    fn the_viewer_keeps_p_for_the_terminal_but_takes_the_click() {
-        use seer_core::proto::{ClientMsg, codec};
-        let mut tree = Tree::new();
-        let workspace = tree.create_workspace("main").expect("workspace must open");
-        let pane = tree
-            .create_tab(
-                &workspace.id,
-                "one",
-                seer_core::PaneSize { cols: 80, rows: 24 },
-            )
-            .expect("tab must open")
-            .panes[0]
-            .id
-            .clone();
-        let mut state = ClientState::new(tree, "alice".into());
-        state.terminals.insert(
-            "alice".into(),
-            vec![seer_core::proto::TerminalInfo {
-                last_typist: None,
-                pane: pane.clone(),
-                name: "shell".into(),
-                state: "idle".into(),
-                cols: 80,
-                rows: 24,
-            }],
-        );
-        let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
-        peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
-            .expect("timeout must apply");
-        let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
-        state.open_focused();
-        draw(&mut terminal, &mut state);
-        let toggle = state.chrome.people_toggle_area;
-        command(
-            KeyEvent::new(CrosstermKeyCode::Char('p'), KeyModifiers::NONE),
-            &mut stream,
-            &mut state,
-        )
-        .expect("key must work");
-        let sent = codec::decode::<_, ClientMsg>(&mut peer).expect("input must reach the terminal");
-        let ClientMsg::TerminalInput {
-            pane: target,
-            input,
-            ..
-        } = sent
-        else {
-            panic!("p must send terminal input, not chrome, got {sent:?}");
-        };
-        assert_eq!(target, pane);
-        assert_eq!(
-            input,
-            key_to_input(KeyEvent::new(
-                CrosstermKeyCode::Char('p'),
-                KeyModifiers::NONE
-            ))
-            .expect("p must map to input")
-        );
-        draw(&mut terminal, &mut state);
-        assert!(state.chrome.people_open, "p must not move the sidebar");
-        click(&mut state, &mut stream, toggle);
-        draw(&mut terminal, &mut state);
-        assert!(!state.chrome.people_open);
-        assert!(state.viewer.is_some(), "the viewer must stay open");
-    }
-}
+mod tests;

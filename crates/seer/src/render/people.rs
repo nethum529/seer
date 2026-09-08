@@ -23,7 +23,7 @@ pub(super) fn column(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect)
     let width = area.width - 1;
     let heading_area = Rect::new(area.x, area.y, width, 1);
     heading(frame, state, heading_area);
-    state.chrome.people_toggle_area = heading_area;
+    state.chrome.close_area = heading_area;
     let full = !compact(area);
     let status = if full {
         status_lines(state)
@@ -74,7 +74,7 @@ fn separator(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
     }
 }
 
-fn status_lines(state: &ClientState) -> Vec<Line<'static>> {
+pub(super) fn status_lines(state: &ClientState) -> Vec<Line<'static>> {
     let palette = Palette::default();
     let dim = palette.style().fg(palette.subtext0);
     let user = state

@@ -1,6 +1,7 @@
 # People and terminals: the seer TUI after the pivot
 
-Status: decided by the owner on 2026-09-04. Wave one shipped as 0.4.1
+Status: terminal-first option 3 approved on 2026-09-08. The earlier
+people-and-terminals design was decided on 2026-09-04. Wave one shipped as 0.4.1
 the same day. The owner then used it and gave 15 nitpicks. Sections 2,
 4, 6, 7 and 8 carry those decisions. The broker and runtime process
 model does not change.
@@ -32,136 +33,61 @@ and seer peek NAME (peek opens with NAME selected).
 
 ### 2.1 Main screen
 
-Layout, left to right, top to bottom:
+The owner approved terminal-first option 3 on 2026-09-08.
 
-- No top bar. The people column and the terminal area start on the
-  first row.
-- People column, 20 columns, no frame. Row 0 is the heading "people"
-  in overlay0 bold, with a "<" at the right edge that hides the
-  column, and the count of people online in overlay0 before it when
-  it fits. Row 1 is blank. The list starts on row 2, one row per
-  person, name only. The owner's own row is first and reads "you".
-  The selected row has a surface0 background across the column width.
-  One vertical rule separates the column from the terminal area. The
-  rule is accent when focus is on the people list, overlay0
-  otherwise.
-- Person status, in the people column, one blank row after the last
-  visible name: "allowed" or "read only" for another person, "away
-  5m" when that person is offline, "typing NAME" when a guest types
-  into the focused terminal. Only the lines that apply are drawn.
-  There are no empty status rows.
-- Owner identity, the bottom two rows of the people column, in
-  overlay0: the owner name, then the server address when it fits.
-- Terminal area, the rest of the width, no frame. No context row
-  above it while the people column is visible and tall enough to
-  carry the status and identity rows. On a short screen the compact
-  fallback row comes back, even with the column visible.
-- Tab row, the first row of the terminal area. One tab per terminal of the
-  selected person, in tree order: the number and the terminal name,
-  cut at 16 characters, with a star after the name when the terminal
-  is busy. The selected tab has a surface0 background and accent text.
-  Tabs of the owner's own terminals end with an x that closes the
-  terminal. The row ends with a + tab. When the tabs do not fit, the
-  row scrolls so the selected tab and the + tab stay visible.
-- Terminal content starts on the row after the tab row and uses the
-  full width and height of the area. The tab row and the terminal
-  content touch the vertical rule. There is no gutter. Tab labels
-  keep their own one space of padding. One terminal draws with no frame.
-  Two or more terminals draw as tiles in a grid, two columns when the
-  area is 80 columns or wider, one column below that. A tile has a
-  thin border and the title is the number and the terminal name. The
-  focused tile border is accent. Each tile shows the last rows with
-  content of that terminal, read only, updating live.
-- Footer, one row: key hints on the right. A notice shows on the left
-  and clears after 3 seconds. Hints stay visible while a notice shows.
+- The terminal uses the full window. No persistent sidebar, tab row,
+  context row, or footer takes space from it.
+- One terminal has no frame. Multiple terminals retain the live grid,
+  two columns at widths of 80 or more, one column below that. Grid
+  focus, scrolling, and the more cue remain available.
+- A small handle at the middle of the left edge opens the people
+  panel. The p key opens it in overview. The panel draws over the
+  terminal and does not change the terminal size. Its heading closes
+  it. Escape or a click outside also closes it.
+- The people panel shows names, presence, input permission, typing
+  status, and owner identity. The / key searches. The m key or a right
+  click opens the person menu. Enter opens the selected terminal.
+- A small chip at the top right shows seer and Your terminal, Read
+  only, or Can type. The input grant determines the remote access
+  text. On narrow screens, the access text takes priority over seer.
+- Click the chip or press s in overview for the session panel. It
+  shows the selected person, access, host, terminal list, and actions.
+  Use j/k or arrows to select, Enter or a click to act. The list
+  scrolls with selection or the mouse wheel. Short screens reduce
+  the header to keep actions reachable.
+- The session panel supports 1-9 terminal selection, n new terminal,
+  x close terminal, c copy invite when available, Ctrl+B back from
+  the viewer, and q quit. Escape or the x at its top closes it.
+  New, close, and copy actions apply to the owner's own terminals.
+- People and session panels are mutually exclusive. Opening or
+  closing a panel clears text selection. Panels consume key, paste,
+  and mouse input so it cannot reach the terminal behind them.
+  Person menus, context menus, and the quit dialog take precedence.
+- Notices draw over a small part of the last row and clear after
+  three seconds. They do not reserve a row.
 
-Spacing: no gap between the vertical rule and the terminal content,
-no other margin, minimum tile row height 9. When the tiles
-do not fit, the grid scrolls and the last visible row reads "+N more"
-in overlay0. The same cue applies to the people list. When the grid
-shape changes (a resize or a new column count), the scroll moves so
-the focused tile stays visible.
-
-Narrow widths: below 90 columns the people column narrows to 14.
-Below 50 it starts hidden. The choice to show or hide it holds through
-a resize, a new selection, and the viewer.
-
-Compact fallback: when the people column is hidden, or when it is too
-short to carry the identity and status rows, the terminal area gains
-one row above the tab row. It reads, left to right: " > people " in
-overlay0 bold when the column is hidden, then "allowed" or "read
-only", the person name, "away 5m", "typing NAME", then the server
-address and the online count on the right.
-
-The row gives up space in this order. The access label, "away" and
-"typing" always keep their full length. The person name takes what is
-left and cuts to fit. The server address and the online count go on
-the right only when space remains after that; the server address
-drops first, then the count.
-
-Focus: accent marks focus and nothing else. When focus is on the people
-list, the vertical rule is accent. When focus is in the grid, the
-focused tile border and the selected tab are accent.
-
-Keys: j and k select a person. h and l move focus between the boxes.
-Enter opens the focused box in the viewer. n creates a new terminal in
-the owner's own list, selects its tab, and opens it in the viewer with
-input. Number keys 1 to 9 select a tab. x closes the selected terminal
-at once and sends ClosePane. Slash opens a search over
-names. Esc on the main screen asks to quit. q quits.
-p shows or hides the people column at every width. In the viewer p goes
-to the terminal, so press ctrl+b first. A click on the "people" heading
-hides the column. When the column is hidden, a click on the "people"
-label at the left of the top row shows it again. The footer hint reads
-"p people" when the column is hidden and "p hide" when it is open.
-
-Geometry: the client keeps one content rect per visible terminal (the
-tile content or the viewer area). The same rect drives Watch cols and
-rows, the owner's Resize, the cursor position, mouse hit tests, and
-text selection. The owner's client sends Resize with the size of the
-drawn content. The PTY gets the size of the smallest client that shows
-it, the owner's client or any watcher, as the pane size rule says.
-
-Empty state: when the selected person has no terminals, the area shows
-"No terminals." centered, with the hint "n new terminal" for the
-owner's own row.
-
-Mouse: see section 2.5.
+The overview keeps j/k people, h/l boxes, Enter view, n new terminal,
+x close, 1-9 terminal selection, / find, q quit, and Escape to ask
+before quitting. The existing person menu keeps its grant actions.
 
 ### 2.2 Viewer
 
-The viewer draws inside the terminal area. The people column stays
-visible on the left and carries the access line, so there is no
-context row. The tab row stays above the viewer. The viewer has no
-frame and fills the rest of the area. When the people column is
-hidden, the compact row above the tab row carries the person and
-"allowed" or "read only". The footer shows one hint: ctrl+b back. A
-click on it sends Ctrl+B.
+The viewer uses the full window, with the same handle and access chip.
+Ctrl+B returns to overview. Then p opens people and s opens session.
+Other keys, including p, s, q, and Escape, go to the terminal when
+no panel or dialog is open. Mouse controls can open a panel without
+leaving the viewer. Escape then closes that panel and keeps the viewer.
+The terminal cursor is hidden while a panel or dialog owns input.
 
-Every other key goes to the terminal: Esc, Tab, q, p, and printable
-characters. Ctrl+B is the only key the viewer keeps. Tabs stay
-clickable while the viewer is open.
+Watch, Resize, cursor, selection, and mouse targets use the actual
+content rectangle. Opening or closing either overlay does not send a
+changed Watch or Resize. A real window resize updates those dimensions.
+Hidden terminals are unwatched and keep running. Remote input still
+requires the owner's grant; the client does not add typing markers.
 
-A terminal in view is always live. There is no follow key and no
-frozen state. The client sends Watch when a terminal comes into view
-(a box in the grid or the viewer) and Unwatch when it leaves view
-(another person selected, another tab, Ctrl+B). Terminals out of view
-keep running in the runtime, like herdr background panes.
-
-Ctrl+B returns to the box grid of the same person.
-
-Read only is the default for every terminal that is not the owner's.
-The owner types into their own terminals with no marker.
-
-If the terminal's owner gave the viewer the input grant, keys go to
-that terminal. The sender is named to the receiving person and to the
-agents in that terminal by a marker, see section 3.4. The client never
-adds a marker.
-
-Size: the viewer draws the frame at the remote size. When the remote
-size is smaller than the viewer, the frame is placed at the top left
-and the rest of the area is empty. The size rule for the pane itself
-is in section 8, mission 14.
+The runtime pane size remains the smallest size among its watchers.
+If another watcher is smaller, the frame stays at the top left and
+the remaining area is empty. This UI change does not alter that rule.
 
 ### 2.3 Person menu
 
@@ -189,33 +115,23 @@ is one centered block, at most 80 columns wide: "Nobody else is here
 yet.", the sentence "Send this line to a friend. Your friend pastes it
 in a terminal. It expires in 24 hours.", the join line with the
 capsule token on its own line, and the hints c copy and n new
-terminal. When the owner has terminals and is still alone, the join
-line shows as one dim row under the header instead, with the hint c
-copy. The people column shows only "you".
+terminal. When the owner has terminals, the session panel offers c copy invite.
+The people panel shows the owner as "you".
 
 ### 2.5 Mouse
 
-Everything the keyboard can do, the mouse can do too, like herdr and
-luvus. Left click is a plain click. Right click opens a context menu.
-
-- Left click on a person row selects it. Double click opens the
-  viewer on its first terminal.
-- Left click on a box focuses it. Double click opens it in the viewer.
-- Left click on a tab selects it. Click on the x of a tab closes that
-  terminal at once. Click on the + tab creates a new
-  terminal.
-- Left click on a footer key hint presses that key.
-- Left click outside an open menu closes it.
-- Right click on a person row opens the person menu (2.3).
-- Right click on a box or a tab opens a small menu: Open, Close. No
-  split items. Seer has no client splits.
-- Scroll wheel scrolls the people list, the box grid, and the viewer
-  scrollback.
-- Drag with the left button inside a box or the viewer selects text
-  in the client. On release the selection is copied to the clipboard
-  with OSC 52 and the footer notice says "Copied". Shift plus drag is
-  left to the host terminal, so the terminal's own selection still
-  works.
+- The edge handle opens people. The top-right chip opens session.
+- A click outside a panel closes it and is consumed.
+- Click a person to select them. Double click opens their first
+  terminal. Right click opens the person menu.
+- Click a terminal row in session to open it. Click a session action
+  to create or close a terminal, copy an invite, go back, or quit.
+- Click a grid tile to focus it. Double click opens the viewer.
+  Right click opens the terminal context menu.
+- The wheel scrolls people, session actions, the grid, or scrollback.
+- Drag inside terminal content selects text. Release requests an
+  OSC 52 clipboard copy. Shift plus drag stays with the host terminal.
+  Open panels and dialogs take input before text selection.
 
 ### 2.6 CLI
 
@@ -305,16 +221,14 @@ white lines. Concrete rules:
   69,71,90; overlay0 108,112,134; text 205,214,244; subtext0
   166,173,200; mauve 203,166,247; green 166,227,161; yellow
   249,226,175; red 243,139,168; teal 148,226,213; peach 250,179,135.
-- Every widget background is Color::Reset, the terminal default. The
-  owner's terminal is transparent and seer respects it. No solid fill
-  anywhere. The people column and the footer have no background. Only
-  the selected people row, the selected tab, the person menu, the
-  context menu, and the confirm dialog use surface0.
-- Key letters in the footer are text with bold; their labels are
-  subtext0. The same style in every footer.
-- The grant text is green for "allowed" and subtext0 for "read only",
-  in the people column and in the compact row alike.
-- Dialogs have padding 1, keys bold like the footer, and one blank
+- Terminal content keeps Color::Reset, the terminal default. The
+  owner's terminal is transparent and seer respects it. The people overlay uses
+  panel_bg, with surface0 for its selected row. The handle, chip,
+  session panel, notices, menus, and dialogs use surface0.
+- The session panel uses accent for its selected action. The chip
+  uses accent for Your terminal and Can type, subtext0 for Read only.
+- The people panel uses green for allowed and subtext0 for read only.
+- Dialogs have padding 1, bold keys, and one blank
   row between the title and the keys.
 - Borders are plain box drawing, the ratatui default. The focused box
   and the selected column use accent for the border. Every other
@@ -336,12 +250,13 @@ white lines. Concrete rules:
 - Never draw a border with the default white. Never leave a widget
   without an explicit style.
 
-## 5. What goes
+## 5. What wave one removed
 
 - The client tree drawing in crates/seer/src/tui.rs draw and
   crates/seer/src/state.rs pane_rects. The client's own split and tab
   keys.
-- The people drawer and its button. The people column replaces it.
+- The original people drawer was replaced by a column in wave one.
+  The approved terminal-first layout now uses an overlay panel.
 - The PEEK banner. seer peek NAME opens the main screen on NAME.
 - Peek and StopPeek in the protocol.
 - The client keys that create tabs and splits. The runtime keeps the
@@ -352,28 +267,24 @@ white lines. Concrete rules:
 
 ## 6. Contract tests
 
-One test per part, at most. Through the CLI or a ratatui TestBackend.
-Write each before its code.
+Write tests for user-facing contracts before their implementation.
 
-- Main screen: with two people and three terminals for the selected
-  one, the rendered buffer contains the two names, the three box
-  titles, and the header "you may type: no".
-- Watch: a client that sends Watch for another user's pane receives
-  Cells for it with no grant.
-- TypeInto: without the grant the broker answers Refused; with the
-  grant the runtime receives the bytes with the marker prefix.
-- Grant: SetGrant persists across a broker restart.
-- First run: the owner alone with zero terminals sees the join line
-  on the main screen. With one terminal the box grid shows.
-- Tab strip: with three terminals the rendered buffer has three tabs
-  and the + tab. Key 2 selects the second.
-- Viewer inside the area: with the viewer open the buffer still has
-  the people column title.
-- Join: seer join with the whole pasted line joins with the capsule.
-- Unknown command: seer bogus prints one line and exits 2.
-- Backgrounds: no cell in the rendered buffer has a background other
-  than Reset outside the selected row, the selected tab, a menu, or a
-  dialog.
+- The full window is available to one terminal or a viewer. Grid
+  terminals still receive their actual tile content sizes.
+- People and session panels open and close by key and click. Escape
+  closes a panel before the quit dialog. Outside clicks are consumed.
+- A viewer forwards normal keys through the real pane location when
+  panels are closed. Open panels consume keys and paste. Watching
+  from a person menu dismisses the people panel and returns input.
+- Session actions select, create, and close real terminals and quit.
+  The selected action remains visible on a short screen.
+- Opening or closing panels sends no changed Watch or Resize. A real
+  window resize sends the correct new dimensions.
+- Remote access stays visible on narrow screens and follows grants.
+- First run retains the invite. Terminal backgrounds retain Reset
+  outside the small controls, panels, menus, notices, and dialogs.
+- Existing CLI, broker viewing, grant, join, and input contracts remain
+  in effect. Granted input reaches the runtime without a text prefix.
 
 ## 7. Wave one bundle, done
 
