@@ -2,7 +2,8 @@
 
 Seer shares live terminals between people in a trusted room. Each person runs
 shells on their own computer. The room broker routes shared views and input;
-it does not start those shells. ADR 0009 defines this model from version 0.5.0.
+it does not start those shells. The room host command runs on Linux or macOS.
+ADR 0009 defines this model from version 0.5.0.
 
 ## Crate map
 
@@ -16,8 +17,10 @@ it does not start those shells. ADR 0009 defines this model from version 0.5.0.
 
 ## Process model
 
+The room host runs these server processes on Linux or macOS:
+
 ```text
-Room host (currently Linux)
+Room host (Linux or macOS)
   seer-broker
 
 Alice's computer (Linux or macOS)

@@ -44,7 +44,7 @@ flowchart LR
 
 ## Host a room
 
-You can host on Linux only. In Seer, select Start a room, or run
+You can host on Linux or macOS. In Seer, select Start a room, or run
 `seer start`.
 
 To invite a friend, open the room menu and select Invite a person.

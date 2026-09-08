@@ -46,7 +46,6 @@ pub(crate) fn leave_room(server: &ServerEntry) -> Result<(), CommandError> {
 }
 
 pub(crate) fn stop() -> Result<(), CommandError> {
-    #[cfg(target_os = "linux")]
     if ServerStore::load()
         .map_err(CommandError::system)?
         .servers

@@ -80,9 +80,8 @@ iroh), WireGuard libraries (wrong boundary, no traversal).
 - An unsafe, unknown, or unauthorized mapping refuses that runtime
   connection. A mapping to uid 0 is refused. The broker continues
   to serve other users.
-- The multiplayer MVP server runs on Linux. macOS is a supported
-  client platform and uses the identities on the Linux server.
-  A macOS broker service is not supported in this release.
+- The multiplayer MVP server runs on Linux or macOS. Clients can also run on
+  Linux or macOS. PTYs and agent processes stay on the host.
 
 ### Identity and invite
 
