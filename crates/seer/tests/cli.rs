@@ -381,6 +381,7 @@ fn write_identity(config: &TestConfig, port: u16, user_id: &str, credential: &st
 }
 
 
+
 fn wait_for_process_end(pid: i32) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while process_exists(pid) && Instant::now() < deadline {
@@ -398,7 +399,7 @@ fn process_exists(pid: i32) -> bool {
     }
     #[cfg(target_os = "macos")]
     {
-        return Command::new("/bin/ps")
+        Command::new("/bin/ps")
             .args(["-p", &pid.to_string(), "-o", "stat="])
             .output()
             .ok()
@@ -407,7 +408,7 @@ fn process_exists(pid: i32) -> bool {
                     && !String::from_utf8_lossy(&output.stdout)
                         .trim()
                         .starts_with('Z')
-            });
+            })
     }
 }
 
