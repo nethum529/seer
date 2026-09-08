@@ -23,7 +23,9 @@ jobs:
           repository: nethum529/seer
           ref: ${{ inputs.ref }}
           ssh-key: ${{ secrets.SEER_SOURCE_DEPLOY_KEY }}
-      - run: rustup target add x86_64-apple-darwin
+      - run: rustup target add aarch64-apple-darwin x86_64-apple-darwin
+      - name: Check macOS host
+        run: cargo clippy -p seer --target aarch64-apple-darwin --all-targets -- -D warnings
       - run: cargo build --release --package seer --target aarch64-apple-darwin
       - run: cargo build --release --package seer --target x86_64-apple-darwin
       - name: Create archives

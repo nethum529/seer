@@ -23,15 +23,9 @@ fn stop_runtime(server: &ServerEntry) -> bool {
     }
 }
 
-#[cfg(target_os = "macos")]
-fn stop_hosted_broker(_endpoint: Option<&str>) -> bool {
-    false
-}
-
 // Only the room hosted on this computer may be stopped here. A joined room
 // runs on someone else's computer and a different local room must not be
 // caught by it.
-#[cfg(target_os = "linux")]
 fn stop_hosted_broker(endpoint: Option<&str>) -> bool {
     super::stop::run_broker(endpoint)
 }

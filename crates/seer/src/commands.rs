@@ -177,7 +177,6 @@ pub(crate) fn invite(hours: Option<&str>) -> Result<(), CommandError> {
     }
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn first_invite(first_start: bool) -> Result<(), CommandError> {
     if first_start { invite(None) } else { Ok(()) }
 }

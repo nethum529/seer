@@ -13,13 +13,13 @@ Closing a Seer window or losing the room connection leaves your local shells
 running. Open Seer again to return to them. A computer or runtime restart
 restores the saved layout with new shells, not the old running processes.
 
-The room host command currently runs on Linux. Participants can use Linux or
-macOS. An agent inbox is planned; this build has no chat or human messaging.
+The room host command runs on Linux or macOS. Participants can also use Linux
+or macOS. An agent inbox is planned; this build has no chat or human messaging.
 Herdr and luvus remain the reference code bases for the terminal core.
 
 ## Quickstart
 
-Install Seer on the owner's Linux machine:
+Install Seer on the owner's Linux or macOS machine:
 
     curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh
 
