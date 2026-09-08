@@ -25,10 +25,13 @@ pub(super) fn handle_connection(
     };
     match first {
         ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
+        ClientMsg::ObserveRuntime => {
+            shared.add_view_connection(connection_id, stream.try_clone()?, None, true)?
+        }
         ClientMsg::Watch {
             pane, cols, rows, ..
         } => {
-            shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane))?;
+            shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane), false)?;
             if let Err(error) =
                 shared.watch_size(connection_id, &pane, Some(PaneSize { cols, rows }))
             {
@@ -37,7 +40,7 @@ pub(super) fn handle_connection(
             }
         }
         ClientMsg::Terminals { .. } => {
-            shared.add_view_connection(connection_id, stream.try_clone()?, None)?
+            shared.add_view_connection(connection_id, stream.try_clone()?, None, false)?
         }
         ClientMsg::QueryTargets { .. } => {
             return handle_target_query(&mut stream, shared, connection_id);
@@ -70,6 +73,7 @@ pub(super) struct ReportedViewport {
 enum ConnectionProjection {
     Full,
     Watched(Tree),
+    Catalog(BTreeSet<String>),
     End { send_bye: bool },
 }
 
@@ -81,6 +85,7 @@ pub(super) struct Connection {
     pub(super) capabilities: Option<TerminalCapabilities>,
     pub(super) viewport: Option<ReportedViewport>,
     pub(super) read_only: bool,
+    pub(super) catalog: bool,
     pub(super) size_owner: bool,
     pub(super) last_active: Instant,
     pub(super) watch_started: bool,
@@ -100,6 +105,7 @@ impl Connection {
             capabilities: None,
             viewport: None,
             read_only: false,
+            catalog: false,
             size_owner: false,
             last_active: Instant::now(),
             watch_started: false,
@@ -145,6 +151,13 @@ impl Connection {
                     }
                 }
             }
+            ConnectionProjection::Catalog(watched) => {
+                for message in messages.iter().filter(|m| catalog_passes(&watched, m)) {
+                    if !self.send(writer::encode(message)?) {
+                        return Ok(false);
+                    }
+                }
+            }
             ConnectionProjection::End { send_bye } => {
                 if send_bye && !self.send(Arc::clone(bye)) {
                     return Ok(false);
@@ -155,7 +168,7 @@ impl Connection {
     }
 
     fn projection(&mut self, session: &UserSession) -> ConnectionProjection {
-        if !self.read_only || !self.watch_started {
+        if !self.read_only || (!self.catalog && !self.watch_started) {
             return ConnectionProjection::Full;
         }
         let valid: BTreeSet<String> = self
@@ -165,6 +178,9 @@ impl Connection {
             .cloned()
             .collect();
         self.watches.retain(|pane, _| valid.contains(pane));
+        if self.catalog {
+            return ConnectionProjection::Catalog(valid);
+        }
         if valid.is_empty() {
             if self.watch_ended {
                 return ConnectionProjection::End { send_bye: false };
@@ -173,6 +189,13 @@ impl Connection {
             return ConnectionProjection::End { send_bye: true };
         }
         ConnectionProjection::Watched(project_tree(&session.tree, &valid))
+    }
+}
+
+fn catalog_passes(watched: &BTreeSet<String>, message: &ServerMsg) -> bool {
+    match message {
+        ServerMsg::Frame { pane, .. } | ServerMsg::Cells { pane, .. } => watched.contains(pane),
+        _ => true,
     }
 }
 
@@ -310,9 +333,10 @@ impl SharedSession {
         id: u64,
         stream: UnixStream,
         pane: Option<&str>,
+        catalog: bool,
     ) -> io::Result<()> {
         let _lease = lock(&self.lease)?;
-        let messages = {
+        let mut messages = {
             let session = lock(&self.session)?;
             if pane.is_some_and(|id| {
                 !session
@@ -330,11 +354,15 @@ impl SharedSession {
             }
             session.snapshot()
         };
+        if catalog {
+            messages.retain(|message| catalog_passes(&BTreeSet::new(), message));
+        }
         let mut connection = Connection::new(id, stream)?;
         if !connection.send_messages(&messages)? {
             return Err(super::connection_closed());
         }
         connection.read_only = true;
+        connection.catalog = catalog;
         lock(&self.connections)?.push(connection);
         self.poll_wake.notify_one();
         Ok(())

@@ -65,6 +65,7 @@ pub enum ClientMsg {
         sender: String,
     },
     AttachRuntime,
+    ObserveRuntime,
     QueryTargets {
         user: String,
     },
