@@ -15,6 +15,7 @@ mod terminal_session;
 mod theme;
 mod tui;
 mod tui_navigation;
+mod tui_sync;
 mod update;
 mod viewer;
 

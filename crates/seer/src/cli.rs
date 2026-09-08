@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use crate::commands::{self, CommandError};
 
-const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start [--restore]\n                 Start the server\n  stop           Stop the server\n  update         Replace the binaries with the latest release.\n  invite [--hours N]\n                 Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Open people and terminals\n  detach         Detach this client\n  peek <person>  Open with this person selected\n\nBare seer opens people and terminals.\n\nMain screen: j/k people, h/l boxes, enter view, n new terminal, / search, esc back, q quit.\nViewer: esc back, tab next terminal, q quit.\nPerson menu: j/k select, enter watch, space grant, esc close.\nFirst run: c copy invite; n new terminal.\n";
+const HELP: &str = "Usage: seer <command>\n\nCommands:\n  start [--restore]\n                 Start the server\n  stop           Stop the server\n  update         Replace the binaries with the latest release.\n  invite [--hours N]\n                 Create an invitation\n  join [capsule] Join a server\n  list           List saved servers and people\n  attach         Open people and terminals\n  detach         Detach this client\n  peek <person>  Open with this person selected\n\nBare seer opens people and terminals.\n\nMain screen: j/k people, h/l boxes, enter view, n new terminal, / search, esc asks to quit, q quit.\nViewer: ctrl+b back. All other keys go to the terminal.\nPerson menu: j/k select, enter watch, space grant, esc close.\nFirst run: c copy invite; n new terminal.\n";
 
 #[derive(Debug, Eq, PartialEq)]
 enum Command {

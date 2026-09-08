@@ -125,6 +125,7 @@ pub(crate) fn command(
     if key.code == CrosstermKeyCode::Char('p')
         && key.modifiers.is_empty()
         && state.chrome.narrow
+        && state.viewer.is_none()
         && !state.searching
     {
         state.chrome.show_people = !state.chrome.show_people;
@@ -142,9 +143,6 @@ pub(crate) fn command(
             .map_or(state.chrome.people_area, |(_, row)| *row);
         crate::person_menu::open(state, state.selected, row);
     } else if state.viewer.is_some() {
-        if key.code == CrosstermKeyCode::Char('q') && key.modifiers.is_empty() {
-            return Ok(true);
-        }
         crate::viewer::key(key, stream, state)?;
     } else {
         return navigation::key(key, stream, state);
@@ -223,16 +221,16 @@ fn click_hint(
     let Some(key) = key else {
         return Ok(false);
     };
-    let code = match key.as_str() {
-        "enter" => CrosstermKeyCode::Enter,
-        "esc" => CrosstermKeyCode::Esc,
-        "tab" => CrosstermKeyCode::Tab,
+    let (code, modifiers) = match key.as_str() {
+        "enter" => (CrosstermKeyCode::Enter, KeyModifiers::NONE),
+        "esc" => (CrosstermKeyCode::Esc, KeyModifiers::NONE),
+        "ctrl+b" => (CrosstermKeyCode::Char('b'), KeyModifiers::CONTROL),
         _ => match key.chars().next() {
-            Some(character) => CrosstermKeyCode::Char(character),
+            Some(character) => (CrosstermKeyCode::Char(character), KeyModifiers::NONE),
             None => return Ok(false),
         },
     };
-    command(KeyEvent::new(code, KeyModifiers::NONE), stream, state)
+    command(KeyEvent::new(code, modifiers), stream, state)
 }
 
 fn click_target(
@@ -276,16 +274,16 @@ fn click_target(
         state.select_tab(index);
         if right {
             crate::person_menu::open_context(state, position);
-        } else if mouse.column == area.right().saturating_sub(2) {
+        } else if state.user() == state.own_user && mouse.column == area.right().saturating_sub(2) {
             state.request_close(stream)?;
         }
         return Ok(());
     }
-    if let Some((index, _)) = state
+    if let Some(index) = state
         .box_areas
         .iter()
-        .find(|(_, area)| area.contains(position))
-        .copied()
+        .find(|tile| tile.area.contains(position))
+        .map(|tile| tile.index)
     {
         state.select_tab(index);
         if right {

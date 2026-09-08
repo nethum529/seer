@@ -1,8 +1,8 @@
-use crate::{state::ClientState, theme::Palette};
+use crate::{state::ClientState, terminal_cells::start_row, theme::Palette};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
-    layout::{Margin, Position, Rect},
+    layout::{Position, Rect},
 };
 use seer_core::Cell;
 use std::io::{self, Write};
@@ -108,15 +108,15 @@ pub(super) fn mouse(mouse: MouseEvent, state: &mut ClientState) -> io::Result<bo
 
 fn begin(state: &ClientState, position: Position) -> Option<Selection> {
     let (area, rows) = if let Some(viewer) = &state.viewer {
-        let area = viewer.area.inner(Margin::new(1, 1));
+        let area = viewer.area;
         (area, viewer.visible_rows(area.height))
     } else {
-        let (index, rect) = state
+        let tile = state
             .box_areas
             .iter()
-            .find(|(_, rect)| rect.inner(Margin::new(1, 1)).contains(position))?;
-        let terminal = state.selected_terminals().get(*index)?;
-        let area = rect.inner(Margin::new(1, 1));
+            .find(|tile| tile.content.contains(position))?;
+        let terminal = state.selected_terminals().get(tile.index)?;
+        let area = tile.content;
         let rows = &state
             .frames
             .get(&(state.user().into(), terminal.pane.clone()))?
@@ -124,7 +124,7 @@ fn begin(state: &ClientState, position: Position) -> Option<Selection> {
         (
             area,
             rows.iter()
-                .skip(rows.len().saturating_sub(usize::from(area.height)))
+                .skip(start_row(rows, area.height))
                 .cloned()
                 .collect(),
         )

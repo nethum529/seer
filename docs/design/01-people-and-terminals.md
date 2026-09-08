@@ -36,48 +36,60 @@ Layout, left to right, top to bottom:
 
 - Top bar, one row. Left: the word seer, then the owner name and server
   address, dim. Right: the count of people online. No key hints here.
-- People column, 26 columns. Title "people". One row per person, name
-  only. The owner's own row is first and reads "you". The selected row
-  has a background. No presence text, no agent text in the list.
-- Terminal area, the rest of the width. Title: the selected person's
-  name. Header row inside, two groups with a 4 space gap: "online  5
-  terminals" then "input: allowed" or "input: read only".
-- Tab strip, one row under the header. One tab per terminal of the
-  selected person, in tree order: the terminal name and its state. The
-  selected tab has a surface0 background and accent text. Each tab has
-  an x at its right edge. The strip ends with a + tab. The strip is
-  always shown, also with one terminal.
-- Live boxes: one bordered box per terminal of the selected person,
-  laid out in a grid, two columns when the area is 80 columns or
-  wider, one column below that. Each box title is the terminal name
-  and its state (section 3.2). Each box shows the last rows of that
-  terminal, scaled to fit, read only, updating live. The owner's own
-  terminals show as boxes the same way. The grid is the default view
-  whenever the selected person has one terminal or more.
+- People column, 20 columns, no frame. Header "people" in overlay0.
+  One row per person, name only. The owner's own row is first and
+  reads "you". The selected row has a surface0 background. One
+  vertical rule separates the column from the terminal area. The rule
+  is accent when focus is on the people list, overlay0 otherwise.
+- Terminal area, the rest of the width, no frame. One context row:
+  the selected person's name, "online" or "away 5m", then "input:
+  allowed" or "input: read only", then "NAME is typing" when a guest
+  types into the focused terminal.
+- Tab row, one row under the context row. One tab per terminal of the
+  selected person, in tree order: the number and the terminal name,
+  cut at 16 characters, with a star after the name when the terminal
+  is busy. The selected tab has a surface0 background and accent text.
+  Tabs of the owner's own terminals end with an x that closes the
+  terminal. The row ends with a + tab. When the tabs do not fit, the
+  row scrolls so the selected tab and the + tab stay visible.
+- Terminal content starts on the row after the tab row and uses the
+  full width and height of the area. One terminal draws with no frame.
+  Two or more terminals draw as tiles in a grid, two columns when the
+  area is 80 columns or wider, one column below that. A tile has a
+  thin border and the title is the number and the terminal name. The
+  focused tile border is accent. Each tile shows the last rows with
+  content of that terminal, read only, updating live.
 - Footer, one row: key hints on the right. A notice shows on the left
   and clears after 3 seconds. Hints stay visible while a notice shows.
 
-Spacing: 1 column margin at the left and right edge of the body, 1
-column gap between the people column and the terminal area, padding 1
-inside both blocks, one blank row after the header, 1 row and 1
-column gap between boxes, minimum box height 8. When the boxes do not
-fit, the grid scrolls and the last visible row reads "+N more" in
-overlay0. The same cue applies to the people list.
+Spacing: 1 column gap between the vertical rule and the terminal
+content, no other margin, minimum tile row height 9. When the tiles
+do not fit, the grid scrolls and the last visible row reads "+N more"
+in overlay0. The same cue applies to the people list. When the grid
+shape changes (a resize or a new column count), the scroll moves so
+the focused tile stays visible.
 
 Narrow widths: below 90 columns the people column narrows to 14.
 Below 50 it hides and the footer shows "p people" to toggle it.
 
-Focus: the accent border follows focus. When focus is on the people
-list, the people column border is accent. When focus is in the grid,
-the focused box border is accent and the people column is overlay0.
+Focus: accent marks focus and nothing else. When focus is on the people
+list, the vertical rule is accent. When focus is in the grid, the
+focused tile border and the selected tab are accent.
 
 Keys: j and k select a person. h and l move focus between the boxes.
 Enter opens the focused box in the viewer. n creates a new terminal in
 the owner's own list, selects its tab, and opens it in the viewer with
 input. Number keys 1 to 9 select a tab. x closes the selected terminal
 at once and sends ClosePane. Slash opens a search over
-names. Esc goes back, and on the main screen asks to quit. q quits.
+names. Esc on the main screen asks to quit. q quits.
 p toggles the people column at narrow widths.
+
+Geometry: the client keeps one content rect per visible terminal (the
+tile content or the viewer area). The same rect drives Watch cols and
+rows, the owner's Resize, the cursor position, mouse hit tests, and
+text selection. The owner's client sends Resize with the size of the
+drawn content. The PTY gets the size of the smallest client that shows
+it, the owner's client or any watcher, as the pane size rule says.
 
 Empty state: when the selected person has no terminals, the area shows
 "No terminals." centered, with the hint "n new terminal" for the
@@ -88,19 +100,22 @@ Mouse: see section 2.5.
 ### 2.2 Viewer
 
 The viewer draws inside the terminal area. The people column stays
-visible on the left. The header and the tab strip stay above it. The
-viewer is one bordered box that fills the rest of the area. Title: the
-person name, the terminal name, then "read only" or "input". The
-footer shows esc back first, tab next terminal, then the other keys,
-q quit last. The same key and label style as the main footer.
+visible on the left. The context row and the tab row stay above it.
+The viewer has no frame and fills the rest of the area. The context
+row shows the person and "input: allowed" or "input: read only". The
+footer shows one hint: ctrl+b back. A click on it sends Ctrl+B.
+
+Every other key goes to the terminal: Esc, Tab, q, p, and printable
+characters. Ctrl+B is the only key the viewer keeps. Tabs stay
+clickable while the viewer is open.
 
 A terminal in view is always live. There is no follow key and no
 frozen state. The client sends Watch when a terminal comes into view
 (a box in the grid or the viewer) and Unwatch when it leaves view
-(another person selected, another tab, esc). Terminals out of view
+(another person selected, another tab, Ctrl+B). Terminals out of view
 keep running in the runtime, like herdr background panes.
 
-Esc returns to the box grid of the same person.
+Ctrl+B returns to the box grid of the same person.
 
 Read only is the default for every terminal that is not the owner's.
 The owner types into their own terminals with no marker.
@@ -112,8 +127,8 @@ adds a marker.
 
 Size: the viewer draws the frame at the remote size. When the remote
 size is smaller than the viewer, the frame is placed at the top left
-and the rest of the box is empty. The size rule for the pane itself is
-in section 8, mission 14.
+and the rest of the area is empty. The size rule for the pane itself
+is in section 8, mission 14.
 
 ### 2.3 Person menu
 

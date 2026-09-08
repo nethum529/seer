@@ -92,7 +92,7 @@ fn first_run_shows_the_join_line() {
         .map(|cell| cell.symbol())
         .collect();
     assert!(!text.contains("Nobody else is here yet."));
-    assert!(text.contains("shell idle"));
+    assert!(text.contains("1 shell"));
     assert!(text.contains("c copy"));
 }
 
@@ -156,7 +156,7 @@ fn tab_strip_shows_terminals_and_number_keys_select() {
         .iter()
         .map(|cell| cell.symbol())
         .collect();
-    for label in ["claude idle x", "codex idle x", "shell idle x", " + "] {
+    for label in ["1 claude x", "2 codex x", "3 shell x", " + "] {
         assert!(text.contains(label));
     }
     let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener must bind");
@@ -180,8 +180,8 @@ fn tab_strip_shows_terminals_and_number_keys_select() {
         .filter(|cell| cell.bg == Palette::default().surface0)
         .map(|cell| cell.symbol())
         .collect();
-    assert!(selected.contains("codex idle x"));
-    assert!(!selected.contains("claude idle x"));
+    assert!(selected.contains("2 codex x"));
+    assert!(!selected.contains("1 claude x"));
 }
 
 #[test]
@@ -213,13 +213,69 @@ fn viewer_keeps_people_and_tabs_visible() {
         "people",
         "you",
         "Bob",
-        "codex idle x",
-        "Bob  codex  read only",
+        "1 codex",
+        "input: read only",
         "Carol is typing",
-        "esc back",
-        "tab next terminal",
+        "ctrl+b back",
     ] {
         assert!(text.contains(label), "screen must show {label}");
     }
-    assert!(!text.contains("follow"));
+    assert!(!text.contains("q quit"));
+}
+
+fn draw_text(state: &mut ClientState, width: u16, height: u16) -> Vec<String> {
+    let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("backend must open");
+    terminal
+        .draw(|frame| render::draw(frame, state))
+        .expect("screen must draw");
+    let buffer = terminal.backend().buffer();
+    (0..height)
+        .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
+        .collect()
+}
+
+#[test]
+fn footer_hints_fit_the_screen_width() {
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    state.note_people(&[person("alice", "Alice")]);
+    state.invite = Some("seer join SEER1-host-7321-invite".into());
+    state
+        .terminals
+        .insert("alice".into(), vec![terminal_info("shell")]);
+    for width in [45, 50, 51, 58, 59, 60, 80] {
+        let rows = draw_text(&mut state, width, 16);
+        let footer = rows.last().expect("footer row must exist");
+        let keys: Vec<&str> = state
+            .chrome
+            .footer_areas
+            .iter()
+            .map(|(key, area)| {
+                assert!(area.right() <= width, "{width}: {key} spills past the edge");
+                let start = usize::from(area.x);
+                let shown = &footer[start..start + usize::from(area.width)];
+                assert!(shown.starts_with(&format!(" {key}")), "{width}: {shown:?}");
+                key.as_str()
+            })
+            .collect();
+        for key in ["enter", "c", "n", "q"] {
+            assert!(keys.contains(&key), "{width}: {keys:?}");
+        }
+    }
+}
+
+#[test]
+fn active_tab_stays_visible_on_a_narrow_screen() {
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    state.terminals.insert(
+        "alice".into(),
+        vec![terminal_info("shell"), terminal_info("longprocessname16")],
+    );
+    state.focus = 1;
+    state.chrome.show_people = true;
+    let rows = draw_text(&mut state, 37, 16);
+    let tab_row = &rows[2];
+    assert!(tab_row.contains(" 2 longpro"), "{tab_row}");
+    assert!(tab_row.contains(" x  + "), "{tab_row}");
+    assert!(tab_row.contains(" + "), "{tab_row}");
 }
