@@ -42,9 +42,7 @@ impl RuntimeConnection {
             &if start {
                 ClientMsg::AttachRuntime
             } else {
-                ClientMsg::Terminals {
-                    user: person.user_id.clone(),
-                }
+                ClientMsg::ObserveRuntime
             },
         )?;
         let ServerMsg::Tree { tree } = codec::decode(&mut stream)? else {

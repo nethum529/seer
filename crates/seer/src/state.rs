@@ -8,6 +8,13 @@ use std::{
     io,
 };
 
+#[derive(Clone, Copy, Debug)]
+pub(crate) struct Tile {
+    pub(crate) index: usize,
+    pub(crate) area: Rect,
+    pub(crate) content: Rect,
+}
+
 pub(crate) struct ClientState {
     pub(crate) tree: Tree,
     pub(crate) own_user: String,
@@ -25,10 +32,11 @@ pub(crate) struct ClientState {
     pub(crate) can_type_here: BTreeSet<String>,
     pub(crate) you_may_type_into: BTreeSet<String>,
     pub(crate) people_areas: Vec<(usize, Rect)>,
-    pub(crate) box_areas: Vec<(usize, Rect)>,
+    pub(crate) box_areas: Vec<Tile>,
     pub(crate) people_scroll: usize,
     pub(crate) grid_scroll: usize,
     pub(crate) grid_columns: usize,
+    pub(crate) grid_rows: usize,
     pub(crate) search: String,
     pub(crate) searching: bool,
     pub(crate) quit_prompt: bool,
@@ -76,6 +84,7 @@ impl ClientState {
             people_scroll: 0,
             grid_scroll: 0,
             grid_columns: 1,
+            grid_rows: 0,
             search: String::new(),
             searching: false,
             quit_prompt: false,
@@ -187,7 +196,7 @@ impl ClientState {
         if self.viewer.is_some() {
             self.open_focused();
         }
-        if !self.box_areas.iter().any(|(i, _)| *i == index) {
+        if !self.box_areas.iter().any(|tile| tile.index == index) {
             self.grid_scroll = index / self.grid_columns.max(1);
         }
     }

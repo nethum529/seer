@@ -111,11 +111,7 @@ fn move_box(state: &mut ClientState, forward: bool) {
         return;
     }
     state.focus = step(state.focus, count, forward);
-    if !state
-        .box_areas
-        .iter()
-        .any(|(index, _)| *index == state.focus)
-    {
+    if !state.box_areas.iter().any(|tile| tile.index == state.focus) {
         state.grid_scroll = state.focus / state.grid_columns;
     }
 }

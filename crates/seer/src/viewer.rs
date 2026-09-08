@@ -2,15 +2,12 @@ use crate::{
     input::key_to_input,
     state::ClientState,
     terminal_cells::{PaneCells, start_row},
-    theme::Palette,
     tui::{send, send_viewer_input},
-    tui_navigation::step,
 };
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use ratatui::{
     Frame,
-    layout::Rect,
-    text::{Line, Span},
+    layout::{Rect, Size},
 };
 use seer_core::TerminalInput;
 use seer_core::proto::ClientMsg;
@@ -21,6 +18,7 @@ pub(crate) struct Viewer {
     pub(crate) user: String,
     pub(crate) pane: String,
     pub(crate) area: Rect,
+    pub(crate) sent_size: Option<Size>,
     history: Vec<Vec<seer_core::Cell>>,
     previous: Vec<Vec<seer_core::Cell>>,
     pub(crate) offset: usize,
@@ -32,6 +30,7 @@ impl Viewer {
             user,
             pane,
             area: Rect::default(),
+            sent_size: None,
             history: Vec::new(),
             previous: Vec::new(),
             offset: 0,
@@ -89,7 +88,6 @@ pub(crate) fn key(
         (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
             state.viewer = None;
         }
-        (KeyCode::Tab, KeyModifiers::NONE) => next(state),
         _ => {
             if let Some(input) = key_to_input(key) {
                 input_message(stream, state, input)?;
@@ -97,29 +95,6 @@ pub(crate) fn key(
         }
     }
     Ok(())
-}
-
-fn next(state: &mut ClientState) {
-    let Some(viewer) = &state.viewer else {
-        return;
-    };
-    let Some(terminals) = state
-        .terminals
-        .get(&viewer.user)
-        .filter(|list| !list.is_empty())
-    else {
-        return;
-    };
-    let index = terminals
-        .iter()
-        .position(|t| t.pane == viewer.pane)
-        .unwrap_or(0);
-    let index = step(index, terminals.len(), true);
-    state.viewer = Some(Viewer::new(
-        viewer.user.clone(),
-        terminals[index].pane.clone(),
-    ));
-    state.focus = index;
 }
 
 pub(crate) fn input_message(
@@ -158,58 +133,23 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     let Some(viewer) = &state.viewer else {
         return;
     };
-    let palette = Palette::default();
-    let terminal = state
-        .terminals
-        .get(&viewer.user)
-        .into_iter()
-        .flatten()
-        .find(|t| t.pane == viewer.pane);
-    let name = terminal.map_or("shell", |t| t.name.as_str());
     let allowed = state.may_type(&viewer.user);
-    let mode = if allowed { "input" } else { "read only" };
-    let mut title = Line::from(vec![
-        Span::styled(
-            format!(" {}  ", state.person_name(&viewer.user)),
-            palette.style(),
-        ),
-        Span::styled(
-            format!("{name}  "),
-            palette.style().fg(if name == "shell" {
-                palette.subtext0
-            } else {
-                palette.blue
-            }),
-        ),
-        Span::styled(
-            format!("{mode} "),
-            palette.style().fg(if allowed {
-                palette.green
-            } else {
-                palette.subtext0
-            }),
-        ),
-    ]);
-    title.spans.extend(crate::render::typist_span(
-        terminal.and_then(|t| t.last_typist.as_deref()),
-    ));
     let area = viewer.area;
-    let block = palette.block(true).title(title);
-    let inner = block.inner(area);
-    frame.render_widget(block, area);
-    let content = state.frames.get(&viewer.target());
-    if let Some(content) = content {
-        let rows = viewer.visible_rows(inner.height);
-        let start = start_row(&rows, inner.height);
-        frame.render_widget(PaneCells::new(&rows), inner);
+    if area.is_empty() {
+        return;
+    }
+    if let Some(content) = state.frames.get(&viewer.target()) {
+        let rows = viewer.visible_rows(area.height);
+        let start = start_row(&rows, area.height);
+        frame.render_widget(PaneCells::new(&rows), area);
         if allowed
             && viewer.offset == 0
             && content.cursor.visible
             && let Some(row) = usize::from(content.cursor.row).checked_sub(start)
-            && row < usize::from(inner.height)
-            && content.cursor.column < inner.width
+            && row < usize::from(area.height)
+            && content.cursor.column < area.width
         {
-            frame.set_cursor_position((inner.x + content.cursor.column, inner.y + row as u16));
+            frame.set_cursor_position((area.x + content.cursor.column, area.y + row as u16));
         }
     }
 }
