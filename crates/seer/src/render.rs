@@ -8,16 +8,17 @@ use ratatui::{
     Frame,
     layout::{Alignment, Rect},
     style::Modifier,
-    text::{Line, Span},
+    text::Line,
     widgets::Paragraph,
 };
-use terminals::{context_row, first_run, tabs};
+use terminals::{context_spans, first_run, tabs};
 
 #[derive(Default)]
 pub(crate) struct Chrome {
     pub(crate) grid_focus: bool,
-    pub(crate) show_people: bool,
-    pub(crate) narrow: bool,
+    pub(crate) show_people: Option<bool>,
+    pub(crate) people_open: bool,
+    pub(crate) people_toggle_area: Rect,
     pub(crate) context: Option<crate::person_menu::TerminalMenu>,
     pub(crate) footer_areas: Vec<(String, Rect)>,
     pub(crate) dialog_areas: Vec<(String, Rect)>,
@@ -44,14 +45,9 @@ pub(crate) fn expire_notice(state: &mut ClientState) -> bool {
     false
 }
 
-fn body_areas(full: Rect, show_people: bool) -> (Rect, Rect) {
-    let body = Rect::new(
-        full.x,
-        full.y.saturating_add(1),
-        full.width,
-        full.height.saturating_sub(2),
-    );
-    let width = if full.width < 50 && !show_people {
+fn body_areas(full: Rect, open: bool) -> (Rect, Rect) {
+    let body = Rect::new(full.x, full.y, full.width, full.height.saturating_sub(1));
+    let width = if !open {
         0
     } else if full.width < 90 {
         14
@@ -74,14 +70,14 @@ fn body_areas(full: Rect, show_people: bool) -> (Rect, Rect) {
 pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     let palette = Palette::default();
     let full = frame.area();
-    state.chrome.narrow = full.width < 50;
+    state.chrome.people_open = state.chrome.show_people.unwrap_or(full.width >= 50);
+    state.chrome.people_toggle_area = Rect::default();
     frame.render_widget(Paragraph::new("").style(palette.style()), full);
     state.people_areas.clear();
     state.box_areas.clear();
     state.tab_areas.clear();
     state.plus_area = Rect::default();
-    top_bar(frame, state);
-    let (people_area, terminals) = body_areas(full, state.chrome.show_people);
+    let (people_area, terminals) = body_areas(full, state.chrome.people_open);
     state.chrome.people_area = people_area;
     people::column(frame, state, people_area);
     terminal_area(frame, state, terminals);
@@ -106,90 +102,103 @@ fn hints(state: &ClientState, width: u16) -> String {
     if state.searching {
         return "enter select  esc cancel".into();
     }
-    let base = if width < 50 {
-        "p people  enter view  n new  q quit"
-    } else if width < 90 {
-        "j/k people  enter view  n new  x close  q quit"
+    let toggle = if state.chrome.people_open {
+        "p hide"
     } else {
-        "j/k people  h/l boxes  enter view  n new  x close  1-9 tabs  / find  q quit"
+        "p people"
+    };
+    let base = if width < 50 {
+        format!("{toggle}  enter view  n new  q quit")
+    } else if width < 90 {
+        format!("j/k people  {toggle}  enter view  n new  x close  q quit")
+    } else {
+        format!(
+            "j/k people  {toggle}  h/l boxes  enter view  n new  x close  1-9 tabs  / find  q quit"
+        )
     };
     if state.people.len() != 1 || state.invite.is_none() {
-        return base.into();
+        return base;
     }
     let fits = |hints: &str| hints.chars().count() + 2 <= usize::from(width);
     let with_copy = |base: &str, copy: &str| base.replace("n new", &format!("{copy}  n new"));
-    let hints = with_copy(base, "c copy invite");
-    if fits(&hints) {
-        return hints;
-    }
-    let hints = with_copy(base, "c copy");
-    if fits(&hints) {
-        return hints;
-    }
-    with_copy(&base.replace("x close  ", ""), "c copy")
+    let trimmed = base.replace("x close  ", "");
+    [
+        with_copy(&base, "c copy invite"),
+        with_copy(&base, "c copy"),
+        with_copy(&trimmed, "c copy"),
+    ]
+    .into_iter()
+    .find(|hints| fits(hints))
+    .unwrap_or_else(|| with_copy(&trimmed.replacen(&format!("{toggle}  "), "", 1), "c copy"))
 }
 
-fn top_bar(frame: &mut Frame<'_>, state: &ClientState) {
+fn meta(state: &ClientState, room: u16) -> Option<String> {
+    let online = state.people.iter().filter(|person| person.online).count();
+    let full = format!("{}  {online} online ", state.server);
+    if full.chars().count() as u16 <= room {
+        return Some(full);
+    }
+    let short = format!("{online} online ");
+    (short.chars().count() as u16 <= room).then_some(short)
+}
+
+fn strip(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     let palette = Palette::default();
-    let area = frame.area();
-    let left = Line::from(vec![
-        Span::styled(
-            " seer ",
-            palette
-                .style()
-                .fg(palette.accent)
-                .add_modifier(Modifier::BOLD),
-        ),
-        Span::styled(
-            format!(" {}  {}", state.own_name, state.server),
-            palette.style().fg(palette.subtext0),
-        ),
-    ]);
+    let mut rest = area;
+    if state.chrome.people_area.width < 2 {
+        let label = " > people ";
+        let toggle = Rect::new(area.x, area.y, (label.len() as u16).min(area.width), 1);
+        state.chrome.people_toggle_area = toggle;
+        frame.render_widget(
+            Paragraph::new(label).style(
+                palette
+                    .style()
+                    .fg(palette.overlay0)
+                    .add_modifier(Modifier::BOLD),
+            ),
+            toggle,
+        );
+        rest = Rect::new(
+            toggle.right(),
+            area.y,
+            area.width.saturating_sub(toggle.width),
+            1,
+        );
+    }
+    if rest.is_empty() {
+        return;
+    }
+    let line = Line::from(context_spans(state, rest.width));
+    let used = line.width() as u16;
+    frame.render_widget(Paragraph::new(line).style(palette.style()), rest);
+    let Some(text) = meta(state, rest.width.saturating_sub(used.saturating_add(2))) else {
+        return;
+    };
+    let width = (text.chars().count() as u16).min(rest.width);
     frame.render_widget(
-        Paragraph::new(left).style(palette.style()),
-        Rect::new(area.x, area.y, area.width, area.height.min(1)),
-    );
-    let right = format!(
-        "{} online ",
-        state.people.iter().filter(|person| person.online).count()
-    );
-    let width = (right.len() as u16).min(area.width / 2);
-    frame.render_widget(
-        Paragraph::new(right)
+        Paragraph::new(text)
             .style(palette.style().fg(palette.subtext0))
             .alignment(Alignment::Right),
-        Rect::new(
-            area.right().saturating_sub(width),
-            area.y,
-            width,
-            area.height.min(1),
-        ),
+        Rect::new(rest.right().saturating_sub(width), area.y, width, 1),
     );
 }
 
 fn terminal_area(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
-    let area = Rect::new(
-        area.x.saturating_add(1),
-        area.y,
-        area.width.saturating_sub(1),
-        area.height,
-    );
     if area.is_empty() {
         return;
     }
+    let mut content = area;
+    if people::compact(state.chrome.people_area) && area.height > 1 {
+        strip(frame, state, Rect::new(area.x, area.y, area.width, 1));
+        content.y += 1;
+        content.height -= 1;
+    }
     let alone = state.people.len() == 1;
     if state.viewer.is_none() && alone && state.selected_terminals().is_empty() {
-        first_run(frame, state, area);
+        first_run(frame, state, content);
         return;
     }
-    context_row(frame, state, Rect::new(area.x, area.y, area.width, 1));
-    let mut content = Rect::new(
-        area.x,
-        area.y + 1,
-        area.width,
-        area.height.saturating_sub(1),
-    );
-    if area.height > 2 {
+    if content.height > 1 {
         tabs(
             frame,
             state,

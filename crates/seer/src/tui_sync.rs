@@ -152,7 +152,29 @@ mod tests {
         sync_resize(&mut stream, &mut state).expect("resize must send");
         assert_viewer_watch(&mut peer, &state);
         assert_viewer_resize(&mut peer, &state);
+        let narrow_area = state.viewer.as_ref().expect("viewer must exist").area;
+        state.chrome.show_people = Some(false);
+        terminal
+            .draw(|frame| render::draw(frame, &mut state))
+            .expect("hidden sidebar must draw");
+        sync_watches(&mut stream, &mut state).expect("watch must follow the toggle");
+        sync_resize(&mut stream, &mut state).expect("resize must follow the toggle");
+        assert_viewer_watch(&mut peer, &state);
+        assert_viewer_resize(&mut peer, &state);
+        let wide_area = state.viewer.as_ref().expect("viewer must exist").area;
+        assert_eq!(wide_area.width, narrow_area.width + 20);
+        assert_eq!(wide_area.height, narrow_area.height - 1);
+        assert_eq!(wide_area.x, 0);
+        state.chrome.show_people = Some(true);
+        terminal
+            .draw(|frame| render::draw(frame, &mut state))
+            .expect("shown sidebar must draw");
+        sync_watches(&mut stream, &mut state).expect("watch must follow the toggle back");
+        sync_resize(&mut stream, &mut state).expect("resize must follow the toggle back");
+        assert_viewer_watch(&mut peer, &state);
+        assert_viewer_resize(&mut peer, &state);
         let viewer_area = state.viewer.take().expect("viewer must exist").area;
+        assert_eq!(viewer_area, narrow_area);
         state
             .terminals
             .get_mut("alice")

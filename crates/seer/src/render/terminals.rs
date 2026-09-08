@@ -59,44 +59,33 @@ pub(super) fn first_run(frame: &mut Frame<'_>, state: &ClientState, area: Rect) 
     );
 }
 
-pub(super) fn context_row(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
+pub(super) fn context_spans(state: &ClientState, width: u16) -> Vec<Span<'static>> {
     let palette = Palette::default();
     let user = state
         .viewer
         .as_ref()
         .map_or(state.user(), |v| v.user.as_str());
-    let person = state.people.iter().find(|p| p.user_id == user);
     let dim = palette.style().fg(palette.subtext0);
-    let mut spans = vec![Span::styled(
-        state.person_name(user).to_owned(),
-        palette
-            .style()
-            .fg(palette.text)
-            .add_modifier(Modifier::BOLD),
-    )];
-    match person {
-        Some(p) if p.online => {
-            spans.push(Span::styled("  online", palette.style().fg(palette.green)))
-        }
-        Some(p) => spans.push(Span::styled(
-            format!("  away {}", super::idle_text(p.idle_secs)),
-            dim,
-        )),
-        None => {}
+    let mut spans = Vec::new();
+    let mut reserved = 0usize;
+    if user != state.own_user {
+        let allowed = state.may_type(user);
+        let label = if allowed { " allowed" } else { " read only" };
+        reserved += label.len();
+        spans.push(Span::styled(
+            label,
+            if allowed {
+                palette.style().fg(palette.green)
+            } else {
+                dim
+            },
+        ));
     }
-    let allowed = state.may_type(user);
-    spans.push(Span::styled(
-        if allowed {
-            "  input: allowed"
-        } else {
-            "  input: read only"
-        },
-        if allowed {
-            palette.style().fg(palette.green)
-        } else {
-            dim
-        },
-    ));
+    let away = state
+        .people
+        .iter()
+        .find(|p| p.user_id == user && !p.online)
+        .map(|person| format!("  away {}", super::idle_text(person.idle_secs)));
     let focused = state.focused();
     let typist = state
         .terminals
@@ -104,17 +93,28 @@ pub(super) fn context_row(frame: &mut Frame<'_>, state: &ClientState, area: Rect
         .into_iter()
         .flatten()
         .find(|t| Some(t.pane.as_str()) == focused)
-        .and_then(|t| t.last_typist.as_deref());
-    if let Some(name) = typist {
+        .and_then(|t| t.last_typist.as_deref())
+        .map(|name| format!("  typing {name}"));
+    reserved += away.as_ref().map_or(0, String::len);
+    reserved += typist.as_ref().map_or(0, String::len);
+    let room = usize::from(width).saturating_sub(reserved + 2);
+    let name: String = state.person_name(user).chars().take(room).collect();
+    if !name.is_empty() {
         spans.push(Span::styled(
-            format!("  {name} is typing"),
-            palette.style().fg(palette.yellow),
+            format!("  {name}"),
+            palette
+                .style()
+                .fg(palette.text)
+                .add_modifier(Modifier::BOLD),
         ));
     }
-    frame.render_widget(
-        Paragraph::new(Line::from(spans)).style(palette.style()),
-        area,
-    );
+    if let Some(away) = away {
+        spans.push(Span::styled(away, dim));
+    }
+    if let Some(typist) = typist {
+        spans.push(Span::styled(typist, palette.style().fg(palette.yellow)));
+    }
+    spans
 }
 
 fn tab_label(index: usize, name: &str, busy: bool, closable: bool) -> String {

@@ -51,8 +51,8 @@ fn main_screen_shows_people_terminals_and_input_permission() {
         "claude",
         "codex",
         "shell",
-        "input: read only",
-        "Carol is typing",
+        "read only",
+        "typing Carol",
     ] {
         assert!(text.contains(expected), "screen must show {expected}");
     }
@@ -214,8 +214,8 @@ fn viewer_keeps_people_and_tabs_visible() {
         "you",
         "Bob",
         "1 codex",
-        "input: read only",
-        "Carol is typing",
+        "read only",
+        "typing Carol",
         "ctrl+b back",
     ] {
         assert!(text.contains(label), "screen must show {label}");
@@ -272,9 +272,9 @@ fn active_tab_stays_visible_on_a_narrow_screen() {
         vec![terminal_info("shell"), terminal_info("longprocessname16")],
     );
     state.focus = 1;
-    state.chrome.show_people = true;
+    state.chrome.show_people = Some(true);
     let rows = draw_text(&mut state, 37, 16);
-    let tab_row = &rows[2];
+    let tab_row = &rows[0];
     assert!(tab_row.contains(" 2 longpro"), "{tab_row}");
     assert!(tab_row.contains(" x  + "), "{tab_row}");
     assert!(tab_row.contains(" + "), "{tab_row}");

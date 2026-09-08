@@ -34,18 +34,29 @@ and seer peek NAME (peek opens with NAME selected).
 
 Layout, left to right, top to bottom:
 
-- Top bar, one row. Left: the word seer, then the owner name and server
-  address, dim. Right: the count of people online. No key hints here.
-- People column, 20 columns, no frame. Header "people" in overlay0.
-  One row per person, name only. The owner's own row is first and
-  reads "you". The selected row has a surface0 background. One
-  vertical rule separates the column from the terminal area. The rule
-  is accent when focus is on the people list, overlay0 otherwise.
-- Terminal area, the rest of the width, no frame. One context row:
-  the selected person's name, "online" or "away 5m", then "input:
-  allowed" or "input: read only", then "NAME is typing" when a guest
-  types into the focused terminal.
-- Tab row, one row under the context row. One tab per terminal of the
+- No top bar. The people column and the terminal area start on the
+  first row.
+- People column, 20 columns, no frame. Row 0 is the heading "people"
+  in overlay0 bold, with a "<" at the right edge that hides the
+  column, and the count of people online in overlay0 before it when
+  it fits. Row 1 is blank. The list starts on row 2, one row per
+  person, name only. The owner's own row is first and reads "you".
+  The selected row has a surface0 background across the column width.
+  One vertical rule separates the column from the terminal area. The
+  rule is accent when focus is on the people list, overlay0
+  otherwise.
+- Person status, in the people column, one blank row after the last
+  visible name: "allowed" or "read only" for another person, "away
+  5m" when that person is offline, "typing NAME" when a guest types
+  into the focused terminal. Only the lines that apply are drawn.
+  There are no empty status rows.
+- Owner identity, the bottom two rows of the people column, in
+  overlay0: the owner name, then the server address when it fits.
+- Terminal area, the rest of the width, no frame. No context row
+  above it while the people column is visible and tall enough to
+  carry the status and identity rows. On a short screen the compact
+  fallback row comes back, even with the column visible.
+- Tab row, the first row of the terminal area. One tab per terminal of the
   selected person, in tree order: the number and the terminal name,
   cut at 16 characters, with a star after the name when the terminal
   is busy. The selected tab has a surface0 background and accent text.
@@ -53,7 +64,9 @@ Layout, left to right, top to bottom:
   terminal. The row ends with a + tab. When the tabs do not fit, the
   row scrolls so the selected tab and the + tab stay visible.
 - Terminal content starts on the row after the tab row and uses the
-  full width and height of the area. One terminal draws with no frame.
+  full width and height of the area. The tab row and the terminal
+  content touch the vertical rule. There is no gutter. Tab labels
+  keep their own one space of padding. One terminal draws with no frame.
   Two or more terminals draw as tiles in a grid, two columns when the
   area is 80 columns or wider, one column below that. A tile has a
   thin border and the title is the number and the terminal name. The
@@ -62,15 +75,29 @@ Layout, left to right, top to bottom:
 - Footer, one row: key hints on the right. A notice shows on the left
   and clears after 3 seconds. Hints stay visible while a notice shows.
 
-Spacing: 1 column gap between the vertical rule and the terminal
-content, no other margin, minimum tile row height 9. When the tiles
+Spacing: no gap between the vertical rule and the terminal content,
+no other margin, minimum tile row height 9. When the tiles
 do not fit, the grid scrolls and the last visible row reads "+N more"
 in overlay0. The same cue applies to the people list. When the grid
 shape changes (a resize or a new column count), the scroll moves so
 the focused tile stays visible.
 
 Narrow widths: below 90 columns the people column narrows to 14.
-Below 50 it hides and the footer shows "p people" to toggle it.
+Below 50 it starts hidden. The choice to show or hide it holds through
+a resize, a new selection, and the viewer.
+
+Compact fallback: when the people column is hidden, or when it is too
+short to carry the identity and status rows, the terminal area gains
+one row above the tab row. It reads, left to right: " > people " in
+overlay0 bold when the column is hidden, then "allowed" or "read
+only", the person name, "away 5m", "typing NAME", then the server
+address and the online count on the right.
+
+The row gives up space in this order. The access label, "away" and
+"typing" always keep their full length. The person name takes what is
+left and cuts to fit. The server address and the online count go on
+the right only when space remains after that; the server address
+drops first, then the count.
 
 Focus: accent marks focus and nothing else. When focus is on the people
 list, the vertical rule is accent. When focus is in the grid, the
@@ -82,7 +109,11 @@ the owner's own list, selects its tab, and opens it in the viewer with
 input. Number keys 1 to 9 select a tab. x closes the selected terminal
 at once and sends ClosePane. Slash opens a search over
 names. Esc on the main screen asks to quit. q quits.
-p toggles the people column at narrow widths.
+p shows or hides the people column at every width. In the viewer p goes
+to the terminal, so press ctrl+b first. A click on the "people" heading
+hides the column. When the column is hidden, a click on the "people"
+label at the left of the top row shows it again. The footer hint reads
+"p people" when the column is hidden and "p hide" when it is open.
 
 Geometry: the client keeps one content rect per visible terminal (the
 tile content or the viewer area). The same rect drives Watch cols and
@@ -100,10 +131,12 @@ Mouse: see section 2.5.
 ### 2.2 Viewer
 
 The viewer draws inside the terminal area. The people column stays
-visible on the left. The context row and the tab row stay above it.
-The viewer has no frame and fills the rest of the area. The context
-row shows the person and "input: allowed" or "input: read only". The
-footer shows one hint: ctrl+b back. A click on it sends Ctrl+B.
+visible on the left and carries the access line, so there is no
+context row. The tab row stays above the viewer. The viewer has no
+frame and fills the rest of the area. When the people column is
+hidden, the compact row above the tab row carries the person and
+"allowed" or "read only". The footer shows one hint: ctrl+b back. A
+click on it sends Ctrl+B.
 
 Every other key goes to the terminal: Esc, Tab, q, p, and printable
 characters. Ctrl+B is the only key the viewer keeps. Tabs stay
@@ -274,13 +307,13 @@ white lines. Concrete rules:
   249,226,175; red 243,139,168; teal 148,226,213; peach 250,179,135.
 - Every widget background is Color::Reset, the terminal default. The
   owner's terminal is transparent and seer respects it. No solid fill
-  anywhere. The top bar and the footer have no background. Only the
-  selected people row, the selected tab, the person menu, the context
-  menu, and the confirm dialog use surface0.
+  anywhere. The people column and the footer have no background. Only
+  the selected people row, the selected tab, the person menu, the
+  context menu, and the confirm dialog use surface0.
 - Key letters in the footer are text with bold; their labels are
   subtext0. The same style in every footer.
-- The header grant text is green for "input: allowed" and subtext0
-  for "input: read only".
+- The grant text is green for "allowed" and subtext0 for "read only",
+  in the people column and in the compact row alike.
 - Dialogs have padding 1, keys bold like the footer, and one blank
   row between the title and the keys.
 - Borders are plain box drawing, the ratatui default. The focused box
@@ -291,9 +324,11 @@ white lines. Concrete rules:
   shell; the state after it, green for idle, yellow for busy. Titles
   sit in the top border with one space of padding each side.
 - The people list: the selected row has surface0 background across
-  the full column width. The owner's row "you" is in yellow. Names
-  are text. The person the viewer shows keeps a small marker on the
-  left of its row.
+  the full column width, with no break in it. Every name is text,
+  including the owner's row "you"; an offline name is subtext0. The
+  person the viewer shows is bold. The heading, the "<" and the ">"
+  toggle marks, the online count, and the owner identity at the
+  bottom of the column are overlay0.
 - The person menu has surface0 background, a plain border in
   overlay0, and the same row highlight as the list.
 - The empty state and every dialog use the same palette. No color

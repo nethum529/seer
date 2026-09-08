@@ -28,9 +28,19 @@ fn help_detach_and_missing_attach_have_exact_results() {
     assert_eq!(help.status.code(), Some(0));
     let help_text = text(&help.stdout);
     for command in [
-        "start", "stop", "invite", "join", "list", "attach", "detach", "peek",
+        "start", "stop", "update", "invite", "join", "list", "attach", "detach", "peek", "help",
     ] {
-        assert!(help_text.contains(command));
+        assert!(help_text.contains(command), "help must list {command}");
+    }
+    for line in help_text
+        .lines()
+        .skip_while(|line| *line != "Commands:")
+        .skip(1)
+    {
+        if line.is_empty() {
+            break;
+        }
+        assert!(line.len() <= 100, "one line per command: {line}");
     }
 
     let detach = run(&config, &["detach"], "");
@@ -51,7 +61,7 @@ fn help_detach_and_missing_attach_have_exact_results() {
     for command in ["start", "invite", "list", "attach", "detach"] {
         let extra = run(&config, &[command, "extra"], "");
         assert_eq!(extra.status.code(), Some(2));
-        assert!(text(&extra.stderr).contains("join [capsule] Join a server"));
+        assert!(text(&extra.stderr).contains("join [capsule]      Join a server"));
     }
 }
 
