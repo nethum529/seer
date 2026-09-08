@@ -124,11 +124,10 @@ pub(crate) fn command(
     }
     if key.code == CrosstermKeyCode::Char('p')
         && key.modifiers.is_empty()
-        && state.chrome.narrow
         && state.viewer.is_none()
         && !state.searching
     {
-        state.chrome.show_people = !state.chrome.show_people;
+        toggle_people(state);
         return Ok(false);
     }
     if key.code == CrosstermKeyCode::Char('m')
@@ -233,6 +232,11 @@ fn click_hint(
     command(KeyEvent::new(code, modifiers), stream, state)
 }
 
+fn toggle_people(state: &mut ClientState) {
+    state.selection = None;
+    state.chrome.show_people = Some(!state.chrome.people_open);
+}
+
 fn click_target(
     mouse: MouseEvent,
     stream: &mut impl Stream,
@@ -241,6 +245,10 @@ fn click_target(
 ) -> io::Result<()> {
     let position = Position::new(mouse.column, mouse.row);
     let right = mouse.kind == MouseEventKind::Down(MouseButton::Right);
+    if !right && state.chrome.people_toggle_area.contains(position) {
+        toggle_people(state);
+        return Ok(());
+    }
     if let Some((index, row)) = state
         .people_areas
         .iter()
@@ -332,41 +340,121 @@ fn scroll(mouse: MouseEvent, state: &mut ClientState) {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use ratatui::{Terminal, backend::TestBackend};
+    use ratatui::{Terminal, backend::TestBackend, layout::Rect};
     use seer_core::Tree;
     use std::os::unix::net::UnixStream;
 
+    fn draw(terminal: &mut Terminal<TestBackend>, state: &mut ClientState) -> String {
+        terminal
+            .draw(|frame| crate::render::draw(frame, state))
+            .expect("screen must draw");
+        let buffer = terminal.backend().buffer();
+        buffer.content.iter().map(|cell| cell.symbol()).collect()
+    }
+
+    fn click(state: &mut ClientState, stream: &mut UnixStream, area: Rect) {
+        let event = MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: area.x + area.width / 2,
+            row: area.y,
+            modifiers: KeyModifiers::NONE,
+        };
+        mouse(event, stream, state, &mut None).expect("click must work");
+    }
+
     #[test]
-    fn people_toggle_only_changes_narrow_screens() {
+    fn people_toggle_works_on_every_width_by_key_and_click() {
         let mut state = ClientState::new(Tree::new(), "alice".into());
         let (mut stream, _peer) = UnixStream::pair().expect("streams must open");
         let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
-        terminal
-            .draw(|frame| crate::render::draw(frame, &mut state))
-            .expect("screen must draw");
         let key = KeyEvent::new(CrosstermKeyCode::Char('p'), KeyModifiers::NONE);
+        assert!(draw(&mut terminal, &mut state).contains("people"));
         command(key, &mut stream, &mut state).expect("wide key must work");
+        assert!(!draw(&mut terminal, &mut state).contains("people /"));
+        assert!(!state.chrome.people_open);
+        let reopen = state.chrome.people_toggle_area;
+        assert!(reopen.width >= 2, "hidden sidebar must keep a click target");
+        click(&mut state, &mut stream, reopen);
+        assert!(draw(&mut terminal, &mut state).contains("people"));
+        assert!(state.chrome.people_open);
+
         terminal.backend_mut().resize(45, 30);
-        terminal
-            .draw(|frame| crate::render::draw(frame, &mut state))
-            .expect("narrow screen must draw");
-        assert!(!title_row(&terminal).contains("people"));
+        assert!(
+            draw(&mut terminal, &mut state).contains("people"),
+            "the preference must survive a resize"
+        );
+        let toggle = state.chrome.people_toggle_area;
+        click(&mut state, &mut stream, toggle);
+        draw(&mut terminal, &mut state);
+        assert!(!state.chrome.people_open);
         command(key, &mut stream, &mut state).expect("narrow key must work");
-        terminal
-            .draw(|frame| crate::render::draw(frame, &mut state))
-            .expect("people must draw");
-        assert!(title_row(&terminal).contains("people"));
-        command(key, &mut stream, &mut state).expect("narrow key must work");
-        terminal
-            .draw(|frame| crate::render::draw(frame, &mut state))
-            .expect("people must hide");
-        assert!(!title_row(&terminal).contains("people"));
+        draw(&mut terminal, &mut state);
+        assert!(state.chrome.people_open);
     }
 
-    fn title_row(terminal: &Terminal<TestBackend>) -> String {
-        let buffer = terminal.backend().buffer();
-        (0..buffer.area.width)
-            .map(|x| buffer[(x, 1)].symbol())
-            .collect()
+    #[test]
+    fn the_viewer_keeps_p_for_the_terminal_but_takes_the_click() {
+        use seer_core::proto::{ClientMsg, codec};
+        let mut tree = Tree::new();
+        let workspace = tree.create_workspace("main").expect("workspace must open");
+        let pane = tree
+            .create_tab(
+                &workspace.id,
+                "one",
+                seer_core::PaneSize { cols: 80, rows: 24 },
+            )
+            .expect("tab must open")
+            .panes[0]
+            .id
+            .clone();
+        let mut state = ClientState::new(tree, "alice".into());
+        state.terminals.insert(
+            "alice".into(),
+            vec![seer_core::proto::TerminalInfo {
+                last_typist: None,
+                pane: pane.clone(),
+                name: "shell".into(),
+                state: "idle".into(),
+                cols: 80,
+                rows: 24,
+            }],
+        );
+        let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
+        peer.set_read_timeout(Some(std::time::Duration::from_millis(50)))
+            .expect("timeout must apply");
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+        state.open_focused();
+        draw(&mut terminal, &mut state);
+        let toggle = state.chrome.people_toggle_area;
+        command(
+            KeyEvent::new(CrosstermKeyCode::Char('p'), KeyModifiers::NONE),
+            &mut stream,
+            &mut state,
+        )
+        .expect("key must work");
+        let sent = codec::decode::<_, ClientMsg>(&mut peer).expect("input must reach the terminal");
+        let ClientMsg::TerminalInput {
+            pane: target,
+            input,
+            ..
+        } = sent
+        else {
+            panic!("p must send terminal input, not chrome, got {sent:?}");
+        };
+        assert_eq!(target, pane);
+        assert_eq!(
+            input,
+            key_to_input(KeyEvent::new(
+                CrosstermKeyCode::Char('p'),
+                KeyModifiers::NONE
+            ))
+            .expect("p must map to input")
+        );
+        draw(&mut terminal, &mut state);
+        assert!(state.chrome.people_open, "p must not move the sidebar");
+        click(&mut state, &mut stream, toggle);
+        draw(&mut terminal, &mut state);
+        assert!(!state.chrome.people_open);
+        assert!(state.viewer.is_some(), "the viewer must stay open");
     }
 }
