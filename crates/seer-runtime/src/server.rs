@@ -410,13 +410,26 @@ impl SharedSession {
 
     fn flush_messages(&self, messages: &[ServerMsg]) -> io::Result<()> {
         let adopt = {
+            let mut session = lock(&self.session)?;
             let mut connections = lock(&self.connections)?;
             let owner_present = connections.iter().any(|connection| connection.size_owner);
             let sizes = Self::visible_sizes(&connections);
-            let resized = lock(&self.session)?.apply_visible_sizes(&sizes)?;
-            for message in messages.iter().chain(&resized) {
-                let output = writer::encode(message)?;
-                connections.retain(|connection| connection.send(Arc::clone(&output)));
+            let mut all_messages = messages.to_vec();
+            all_messages.extend(session.apply_visible_sizes(&sizes)?);
+            let encoded = all_messages
+                .iter()
+                .map(writer::encode)
+                .collect::<io::Result<Vec<_>>>()?;
+            let bye = writer::encode(&ServerMsg::Bye {
+                reason: "peek target closed".into(),
+            })?;
+            let mut position = 0;
+            while position < connections.len() {
+                if connections[position].send_projection(&session, &all_messages, &encoded, &bye)? {
+                    position += 1;
+                } else {
+                    evict_connection(&mut connections, position);
+                }
             }
             if owner_present && !connections.iter().any(|connection| connection.size_owner) {
                 grant_next_owner(&mut connections)

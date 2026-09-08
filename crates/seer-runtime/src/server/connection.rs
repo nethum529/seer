@@ -1,5 +1,5 @@
 use seer_core::PaneSize;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -7,9 +7,11 @@ use std::sync::mpsc::{self, SyncSender};
 use std::time::Instant;
 
 use seer_core::TerminalCapabilities;
-use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, codec};
+use seer_core::Tree;
+use seer_core::proto::{ClientMsg, PeekTarget as TargetInfo, ServerMsg, codec};
 
 use super::{SharedSession, connection_loop, lock, writer};
+use crate::UserSession;
 
 pub(super) fn handle_connection(
     mut stream: UnixStream,
@@ -65,6 +67,12 @@ pub(super) struct ReportedViewport {
     pub(super) rows: u16,
 }
 
+enum ConnectionProjection {
+    Full,
+    Watched(Tree),
+    End { send_bye: bool },
+}
+
 pub(super) struct Connection {
     pub(super) id: u64,
     pub(super) watches: BTreeMap<String, PaneSize>,
@@ -75,6 +83,8 @@ pub(super) struct Connection {
     pub(super) read_only: bool,
     pub(super) size_owner: bool,
     pub(super) last_active: Instant,
+    pub(super) watch_started: bool,
+    pub(super) watch_ended: bool,
 }
 
 impl Connection {
@@ -92,6 +102,8 @@ impl Connection {
             read_only: false,
             size_owner: false,
             last_active: Instant::now(),
+            watch_started: false,
+            watch_ended: false,
         })
     }
 
@@ -107,6 +119,146 @@ impl Connection {
         }
         Ok(true)
     }
+
+    pub(super) fn send_projection(
+        &mut self,
+        session: &UserSession,
+        messages: &[ServerMsg],
+        encoded: &[Arc<[u8]>],
+        bye: &Arc<[u8]>,
+    ) -> io::Result<bool> {
+        match self.projection(session) {
+            ConnectionProjection::Full => {
+                for output in encoded {
+                    if !self.send(Arc::clone(output)) {
+                        return Ok(false);
+                    }
+                }
+            }
+            ConnectionProjection::Watched(tree) => {
+                for message in messages {
+                    let Some(message) = project_message(&tree, message) else {
+                        continue;
+                    };
+                    if !self.send(writer::encode(&message)?) {
+                        return Ok(false);
+                    }
+                }
+            }
+            ConnectionProjection::End { send_bye } => {
+                if send_bye && !self.send(Arc::clone(bye)) {
+                    return Ok(false);
+                }
+            }
+        }
+        Ok(true)
+    }
+
+    fn projection(&mut self, session: &UserSession) -> ConnectionProjection {
+        if !self.read_only || !self.watch_started {
+            return ConnectionProjection::Full;
+        }
+        let valid: BTreeSet<String> = self
+            .watches
+            .keys()
+            .filter(|pane| tree_contains_pane(&session.tree, pane))
+            .cloned()
+            .collect();
+        self.watches.retain(|pane, _| valid.contains(pane));
+        if valid.is_empty() {
+            if self.watch_ended {
+                return ConnectionProjection::End { send_bye: false };
+            }
+            self.watch_ended = true;
+            return ConnectionProjection::End { send_bye: true };
+        }
+        ConnectionProjection::Watched(project_tree(&session.tree, &valid))
+    }
+}
+
+fn project_message(tree: &Tree, message: &ServerMsg) -> Option<ServerMsg> {
+    match message {
+        ServerMsg::Tree { .. } => Some(ServerMsg::Tree { tree: tree.clone() }),
+        ServerMsg::Frame { pane, .. } | ServerMsg::Cells { pane, .. }
+            if !tree_contains_pane(tree, pane) =>
+        {
+            None
+        }
+        ServerMsg::Terminals { user, terminals } => Some(ServerMsg::Terminals {
+            user: user.clone(),
+            terminals: terminals
+                .iter()
+                .filter(|terminal| tree_contains_pane(tree, &terminal.pane))
+                .cloned()
+                .collect(),
+        }),
+        _ => Some(message.clone()),
+    }
+}
+
+fn project_tree(tree: &Tree, watched: &BTreeSet<String>) -> Tree {
+    let mut projected = tree.clone();
+    for workspace in &mut projected.workspaces {
+        workspace.tabs.retain_mut(|tab| {
+            tab.panes.retain(|pane| watched.contains(&pane.id));
+            let Some(root) = tab.layout.root.take() else {
+                return false;
+            };
+            let Some(root) = project_layout(root, watched) else {
+                return false;
+            };
+            tab.layout.root = Some(root);
+            if !tab
+                .layout
+                .focused
+                .as_ref()
+                .is_some_and(|pane| watched.contains(pane))
+            {
+                tab.layout.focused = tab.panes.first().map(|pane| pane.id.clone());
+            }
+            true
+        });
+    }
+    projected
+        .workspaces
+        .retain(|workspace| !workspace.tabs.is_empty());
+    projected
+}
+
+fn project_layout(
+    node: seer_core::LayoutNode,
+    watched: &BTreeSet<String>,
+) -> Option<seer_core::LayoutNode> {
+    match node {
+        seer_core::LayoutNode::Pane { pane } if watched.contains(&pane) => {
+            Some(seer_core::LayoutNode::Pane { pane })
+        }
+        seer_core::LayoutNode::Pane { .. } => None,
+        seer_core::LayoutNode::Split {
+            direction,
+            first,
+            second,
+        } => match (
+            project_layout(*first, watched),
+            project_layout(*second, watched),
+        ) {
+            (Some(first), Some(second)) => Some(seer_core::LayoutNode::Split {
+                direction,
+                first: Box::new(first),
+                second: Box::new(second),
+            }),
+            (Some(node), None) | (None, Some(node)) => Some(node),
+            (None, None) => None,
+        },
+    }
+}
+
+fn tree_contains_pane(tree: &Tree, pane: &str) -> bool {
+    tree.workspaces
+        .iter()
+        .flat_map(|workspace| &workspace.tabs)
+        .flat_map(|tab| &tab.panes)
+        .any(|candidate| candidate.id == pane)
 }
 
 impl Drop for Connection {
@@ -167,9 +319,9 @@ impl SharedSession {
                     .tree
                     .workspaces
                     .iter()
-                    .flat_map(|w| &w.tabs)
-                    .flat_map(|t| &t.panes)
-                    .any(|p| p.id == id)
+                    .flat_map(|workspace| &workspace.tabs)
+                    .flat_map(|tab| &tab.panes)
+                    .any(|candidate| candidate.id == id)
             }) {
                 return Err(io::Error::new(
                     io::ErrorKind::InvalidInput,
@@ -179,10 +331,10 @@ impl SharedSession {
             session.snapshot()
         };
         let mut connection = Connection::new(id, stream)?;
-        connection.read_only = true;
         if !connection.send_messages(&messages)? {
             return Err(super::connection_closed());
         }
+        connection.read_only = true;
         lock(&self.connections)?.push(connection);
         self.poll_wake.notify_one();
         Ok(())
@@ -197,7 +349,7 @@ impl SharedSession {
         )
     }
 
-    pub(super) fn targets(&self) -> io::Result<Vec<PeekTarget>> {
+    pub(super) fn targets(&self) -> io::Result<Vec<TargetInfo>> {
         let active = lock(&self.connections)?
             .iter()
             .find(|connection| connection.size_owner)

@@ -30,8 +30,14 @@ impl SharedSession {
             };
             if let Some(size) = size {
                 connection.watches.insert(pane.into(), size);
+                connection.watch_started = true;
+                connection.watch_ended = false;
             } else {
                 connection.watches.remove(pane);
+                if connection.watches.is_empty() {
+                    connection.watch_started = false;
+                    connection.watch_ended = false;
+                }
             }
         }
         self.flush_messages(&[])?;
