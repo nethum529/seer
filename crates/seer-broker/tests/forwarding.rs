@@ -5,13 +5,19 @@ use std::path::Path;
 use std::thread;
 use std::time::{Duration, Instant};
 
-use seer_core::proto::{ClientMsg, PeekTarget, PersonState, ServerMsg};
+use seer_core::proto::{ClientMsg, PersonState, ServerMsg};
 use seer_core::{InputEvent, TerminalInput};
 
 #[path = "support/binary.rs"]
 mod binary;
 #[path = "forwarding/extras.rs"]
 mod extras;
+#[path = "forwarding/latency.rs"]
+mod latency;
+#[path = "forwarding/lifecycle.rs"]
+mod lifecycle;
+#[path = "forwarding/sharing.rs"]
+mod sharing;
 #[path = "forwarding/support.rs"]
 mod support;
 
@@ -89,7 +95,7 @@ fn forwards_to_a_lazy_runtime_and_preserves_its_tree() {
     let mut second = connect_when_ready(address);
     send_hello(&mut second, "alice", "alice-secret");
     drop(welcome_client_id(read_message(&mut second), "alice"));
-    assert_tree_has_one_tab(read_message(&mut second));
+    wait_for_tree_with_tab(&mut second);
     assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
 
     drop(second);
@@ -136,164 +142,6 @@ fn wait_for_active_person(stream: &mut TcpStream) {
 }
 
 #[test]
-fn routes_peek_and_restores_the_owners_runtime() {
-    let temporary = TestFiles::new();
-    let address = unused_address();
-    write_config(&temporary, address);
-    temporary.write_runtime_wrapper();
-    let broker = temporary.start_broker();
-    let _broker = ProcessGuard::new(broker);
-
-    let mut alice = connect_when_ready(address);
-    send_hello(&mut alice, "alice", "alice-secret");
-    drop(welcome_client_id(read_message(&mut alice), "alice"));
-    let first_tree = wait_for_tree_with_tab(&mut alice);
-    assert!(wait_for_cells(&mut alice));
-    let workspace = first_tree.workspaces[0].id.clone();
-    let first_tab = first_tree.workspaces[0].tabs[0].id.clone();
-    let first_pane = first_tree.workspaces[0].tabs[0].panes[0].id.clone();
-    send(
-        &mut alice,
-        &ClientMsg::ClosePane {
-            workspace: workspace.clone(),
-            tab: first_tab,
-            pane: first_pane,
-        },
-    );
-    wait_for_empty_tree(&mut alice);
-
-    let mut bob = connect_when_ready(address);
-    send_hello(&mut bob, "bob", "bob-secret");
-    drop(welcome_client_id(read_message(&mut bob), "bob"));
-    wait_for_tree_with_tab(&mut bob);
-    send(&mut bob, &ClientMsg::Invite { hours: None });
-    assert_eq!(
-        wait_for_refused(&mut bob),
-        ServerMsg::Refused {
-            reason: "owner access required".into()
-        }
-    );
-
-    send(
-        &mut bob,
-        &ClientMsg::QueryTargets {
-            user: "charlie".into(),
-        },
-    );
-    assert_eq!(
-        wait_for_refused(&mut bob),
-        ServerMsg::Refused {
-            reason: "person not found".into()
-        }
-    );
-    assert!(!temporary.pid_file("charlie").is_file());
-
-    send(
-        &mut bob,
-        &ClientMsg::QueryTargets {
-            user: "alice".into(),
-        },
-    );
-    assert!(wait_for_targets(&mut bob).is_empty());
-
-    send(
-        &mut alice,
-        &ClientMsg::CreateTab {
-            workspace: workspace.clone(),
-        },
-    );
-    let alice_tree = wait_for_tree_with_tab(&mut alice);
-    assert!(wait_for_cells(&mut alice));
-    let tab = alice_tree.workspaces[0].tabs[0].id.clone();
-    let pane = alice_tree.workspaces[0].tabs[0].panes[0].id.clone();
-    send(
-        &mut alice,
-        &ClientMsg::Resize {
-            workspace: workspace.clone(),
-            tab: tab.clone(),
-            cols: 80,
-            rows: 24,
-        },
-    );
-    wait_for_tree_with_tab(&mut alice);
-
-    send(
-        &mut bob,
-        &ClientMsg::QueryTargets {
-            user: "alice".into(),
-        },
-    );
-    let target = wait_for_targets(&mut bob)
-        .into_iter()
-        .next()
-        .expect("alice must have a target");
-    assert_eq!(target.workspace, workspace);
-    assert_eq!(target.tab, tab);
-    assert!(target.active);
-    send(
-        &mut bob,
-        &ClientMsg::Peek {
-            user: "alice".into(),
-            workspace: target.workspace,
-            tab: target.tab,
-        },
-    );
-    assert_eq!(wait_for_tree_with_tab(&mut bob), alice_tree);
-
-    send_input(
-        &mut alice,
-        &workspace,
-        &tab,
-        &pane,
-        "printf 'alice-before\\n'\n",
-    );
-    assert!(wait_for_cells_containing(&mut alice, "alice-before").contains("alice-before"));
-    assert!(wait_for_cells_containing(&mut bob, "alice-before").contains("alice-before"));
-
-    send_input(&mut bob, &workspace, &tab, &pane, "printf 'bob-write\\n'\n");
-    send_input(
-        &mut alice,
-        &workspace,
-        &tab,
-        &pane,
-        "printf 'alice-after\\n'\n",
-    );
-    let alice_cells = wait_for_cells_containing(&mut alice, "alice-after");
-    let bob_cells = wait_for_cells_containing(&mut bob, "alice-after");
-    assert!(!alice_cells.contains("bob-write"));
-    assert!(!bob_cells.contains("bob-write"));
-
-    send(&mut bob, &ClientMsg::StopPeek);
-    wait_for_tree_with_tab(&mut bob);
-    send(
-        &mut bob,
-        &ClientMsg::QueryTargets {
-            user: "alice".into(),
-        },
-    );
-    let target = wait_for_targets(&mut bob)
-        .into_iter()
-        .next()
-        .expect("alice must have a target after requery");
-    send(
-        &mut bob,
-        &ClientMsg::Peek {
-            user: "alice".into(),
-            workspace: target.workspace,
-            tab: target.tab,
-        },
-    );
-    wait_for_tree_with_tab(&mut bob);
-    temporary.terminate_runtime("alice");
-    wait_for_tree_with_tab(&mut bob);
-    wait_for_disconnect(&mut alice);
-
-    drop(alice);
-    drop(bob);
-    temporary.terminate_runtime("bob");
-}
-
-#[test]
 fn supervises_an_exited_runtime_and_starts_a_replacement() {
     let temporary = TestFiles::new();
     let address = unused_address();
@@ -306,6 +154,10 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
     send_hello(&mut alice, "alice", "alice-secret");
     drop(welcome_client_id(read_message(&mut alice), "alice"));
     wait_for_tree_with_tab(&mut alice);
+    let initial_generation = temporary.runtime_record("alice")["generation"]
+        .as_str()
+        .expect("initial generation must be present")
+        .to_owned();
     let alice_pid = temporary.runtime_pid("alice");
 
     let mut bob = connect_when_ready(address);
@@ -315,7 +167,13 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
     let bob_pid = temporary.runtime_pid("bob");
 
     let alice_socket = temporary.terminate_runtime("alice");
+    wait_for_disconnect(&mut alice);
     assert_path_removed(format!("/proc/{alice_pid}/status"));
+    let failed = temporary.wait_for_runtime_state("alice", "failed");
+    assert_eq!(
+        failed["generation"].as_str(),
+        Some(initial_generation.as_str())
+    );
     assert_path_removed(&alice_socket);
     assert_process_running(bob_pid);
 
@@ -323,6 +181,11 @@ fn supervises_an_exited_runtime_and_starts_a_replacement() {
     send_hello(&mut replacement, "alice", "alice-secret");
     drop(welcome_client_id(read_message(&mut replacement), "alice"));
     wait_for_tree_with_tab(&mut replacement);
+    let replacement_record = temporary.wait_for_runtime_state("alice", "running");
+    assert_ne!(
+        replacement_record["generation"].as_str(),
+        Some(initial_generation.as_str())
+    );
     assert_ne!(temporary.runtime_pid("alice"), alice_pid);
     assert_process_running(bob_pid);
 
@@ -343,32 +206,6 @@ fn send_input(stream: &mut TcpStream, workspace: &str, tab: &str, pane: &str, in
             input: TerminalInput::new(InputEvent::Text(input.into())),
         },
     );
-}
-
-fn assert_tree_has_one_tab(message: ServerMsg) {
-    match message {
-        ServerMsg::Tree { tree } => {
-            assert_eq!(tree.workspaces.len(), 1);
-            assert_eq!(tree.workspaces[0].tabs.len(), 1);
-        }
-        other => panic!("expected Tree, got {other:?}"),
-    }
-}
-
-fn wait_for_empty_tree(stream: &mut TcpStream) {
-    wait_for_broker_message(
-        stream,
-        |message| matches!(message, ServerMsg::Tree { tree } if tree.workspaces.iter().all(|workspace| workspace.tabs.is_empty())),
-    );
-}
-
-fn wait_for_targets(stream: &mut TcpStream) -> Vec<PeekTarget> {
-    match wait_for_broker_message(stream, |message| {
-        matches!(message, ServerMsg::Targets { .. })
-    }) {
-        ServerMsg::Targets { targets } => targets,
-        other => panic!("expected Targets, got {other:?}"),
-    }
 }
 
 fn wait_for_seat(stream: &mut TcpStream) -> ServerMsg {

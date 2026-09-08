@@ -20,17 +20,17 @@ pub use pty::PtySession;
 pub use server::{bind, serve};
 pub use user_session::UserSession;
 
-const USAGE: &str = "usage: seer-runtime <socket-path> <user> <shell>";
+const USAGE: &str = "usage: seer-runtime <socket-path> <user> <shell> <generation>";
 const SNAPSHOT_DIRECTORY_VAR: &str = "SEER_SNAPSHOT_DIR";
 
 pub fn run() -> io::Result<()> {
-    let (socket_path, user, shell) = arguments()?;
+    let (socket_path, user, shell, generation) = arguments()?;
     start_lifeline_watch()?;
-    let listener = bind(Path::new(&socket_path))?;
-    install_sigterm_cleanup(&socket_path);
     let snapshot_dir = snapshot_directory();
     let session = persistence::load_session(user, shell, snapshot_dir.as_deref())?;
-    serve(listener, session)
+    let listener = bind(Path::new(&socket_path))?;
+    install_sigterm_cleanup(&socket_path);
+    server::serve_with_generation(listener, session, generation)
 }
 
 fn snapshot_directory() -> Option<PathBuf> {
@@ -57,17 +57,18 @@ fn watch_lifeline() {
     }
 }
 
-fn arguments() -> io::Result<(String, String, String)> {
+fn arguments() -> io::Result<(String, String, String, String)> {
     let mut values = env::args().skip(1);
     let socket_path = values.next().ok_or_else(usage_error)?;
     let user = values.next().ok_or_else(usage_error)?;
     let shell = values.next().ok_or_else(usage_error)?;
+    let generation = values.next().ok_or_else(usage_error)?;
 
     if values.next().is_some() {
         return Err(usage_error());
     }
 
-    Ok((socket_path, user, shell))
+    Ok((socket_path, user, shell, generation))
 }
 
 fn usage_error() -> io::Error {

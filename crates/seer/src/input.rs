@@ -1,75 +1,7 @@
-use crossterm::event::{
-    KeyCode as CrosstermKeyCode, KeyEvent, KeyModifiers, MouseButton as CrosstermMouseButton,
-    MouseEvent, MouseEventKind,
-};
-use ratatui::layout::Rect;
-use seer_core::{
-    InputEvent, KeyCode, KeyInput, Modifiers, MouseButton, MouseInput, MouseKind, MouseTracking,
-    SplitDirection, TerminalInput, Tree,
-};
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(crate) enum FocusDirection {
-    Up,
-    Down,
-    Left,
-    Right,
-}
-
-#[derive(Debug, Eq, PartialEq)]
-pub(crate) enum InputAction {
-    CreateTab,
-    SplitPane(SplitDirection),
-    ClosePane,
-    NextTab,
-    PreviousTab,
-    ToggleDrawer,
-    FocusPane(FocusDirection),
-    FocusNumber(usize),
-    Bytes(TerminalInput),
-}
-
-pub(crate) fn key_to_action(key: KeyEvent, prefix_pending: &mut bool) -> Option<InputAction> {
-    if !*prefix_pending {
-        if is_control_char(key, 'b') {
-            *prefix_pending = true;
-            return None;
-        }
-        return key_to_input(key).map(InputAction::Bytes);
-    }
-
-    *prefix_pending = false;
-    if is_control_char(key, 'b') {
-        return Some(InputAction::Bytes(TerminalInput::new(InputEvent::Text(
-            "\u{2}".into(),
-        ))));
-    }
-    let command_modifiers = KeyModifiers::CONTROL
-        | KeyModifiers::ALT
-        | KeyModifiers::SUPER
-        | KeyModifiers::HYPER
-        | KeyModifiers::META;
-    if key.modifiers.intersects(command_modifiers) {
-        return None;
-    }
-    match key.code {
-        CrosstermKeyCode::Char('c') => Some(InputAction::CreateTab),
-        CrosstermKeyCode::Char('%') => Some(InputAction::SplitPane(SplitDirection::Right)),
-        CrosstermKeyCode::Char('"') => Some(InputAction::SplitPane(SplitDirection::Down)),
-        CrosstermKeyCode::Char('x') => Some(InputAction::ClosePane),
-        CrosstermKeyCode::Char('n') => Some(InputAction::NextTab),
-        CrosstermKeyCode::Char('p') => Some(InputAction::PreviousTab),
-        CrosstermKeyCode::Char('u') => Some(InputAction::ToggleDrawer),
-        CrosstermKeyCode::Up => Some(InputAction::FocusPane(FocusDirection::Up)),
-        CrosstermKeyCode::Down => Some(InputAction::FocusPane(FocusDirection::Down)),
-        CrosstermKeyCode::Left => Some(InputAction::FocusPane(FocusDirection::Left)),
-        CrosstermKeyCode::Right => Some(InputAction::FocusPane(FocusDirection::Right)),
-        CrosstermKeyCode::Char(number @ '1'..='9') => number
-            .to_digit(10)
-            .map(|value| InputAction::FocusNumber(value as usize)),
-        _ => None,
-    }
-}
+mod selection;
+use crossterm::event::{KeyCode as CrosstermKeyCode, KeyEvent, KeyModifiers};
+use seer_core::{InputEvent, KeyCode, KeyInput, Modifiers, TerminalInput};
+pub(crate) use selection::{Selection, copy_text};
 
 const SCROLLBACK_PAGE_LINES: i32 = 20;
 
@@ -94,30 +26,6 @@ pub(crate) fn key_to_input(key: KeyEvent) -> Option<TerminalInput> {
         code,
         modifiers: map_modifiers(key.modifiers),
     })))
-}
-
-pub(crate) fn mouse_to_input(mouse: MouseEvent, column: u16, row: u16) -> TerminalInput {
-    let (kind, button) = map_mouse_kind(mouse.kind);
-    TerminalInput::new(InputEvent::Mouse(MouseInput {
-        kind,
-        button,
-        column,
-        row,
-        modifiers: map_modifiers(mouse.modifiers),
-    }))
-}
-
-pub(crate) fn mouse_event_is_tracked(kind: MouseEventKind, tracking: MouseTracking) -> bool {
-    match kind {
-        MouseEventKind::Moved => tracking == MouseTracking::AnyMotion,
-        MouseEventKind::Drag(_) => {
-            matches!(
-                tracking,
-                MouseTracking::ButtonMotion | MouseTracking::AnyMotion
-            )
-        }
-        _ => true,
-    }
 }
 
 fn map_key_code(code: CrosstermKeyCode) -> Option<KeyCode> {
@@ -185,168 +93,282 @@ pub(crate) fn map_modifiers(modifiers: KeyModifiers) -> Modifiers {
     }
 }
 
-fn map_mouse_kind(kind: MouseEventKind) -> (MouseKind, Option<MouseButton>) {
-    match kind {
-        MouseEventKind::Down(button) => (MouseKind::Down, Some(map_mouse_button(button))),
-        MouseEventKind::Up(button) => (MouseKind::Up, Some(map_mouse_button(button))),
-        MouseEventKind::Drag(button) => (MouseKind::Drag, Some(map_mouse_button(button))),
-        MouseEventKind::Moved => (MouseKind::Moved, None),
-        MouseEventKind::ScrollDown => (MouseKind::ScrollDown, None),
-        MouseEventKind::ScrollUp => (MouseKind::ScrollUp, None),
-        MouseEventKind::ScrollLeft => (MouseKind::ScrollLeft, None),
-        MouseEventKind::ScrollRight => (MouseKind::ScrollRight, None),
-    }
+pub(crate) fn raw_bytes(input: &TerminalInput) -> std::io::Result<Option<Vec<u8>>> {
+    seer_runtime::PaneGrid::new(1, 1).handle_input(input)
 }
 
-fn map_mouse_button(button: CrosstermMouseButton) -> MouseButton {
-    match button {
-        CrosstermMouseButton::Left => MouseButton::Left,
-        CrosstermMouseButton::Middle => MouseButton::Middle,
-        CrosstermMouseButton::Right => MouseButton::Right,
-    }
-}
+use crate::{state::ClientState, tui_navigation as navigation};
+use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
+use ratatui::layout::Position;
+use seer_net::Stream;
+use std::{
+    io,
+    time::{Duration, Instant},
+};
 
-pub(crate) fn selected_tab_tree(
-    tree: &Tree,
-    workspace_id: &str,
-    current_tab: &str,
-    forward: bool,
-) -> Option<Tree> {
-    let workspace = tree
-        .workspaces
-        .iter()
-        .find(|workspace| workspace.id == workspace_id)?;
-    let current = workspace
-        .tabs
-        .iter()
-        .position(|tab| tab.id == current_tab)?;
-    let next = if forward {
-        (current + 1) % workspace.tabs.len()
+pub(crate) fn command(
+    key: KeyEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+) -> io::Result<bool> {
+    if state.chrome.context.is_some() {
+        crate::person_menu::context_key(key, stream, state)?;
+        return Ok(false);
+    }
+    if state.quit_prompt {
+        return navigation::key(key, stream, state);
+    }
+    if state.menu.is_some() {
+        crate::person_menu::key(key, stream, state)?;
+        return Ok(false);
+    }
+    if key.code == CrosstermKeyCode::Char('p')
+        && key.modifiers.is_empty()
+        && state.chrome.narrow
+        && !state.searching
+    {
+        state.chrome.show_people = !state.chrome.show_people;
+        return Ok(false);
+    }
+    if key.code == CrosstermKeyCode::Char('m')
+        && key.modifiers.is_empty()
+        && state.viewer.is_none()
+        && !state.searching
+    {
+        let row = state
+            .people_areas
+            .iter()
+            .find(|(i, _)| *i == state.selected)
+            .map_or(state.chrome.people_area, |(_, row)| *row);
+        crate::person_menu::open(state, state.selected, row);
+    } else if state.viewer.is_some() {
+        if key.code == CrosstermKeyCode::Char('q') && key.modifiers.is_empty() {
+            return Ok(true);
+        }
+        crate::viewer::key(key, stream, state)?;
     } else {
-        (current + workspace.tabs.len() - 1) % workspace.tabs.len()
-    };
-    let selected_id = workspace.tabs.get(next)?.id.clone();
-    let mut selected = tree.clone();
-    selected
-        .workspaces
-        .retain(|workspace| workspace.id == workspace_id);
-    let workspace = selected.workspaces.first_mut()?;
-    workspace.tabs.retain(|tab| tab.id == selected_id);
-    Some(selected)
+        return navigation::key(key, stream, state);
+    }
+    Ok(false)
 }
 
-pub(crate) fn pane_in_direction(
-    rects: &[(String, Rect)],
-    focused: &str,
-    direction: FocusDirection,
-) -> Option<String> {
-    let source = rects.iter().find(|(pane, _)| pane == focused)?.1;
-    rects
+pub(crate) fn mouse(
+    mouse: MouseEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+    last: &mut Option<(String, usize, Instant)>,
+) -> io::Result<bool> {
+    if mouse.modifiers.contains(KeyModifiers::SHIFT) {
+        return Ok(false);
+    }
+    if selection::mouse(mouse, state)? {
+        *last = None;
+        return Ok(false);
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    if state.quit_prompt {
+        return click_hint(mouse, stream, state, true);
+    }
+    if state.chrome.context.is_some() {
+        crate::person_menu::context_mouse(mouse, stream, state)?;
+        return Ok(false);
+    }
+    if state.menu.is_some() {
+        crate::person_menu::mouse(mouse, stream, state)?;
+        return Ok(false);
+    }
+    if matches!(
+        mouse.kind,
+        MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
+    ) {
+        scroll(mouse, state);
+        return Ok(false);
+    }
+    if !matches!(
+        mouse.kind,
+        MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
+    ) {
+        return Ok(false);
+    }
+    if state
+        .chrome
+        .footer_areas
         .iter()
-        .filter(|(pane, _)| pane != focused)
-        .filter_map(|(pane, rect)| {
-            direction_score(source, *rect, direction).map(|score| (score, pane))
-        })
-        .min_by_key(|(score, _)| *score)
-        .map(|(_, pane)| pane.clone())
+        .any(|(_, area)| area.contains(position))
+    {
+        return click_hint(mouse, stream, state, false);
+    }
+    click_target(mouse, stream, state, last)?;
+    Ok(false)
 }
 
-fn direction_score(source: Rect, target: Rect, direction: FocusDirection) -> Option<(u32, u32)> {
-    let (left, top, right, bottom) = rect_edges(source);
-    let (target_left, target_top, target_right, target_bottom) = rect_edges(target);
-    let score = match direction {
-        FocusDirection::Up if target_bottom <= top => (
-            top - target_bottom,
-            span_gap(left, right, target_left, target_right),
-        ),
-        FocusDirection::Down if target_top >= bottom => (
-            target_top - bottom,
-            span_gap(left, right, target_left, target_right),
-        ),
-        FocusDirection::Left if target_right <= left => (
-            left - target_right,
-            span_gap(top, bottom, target_top, target_bottom),
-        ),
-        FocusDirection::Right if target_left >= right => (
-            target_left - right,
-            span_gap(top, bottom, target_top, target_bottom),
-        ),
-        _ => return None,
-    };
-    Some(score)
-}
-
-fn span_gap(first_start: u32, first_end: u32, second_start: u32, second_end: u32) -> u32 {
-    if first_end <= second_start {
-        second_start - first_end
+fn click_hint(
+    mouse: MouseEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+    dialog: bool,
+) -> io::Result<bool> {
+    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
+        return Ok(false);
+    }
+    let areas = if dialog {
+        &state.chrome.dialog_areas
     } else {
-        first_start.saturating_sub(second_end)
+        &state.chrome.footer_areas
+    };
+    let key = areas
+        .iter()
+        .find(|(_, area)| area.contains(Position::new(mouse.column, mouse.row)))
+        .map(|(key, _)| key.clone());
+    let Some(key) = key else {
+        return Ok(false);
+    };
+    let code = match key.as_str() {
+        "enter" => CrosstermKeyCode::Enter,
+        "esc" => CrosstermKeyCode::Esc,
+        "tab" => CrosstermKeyCode::Tab,
+        _ => match key.chars().next() {
+            Some(character) => CrosstermKeyCode::Char(character),
+            None => return Ok(false),
+        },
+    };
+    command(KeyEvent::new(code, KeyModifiers::NONE), stream, state)
+}
+
+fn click_target(
+    mouse: MouseEvent,
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+    last: &mut Option<(String, usize, Instant)>,
+) -> io::Result<()> {
+    let position = Position::new(mouse.column, mouse.row);
+    let right = mouse.kind == MouseEventKind::Down(MouseButton::Right);
+    if let Some((index, row)) = state
+        .people_areas
+        .iter()
+        .find(|(_, area)| area.contains(position))
+        .copied()
+    {
+        if right {
+            crate::person_menu::open(state, index, row);
+        } else {
+            state.select_person(index);
+            if double_click(last, format!("person:{}", state.user()), index) {
+                state.open_focused();
+            }
+        }
+        return Ok(());
+    }
+    if state.plus_area.contains(position) && !right {
+        navigation::key(
+            KeyEvent::new(CrosstermKeyCode::Char('n'), KeyModifiers::NONE),
+            stream,
+            state,
+        )?;
+        return Ok(());
+    }
+    if let Some((index, area)) = state
+        .tab_areas
+        .iter()
+        .find(|(_, area)| area.contains(position))
+        .copied()
+    {
+        state.select_tab(index);
+        if right {
+            crate::person_menu::open_context(state, position);
+        } else if mouse.column == area.right().saturating_sub(2) {
+            state.request_close(stream)?;
+        }
+        return Ok(());
+    }
+    if let Some((index, _)) = state
+        .box_areas
+        .iter()
+        .find(|(_, area)| area.contains(position))
+        .copied()
+    {
+        state.select_tab(index);
+        if right {
+            crate::person_menu::open_context(state, position);
+        } else if double_click(last, format!("box:{}", state.user()), index) {
+            state.open_focused();
+        }
+    }
+    Ok(())
+}
+
+fn double_click(last: &mut Option<(String, usize, Instant)>, target: String, index: usize) -> bool {
+    if last.as_ref().is_some_and(|(old, i, time)| {
+        *old == target && *i == index && time.elapsed() < Duration::from_millis(400)
+    }) {
+        *last = None;
+        true
+    } else {
+        *last = Some((target, index, Instant::now()));
+        false
     }
 }
 
-fn rect_edges(rect: Rect) -> (u32, u32, u32, u32) {
-    let left = u32::from(rect.x);
-    let top = u32::from(rect.y);
-    (
-        left,
-        top,
-        left + u32::from(rect.width),
-        top + u32::from(rect.height),
-    )
-}
-
-pub(crate) fn is_control_char(key: KeyEvent, character: char) -> bool {
-    key.code == CrosstermKeyCode::Char(character) && key.modifiers == KeyModifiers::CONTROL
+fn scroll(mouse: MouseEvent, state: &mut ClientState) {
+    let position = Position::new(mouse.column, mouse.row);
+    let up = mouse.kind == MouseEventKind::ScrollUp;
+    if state.chrome.people_area.contains(position) {
+        state.people_scroll = if up {
+            state.people_scroll.saturating_sub(1)
+        } else {
+            state.people_scroll.saturating_add(1)
+        };
+    } else if let Some(viewer) = &mut state.viewer {
+        if viewer.area.contains(position) {
+            viewer.scroll(up);
+        }
+    } else {
+        state.grid_scroll = if up {
+            state.grid_scroll.saturating_sub(1)
+        } else {
+            state.grid_scroll.saturating_add(1)
+        };
+    }
 }
 
 #[cfg(test)]
 mod tests {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    use seer_core::{InputEvent, KeyCode as CoreKeyCode, TerminalInput};
-
-    use super::{InputAction, key_to_action, key_to_input};
-
-    #[test]
-    fn prefix_creates_a_tab_and_sends_a_literal_prefix() {
-        let mut prefix_pending = false;
-        let prefix = KeyEvent::new(KeyCode::Char('b'), KeyModifiers::CONTROL);
-
-        assert_eq!(key_to_action(prefix, &mut prefix_pending), None);
-        assert_eq!(
-            key_to_action(key(KeyCode::Char('c')), &mut prefix_pending),
-            Some(InputAction::CreateTab)
-        );
-        assert_eq!(key_to_action(prefix, &mut prefix_pending), None);
-        assert_eq!(
-            key_to_action(prefix, &mut prefix_pending),
-            Some(InputAction::Bytes(TerminalInput::new(InputEvent::Text(
-                "\u{2}".into()
-            ))))
-        );
-    }
+    use super::*;
+    use ratatui::{Terminal, backend::TestBackend};
+    use seer_core::Tree;
+    use std::os::unix::net::UnixStream;
 
     #[test]
-    fn encodes_supported_keys() {
-        let cases = [
-            (key(KeyCode::Char('a')), CoreKeyCode::Char('a')),
-            (key(KeyCode::Enter), CoreKeyCode::Enter),
-            (key(KeyCode::Backspace), CoreKeyCode::Backspace),
-            (key(KeyCode::Up), CoreKeyCode::Up),
-            (key(KeyCode::Delete), CoreKeyCode::Delete),
-            (key(KeyCode::F(12)), CoreKeyCode::Function(12)),
-        ];
-
-        for (key, expected) in cases {
-            let input = key_to_input(key).expect("key must map");
-            let InputEvent::Key(key) = input.event else {
-                panic!("key event expected");
-            };
-            assert_eq!(key.code, expected);
-        }
-        assert_eq!(key_to_input(key(KeyCode::CapsLock)), None);
+    fn people_toggle_only_changes_narrow_screens() {
+        let mut state = ClientState::new(Tree::new(), "alice".into());
+        let (mut stream, _peer) = UnixStream::pair().expect("streams must open");
+        let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+        terminal
+            .draw(|frame| crate::render::draw(frame, &mut state))
+            .expect("screen must draw");
+        let key = KeyEvent::new(CrosstermKeyCode::Char('p'), KeyModifiers::NONE);
+        command(key, &mut stream, &mut state).expect("wide key must work");
+        terminal.backend_mut().resize(45, 30);
+        terminal
+            .draw(|frame| crate::render::draw(frame, &mut state))
+            .expect("narrow screen must draw");
+        assert!(!title_row(&terminal).contains("people"));
+        command(key, &mut stream, &mut state).expect("narrow key must work");
+        terminal
+            .draw(|frame| crate::render::draw(frame, &mut state))
+            .expect("people must draw");
+        assert!(title_row(&terminal).contains("people"));
+        command(key, &mut stream, &mut state).expect("narrow key must work");
+        terminal
+            .draw(|frame| crate::render::draw(frame, &mut state))
+            .expect("people must hide");
+        assert!(!title_row(&terminal).contains("people"));
     }
 
-    fn key(code: KeyCode) -> KeyEvent {
-        KeyEvent::new(code, KeyModifiers::NONE)
+    fn title_row(terminal: &Terminal<TestBackend>) -> String {
+        let buffer = terminal.backend().buffer();
+        (0..buffer.area.width)
+            .map(|x| buffer[(x, 1)].symbol())
+            .collect()
     }
 }

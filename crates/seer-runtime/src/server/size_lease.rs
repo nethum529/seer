@@ -1,337 +1,62 @@
-use std::os::unix::net::UnixStream;
-use std::time::{Duration, Instant};
+use std::collections::BTreeMap;
+use std::io;
 
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
-use seer_core::{PaneSize, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, Tree};
+use seer_core::PaneSize;
 
-use super::{SIZE_LEASE_TIMEOUT, SharedSession, handle_message, lock};
-use crate::UserSession;
+use super::{SharedSession, connection::Connection, lock};
 
-#[test]
-fn size_lease_governs_per_client_resize_control() {
-    let shared = SharedSession::new(UserSession::new("alice", "sh"));
-    let (owner_server, mut owner_client) = UnixStream::pair().expect("stream pair must open");
-    let (peer_server, mut peer_client) = UnixStream::pair().expect("stream pair must open");
-    let (peek_server, mut peek_client) = UnixStream::pair().expect("stream pair must open");
-
-    shared
-        .add_connection(1, owner_server)
-        .expect("owner must attach");
-    assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut owner_client)),
-        PaneSize { cols: 80, rows: 24 }
-    );
-
-    shared
-        .add_connection(2, peer_server)
-        .expect("peer must attach");
-    assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut peer_client)),
-        PaneSize { cols: 80, rows: 24 }
-    );
-
-    let capabilities = TerminalCapabilities {
-        protocol_version: TERMINAL_PROTOCOL_VERSION,
-    };
-    handle_message(&shared, 1, ClientMsg::TerminalCapabilities { capabilities })
-        .expect("valid capabilities must be accepted");
-    assert_eq!(capabilities_of(&shared, 1), Some(capabilities));
-    assert_eq!(capabilities_of(&shared, 2), None);
-
-    handle_message(
-        &shared,
-        2,
-        ClientMsg::TerminalCapabilities {
-            capabilities: TerminalCapabilities {
-                protocol_version: TERMINAL_PROTOCOL_VERSION + 1,
-            },
-        },
-    )
-    .expect("invalid capabilities must be refused");
-    read_until_refused(&mut peer_client);
-    assert_eq!(capabilities_of(&shared, 1), Some(capabilities));
-    assert_eq!(capabilities_of(&shared, 2), None);
-
-    handle_message(
-        &shared,
-        1,
-        ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 120,
-            rows: 40,
-        },
-    )
-    .expect("owner resize must apply");
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut owner_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
+impl SharedSession {
+    pub(super) fn watch_size(
+        &self,
+        id: u64,
+        pane: &str,
+        size: Option<PaneSize>,
+    ) -> io::Result<bool> {
+        let lease = lock(&self.lease)?;
+        let valid = lock(&self.session)?.pane_hosts.contains_key(pane)
+            && size.is_none_or(|size| size.cols > 0 && size.rows > 0);
+        if !valid {
+            drop(lease);
+            self.send_refused(id, "terminal or size is invalid".into())?;
+            return Ok(false);
         }
-    );
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut peer_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-    assert_eq!(
-        session_pane_size(&shared),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-
-    handle_message(
-        &shared,
-        2,
-        ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 100,
-            rows: 30,
-        },
-    )
-    .expect("denied resize must not fail");
-    assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(
-        viewport_of(&shared, 2),
-        Some(PaneSize {
-            cols: 100,
-            rows: 30
-        })
-    );
-    assert_eq!(
-        viewport_of(&shared, 1),
-        Some(PaneSize {
-            cols: 120,
-            rows: 40
-        })
-    );
-    assert_eq!(
-        session_pane_size(&shared),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-
-    shared
-        .add_connection(3, peek_server)
-        .expect("peek viewer must attach");
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut peek_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-    handle_message(
-        &shared,
-        3,
-        ClientMsg::Peek {
-            user: "bob".into(),
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-        },
-    )
-    .expect("peek must start");
-    assert!(read_only_of(&shared, 3));
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut peek_client)),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-    handle_message(
-        &shared,
-        3,
-        ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 200,
-            rows: 50,
-        },
-    )
-    .expect("peek resize must be dropped");
-    assert_eq!(viewport_of(&shared, 3), None);
-    assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(
-        session_pane_size(&shared),
-        PaneSize {
-            cols: 120,
-            rows: 40
-        }
-    );
-
-    shared
-        .remove_connection(3)
-        .expect("peek viewer must detach");
-    assert_eq!(owner_id(&shared), Some(1));
-
-    {
-        let mut connections = lock(&shared.connections).expect("connections must lock");
-        let owner = connections
-            .iter_mut()
-            .find(|connection| connection.id == 1)
-            .expect("owner must exist");
-        owner.last_active = Instant::now() - SIZE_LEASE_TIMEOUT - Duration::from_secs(1);
-    }
-    handle_message(
-        &shared,
-        2,
-        ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 90,
-            rows: 30,
-        },
-    )
-    .expect("takeover resize must apply");
-    assert_eq!(owner_id(&shared), Some(2));
-    assert_eq!(session_pane_size(&shared), PaneSize { cols: 90, rows: 30 });
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut owner_client)),
-        PaneSize { cols: 90, rows: 30 }
-    );
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut peer_client)),
-        PaneSize { cols: 90, rows: 30 }
-    );
-
-    handle_message(
-        &shared,
-        1,
-        ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 110,
-            rows: 40,
-        },
-    )
-    .expect("denied resize must not fail");
-    assert_eq!(owner_id(&shared), Some(2));
-    assert_eq!(
-        viewport_of(&shared, 1),
-        Some(PaneSize {
-            cols: 110,
-            rows: 40
-        })
-    );
-    assert_eq!(session_pane_size(&shared), PaneSize { cols: 90, rows: 30 });
-
-    shared.remove_connection(2).expect("owner must detach");
-    assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut owner_client)),
-        PaneSize {
-            cols: 110,
-            rows: 40
-        }
-    );
-    assert_eq!(
-        session_pane_size(&shared),
-        PaneSize {
-            cols: 110,
-            rows: 40
-        }
-    );
-
-    handle_message(
-        &shared,
-        1,
-        ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 130,
-            rows: 45,
-        },
-    )
-    .expect("survivor resize must apply");
-    assert_eq!(owner_id(&shared), Some(1));
-    assert_eq!(
-        session_pane_size(&shared),
-        PaneSize {
-            cols: 130,
-            rows: 45
-        }
-    );
-    assert_eq!(
-        pane_size_of(&read_until_tree(&mut owner_client)),
-        PaneSize {
-            cols: 130,
-            rows: 45
-        }
-    );
-}
-
-fn owner_id(shared: &SharedSession) -> Option<u64> {
-    let connections = lock(&shared.connections).expect("connections must lock");
-    connections
-        .iter()
-        .find(|connection| connection.size_owner)
-        .map(|connection| connection.id)
-}
-
-fn viewport_of(shared: &SharedSession, id: u64) -> Option<PaneSize> {
-    let connections = lock(&shared.connections).expect("connections must lock");
-    connections
-        .iter()
-        .find(|connection| connection.id == id)
-        .and_then(|connection| connection.viewport.as_ref())
-        .map(|viewport| PaneSize {
-            cols: viewport.cols,
-            rows: viewport.rows,
-        })
-}
-
-fn capabilities_of(shared: &SharedSession, id: u64) -> Option<TerminalCapabilities> {
-    let connections = lock(&shared.connections).expect("connections must lock");
-    connections
-        .iter()
-        .find(|connection| connection.id == id)
-        .and_then(|connection| connection.capabilities)
-}
-
-fn read_only_of(shared: &SharedSession, id: u64) -> bool {
-    let connections = lock(&shared.connections).expect("connections must lock");
-    connections
-        .iter()
-        .find(|connection| connection.id == id)
-        .is_some_and(|connection| connection.read_only)
-}
-
-fn session_pane_size(shared: &SharedSession) -> PaneSize {
-    let session = lock(&shared.session).expect("session must lock");
-    pane_size_of(&session.tree)
-}
-
-fn read_until_tree(stream: &mut UnixStream) -> Tree {
-    loop {
-        if let ServerMsg::Tree { tree } = codec::decode(stream).expect("server message must decode")
         {
-            return tree;
+            let mut connections = lock(&self.connections)?;
+            let Some(connection) = connections
+                .iter_mut()
+                .find(|connection| connection.id == id)
+            else {
+                return Ok(true);
+            };
+            if let Some(size) = size {
+                connection.watches.insert(pane.into(), size);
+                connection.watch_started = true;
+                connection.watch_ended = false;
+            } else {
+                connection.watches.remove(pane);
+                if connection.watches.is_empty() {
+                    connection.watch_started = false;
+                    connection.watch_ended = false;
+                }
+            }
         }
+        self.flush_messages(&[])?;
+        Ok(false)
     }
-}
 
-fn read_until_refused(stream: &mut UnixStream) {
-    loop {
-        if matches!(
-            codec::decode(stream).expect("server message must decode"),
-            ServerMsg::Refused { .. }
-        ) {
-            return;
+    pub(super) fn visible_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize> {
+        let mut sizes: BTreeMap<String, PaneSize> = BTreeMap::new();
+        for connection in connections {
+            for (pane, size) in &connection.watches {
+                sizes
+                    .entry(pane.clone())
+                    .and_modify(|smallest| {
+                        smallest.cols = smallest.cols.min(size.cols);
+                        smallest.rows = smallest.rows.min(size.rows);
+                    })
+                    .or_insert(*size);
+            }
         }
+        sizes
     }
-}
-
-fn pane_size_of(tree: &Tree) -> PaneSize {
-    tree.workspaces[0].tabs[0].panes[0].size
 }

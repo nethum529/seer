@@ -52,7 +52,7 @@ pub(crate) fn send_hello(stream: &mut TcpStream, user: &str, credential: &str) {
     .expect("hello must encode");
 }
 
-pub(crate) fn welcome_client_id(message: ServerMsg, expected_user: &str) -> String {
+pub fn welcome_client_id(message: ServerMsg, expected_user: &str) -> String {
     let ServerMsg::Welcome {
         user_id,
         name,
@@ -92,7 +92,7 @@ pub(crate) fn wait_for_tree_with_tab(stream: &mut TcpStream) -> seer_core::Tree 
     panic!("Tree with a tab was not received");
 }
 
-pub(crate) fn wait_for_disconnect(stream: &mut TcpStream) {
+pub fn wait_for_disconnect(stream: &mut TcpStream) {
     let deadline = Instant::now() + WAIT_TIMEOUT;
     let mut bytes = [0; 1_024];
     while Instant::now() < deadline {
@@ -121,7 +121,7 @@ pub(crate) fn wait_for_disconnect(stream: &mut TcpStream) {
     panic!("client did not disconnect");
 }
 
-pub(crate) struct TestFiles {
+pub struct TestFiles {
     pub(crate) root: PathBuf,
     pub(crate) state_dir: PathBuf,
     pub(crate) config: PathBuf,
@@ -181,7 +181,7 @@ impl TestFiles {
     }
 
     pub(crate) fn write_runtime_wrapper(&self) {
-        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nprintf '%s\\n%s\\n%s\\n' \"$(id -u)\" \"$HOME\" \"$SHELL\" > \"$SEER_TEST_FILES/$2.identity\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
+        let script = "#!/bin/sh\nprintf '%s\\n' \"$$\" > \"$SEER_TEST_FILES/$2.pid\"\nprintf '%s\\n' \"$$\" >> \"$SEER_TEST_FILES/$2.launches\"\nprintf '%s\\n%s\\n%s\\n%s\\n%s\\n' \"$1\" \"$2\" \"$3\" \"$4\" \"$PWD\" > \"$SEER_TEST_FILES/$2.args\"\nprintf '%s\\n%s\\n%s\\n' \"$(id -u)\" \"$HOME\" \"$SHELL\" > \"$SEER_TEST_FILES/$2.identity\"\nexec \"$SEER_TEST_RUNTIME_BIN\" \"$@\"\n";
         fs::write(&self.wrapper, script).expect("runtime wrapper must write");
         fs::set_permissions(&self.wrapper, fs::Permissions::from_mode(0o700))
             .expect("runtime wrapper mode must set");

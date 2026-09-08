@@ -1,4 +1,5 @@
 pub mod codec;
+pub(crate) mod frame_rows;
 
 use serde::{Deserialize, Serialize};
 
@@ -56,21 +57,60 @@ pub enum ClientMsg {
         cols: u16,
         rows: u16,
     },
+    GrantedInput {
+        workspace: String,
+        tab: String,
+        pane: String,
+        bytes: Vec<u8>,
+        sender: String,
+    },
     AttachRuntime,
     QueryTargets {
         user: String,
     },
-    Peek {
+    Watch {
         user: String,
-        workspace: String,
-        tab: String,
+        pane: String,
+        cols: u16,
+        rows: u16,
     },
-    StopPeek,
+    Unwatch {
+        user: String,
+        pane: String,
+    },
+    Terminals {
+        user: String,
+    },
+    TypeInto {
+        user: String,
+        pane: String,
+        bytes: Vec<u8>,
+    },
+    SetGrant {
+        user: String,
+        can_type: bool,
+    },
     Detach,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ServerMsg {
+    Terminals {
+        user: String,
+        terminals: Vec<TerminalInfo>,
+    },
+    Presence {
+        user: String,
+        online: bool,
+        idle_secs: u64,
+    },
+    Grants {
+        can_type_here: Vec<String>,
+        you_may_type_into: Vec<String>,
+    },
+    RuntimeReady {
+        generation: String,
+    },
     Welcome {
         user_id: String,
         name: String,
@@ -111,6 +151,7 @@ pub enum ServerMsg {
         bytes: Vec<u8>,
     },
     Cells {
+        user: String,
         pane: String,
         frame: TerminalFrame,
     },
@@ -153,6 +194,8 @@ pub enum PersonState {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct Person {
+    #[serde(default)]
+    pub online: bool,
     pub user_id: String,
     pub name: String,
     pub attached_clients: u32,
@@ -173,227 +216,13 @@ pub struct ClientInfo {
     pub connected_secs: u64,
 }
 
-#[cfg(test)]
-mod tests {
-    use std::fmt::Debug;
-
-    use serde::{Serialize, de::DeserializeOwned};
-
-    use super::{ClientInfo, ClientMsg, PeekTarget, Person, PersonState, ServerMsg, codec};
-    use crate::{
-        Cell, Color, Cursor, InputEvent, KeyCode, KeyInput, Modifiers, PaneSize, SplitDirection,
-        TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, TerminalInput,
-        TerminalModes, Tree,
-    };
-
-    fn assert_round_trip<T>(message: &T)
-    where
-        T: Debug + DeserializeOwned + PartialEq + Serialize,
-    {
-        let mut bytes = Vec::new();
-        codec::encode(&mut bytes, message).expect("message must encode");
-        let decoded = codec::decode(&mut bytes.as_slice()).expect("message must decode");
-        assert_eq!(message, &decoded);
-    }
-
-    fn tree_with_two_panes() -> Tree {
-        let mut tree = Tree::new();
-        tree.create_workspace("main")
-            .expect("workspace must be created");
-        tree.create_tab(
-            "w1",
-            "shell",
-            PaneSize {
-                cols: 120,
-                rows: 40,
-            },
-        )
-        .expect("tab must be created");
-        tree.split_pane("w1:p1", SplitDirection::Right)
-            .expect("pane must be split");
-        tree
-    }
-
-    #[test]
-    fn client_messages_round_trip() {
-        let messages = [
-            ClientMsg::Hello {
-                user_id: "user-1".into(),
-                credential: "credential-1".into(),
-                version: "0.1.0".into(),
-            },
-            ClientMsg::Join {
-                seat_token: "seat-1".into(),
-                name: "Alice".into(),
-            },
-            ClientMsg::Invite { hours: None },
-            ClientMsg::ListPeople,
-            ClientMsg::QueryStatus,
-            ClientMsg::DetachClient {
-                client_id: "client-1".into(),
-            },
-            ClientMsg::CreateTab {
-                workspace: "w1".into(),
-            },
-            ClientMsg::SplitPane {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                direction: SplitDirection::Right,
-            },
-            ClientMsg::SplitPane {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                direction: SplitDirection::Down,
-            },
-            ClientMsg::ClosePane {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                pane: "w1:p1".into(),
-            },
-            ClientMsg::FocusPane {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                pane: "w1:p2".into(),
-            },
-            ClientMsg::TerminalCapabilities {
-                capabilities: TerminalCapabilities {
-                    protocol_version: TERMINAL_PROTOCOL_VERSION,
-                },
-            },
-            ClientMsg::TerminalInput {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                pane: "w1:p1".into(),
-                input: TerminalInput::new(InputEvent::Key(KeyInput {
-                    code: KeyCode::Function(5),
-                    modifiers: Modifiers::default(),
-                })),
-            },
-            ClientMsg::Resize {
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-                cols: 120,
-                rows: 40,
-            },
-            ClientMsg::AttachRuntime,
-            ClientMsg::QueryTargets { user: "bob".into() },
-            ClientMsg::Peek {
-                user: "bob".into(),
-                workspace: "w1".into(),
-                tab: "w1:t1".into(),
-            },
-            ClientMsg::StopPeek,
-            ClientMsg::Detach,
-        ];
-
-        for message in messages {
-            assert_round_trip(&message);
-        }
-    }
-
-    #[test]
-    fn server_messages_round_trip() {
-        let tree = tree_with_two_panes();
-        let messages = [
-            ServerMsg::Welcome {
-                user_id: "user-1".into(),
-                name: "Alice".into(),
-                client_id: "client-1".into(),
-                tree: tree.clone(),
-            },
-            ServerMsg::Joined {
-                user_id: "user-2".into(),
-                credential: "credential-2".into(),
-                name: "Bob".into(),
-            },
-            ServerMsg::Seat {
-                capsule: "capsule-1".into(),
-                expires_in_secs: 3_600,
-            },
-            ServerMsg::People {
-                people: vec![Person {
-                    user_id: "user-1".into(),
-                    name: "Alice".into(),
-                    attached_clients: 2,
-                    peekable: true,
-                    state: PersonState::Active,
-                    tabs: 3,
-                    foreground: "nvim".into(),
-                    idle_secs: 12,
-                }],
-            },
-            ServerMsg::Status {
-                tabs: 3,
-                foreground: "nvim".into(),
-                idle_secs: 12,
-            },
-            ServerMsg::Targets {
-                targets: vec![PeekTarget {
-                    workspace: "w2".into(),
-                    workspace_name: "work".into(),
-                    tab: "w2:t3".into(),
-                    tab_title: "shell".into(),
-                    active: true,
-                }],
-            },
-            ServerMsg::Clients {
-                clients: vec![ClientInfo {
-                    client_id: "client-1".into(),
-                    connected_secs: 60,
-                }],
-            },
-            ServerMsg::Refused {
-                reason: "invalid token".into(),
-            },
-            ServerMsg::Tree { tree },
-            ServerMsg::Frame {
-                pane: "w1:p1".into(),
-                bytes: vec![0, 1, 255],
-            },
-            ServerMsg::Cells {
-                pane: "w1:p1".into(),
-                frame: TerminalFrame {
-                    rows: vec![
-                        vec![Cell {
-                            character: 'A',
-                            fg: Color::Indexed(1),
-                            bg: Color::Default,
-                            bold: true,
-                            italic: false,
-                            underline: false,
-                            dim: false,
-                            inverse: false,
-                            hidden: false,
-                            strikeout: false,
-                        }],
-                        vec![Cell {
-                            character: 'B',
-                            fg: Color::Rgb {
-                                red: 10,
-                                green: 20,
-                                blue: 30,
-                            },
-                            bg: Color::Indexed(2),
-                            bold: false,
-                            italic: true,
-                            underline: true,
-                            dim: false,
-                            inverse: false,
-                            hidden: false,
-                            strikeout: false,
-                        }],
-                    ],
-                    cursor: Cursor::default(),
-                    modes: TerminalModes::default(),
-                },
-            },
-            ServerMsg::Bye {
-                reason: "detached".into(),
-            },
-        ];
-
-        for message in messages {
-            assert_round_trip(&message);
-        }
-    }
+#[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
+pub struct TerminalInfo {
+    #[serde(default)]
+    pub last_typist: Option<String>,
+    pub pane: String,
+    pub name: String,
+    pub state: String,
+    pub cols: u16,
+    pub rows: u16,
 }

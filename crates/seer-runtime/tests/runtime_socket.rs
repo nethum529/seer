@@ -15,6 +15,8 @@ use seer_core::{InputEvent, SplitDirection, TerminalFrame, TerminalInput};
 mod support;
 use support::*;
 
+const GENERATION: &str = "0123456789abcdef0123456789abcdef";
+
 #[test]
 fn serves_cells_and_preserves_the_tree_after_disconnect() {
     let temporary = TemporaryDirectory::new();
@@ -26,7 +28,12 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
     drop(stale_listener);
 
     let runtime = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -57,7 +64,12 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
     wait_for_close(&mut reattached);
 
     let duplicate = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
         .spawn()
@@ -72,7 +84,12 @@ fn restores_idle_cells_after_reattach() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let runtime = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -98,11 +115,16 @@ fn restores_idle_cells_after_reattach() {
 }
 
 #[test]
-fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
+fn broadcasts_to_concurrent_connections() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let runtime = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -110,14 +132,14 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     let mut runtime = RuntimeProcess::new(runtime);
 
     let mut owner = connect_with_timeout(&socket_path);
-    let created = tree(read_message(&mut owner));
+    let created = read_until_tree(&mut owner);
     assert_eq!(created.workspaces[0].tabs.len(), 1);
     assert_eq!(created.workspaces[0].tabs[0].panes.len(), 1);
     let first_tab = created.workspaces[0].tabs[0].id.clone();
     let first_pane = created.workspaces[0].tabs[0].panes[0].id.clone();
     assert!(wait_for_cells(&mut owner));
 
-    let mut viewer = connect_with_timeout(&socket_path);
+    let mut viewer = connect_viewer(&socket_path);
     let viewer_tree = tree(read_message(&mut viewer));
     assert_eq!(viewer_tree, created);
     assert!(wait_for_cells(&mut viewer));
@@ -128,22 +150,22 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
 
     send(
         &mut viewer,
-        &ClientMsg::Peek {
+        &ClientMsg::Watch {
             user: "alice".into(),
-            workspace: "w1".into(),
-            tab: first_tab.clone(),
+            pane: first_pane.clone(),
+            cols: 80,
+            rows: 24,
         },
     );
-    assert_eq!(read_until_tree(&mut viewer), created);
-    assert!(wait_for_cells(&mut viewer));
     send_input(&mut viewer, &first_pane, "printf 'viewer-input\\n'\n");
 
     send(
         &mut viewer,
-        &ClientMsg::Peek {
+        &ClientMsg::Watch {
             user: "alice".into(),
-            workspace: "w1".into(),
-            tab: "w1:missing".into(),
+            pane: "w1:missing".into(),
+            cols: 80,
+            rows: 24,
         },
     );
     wait_for_refused(&mut viewer);
@@ -166,13 +188,19 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     let second_pane = owner_with_second.workspaces[0].tabs[1].panes[0].id.clone();
 
     let viewer_selected = read_until_tree(&mut viewer);
-    assert_eq!(viewer_selected.workspaces[0].name, created.workspaces[0].name);
+    assert_eq!(
+        viewer_selected.workspaces[0].name,
+        created.workspaces[0].name
+    );
     assert_eq!(viewer_selected.workspaces.len(), 1);
     assert_eq!(viewer_selected.workspaces[0].tabs.len(), 1);
     assert_eq!(viewer_selected.workspaces[0].tabs[0].id, first_tab);
-    assert!(!viewer_selected.workspaces[0].tabs[0].panes.iter().any(|pane| {
-        pane.id == second_pane
-    }));
+    assert!(
+        !viewer_selected.workspaces[0].tabs[0]
+            .panes
+            .iter()
+            .any(|pane| { pane.id == second_pane })
+    );
 
     send_input_at(
         &mut owner,
@@ -247,10 +275,7 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     let viewer_resized = read_until_tree(&mut viewer);
     assert_eq!(
         viewer_resized.workspaces[0].tabs[0].panes[0].size,
-        seer_core::PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        seer_core::PaneSize { cols: 80, rows: 24 }
     );
 
     send(
@@ -261,7 +286,7 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
             pane: first_pane,
         },
     );
-    let remaining = read_until_tree(&mut owner);
+    let remaining = read_until_tree_with_tab_count(&mut owner, 1);
     assert_eq!(remaining.workspaces[0].tabs.len(), 1);
     assert_eq!(remaining.workspaces[0].tabs[0].id, second_tab);
     wait_for_bye(&mut viewer);
@@ -277,7 +302,7 @@ fn broadcasts_to_concurrent_connections_and_blocks_peek_input() {
     wait_for_pane_cells_containing(&mut owner, &second_pane, "owner-after-close");
     assert_no_message(&mut viewer, None);
 
-    send(&mut viewer, &ClientMsg::StopPeek);
+    send(&mut viewer, &ClientMsg::Detach);
     wait_for_close(&mut viewer);
 
     drop(owner);
@@ -289,7 +314,12 @@ fn removes_its_socket_on_sigterm() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let mut runtime = runtime_command()
-        .args([socket_path.as_os_str(), "alice".as_ref(), "sh".as_ref()])
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
@@ -315,7 +345,8 @@ fn rejects_wrong_argument_counts() {
         &[],
         &["socket"],
         &["socket", "alice"],
-        &["socket", "alice", "sh", "extra"],
+        &["socket", "alice", "sh"],
+        &["socket", "alice", "sh", "generation", "extra"],
     ];
 
     for arguments in cases {
@@ -346,6 +377,37 @@ fn wait_for_socket_replacement(path: &Path, stale_inode: u64) {
         thread::sleep(RETRY_INTERVAL);
     }
 }
+fn connect_viewer(path: &Path) -> UnixStream {
+    let deadline = Instant::now() + CONNECT_TIMEOUT;
+    loop {
+        match UnixStream::connect(path) {
+            Ok(mut stream) => {
+                codec::encode(
+                    &mut stream,
+                    &ClientMsg::Terminals {
+                        user: "alice".into(),
+                    },
+                )
+                .expect("viewer attach must encode");
+                match codec::decode::<_, ServerMsg>(&mut stream).expect("runtime ready must decode")
+                {
+                    ServerMsg::RuntimeReady { generation } => {
+                        assert!(!generation.is_empty());
+                        stream
+                            .set_read_timeout(Some(MESSAGE_TIMEOUT))
+                            .expect("read timeout must set");
+                        return stream;
+                    }
+                    other => panic!("expected RuntimeReady, got {other:?}"),
+                }
+            }
+            Err(error) => {
+                assert!(Instant::now() < deadline, "viewer did not connect: {error}");
+            }
+        }
+        thread::sleep(RETRY_INTERVAL);
+    }
+}
 
 fn send_input_at(stream: &mut UnixStream, workspace: &str, tab: &str, pane: &str, input: &str) {
     send(
@@ -359,6 +421,15 @@ fn send_input_at(stream: &mut UnixStream, workspace: &str, tab: &str, pane: &str
     );
 }
 
+fn read_until_tree_with_tab_count(stream: &mut UnixStream, tab_count: usize) -> seer_core::Tree {
+    loop {
+        let tree = read_until_tree(stream);
+        if tree.workspaces[0].tabs.len() == tab_count {
+            return tree;
+        }
+    }
+}
+
 fn wait_for_pane_cells_containing(stream: &mut UnixStream, pane: &str, expected: &str) {
     let start = Instant::now();
     loop {
@@ -369,6 +440,7 @@ fn wait_for_pane_cells_containing(stream: &mut UnixStream, pane: &str, expected:
         if let ServerMsg::Cells {
             pane: message_pane,
             frame,
+            ..
         } = read_message(stream)
             && message_pane == pane
             && frame_text(&frame).contains(expected)
@@ -379,7 +451,12 @@ fn wait_for_pane_cells_containing(stream: &mut UnixStream, pane: &str, expected:
 }
 
 fn frame_text(frame: &TerminalFrame) -> String {
-    frame.rows.iter().flatten().map(|cell| cell.character).collect()
+    frame
+        .rows
+        .iter()
+        .flatten()
+        .map(|cell| cell.character)
+        .collect()
 }
 
 fn wait_for_refused(stream: &mut UnixStream) {
@@ -400,10 +477,12 @@ fn assert_no_message(stream: &mut UnixStream, pane: Option<&str>) {
             Ok(message) if pane.is_none() => {
                 panic!("unexpected message after peek ended: {message:?}");
             }
-            Ok(ServerMsg::Cells { pane: message_pane, .. })
-            | Ok(ServerMsg::Frame { pane: message_pane, .. })
-                if pane.is_some_and(|expected| expected == message_pane) =>
-            {
+            Ok(ServerMsg::Cells {
+                pane: message_pane, ..
+            })
+            | Ok(ServerMsg::Frame {
+                pane: message_pane, ..
+            }) if pane.is_some_and(|expected| expected == message_pane) => {
                 panic!("peek received an update for pane {message_pane}");
             }
             Ok(_) => {}
@@ -466,7 +545,7 @@ fn assert_usage_error(output: &Output) {
     assert!(output.stdout.is_empty());
     assert!(
         String::from_utf8_lossy(&output.stderr)
-            .contains("usage: seer-runtime <socket-path> <user> <shell>")
+            .contains("usage: seer-runtime <socket-path> <user> <shell> <generation>")
     );
 }
 

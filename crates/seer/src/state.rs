@@ -1,222 +1,256 @@
-use std::collections::HashMap;
+use crate::viewer::Viewer;
+use ratatui::layout::{Rect, Size};
+use seer_core::proto::{ClientMsg, Person, PersonState, TerminalInfo};
+use seer_core::{Cursor, TerminalFrame, Tree};
+use seer_net::Stream;
+use std::{
+    collections::{BTreeMap, BTreeSet, HashMap},
+    io,
+};
 
-use ratatui::layout::Rect;
-use seer_core::proto::Person;
-use seer_core::{Cell, Cursor, MouseTracking, Tab, TerminalFrame, Tree};
-
-#[derive(Debug)]
 pub(crate) struct ClientState {
-    tree: Tree,
-    frames: HashMap<String, TerminalFrame>,
-    selected_workspace: Option<String>,
-    selected_tab: Option<String>,
-    focused: Option<String>,
-    pane_areas: Vec<(String, Rect)>,
-    own_user: String,
-    foreground: String,
+    pub(crate) tree: Tree,
+    pub(crate) own_user: String,
+    pub(crate) own_name: String,
+    pub(crate) server: String,
+    pub(crate) people: Vec<Person>,
+    pub(crate) selected: usize,
+    pub(crate) focus: usize,
+    pub(crate) chrome: crate::render::Chrome,
+    pub(crate) terminals: HashMap<String, Vec<TerminalInfo>>,
+    pub(crate) frames: HashMap<(String, String), TerminalFrame>,
+    pub(crate) viewer: Option<Viewer>,
+    pub(crate) selection: Option<crate::input::Selection>,
+    pub(crate) menu: Option<crate::person_menu::PersonMenu>,
+    pub(crate) can_type_here: BTreeSet<String>,
+    pub(crate) you_may_type_into: BTreeSet<String>,
+    pub(crate) people_areas: Vec<(usize, Rect)>,
+    pub(crate) box_areas: Vec<(usize, Rect)>,
+    pub(crate) people_scroll: usize,
+    pub(crate) grid_scroll: usize,
+    pub(crate) grid_columns: usize,
+    pub(crate) search: String,
+    pub(crate) searching: bool,
+    pub(crate) quit_prompt: bool,
+    pub(crate) tab_areas: Vec<(usize, Rect)>,
+    pub(crate) plus_area: Rect,
+    pub(crate) discard_prefix: bool,
+    pub(crate) invite: Option<String>,
+    pub(crate) invite_pending: bool,
+    pub(crate) notice: String,
+    pub(crate) watches: BTreeMap<(String, String), Size>,
+    pub(crate) pending_new: Option<BTreeSet<String>>,
 }
 
 impl ClientState {
     pub(crate) fn new(tree: Tree, own_user: String) -> Self {
-        let (selected_workspace, selected_tab) = first_selection(&tree)
-            .map_or((None, None), |(workspace, tab)| {
-                (Some(workspace), Some(tab))
-            });
-        let focused = selected_tab_in(
-            &tree,
-            selected_workspace.as_deref(),
-            selected_tab.as_deref(),
-        )
-        .and_then(preferred_focus);
+        let own = Person {
+            user_id: own_user.clone(),
+            name: own_user.clone(),
+            online: true,
+            idle_secs: 0,
+            attached_clients: 1,
+            peekable: true,
+            state: PersonState::Active,
+            tabs: 0,
+            foreground: String::new(),
+        };
         Self {
             tree,
-            frames: HashMap::new(),
-            selected_workspace,
-            selected_tab,
-            focused,
-            pane_areas: Vec::new(),
+            own_name: own_user.clone(),
             own_user,
-            foreground: String::new(),
+            server: String::new(),
+            people: vec![own],
+            selected: 0,
+            focus: 0,
+            chrome: crate::render::Chrome::default(),
+            terminals: HashMap::new(),
+            frames: HashMap::new(),
+            viewer: None,
+            selection: None,
+            menu: None,
+            can_type_here: BTreeSet::new(),
+            you_may_type_into: BTreeSet::new(),
+            people_areas: Vec::new(),
+            box_areas: Vec::new(),
+            people_scroll: 0,
+            grid_scroll: 0,
+            grid_columns: 1,
+            search: String::new(),
+            searching: false,
+            quit_prompt: false,
+            tab_areas: Vec::new(),
+            plus_area: Rect::default(),
+            discard_prefix: false,
+            invite: None,
+            invite_pending: false,
+            notice: String::new(),
+            watches: BTreeMap::new(),
+            pending_new: None,
         }
     }
 
-    pub(crate) fn note_people(&mut self, people: &[Person]) {
-        if let Some(person) = people.iter().find(|person| person.user_id == self.own_user) {
-            self.foreground = person.foreground.clone();
-        }
+    pub(crate) fn set_notice(&mut self, notice: impl Into<String>) {
+        self.notice = notice.into();
+        self.chrome.notice_since = None;
     }
 
-    pub(crate) fn herdr_in_front(&self) -> bool {
-        self.foreground == "herdr"
+    pub(crate) fn user(&self) -> &str {
+        self.people
+            .get(self.selected)
+            .map_or(&self.own_user, |person| person.user_id.as_str())
     }
 
-    pub(crate) fn replace_tree(&mut self, tree: Tree) -> bool {
-        let previous_workspace = self.selected_workspace.clone();
-        let previous_tab = self.selected_tab.clone();
-        self.tree = tree;
-        if self.visible_tab().is_none() {
-            (self.selected_workspace, self.selected_tab) = first_selection(&self.tree)
-                .map_or((None, None), |(workspace, tab)| {
-                    (Some(workspace), Some(tab))
-                });
-        }
-        self.focused = self.visible_tab().and_then(preferred_focus);
-        previous_workspace != self.selected_workspace || previous_tab != self.selected_tab
+    pub(crate) fn person_name(&self, user: &str) -> &str {
+        self.people
+            .iter()
+            .find(|p| p.user_id == user)
+            .map_or("unknown", |p| p.name.as_str())
     }
 
-    pub(crate) fn apply_frame(&mut self, pane: String, frame: TerminalFrame) {
-        self.frames.insert(pane, frame);
-    }
-
-    pub(crate) fn focus_number(&mut self, number: usize) -> Option<String> {
-        let pane = self
-            .visible_pane_ids()
-            .nth(number.checked_sub(1)?)?
-            .to_owned();
-        self.focused = Some(pane.clone());
-        Some(pane)
+    pub(crate) fn selected_terminals(&self) -> &[TerminalInfo] {
+        self.terminals.get(self.user()).map_or(&[], Vec::as_slice)
     }
 
     pub(crate) fn focused(&self) -> Option<&str> {
-        self.focused.as_deref()
-    }
-
-    pub(crate) fn set_focus(&mut self, pane: String) {
-        self.focused = Some(pane);
-    }
-
-    pub(crate) fn visible_tab(&self) -> Option<&Tab> {
-        selected_tab_in(
-            &self.tree,
-            self.selected_workspace.as_deref(),
-            self.selected_tab.as_deref(),
-        )
-    }
-
-    pub(crate) fn selection(&self) -> Option<(&str, &str)> {
-        Some((
-            self.selected_workspace.as_deref()?,
-            self.selected_tab.as_deref()?,
-        ))
-    }
-
-    pub(crate) fn selected_workspace(&self) -> Option<&str> {
-        self.selected_workspace.as_deref()
-    }
-
-    pub(crate) fn pane_rows(&self, pane: &str) -> &[Vec<Cell>] {
-        self.frames
-            .get(pane)
-            .map_or(&[], |frame| frame.rows.as_slice())
+        self.viewer
+            .as_ref()
+            .map(|viewer| viewer.pane.as_str())
+            .or_else(|| {
+                self.selected_terminals()
+                    .get(self.focus)
+                    .map(|t| t.pane.as_str())
+            })
     }
 
     pub(crate) fn pane_cursor(&self, pane: &str) -> Option<Cursor> {
-        self.frames.get(pane).map(|frame| frame.cursor)
-    }
-
-    pub(crate) fn pane_mouse_tracking(&self, pane: &str) -> MouseTracking {
+        let user = self
+            .viewer
+            .as_ref()
+            .map_or(self.user(), |viewer| viewer.user.as_str());
         self.frames
-            .get(pane)
-            .map_or(MouseTracking::None, |frame| frame.modes.mouse_tracking)
+            .get(&(user.into(), pane.into()))
+            .map(|frame| frame.cursor)
     }
 
-    pub(crate) fn set_pane_areas(&mut self, areas: Vec<(String, Rect)>) {
-        self.pane_areas = areas;
+    pub(crate) fn note_people(&mut self, people: &[Person]) {
+        let selected_user = self.user().to_owned();
+        self.people = people.to_vec();
+        self.people.sort_by_key(|p| p.user_id != self.own_user);
+        if let Some(person) = self.people.iter().find(|p| p.user_id == self.own_user) {
+            self.own_name.clone_from(&person.name);
+        }
+        self.selected = self
+            .people
+            .iter()
+            .position(|p| p.user_id == selected_user)
+            .unwrap_or(0);
     }
 
-    pub(crate) fn mouse_target(&self, column: u16, row: u16) -> Option<(String, u16, u16)> {
-        self.pane_areas.iter().find_map(|(pane, area)| {
-            let inside = column >= area.x
-                && column < area.x.saturating_add(area.width)
-                && row >= area.y
-                && row < area.y.saturating_add(area.height);
-            inside.then(|| (pane.clone(), column - area.x, row - area.y))
+    pub(crate) fn select_person(&mut self, index: usize) {
+        self.selected = index.min(self.people.len().saturating_sub(1));
+        self.focus = 0;
+        self.viewer = None;
+        self.selection = None;
+        self.chrome.grid_focus = false;
+        self.grid_scroll = 0;
+        self.notice.clear();
+    }
+
+    pub(crate) fn matches(&self) -> Vec<usize> {
+        let query = self.search.to_lowercase();
+        self.people
+            .iter()
+            .enumerate()
+            .filter(|(_, person)| {
+                person.name.to_lowercase().contains(&query)
+                    || (person.user_id == self.own_user && "you".contains(&query))
+            })
+            .map(|(index, _)| index)
+            .collect()
+    }
+
+    pub(crate) fn open_focused(&mut self) {
+        self.selection = None;
+        self.chrome.grid_focus = true;
+        if let Some(terminal) = self.selected_terminals().get(self.focus) {
+            self.viewer = Some(Viewer::new(self.user().into(), terminal.pane.clone()));
+        }
+    }
+
+    pub(crate) fn select_tab(&mut self, index: usize) {
+        if index >= self.selected_terminals().len() {
+            return;
+        }
+        self.focus = index;
+        self.chrome.grid_focus = true;
+        if self.viewer.is_some() {
+            self.open_focused();
+        }
+        if !self.box_areas.iter().any(|(i, _)| *i == index) {
+            self.grid_scroll = index / self.grid_columns.max(1);
+        }
+    }
+
+    pub(crate) fn request_close(&self, stream: &mut impl Stream) -> io::Result<()> {
+        if self.user() != self.own_user {
+            return Ok(());
+        }
+        let Some(pane) = self.focused() else {
+            return Ok(());
+        };
+        let Some((workspace, tab)) = self.location(pane) else {
+            return Ok(());
+        };
+        crate::tui::send(
+            stream,
+            &ClientMsg::ClosePane {
+                workspace,
+                tab,
+                pane: pane.to_owned(),
+            },
+        )
+    }
+
+    pub(crate) fn replace_tree(&mut self, tree: Tree) {
+        self.tree = tree;
+        let Some(existing) = &self.pending_new else {
+            return;
+        };
+        let terminal = self
+            .tree
+            .workspaces
+            .iter()
+            .flat_map(|w| &w.tabs)
+            .flat_map(|t| &t.panes)
+            .find(|p| !existing.contains(&p.id))
+            .map(|p| p.id.clone());
+        if let Some(pane) = terminal {
+            self.selected = self
+                .people
+                .iter()
+                .position(|p| p.user_id == self.own_user)
+                .unwrap_or(0);
+            self.focus = self
+                .terminals
+                .get(&self.own_user)
+                .and_then(|list| list.iter().position(|t| t.pane == pane))
+                .unwrap_or(0);
+            self.viewer = Some(Viewer::new(self.own_user.clone(), pane));
+            self.pending_new = None;
+        }
+    }
+
+    pub(crate) fn may_type(&self, user: &str) -> bool {
+        user == self.own_user || self.you_may_type_into.contains(user)
+    }
+
+    pub(crate) fn location(&self, pane: &str) -> Option<(String, String)> {
+        self.tree.workspaces.iter().find_map(|w| {
+            w.tabs
+                .iter()
+                .find(|t| t.panes.iter().any(|p| p.id == pane))
+                .map(|t| (w.id.clone(), t.id.clone()))
         })
-    }
-
-    fn visible_pane_ids(&self) -> impl Iterator<Item = &str> {
-        self.visible_tab()
-            .into_iter()
-            .flat_map(|tab| tab.panes.iter())
-            .map(|pane| pane.id.as_str())
-    }
-}
-
-fn first_selection(tree: &Tree) -> Option<(String, String)> {
-    tree.workspaces.iter().find_map(|workspace| {
-        workspace
-            .tabs
-            .first()
-            .map(|tab| (workspace.id.clone(), tab.id.clone()))
-    })
-}
-
-fn selected_tab_in<'a>(
-    tree: &'a Tree,
-    workspace: Option<&str>,
-    tab: Option<&str>,
-) -> Option<&'a Tab> {
-    tree.workspaces
-        .iter()
-        .find(|candidate| Some(candidate.id.as_str()) == workspace)?
-        .tabs
-        .iter()
-        .find(|candidate| Some(candidate.id.as_str()) == tab)
-}
-
-fn preferred_focus(tab: &Tab) -> Option<String> {
-    tab.layout
-        .focused
-        .as_ref()
-        .filter(|focused| tab.panes.iter().any(|pane| pane.id == **focused))
-        .cloned()
-        .or_else(|| tab.panes.first().map(|pane| pane.id.clone()))
-}
-
-pub(crate) fn pane_rects(tab: &Tab, area: Rect) -> Vec<(String, Rect)> {
-    seer_core::layout::rects(tab, area.width, area.height)
-        .into_iter()
-        .map(|rect| {
-            (
-                rect.pane,
-                Rect::new(
-                    area.x.saturating_add(rect.x),
-                    area.y.saturating_add(rect.y),
-                    rect.cols,
-                    rect.rows,
-                ),
-            )
-        })
-        .collect()
-}
-
-#[cfg(test)]
-mod tests {
-    use ratatui::layout::Rect;
-    use seer_core::{PaneSize, SplitDirection, Tree};
-
-    use super::pane_rects;
-
-    #[test]
-    fn pane_rects_use_shared_layout_with_area_offsets() {
-        let mut tree = Tree::new();
-        tree.create_workspace("main")
-            .expect("workspace must be created");
-        tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
-            .expect("tab must be created");
-        tree.split_pane("w1:p1", SplitDirection::Right)
-            .expect("first split must be created");
-        let tab = tree
-            .split_pane("w1:p2", SplitDirection::Down)
-            .expect("second split must be created");
-
-        assert_eq!(
-            pane_rects(&tab, Rect::new(10, 20, 81, 25)),
-            vec![
-                ("w1:p1".into(), Rect::new(10, 20, 41, 25)),
-                ("w1:p2".into(), Rect::new(51, 20, 40, 13)),
-                ("w1:p3".into(), Rect::new(51, 33, 40, 12)),
-            ]
-        );
     }
 }

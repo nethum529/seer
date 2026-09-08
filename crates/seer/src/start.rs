@@ -2,7 +2,13 @@
 use serde::{Deserialize, Serialize};
 use std::process::ExitCode;
 #[cfg(target_os = "linux")]
+mod restore;
+#[cfg(target_os = "linux")]
+pub(crate) use restore::restore_owner;
+#[cfg(target_os = "linux")]
 mod stop;
+#[cfg(target_os = "linux")]
+mod wordmark;
 #[cfg(target_os = "linux")]
 use std::{
     env,
@@ -25,6 +31,11 @@ const START_TIMEOUT: Duration = Duration::from_secs(5);
 #[cfg(target_os = "linux")]
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
 #[cfg(target_os = "linux")]
+const WORDMARK: &str = r" ___  ___  ___  _ _
+(_-< / -_)/ -_)| '_|
+/__/ \___|\___||_|
+";
+#[cfg(target_os = "linux")]
 #[derive(Deserialize, Serialize)]
 struct BrokerConfig {
     listen: SocketAddr,
@@ -34,15 +45,15 @@ struct BrokerConfig {
     owner_name: String,
     state_dir: PathBuf,
 }
-pub fn run() -> ExitCode {
+pub fn run(restore: bool) -> ExitCode {
     #[cfg(target_os = "macos")]
     {
+        let _ = restore;
         eprintln!("the server runs on Linux only");
         ExitCode::FAILURE
     }
-
     #[cfg(target_os = "linux")]
-    match run_linux() {
+    match run_linux(restore) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");
@@ -56,24 +67,31 @@ pub fn stop() -> ExitCode {
         eprintln!("the server runs on Linux only");
         ExitCode::FAILURE
     }
-
     #[cfg(target_os = "linux")]
     stop::run()
 }
 #[cfg(target_os = "linux")]
-fn run_linux() -> io::Result<()> {
+fn run_linux(restore: bool) -> io::Result<()> {
     let config_dir = config_dir()?;
     secure_directory(&config_dir)?;
     let config_path = config_dir.join("broker.toml");
-    let (config, first_start) = load_or_create_config(&config_path)?;
+    let (config, mut first_start) = load_or_create_config(&config_path)?;
+    let started = Instant::now();
     secure_directory(&config.state_dir)?;
-
     if running_broker(&config) {
+        if restore {
+            return Err(io::Error::other(
+                "Server is running. Run seer stop, then seer start --restore.",
+            ));
+        }
         println!("Server already running at {}.", config.published_addr);
         return Ok(());
     }
-
-    start_broker(&config_path, &config, &config_dir, first_start)
+    if restore {
+        restore::remint_owner(&config_path, &config, &config_dir)?;
+        first_start = false;
+    }
+    start_broker(&config_path, &config, &config_dir, first_start, started)
 }
 #[cfg(target_os = "linux")]
 fn config_dir() -> io::Result<PathBuf> {
@@ -248,13 +266,13 @@ fn start_broker(
     config: &BrokerConfig,
     config_dir: &Path,
     first_start: bool,
+    started: Instant,
 ) -> io::Result<()> {
     let broker = find_broker()?;
     let log_path = config.state_dir.join("broker.log");
     let (log, log_start) = open_log(&log_path)?;
     let mut child = spawn_detached(&broker, config_path, log)?;
     let deadline = Instant::now() + START_TIMEOUT;
-
     if let Err(error) = complete_start(
         &mut child,
         config,
@@ -268,11 +286,22 @@ fn start_broker(
         print_log_tail(&log_path);
         return Err(error);
     }
+    wordmark::print(WORDMARK);
+    println!();
     println!("Server started at {}.", config.published_addr);
     println!("You are {}.", config.owner_name);
-    crate::commands::first_invite(first_start).map_err(|error| io::Error::other(error.message))
+    println!("Ready in {:.2} s.", started.elapsed().as_secs_f64());
+    let invite_started = Instant::now();
+    let result =
+        crate::commands::first_invite(first_start).map_err(|error| io::Error::other(error.message));
+    if first_start {
+        println!(
+            "Invite ready in {:.2} s.",
+            invite_started.elapsed().as_secs_f64()
+        );
+    }
+    result
 }
-
 #[cfg(target_os = "linux")]
 #[allow(clippy::too_many_arguments)] // Startup needs these values to clean up one child on each error.
 fn complete_start(
@@ -296,7 +325,6 @@ fn complete_start(
         format!("{}\n", child.id()).as_bytes(),
     )
 }
-
 #[cfg(target_os = "linux")]
 fn find_broker() -> io::Result<PathBuf> {
     let executable = env::current_exe()?;
@@ -318,7 +346,6 @@ fn find_broker() -> io::Result<PathBuf> {
         "seer-broker was not found",
     ))
 }
-
 #[cfg(target_os = "linux")]
 fn open_log(path: &Path) -> io::Result<(File, u64)> {
     let log = OpenOptions::new()
@@ -331,7 +358,6 @@ fn open_log(path: &Path) -> io::Result<(File, u64)> {
     let start = log.metadata()?.len();
     Ok((log, start))
 }
-
 #[cfg(target_os = "linux")]
 fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> {
     let stderr = log.try_clone()?;
@@ -353,7 +379,6 @@ fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> 
     }
     command.spawn()
 }
-
 #[cfg(target_os = "linux")]
 fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io::Result<()> {
     loop {
@@ -374,7 +399,6 @@ fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io
         thread::sleep(POLL_INTERVAL);
     }
 }
-
 #[cfg(target_os = "linux")]
 fn stop_child(child: &mut Child) {
     let pid = child.id().cast_signed();
@@ -385,7 +409,6 @@ fn stop_child(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
-
 #[cfg(target_os = "linux")]
 fn wait_for_owner_identity(
     path: &Path,
@@ -393,7 +416,11 @@ fn wait_for_owner_identity(
     deadline: Instant,
 ) -> io::Result<(String, String)> {
     loop {
-        if let Some(identity) = read_owner_identity(path, start)? {
+        let mut log = File::open(path)?;
+        log.seek(SeekFrom::Start(start))?;
+        let mut contents = String::new();
+        log.read_to_string(&mut contents)?;
+        if let Some(identity) = restore::read_owner_identity(&contents) {
             return Ok(identity);
         }
         if Instant::now() >= deadline {
@@ -405,26 +432,6 @@ fn wait_for_owner_identity(
         thread::sleep(POLL_INTERVAL);
     }
 }
-
-#[cfg(target_os = "linux")]
-fn read_owner_identity(path: &Path, start: u64) -> io::Result<Option<(String, String)>> {
-    let mut log = File::open(path)?;
-    log.seek(SeekFrom::Start(start))?;
-    let mut contents = String::new();
-    log.read_to_string(&mut contents)?;
-    let user_id = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("owner-id: "))
-        .filter(|value| !value.is_empty());
-    let credential = contents
-        .lines()
-        .find_map(|line| line.strip_prefix("owner-credential: "))
-        .filter(|value| !value.is_empty());
-    Ok(user_id
-        .zip(credential)
-        .map(|(user_id, credential)| (user_id.to_owned(), credential.to_owned())))
-}
-
 #[cfg(target_os = "linux")]
 fn strip_owner_credential(path: &Path) -> io::Result<()> {
     let contents = fs::read_to_string(path)?;
@@ -434,7 +441,6 @@ fn strip_owner_credential(path: &Path) -> io::Result<()> {
         .collect::<String>();
     write_private(path, filtered.as_bytes())
 }
-
 #[cfg(target_os = "linux")]
 fn save_owner(
     config_dir: &Path,
@@ -457,7 +463,6 @@ fn save_owner(
     });
     store.save_to(&path)
 }
-
 #[cfg(target_os = "linux")]
 fn print_log_tail(path: &Path) {
     let Ok(contents) = fs::read_to_string(path) else {
@@ -468,7 +473,3 @@ fn print_log_tail(path: &Path) {
         eprintln!("{line}");
     }
 }
-
-#[cfg(all(test, target_os = "linux"))]
-#[path = "start_tests.rs"]
-mod tests;

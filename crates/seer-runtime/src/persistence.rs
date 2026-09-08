@@ -43,6 +43,7 @@ fn restore_session(
     snapshot: Snapshot,
 ) -> io::Result<UserSession> {
     let mut session = UserSession {
+        published_terminals: Vec::new(),
         user,
         tree: snapshot.tree,
         shell,

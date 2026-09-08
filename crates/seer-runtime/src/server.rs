@@ -3,7 +3,7 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
-use std::sync::{Arc, Mutex};
+use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -16,13 +16,12 @@ mod util;
 mod writer;
 
 use connection::{
-    Connection, PeekTarget, ReportedViewport, evict_connection, flush_messages,
-    grant_next_owner, handle_target_query, reported_viewport,
+    Connection, ReportedViewport, evict_connection, grant_next_owner, handle_connection,
+    reported_viewport,
 };
-use status::handle_status_query;
 use util::{connection_closed, lock, remove_stale_socket, stop_after_snapshot_failure};
 
-const POLL_INTERVAL: Duration = Duration::from_millis(20);
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
 const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
 const SIZE_LEASE_TIMEOUT: Duration = Duration::from_secs(30);
 
@@ -32,16 +31,27 @@ pub fn bind(path: &Path) -> io::Result<UnixListener> {
 }
 
 pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
+    serve_with_generation(listener, session, String::new())
+}
+
+pub(crate) fn serve_with_generation(
+    listener: UnixListener,
+    session: UserSession,
+    generation: String,
+) -> io::Result<()> {
     let shared = Arc::new(SharedSession::new(session));
     start_poll_driver(Arc::clone(&shared))?;
 
     for connection_id in 0_u64.. {
         let (stream, _) = listener.accept()?;
         let connection = Arc::clone(&shared);
+        let generation = generation.clone();
         thread::Builder::new()
             .name(format!("runtime-connection-{connection_id}"))
             .spawn(move || {
-                if let Err(error) = handle_connection(stream, &connection, connection_id) {
+                if let Err(error) =
+                    handle_connection(stream, &connection, connection_id, generation)
+                {
                     if crate::persistence::is_fatal(&error) {
                         stop_after_snapshot_failure(&error);
                     }
@@ -50,33 +60,6 @@ pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
             })?;
     }
     Ok(())
-}
-
-fn handle_connection(
-    mut stream: UnixStream,
-    shared: &SharedSession,
-    connection_id: u64,
-) -> io::Result<()> {
-    let Ok(first) = codec::decode(&mut stream) else {
-        return Ok(());
-    };
-    match first {
-        ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
-        ClientMsg::QueryTargets { .. } => {
-            return handle_target_query(&mut stream, shared, connection_id);
-        }
-        ClientMsg::QueryStatus => return handle_status_query(&mut stream, shared),
-        _ => {
-            return Err(io::Error::new(
-                io::ErrorKind::InvalidInput,
-                "expected runtime attach",
-            ));
-        }
-    }
-    let result = connection_loop(&mut stream, shared, connection_id);
-    shared.remove_connection(connection_id)?;
-    let _ = stream.shutdown(std::net::Shutdown::Both);
-    result
 }
 
 fn connection_loop(
@@ -100,17 +83,15 @@ fn handle_message(
     message: ClientMsg,
 ) -> io::Result<bool> {
     match message {
-        ClientMsg::Detach | ClientMsg::StopPeek => Ok(true),
-        ClientMsg::Peek { workspace, tab, .. } => {
-            match shared.enter_peek(connection_id, &workspace, &tab) {
-                Ok(()) => {}
-                Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-                    shared.send_refused(connection_id, error.to_string())?;
-                }
-                Err(error) => return Err(error),
-            }
-            Ok(false)
-        }
+        ClientMsg::Detach => Ok(true),
+        ClientMsg::Watch {
+            pane, cols, rows, ..
+        } => shared.watch_size(
+            connection_id,
+            &pane,
+            Some(seer_core::PaneSize { cols, rows }),
+        ),
+        ClientMsg::Unwatch { pane, .. } => shared.watch_size(connection_id, &pane, None),
         ClientMsg::Resize {
             workspace,
             tab,
@@ -120,7 +101,7 @@ fn handle_message(
         ClientMsg::TerminalCapabilities { capabilities } => {
             shared.record_capabilities(connection_id, capabilities)
         }
-        message if message.is_mutating() => {
+        message if message.is_mutating() || matches!(message, ClientMsg::GrantedInput { .. }) => {
             shared.record_input(&message);
             shared.dispatch_input(connection_id, message)
         }
@@ -137,24 +118,19 @@ fn start_poll_driver(shared: Arc<SharedSession>) -> io::Result<()> {
 
 fn poll_driver(shared: &SharedSession) {
     loop {
-        let has_connections = match shared.poll_and_broadcast() {
-            Ok((_, has_connections)) => has_connections,
-            Err(error) => {
-                eprintln!("runtime poll error: {error}");
-                return;
-            }
-        };
-        let interval = if has_connections {
-            POLL_INTERVAL
-        } else {
-            DETACHED_POLL_INTERVAL
-        };
-        thread::sleep(interval);
+        if let Err(error) = shared
+            .poll_and_broadcast()
+            .and_then(|_| shared.wait_for_poll())
+        {
+            eprintln!("runtime poll error: {error}");
+            return;
+        }
     }
 }
 
 struct SharedSession {
     session: Mutex<UserSession>,
+    poll_wake: Condvar,
     connections: Mutex<Vec<Connection>>,
     lease: Mutex<()>,
     last_input: Mutex<Instant>,
@@ -164,6 +140,7 @@ impl SharedSession {
     fn new(session: UserSession) -> Self {
         Self {
             session: Mutex::new(session),
+            poll_wake: Condvar::new(),
             connections: Mutex::new(Vec::new()),
             lease: Mutex::new(()),
             last_input: Mutex::new(Instant::now()),
@@ -171,6 +148,7 @@ impl SharedSession {
     }
 
     fn add_connection(&self, id: u64, stream: UnixStream) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
         let messages = {
             let mut session = lock(&self.session)?;
             match session.ensure_first_shell() {
@@ -185,7 +163,6 @@ impl SharedSession {
         if !connection.send_messages(&messages)? {
             return Err(connection_closed());
         }
-        let _lease = lock(&self.lease)?;
         let mut connections = lock(&self.connections)?;
         let owner_stale = connections
             .iter()
@@ -199,6 +176,7 @@ impl SharedSession {
             connection.size_owner = !connections.iter().any(|c| c.size_owner);
         }
         connections.push(connection);
+        self.poll_wake.notify_one();
         Ok(())
     }
 
@@ -213,7 +191,7 @@ impl SharedSession {
         if owner_removed {
             self.recover_locked()?;
         }
-        Ok(())
+        self.flush_messages(&[])
     }
 
     fn recover(&self) -> io::Result<()> {
@@ -264,7 +242,7 @@ impl SharedSession {
         let Some(read_only) = self.refresh_read_only(connection_id)? else {
             return Ok(true);
         };
-        if read_only {
+        if read_only && !matches!(message, ClientMsg::GrantedInput { .. }) {
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);
         }
@@ -358,48 +336,6 @@ impl SharedSession {
         }
     }
 
-    fn enter_peek(&self, id: u64, workspace: &str, tab: &str) -> io::Result<()> {
-        let _lease = lock(&self.lease)?;
-        {
-            let connections = lock(&self.connections)?;
-            let Some(connection) = connections.iter().find(|connection| connection.id == id) else {
-                return Err(connection_closed());
-            };
-            if connection.peek_ended {
-                return Err(connection_closed());
-            }
-        }
-        let (owner_lost, entered) = {
-            let session = lock(&self.session)?;
-            let tree = session.selected_tree(workspace, tab)?;
-            let messages = session.snapshot_for(tree);
-            let mut connections = lock(&self.connections)?;
-            let Some(position) = connections
-                .iter()
-                .position(|connection| connection.id == id)
-            else {
-                return Err(connection_closed());
-            };
-            if connections[position].send_messages(&messages)? {
-                let owner_lost = connections[position].size_owner;
-                connections[position].size_owner = false;
-                connections[position].read_only = true;
-                connections[position].peek_target = Some(PeekTarget::new(workspace, tab));
-                (owner_lost, true)
-            } else {
-                (evict_connection(&mut connections, position), false)
-            }
-        };
-        if owner_lost {
-            self.recover_locked()?;
-        }
-        if entered {
-            Ok(())
-        } else {
-            Err(connection_closed())
-        }
-    }
-
     fn send_refused(&self, id: u64, reason: String) -> io::Result<()> {
         self.send_to(id, &ServerMsg::Refused { reason })
     }
@@ -442,15 +378,31 @@ impl SharedSession {
         }
     }
 
+    fn wait_for_poll(&self) -> io::Result<()> {
+        let connections = lock(&self.connections)?;
+        let interval = if connections.is_empty() {
+            DETACHED_POLL_INTERVAL
+        } else {
+            POLL_INTERVAL
+        };
+        let _wait = self
+            .poll_wake
+            .wait_timeout(connections, interval)
+            .map_err(|_| io::Error::other("runtime poll lock is poisoned"))?;
+        Ok(())
+    }
+
     fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {
+        let _lease = lock(&self.lease)?;
         let messages = lock(&self.session)?.poll();
         let has_connections = !lock(&self.connections)?.is_empty();
         if has_connections {
-            self.broadcast(&messages)?;
+            self.flush_messages(&messages)?;
         }
         Ok((messages, has_connections))
     }
 
+    #[cfg(test)]
     fn broadcast(&self, messages: &[ServerMsg]) -> io::Result<()> {
         let _lease = lock(&self.lease)?;
         self.flush_messages(messages)
@@ -458,9 +410,32 @@ impl SharedSession {
 
     fn flush_messages(&self, messages: &[ServerMsg]) -> io::Result<()> {
         let adopt = {
-            let session = lock(&self.session)?;
+            let mut session = lock(&self.session)?;
             let mut connections = lock(&self.connections)?;
-            flush_messages(&session, &mut connections, messages)?
+            let owner_present = connections.iter().any(|connection| connection.size_owner);
+            let sizes = Self::visible_sizes(&connections);
+            let mut all_messages = messages.to_vec();
+            all_messages.extend(session.apply_visible_sizes(&sizes)?);
+            let encoded = all_messages
+                .iter()
+                .map(writer::encode)
+                .collect::<io::Result<Vec<_>>>()?;
+            let bye = writer::encode(&ServerMsg::Bye {
+                reason: "peek target closed".into(),
+            })?;
+            let mut position = 0;
+            while position < connections.len() {
+                if connections[position].send_projection(&session, &all_messages, &encoded, &bye)? {
+                    position += 1;
+                } else {
+                    evict_connection(&mut connections, position);
+                }
+            }
+            if owner_present && !connections.iter().any(|connection| connection.size_owner) {
+                grant_next_owner(&mut connections)
+            } else {
+                None
+            }
         };
         if let Some(viewport) = adopt {
             self.adopt_locked(viewport)?;
@@ -477,5 +452,4 @@ impl SharedSession {
 #[cfg(test)]
 mod tests;
 
-#[cfg(test)]
 mod size_lease;

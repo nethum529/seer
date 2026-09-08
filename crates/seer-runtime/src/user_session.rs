@@ -2,7 +2,7 @@ use crate::PaneHost;
 use crate::persistence::{self, Store};
 use portable_pty::CommandBuilder;
 use seer_core::layout::{PaneRect, rects};
-use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg};
+use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, TerminalInfo};
 use seer_core::{
     PaneSize, TERMINAL_PROTOCOL_VERSION, Tab, TerminalCapabilities, TerminalInput, Tree, TreeError,
 };
@@ -16,6 +16,7 @@ const DEFAULT_TAB_TITLE: &str = "shell";
 
 pub struct UserSession {
     pub user: String,
+    pub(crate) published_terminals: Vec<TerminalInfo>,
     pub tree: Tree,
     pub(crate) shell: String,
     pub(crate) viewport: PaneSize,
@@ -28,6 +29,7 @@ impl UserSession {
     pub fn new(user: impl Into<String>, shell: impl Into<String>) -> Self {
         Self {
             user: user.into(),
+            published_terminals: Vec::new(),
             tree: Tree::new(),
             shell: shell.into(),
             viewport: PaneSize {
@@ -60,6 +62,13 @@ impl UserSession {
             ClientMsg::TerminalCapabilities { capabilities } => {
                 validate_capabilities(capabilities).map(|()| Vec::new())
             }
+            ClientMsg::GrantedInput {
+                workspace,
+                tab,
+                pane,
+                bytes,
+                sender,
+            } => self.granted_input(&workspace, &tab, &pane, &bytes, sender),
             ClientMsg::TerminalInput {
                 workspace,
                 tab,
@@ -80,23 +89,37 @@ impl UserSession {
             | ClientMsg::DetachClient { .. }
             | ClientMsg::AttachRuntime
             | ClientMsg::QueryTargets { .. }
-            | ClientMsg::Peek { .. }
-            | ClientMsg::StopPeek
+            | ClientMsg::Watch { .. }
+            | ClientMsg::Unwatch { .. }
+            | ClientMsg::Terminals { .. }
+            | ClientMsg::SetGrant { .. }
+            | ClientMsg::TypeInto { .. }
             | ClientMsg::Detach => Ok(Vec::new()),
         }
     }
 
     #[must_use]
     pub fn poll(&mut self) -> Vec<ServerMsg> {
-        self.pane_hosts
+        let mut messages: Vec<_> = self
+            .pane_hosts
             .iter_mut()
             .filter_map(|(pane, host)| {
                 host.poll().then(|| ServerMsg::Cells {
+                    user: self.user.clone(),
                     pane: pane.clone(),
                     frame: host.frame(),
                 })
             })
-            .collect()
+            .collect();
+        let terminals = self.terminals();
+        if terminals != self.published_terminals {
+            self.published_terminals.clone_from(&terminals);
+            messages.push(ServerMsg::Terminals {
+                user: self.user.clone(),
+                terminals,
+            });
+        }
+        messages
     }
 
     #[must_use]
@@ -133,6 +156,7 @@ impl UserSession {
             .flat_map(|tab| &tab.panes)
             .filter_map(|pane| {
                 self.pane_hosts.get(&pane.id).map(|host| ServerMsg::Cells {
+                    user: self.user.clone(),
                     pane: pane.id.clone(),
                     frame: host.frame(),
                 })
@@ -140,6 +164,10 @@ impl UserSession {
             .collect::<Vec<_>>();
         let mut messages = vec![ServerMsg::Tree { tree }];
         messages.extend(cells);
+        messages.push(ServerMsg::Terminals {
+            user: self.user.clone(),
+            terminals: self.terminals(),
+        });
         messages
     }
 
@@ -270,6 +298,7 @@ impl UserSession {
         let changed = host.handle_input(input)?;
         Ok(changed
             .then(|| ServerMsg::Cells {
+                user: self.user.clone(),
                 pane: pane.to_owned(),
                 frame: host.frame(),
             })
@@ -382,17 +411,6 @@ impl UserSession {
         }
     }
 
-    pub(crate) fn selected_tree(&self, workspace: &str, tab: &str) -> io::Result<Tree> {
-        self.tab(workspace, tab)?;
-        let mut tree = self.tree.clone();
-        tree.workspaces
-            .retain(|candidate| candidate.id == workspace);
-        for workspace in &mut tree.workspaces {
-            workspace.tabs.retain(|candidate| candidate.id == tab);
-        }
-        Ok(tree)
-    }
-
     fn tree_message(&self) -> Vec<ServerMsg> {
         vec![ServerMsg::Tree {
             tree: self.tree.clone(),
@@ -439,3 +457,5 @@ pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
 
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
+
+mod terminals;

@@ -109,6 +109,22 @@ impl Registry {
         ))
     }
 
+    pub(crate) fn remint_owner(&self) -> io::Result<(String, String)> {
+        let mut data = self.lock()?;
+        let mut next = data.clone();
+        let owner = next
+            .people
+            .iter_mut()
+            .find(|person| person.is_owner)
+            .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "owner is unavailable"))?;
+        let credential = random_hex::<32>()?;
+        owner.credential_hash = credential_hash(&credential);
+        let user_id = owner.user_id.clone();
+        write_json_atomically(&self.state_dir.join(REGISTRY_FILE), &next)?;
+        *data = next;
+        Ok((user_id, credential))
+    }
+
     pub(crate) fn authenticate(
         &self,
         user_id: &str,
@@ -267,19 +283,27 @@ fn now_secs() -> io::Result<u64> {
         .map_err(io::Error::other)
 }
 
-fn load_json<T: DeserializeOwned + Default>(path: &Path) -> io::Result<T> {
-    match File::open(path) {
-        Ok(file) => serde_json::from_reader(BufReader::new(file)).map_err(invalid_json),
+pub(crate) fn load_json<T: DeserializeOwned + Default>(path: &Path) -> io::Result<T> {
+    match load_json_required(path) {
+        Ok(value) => Ok(value),
         Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(T::default()),
         Err(error) => Err(error),
     }
 }
 
-fn set_private_file(path: &Path) -> io::Result<()> {
+pub(crate) fn load_json_required<T: DeserializeOwned>(path: &Path) -> io::Result<T> {
+    let file = File::open(path)?;
+    serde_json::from_reader(BufReader::new(file)).map_err(invalid_json)
+}
+
+pub(crate) fn set_private_file(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, Permissions::from_mode(FILE_MODE))
 }
 
-fn write_json_atomically<T: Serialize + ?Sized>(path: &Path, value: &T) -> io::Result<()> {
+pub(crate) fn write_json_atomically<T: Serialize + ?Sized>(
+    path: &Path,
+    value: &T,
+) -> io::Result<()> {
     let file_name = path
         .file_name()
         .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "state file has no name"))?;

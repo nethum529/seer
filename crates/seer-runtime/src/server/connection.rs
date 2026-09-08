@@ -1,3 +1,5 @@
+use seer_core::PaneSize;
+use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
@@ -5,29 +7,58 @@ use std::sync::mpsc::{self, SyncSender};
 use std::time::Instant;
 
 use seer_core::TerminalCapabilities;
-use seer_core::proto::{ClientMsg, PeekTarget as TargetInfo, ServerMsg, codec};
 use seer_core::Tree;
+use seer_core::proto::{ClientMsg, PeekTarget as TargetInfo, ServerMsg, codec};
 
+use super::{SharedSession, connection_loop, lock, writer};
 use crate::UserSession;
-use super::{SharedSession, connection_closed, connection_loop, lock, writer};
+
+pub(super) fn handle_connection(
+    mut stream: UnixStream,
+    shared: &SharedSession,
+    connection_id: u64,
+    generation: String,
+) -> io::Result<()> {
+    codec::encode(&mut stream, &ServerMsg::RuntimeReady { generation })?;
+    let Ok(first) = codec::decode(&mut stream) else {
+        return Ok(());
+    };
+    match first {
+        ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
+        ClientMsg::Watch {
+            pane, cols, rows, ..
+        } => {
+            shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane))?;
+            if let Err(error) =
+                shared.watch_size(connection_id, &pane, Some(PaneSize { cols, rows }))
+            {
+                shared.remove_connection(connection_id)?;
+                return Err(error);
+            }
+        }
+        ClientMsg::Terminals { .. } => {
+            shared.add_view_connection(connection_id, stream.try_clone()?, None)?
+        }
+        ClientMsg::QueryTargets { .. } => {
+            return handle_target_query(&mut stream, shared, connection_id);
+        }
+        ClientMsg::QueryStatus => return super::status::handle_status_query(&mut stream, shared),
+        _ => {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "expected runtime attach",
+            ));
+        }
+    }
+    let result = connection_loop(&mut stream, shared, connection_id);
+    shared.remove_connection(connection_id)?;
+    let _ = stream.shutdown(std::net::Shutdown::Both);
+    result
+}
 
 // A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
 const OUTPUT_QUEUE_CAPACITY: usize = 64;
 
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub(super) struct PeekTarget {
-    workspace: String,
-    tab: String,
-}
-
-impl PeekTarget {
-    pub(super) fn new(workspace: &str, tab: &str) -> Self {
-        Self {
-            workspace: workspace.to_owned(),
-            tab: tab.to_owned(),
-        }
-    }
-}
 #[derive(Clone)]
 pub(super) struct ReportedViewport {
     pub(super) workspace: String,
@@ -36,15 +67,15 @@ pub(super) struct ReportedViewport {
     pub(super) rows: u16,
 }
 
-
 enum ConnectionProjection {
     Full,
-    Peek(Tree),
+    Watched(Tree),
     End { send_bye: bool },
 }
 
 pub(super) struct Connection {
     pub(super) id: u64,
+    pub(super) watches: BTreeMap<String, PaneSize>,
     pub(super) output: SyncSender<Arc<[u8]>>,
     pub(super) stream: UnixStream,
     pub(super) capabilities: Option<TerminalCapabilities>,
@@ -52,8 +83,8 @@ pub(super) struct Connection {
     pub(super) read_only: bool,
     pub(super) size_owner: bool,
     pub(super) last_active: Instant,
-    pub(super) peek_target: Option<PeekTarget>,
-    pub(super) peek_ended: bool,
+    pub(super) watch_started: bool,
+    pub(super) watch_ended: bool,
 }
 
 impl Connection {
@@ -63,6 +94,7 @@ impl Connection {
         writer::spawn(id, writer, queued)?;
         Ok(Self {
             id,
+            watches: BTreeMap::new(),
             output,
             stream,
             capabilities: None,
@@ -70,8 +102,8 @@ impl Connection {
             read_only: false,
             size_owner: false,
             last_active: Instant::now(),
-            peek_target: None,
-            peek_ended: false,
+            watch_started: false,
+            watch_ended: false,
         })
     }
 
@@ -103,7 +135,7 @@ impl Connection {
                     }
                 }
             }
-            ConnectionProjection::Peek(tree) => {
+            ConnectionProjection::Watched(tree) => {
                 for message in messages {
                     let Some(message) = project_message(&tree, message) else {
                         continue;
@@ -123,34 +155,101 @@ impl Connection {
     }
 
     fn projection(&mut self, session: &UserSession) -> ConnectionProjection {
-        if self.peek_ended {
-            return ConnectionProjection::End { send_bye: false };
-        }
-        let Some(target) = self.peek_target.as_ref() else {
+        if !self.read_only || !self.watch_started {
             return ConnectionProjection::Full;
-        };
-        match session.selected_tree(&target.workspace, &target.tab) {
-            Ok(tree) => ConnectionProjection::Peek(tree),
-            Err(_) => {
-                self.peek_target = None;
-                self.peek_ended = true;
-                ConnectionProjection::End { send_bye: true }
-            }
         }
+        let valid: BTreeSet<String> = self
+            .watches
+            .keys()
+            .filter(|pane| tree_contains_pane(&session.tree, pane))
+            .cloned()
+            .collect();
+        self.watches.retain(|pane, _| valid.contains(pane));
+        if valid.is_empty() {
+            if self.watch_ended {
+                return ConnectionProjection::End { send_bye: false };
+            }
+            self.watch_ended = true;
+            return ConnectionProjection::End { send_bye: true };
+        }
+        ConnectionProjection::Watched(project_tree(&session.tree, &valid))
     }
 }
 
 fn project_message(tree: &Tree, message: &ServerMsg) -> Option<ServerMsg> {
     match message {
-        ServerMsg::Tree { .. } => Some(ServerMsg::Tree {
-            tree: tree.clone(),
-        }),
+        ServerMsg::Tree { .. } => Some(ServerMsg::Tree { tree: tree.clone() }),
         ServerMsg::Frame { pane, .. } | ServerMsg::Cells { pane, .. }
             if !tree_contains_pane(tree, pane) =>
         {
             None
         }
+        ServerMsg::Terminals { user, terminals } => Some(ServerMsg::Terminals {
+            user: user.clone(),
+            terminals: terminals
+                .iter()
+                .filter(|terminal| tree_contains_pane(tree, &terminal.pane))
+                .cloned()
+                .collect(),
+        }),
         _ => Some(message.clone()),
+    }
+}
+
+fn project_tree(tree: &Tree, watched: &BTreeSet<String>) -> Tree {
+    let mut projected = tree.clone();
+    for workspace in &mut projected.workspaces {
+        workspace.tabs.retain_mut(|tab| {
+            tab.panes.retain(|pane| watched.contains(&pane.id));
+            let Some(root) = tab.layout.root.take() else {
+                return false;
+            };
+            let Some(root) = project_layout(root, watched) else {
+                return false;
+            };
+            tab.layout.root = Some(root);
+            if !tab
+                .layout
+                .focused
+                .as_ref()
+                .is_some_and(|pane| watched.contains(pane))
+            {
+                tab.layout.focused = tab.panes.first().map(|pane| pane.id.clone());
+            }
+            true
+        });
+    }
+    projected
+        .workspaces
+        .retain(|workspace| !workspace.tabs.is_empty());
+    projected
+}
+
+fn project_layout(
+    node: seer_core::LayoutNode,
+    watched: &BTreeSet<String>,
+) -> Option<seer_core::LayoutNode> {
+    match node {
+        seer_core::LayoutNode::Pane { pane } if watched.contains(&pane) => {
+            Some(seer_core::LayoutNode::Pane { pane })
+        }
+        seer_core::LayoutNode::Pane { .. } => None,
+        seer_core::LayoutNode::Split {
+            direction,
+            first,
+            second,
+        } => match (
+            project_layout(*first, watched),
+            project_layout(*second, watched),
+        ) {
+            (Some(first), Some(second)) => Some(seer_core::LayoutNode::Split {
+                direction,
+                first: Box::new(first),
+                second: Box::new(second),
+            }),
+            (Some(node), None) | (None, Some(node)) => Some(node),
+            (None, None) => None,
+        },
     }
 }
 
@@ -161,35 +260,6 @@ fn tree_contains_pane(tree: &Tree, pane: &str) -> bool {
         .flat_map(|tab| &tab.panes)
         .any(|candidate| candidate.id == pane)
 }
-pub(super) fn flush_messages(
-    session: &UserSession,
-    connections: &mut Vec<Connection>,
-    messages: &[ServerMsg],
-) -> io::Result<Option<ReportedViewport>> {
-    let encoded = messages
-        .iter()
-        .map(writer::encode)
-        .collect::<io::Result<Vec<_>>>()?;
-    let bye = writer::encode(&ServerMsg::Bye {
-        reason: "peek target closed".into(),
-    })?;
-    let owner_present = connections.iter().any(|connection| connection.size_owner);
-    let mut position = 0;
-    while position < connections.len() {
-        if connections[position].send_projection(session, messages, &encoded, &bye)? {
-            position += 1;
-        } else {
-            evict_connection(connections, position);
-        }
-    }
-    if owner_present && !connections.iter().any(|connection| connection.size_owner) {
-        Ok(grant_next_owner(connections))
-    } else {
-        Ok(None)
-    }
-}
-
-
 
 impl Drop for Connection {
     fn drop(&mut self) {
@@ -230,52 +300,43 @@ pub(super) fn handle_target_query(
     shared: &SharedSession,
     connection_id: u64,
 ) -> io::Result<()> {
-    shared.write_targets(stream)?;
-    let Ok(message) = codec::decode(stream) else {
-        return Ok(());
-    };
-    let ClientMsg::Peek { workspace, tab, .. } = message else {
-        return Ok(());
-    };
-    match shared.add_peek_connection(connection_id, stream.try_clone()?, &workspace, &tab) {
-        Ok(()) => {}
-        Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
-            codec::encode(
-                stream,
-                &ServerMsg::Refused {
-                    reason: error.to_string(),
-                },
-            )?;
-            return Ok(());
-        }
-        Err(error) => return Err(error),
-    }
-    let result = connection_loop(stream, shared, connection_id);
-    shared.remove_connection(connection_id)?;
-    result
+    let _ = connection_id;
+    shared.write_targets(stream)
 }
 
 impl SharedSession {
-    fn add_peek_connection(
+    fn add_view_connection(
         &self,
         id: u64,
         stream: UnixStream,
-        workspace: &str,
-        tab: &str,
+        pane: Option<&str>,
     ) -> io::Result<()> {
         let _lease = lock(&self.lease)?;
         let messages = {
             let session = lock(&self.session)?;
-            let tree = session.selected_tree(workspace, tab)?;
-            session.snapshot_for(tree)
+            if pane.is_some_and(|id| {
+                !session
+                    .tree
+                    .workspaces
+                    .iter()
+                    .flat_map(|workspace| &workspace.tabs)
+                    .flat_map(|tab| &tab.panes)
+                    .any(|candidate| candidate.id == id)
+            }) {
+                return Err(io::Error::new(
+                    io::ErrorKind::InvalidInput,
+                    "terminal not found",
+                ));
+            }
+            session.snapshot()
         };
         let mut connection = Connection::new(id, stream)?;
         if !connection.send_messages(&messages)? {
-            return Err(connection_closed());
+            return Err(super::connection_closed());
         }
-        connection.peek_target = Some(PeekTarget::new(workspace, tab));
         connection.read_only = true;
         lock(&self.connections)?.push(connection);
+        self.poll_wake.notify_one();
         Ok(())
     }
 
