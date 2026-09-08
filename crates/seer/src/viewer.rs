@@ -86,7 +86,7 @@ pub(crate) fn key(
     state: &mut ClientState,
 ) -> io::Result<()> {
     match (key.code, key.modifiers) {
-        (KeyCode::Esc, KeyModifiers::NONE) => {
+        (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
             state.viewer = None;
         }
         (KeyCode::Tab, KeyModifiers::NONE) => next(state),

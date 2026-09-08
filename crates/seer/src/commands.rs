@@ -252,6 +252,9 @@ fn receive_clients(stream: &mut impl Stream) -> Result<Vec<ClientInfo>, CommandE
 fn print_detached(alias: &str) {
     println!("Detached from {alias}. Your panes are still running.");
 }
+fn print_server_stopped() {
+    println!("Server stopped.");
+}
 
 fn print_close_names(target: &str, people: &[Person]) {
     let mut names: Vec<&str> = people
@@ -440,8 +443,10 @@ fn finish_session(
         .map_err(CommandError::system)?;
     tui::set_peek_person(peek_person);
     let exit = run(stream, tree, own_user).map_err(CommandError::system)?;
-    if exit == tui::SessionExit::Detached {
-        print_detached(alias);
+    match exit {
+        tui::SessionExit::Detached => print_detached(alias),
+        tui::SessionExit::ServerStopped => print_server_stopped(),
+        tui::SessionExit::Client => {}
     }
     Ok(())
 }
