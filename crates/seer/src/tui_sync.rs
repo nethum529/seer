@@ -152,29 +152,29 @@ mod tests {
         sync_resize(&mut stream, &mut state).expect("resize must send");
         assert_viewer_watch(&mut peer, &state);
         assert_viewer_resize(&mut peer, &state);
-        let narrow_area = state.viewer.as_ref().expect("viewer must exist").area;
-        state.chrome.show_people = Some(false);
-        terminal
-            .draw(|frame| render::draw(frame, &mut state))
-            .expect("hidden sidebar must draw");
-        sync_watches(&mut stream, &mut state).expect("watch must follow the toggle");
-        sync_resize(&mut stream, &mut state).expect("resize must follow the toggle");
-        assert_viewer_watch(&mut peer, &state);
-        assert_viewer_resize(&mut peer, &state);
-        let wide_area = state.viewer.as_ref().expect("viewer must exist").area;
-        assert_eq!(wide_area.width, narrow_area.width + 20);
-        assert_eq!(wide_area.height, narrow_area.height - 1);
-        assert_eq!(wide_area.x, 0);
-        state.chrome.show_people = Some(true);
-        terminal
-            .draw(|frame| render::draw(frame, &mut state))
-            .expect("shown sidebar must draw");
-        sync_watches(&mut stream, &mut state).expect("watch must follow the toggle back");
-        sync_resize(&mut stream, &mut state).expect("resize must follow the toggle back");
-        assert_viewer_watch(&mut peer, &state);
-        assert_viewer_resize(&mut peer, &state);
-        let viewer_area = state.viewer.take().expect("viewer must exist").area;
-        assert_eq!(viewer_area, narrow_area);
+        let viewer_area = state.viewer.as_ref().expect("viewer must exist").area;
+        assert_eq!(viewer_area, ratatui::layout::Rect::new(0, 0, 100, 30));
+        for panel in [
+            Some(crate::panels::Panel::People),
+            Some(crate::panels::Panel::Session),
+            None,
+        ] {
+            state.chrome.panel = panel;
+            terminal
+                .draw(|frame| render::draw(frame, &mut state))
+                .expect("overlay must draw");
+            sync_watches(&mut stream, &mut state).expect("watches must sync");
+            sync_resize(&mut stream, &mut state).expect("resize must sync");
+            assert!(
+                std::io::Read::read(&mut peer, &mut byte).is_err(),
+                "overlay must not resize the terminal"
+            );
+            assert_eq!(
+                state.viewer.as_ref().expect("viewer must exist").area,
+                viewer_area
+            );
+        }
+        state.viewer = None;
         state
             .terminals
             .get_mut("alice")
@@ -188,8 +188,8 @@ mod tests {
         let tile = &state.box_areas[0];
         assert_eq!(tile.content, viewer_area);
         assert_eq!(tile.content.right(), 100);
-        assert_eq!(tile.content.bottom(), 29);
-        assert!(tile.content.x <= state.chrome.people_area.right() + 1);
+        assert_eq!(tile.content.bottom(), 30);
+        assert_eq!(tile.content.x, 0);
     }
 
     fn assert_grid_watches(peer: &mut UnixStream, state: &ClientState) {

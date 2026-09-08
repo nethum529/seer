@@ -1,4 +1,9 @@
-use crate::{render, state::ClientState, theme::Palette};
+use crate::{
+    panels::{self, Panel},
+    render,
+    state::ClientState,
+    theme::Palette,
+};
 use ratatui::{Terminal, backend::TestBackend};
 use seer_core::{
     Tree,
@@ -24,6 +29,7 @@ fn main_screen_shows_people_terminals_and_input_permission() {
     let mut state = ClientState::new(Tree::new(), "alice".into());
     state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
     state.selected = 1;
+    panels::open(&mut state, Panel::People);
     state.terminals.insert(
         "bob".into(),
         ["claude", "codex", "shell"]
@@ -44,9 +50,11 @@ fn main_screen_shows_people_terminals_and_input_permission() {
         .draw(|frame| render::draw(frame, &mut state))
         .expect("screen must draw");
     let buffer = terminal.backend().buffer();
-    let text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    let mut text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
+    panels::close(&mut state);
+    text.push_str(&draw_text(&mut state, 130, 35).join("\n"));
     for expected in [
-        "Alice",
+        "you",
         "Bob",
         "claude",
         "codex",
@@ -77,7 +85,7 @@ fn first_run_shows_the_join_line() {
     assert!(text.contains("Nobody else is here yet."));
     assert!(text.contains("seer join"));
     assert!(text.contains("SEER1-host-7321-invite"));
-    assert!(text.contains("you"));
+    assert!(text.contains("Your terminal"));
     state
         .terminals
         .insert("alice".into(), vec![terminal_info("shell")]);
@@ -92,8 +100,10 @@ fn first_run_shows_the_join_line() {
         .map(|cell| cell.symbol())
         .collect();
     assert!(!text.contains("Nobody else is here yet."));
-    assert!(text.contains("1 shell"));
-    assert!(text.contains("c copy"));
+    assert_eq!(
+        state.box_areas[0].content,
+        ratatui::layout::Rect::new(0, 0, 110, 30)
+    );
 }
 
 #[test]
@@ -108,9 +118,9 @@ fn backgrounds_preserve_the_host_terminal() {
     let buffer = terminal.backend().buffer();
     for y in 0..35 {
         for x in 0..130 {
-            let selected = state.people_areas.iter().any(|(index, area)| {
-                *index == state.selected && area.contains(Position::new(x, y))
-            });
+            let selected = [state.chrome.chip_area, state.chrome.handle_area]
+                .iter()
+                .any(|area| area.contains(Position::new(x, y)));
             assert_eq!(
                 buffer[(x, y)].bg,
                 if selected {
@@ -134,95 +144,6 @@ fn terminal_info(name: &str) -> TerminalInfo {
     }
 }
 
-#[test]
-fn tab_strip_shows_terminals_and_number_keys_select() {
-    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
-    let mut state = ClientState::new(Tree::new(), "alice".into());
-    state.terminals.insert(
-        "alice".into(),
-        ["claude", "codex", "shell"]
-            .into_iter()
-            .map(terminal_info)
-            .collect(),
-    );
-    let mut terminal = Terminal::new(TestBackend::new(150, 40)).expect("backend must open");
-    terminal
-        .draw(|frame| render::draw(frame, &mut state))
-        .expect("screen must draw");
-    let text: String = terminal
-        .backend()
-        .buffer()
-        .content
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
-    for label in ["1 claude x", "2 codex x", "3 shell x", " + "] {
-        assert!(text.contains(label));
-    }
-    let listener = std::net::TcpListener::bind("127.0.0.1:0").expect("listener must bind");
-    let mut stream =
-        std::net::TcpStream::connect(listener.local_addr().expect("address must exist"))
-            .expect("client must connect");
-    let _peer = listener.accept().expect("server must accept");
-    crate::tui_navigation::key(
-        KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE),
-        &mut stream,
-        &mut state,
-    )
-    .expect("key must work");
-    terminal
-        .draw(|frame| render::draw(frame, &mut state))
-        .expect("screen must draw");
-    let buffer = terminal.backend().buffer();
-    let selected: String = buffer
-        .content
-        .iter()
-        .filter(|cell| cell.bg == Palette::default().surface0)
-        .map(|cell| cell.symbol())
-        .collect();
-    assert!(selected.contains("2 codex x"));
-    assert!(!selected.contains("1 claude x"));
-}
-
-#[test]
-fn viewer_keeps_people_and_tabs_visible() {
-    let mut state = ClientState::new(Tree::new(), "alice".into());
-    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
-    state
-        .terminals
-        .insert("bob".into(), vec![terminal_info("codex")]);
-    state
-        .terminals
-        .get_mut("bob")
-        .expect("terminals must exist")[0]
-        .last_typist = Some("Carol".into());
-    state.select_person(1);
-    state.open_focused();
-    let mut terminal = Terminal::new(TestBackend::new(130, 35)).expect("backend must open");
-    terminal
-        .draw(|frame| render::draw(frame, &mut state))
-        .expect("screen must draw");
-    let text: String = terminal
-        .backend()
-        .buffer()
-        .content
-        .iter()
-        .map(|cell| cell.symbol())
-        .collect();
-    for label in [
-        "people",
-        "you",
-        "Bob",
-        "1 codex",
-        "read only",
-        "typing Carol",
-        "ctrl+b back",
-    ] {
-        assert!(text.contains(label), "screen must show {label}");
-    }
-    assert!(!text.contains("q quit"));
-}
-
 fn draw_text(state: &mut ClientState, width: u16, height: u16) -> Vec<String> {
     let mut terminal = Terminal::new(TestBackend::new(width, height)).expect("backend must open");
     terminal
@@ -235,47 +156,73 @@ fn draw_text(state: &mut ClientState, width: u16, height: u16) -> Vec<String> {
 }
 
 #[test]
-fn footer_hints_fit_the_screen_width() {
+fn session_lists_terminals_and_keeps_actions_visible_on_short_screens() {
+    use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
     let mut state = ClientState::new(Tree::new(), "alice".into());
-    state.note_people(&[person("alice", "Alice")]);
-    state.invite = Some("seer join SEER1-host-7321-invite".into());
-    state
-        .terminals
-        .insert("alice".into(), vec![terminal_info("shell")]);
-    for width in [45, 50, 51, 58, 59, 60, 80] {
-        let rows = draw_text(&mut state, width, 16);
-        let footer = rows.last().expect("footer row must exist");
-        let keys: Vec<&str> = state
-            .chrome
-            .footer_areas
-            .iter()
-            .map(|(key, area)| {
-                assert!(area.right() <= width, "{width}: {key} spills past the edge");
-                let start = usize::from(area.x);
-                let shown = &footer[start..start + usize::from(area.width)];
-                assert!(shown.starts_with(&format!(" {key}")), "{width}: {shown:?}");
-                key.as_str()
-            })
-            .collect();
-        for key in ["enter", "c", "n", "q"] {
-            assert!(keys.contains(&key), "{width}: {keys:?}");
-        }
+    state.terminals.insert(
+        "alice".into(),
+        (0..20)
+            .map(|i| terminal_info(&format!("shell{i}")))
+            .collect(),
+    );
+    let (mut stream, _peer) = std::os::unix::net::UnixStream::pair().expect("streams");
+    panels::open(&mut state, Panel::Session);
+    for _ in 0..22 {
+        crate::input::command(
+            KeyEvent::new(KeyCode::Down, KeyModifiers::NONE),
+            &mut stream,
+            &mut state,
+        )
+        .expect("down");
     }
+    for height in [8, 16, 35] {
+        let text = draw_text(&mut state, 46, height).join("\n");
+        assert!(
+            text.contains("q quit"),
+            "selected action must remain visible: {text}"
+        );
+        assert!(!state.chrome.rows.is_empty());
+    }
+    crate::input::command(
+        KeyEvent::new(KeyCode::Char('2'), KeyModifiers::NONE),
+        &mut stream,
+        &mut state,
+    )
+    .expect("select");
+    assert_eq!(state.focus, 1);
 }
 
 #[test]
-fn active_tab_stays_visible_on_a_narrow_screen() {
+fn viewer_fills_the_screen_and_access_stays_visible() {
     let mut state = ClientState::new(Tree::new(), "alice".into());
     state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
-    state.terminals.insert(
-        "alice".into(),
-        vec![terminal_info("shell"), terminal_info("longprocessname16")],
-    );
-    state.focus = 1;
-    state.chrome.show_people = Some(true);
-    let rows = draw_text(&mut state, 37, 16);
-    let tab_row = &rows[0];
-    assert!(tab_row.contains(" 2 longpro"), "{tab_row}");
-    assert!(tab_row.contains(" x  + "), "{tab_row}");
-    assert!(tab_row.contains(" + "), "{tab_row}");
+    state
+        .terminals
+        .insert("bob".into(), vec![terminal_info("codex")]);
+    state.select_person(1);
+    state.open_focused();
+    for width in [9, 20, 36, 80, 130] {
+        let text = draw_text(&mut state, width, 24).join("\n");
+        assert!(
+            text.contains("Read only"),
+            "access must survive narrow widths: {text}"
+        );
+        assert_eq!(
+            state.viewer.as_ref().expect("viewer").area,
+            ratatui::layout::Rect::new(0, 0, width, 24)
+        );
+        assert!(!text.contains("people"));
+        state.you_may_type_into.insert("bob".into());
+        assert!(
+            draw_text(&mut state, width, 24)
+                .join("\n")
+                .contains("Can type")
+        );
+        state.you_may_type_into.clear();
+    }
+    panels::open(&mut state, Panel::Session);
+    let text = draw_text(&mut state, 80, 24).join("\n");
+    for label in ["Bob", "Read only", "1 codex", "ctrl+b back"] {
+        assert!(text.contains(label), "missing {label}");
+    }
 }

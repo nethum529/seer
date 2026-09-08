@@ -7,31 +7,6 @@ use ratatui::{
     widgets::{Padding, Paragraph},
 };
 
-pub(super) fn footer(frame: &mut Frame<'_>, state: &mut ClientState, hints: &str) {
-    let palette = Palette::default();
-    let area = frame.area();
-    let line = hint_line(hints);
-    let width = (line.width() as u16).min(area.width);
-    let row = Rect::new(
-        area.right().saturating_sub(width),
-        area.bottom().saturating_sub(1),
-        width,
-        area.height.min(1),
-    );
-    state.chrome.footer_areas = hint_areas(hints, row);
-    frame.render_widget(
-        Paragraph::new(line)
-            .style(palette.style())
-            .alignment(Alignment::Right),
-        Rect::new(
-            area.x,
-            area.bottom().saturating_sub(1),
-            area.width,
-            area.height.min(1),
-        ),
-    );
-}
-
 pub(super) fn dialog(frame: &mut Frame<'_>, state: &mut ClientState, title: &str, text: &str) {
     let palette = Palette::default();
     let area = frame.area();
@@ -73,16 +48,17 @@ pub(super) fn dialog(frame: &mut Frame<'_>, state: &mut ClientState, title: &str
     );
 }
 
-pub(super) fn notice(frame: &mut Frame<'_>, state: &ClientState, hints: &str) {
+pub(super) fn notice(frame: &mut Frame<'_>, state: &ClientState) {
     let area = frame.area();
+    if state.notice.is_empty() || area.is_empty() {
+        return;
+    }
+    let palette = Palette::default();
+    let text = format!(" {} ", state.notice);
+    let width = (text.chars().count() as u16).min(area.width);
     frame.render_widget(
-        Paragraph::new(state.notice.as_str()).style(Palette::default().style()),
-        Rect::new(
-            area.x + 1,
-            area.bottom().saturating_sub(1),
-            area.width.saturating_sub(hints.len() as u16 + 3),
-            area.height.min(1),
-        ),
+        Paragraph::new(text).style(palette.style().bg(palette.surface0)),
+        Rect::new(area.x, area.bottom() - 1, width, 1),
     );
 }
 

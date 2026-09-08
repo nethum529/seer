@@ -102,6 +102,9 @@ pub(crate) fn input_message(
     state: &ClientState,
     input: TerminalInput,
 ) -> io::Result<()> {
+    if state.chrome_owns_input() {
+        return Ok(());
+    }
     let Some(viewer) = &state.viewer else {
         return Ok(());
     };
@@ -143,6 +146,7 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
         let start = start_row(&rows, area.height);
         frame.render_widget(PaneCells::new(&rows), area);
         if allowed
+            && !state.chrome_owns_input()
             && viewer.offset == 0
             && content.cursor.visible
             && let Some(row) = usize::from(content.cursor.row).checked_sub(start)

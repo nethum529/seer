@@ -124,7 +124,7 @@ pub(crate) fn step(index: usize, count: usize, forward: bool) -> usize {
     }
 }
 
-fn new_terminal(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
+pub(crate) fn new_terminal(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
     let Some(workspace) = state.tree.workspaces.first() else {
         state.set_notice("Waiting for your terminals.");
         return Ok(());
@@ -156,7 +156,7 @@ pub(crate) fn invite(stream: &mut impl Stream, state: &mut ClientState) -> io::R
     Ok(())
 }
 
-fn copy_invite(state: &mut ClientState) -> io::Result<()> {
+pub(crate) fn copy_invite(state: &mut ClientState) -> io::Result<()> {
     let Some(invite) = &state.invite else {
         return Ok(());
     };

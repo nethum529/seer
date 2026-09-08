@@ -89,6 +89,7 @@ fn activate(
     {
         state.viewer = Some(Viewer::new(menu.user.clone(), terminal.pane.clone()));
         state.focus = menu.selected;
+        crate::panels::close(state);
         return Ok(true);
     }
     Ok(false)

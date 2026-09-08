@@ -40,8 +40,6 @@ pub(crate) struct ClientState {
     pub(crate) search: String,
     pub(crate) searching: bool,
     pub(crate) quit_prompt: bool,
-    pub(crate) tab_areas: Vec<(usize, Rect)>,
-    pub(crate) plus_area: Rect,
     pub(crate) discard_prefix: bool,
     pub(crate) invite: Option<String>,
     pub(crate) invite_pending: bool,
@@ -51,6 +49,12 @@ pub(crate) struct ClientState {
 }
 
 impl ClientState {
+    pub(crate) fn chrome_owns_input(&self) -> bool {
+        self.chrome.panel.is_some()
+            || self.menu.is_some()
+            || self.chrome.context.is_some()
+            || self.quit_prompt
+    }
     pub(crate) fn new(tree: Tree, own_user: String) -> Self {
         let own = Person {
             user_id: own_user.clone(),
@@ -88,8 +92,6 @@ impl ClientState {
             search: String::new(),
             searching: false,
             quit_prompt: false,
-            tab_areas: Vec::new(),
-            plus_area: Rect::default(),
             discard_prefix: false,
             invite: None,
             invite_pending: false,
