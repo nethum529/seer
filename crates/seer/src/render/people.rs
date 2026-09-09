@@ -15,15 +15,13 @@ pub(super) fn compact(area: Rect) -> bool {
     area.width < 2 || area.height < MIN_FULL_HEIGHT
 }
 
-pub(super) fn column(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
+pub(super) fn column(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, pinned: bool) {
     if area.width < 2 || area.height == 0 {
         return;
     }
     separator(frame, state, area);
     let width = area.width - 1;
-    let heading_area = Rect::new(area.x, area.y, width, 1);
-    heading(frame, state, heading_area);
-    state.chrome.close_area = heading_area;
+    heading(frame, state, Rect::new(area.x, area.y, width, 1), pinned);
     search_field(frame, state, Rect::new(area.x, area.y + 1, width, 1));
     let full = !compact(area);
     let status = if full {
@@ -131,7 +129,7 @@ fn identity(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
     );
 }
 
-fn heading(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
+fn heading(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, pinned: bool) {
     let palette = Palette::default();
     let style = palette.style().fg(palette.overlay0);
     let title = " people";
@@ -144,21 +142,25 @@ fn heading(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
         .style(style),
         area,
     );
-    frame.render_widget(
-        Paragraph::new("<").style(style),
-        Rect::new(area.right().saturating_sub(1), area.y, 1, 1),
-    );
+    let rest = pin(frame, state, area);
+    if !pinned {
+        state.chrome.close_area = rest;
+        frame.render_widget(
+            Paragraph::new("<").style(style),
+            Rect::new(rest.right().saturating_sub(1), rest.y, 1, 1),
+        );
+    }
     let count = format!(
         "{} online",
         state.people.iter().filter(|person| person.online).count()
     );
     let width = count.chars().count() as u16;
-    if width > area.width.saturating_sub(used.saturating_add(3)) {
+    if width > rest.width.saturating_sub(used.saturating_add(3)) {
         return;
     }
     frame.render_widget(
         Paragraph::new(count).style(style),
-        Rect::new(area.right().saturating_sub(width + 2), area.y, width, 1),
+        Rect::new(rest.right().saturating_sub(width + 2), rest.y, width, 1),
     );
 }
 
@@ -174,6 +176,23 @@ fn search_field(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     };
     frame.render_widget(Paragraph::new(text).style(palette.style().fg(color)), area);
     state.chrome.search_area = area;
+}
+
+fn pin(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) -> Rect {
+    let palette = Palette::default();
+    let (label, colour) = if state.chrome.pinned {
+        ("unpin", palette.accent)
+    } else {
+        ("pin", palette.subtext0)
+    };
+    let width = (label.len() as u16 + 1).min(area.width);
+    let pin_area = Rect::new(area.right() - width, area.y, width, 1);
+    frame.render_widget(
+        Paragraph::new(format!("{label} ")).style(palette.style().fg(colour)),
+        pin_area,
+    );
+    state.chrome.pin_area = pin_area;
+    Rect::new(area.x, area.y, area.width - width, 1)
 }
 
 fn rows(frame: &mut Frame<'_>, state: &mut ClientState, list: Rect, width: u16) -> u16 {

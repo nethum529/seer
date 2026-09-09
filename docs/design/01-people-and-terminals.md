@@ -44,6 +44,15 @@ The owner approved terminal-first option 3 on 2026-09-08.
   panel. The p key opens it in overview. The panel draws over the
   terminal and does not change the terminal size. Its heading closes
   it. Escape or a click outside also closes it.
+- The people panel heading has a pin control. When pinned, the people
+  panel becomes a column at the left edge, and the terminal uses the
+  area beside it. A visible pinned column alone does not take terminal
+  input. Clicking search or a menu gives that control the keys until
+  terminal content is clicked again. A pinned column stays through panel
+  changes, terminal changes, and outside clicks. Below 60 columns the
+  pinned column collapses to the handle, and the terminal uses the
+  whole window. A wider window shows the column again. The pin stays
+  in the current window only. A new window starts unpinned.
 - The people panel shows names, presence, input permission, typing
   status, and owner identity. The / key searches. The m key or a right
   click opens the person menu. Enter opens the selected terminal.
