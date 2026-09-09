@@ -114,7 +114,7 @@ fn empty(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
     let palette = Palette::default();
     frame.render_widget(
         Paragraph::new(if state.user() == state.own_user {
-            "No terminals.\nn new terminal"
+            "No terminals.\nRight click the control at the top right to open one."
         } else {
             "No terminals."
         })

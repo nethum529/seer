@@ -18,6 +18,7 @@ fn person(user: &str, name: &str) -> Person {
         idle_secs: 0,
         attached_clients: 1,
         peekable: true,
+        host: user == "alice",
         state: PersonState::Active,
         tabs: 0,
         foreground: String::new(),
@@ -25,11 +26,12 @@ fn person(user: &str, name: &str) -> Person {
 }
 
 #[test]
-fn main_screen_shows_people_terminals_and_input_permission() {
+fn the_picker_shows_every_person_and_the_permission_for_the_viewed_one() {
     let mut state = ClientState::new(Tree::new(), "alice".into());
     state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    state.server = "127.0.0.1:7321".into();
     state.selected = 1;
-    panels::open(&mut state, Panel::People);
+    panels::open(&mut state, Panel::Picker);
     state.terminals.insert(
         "bob".into(),
         ["claude", "codex", "shell"]
@@ -45,24 +47,24 @@ fn main_screen_shows_people_terminals_and_input_permission() {
             })
             .collect(),
     );
-    let mut terminal = Terminal::new(TestBackend::new(130, 35)).expect("backend must open");
-    terminal
-        .draw(|frame| render::draw(frame, &mut state))
-        .expect("screen must draw");
-    let buffer = terminal.backend().buffer();
-    let mut text: String = buffer.content.iter().map(|cell| cell.symbol()).collect();
-    panels::close(&mut state);
-    text.push_str(&draw_text(&mut state, 130, 35).join("\n"));
+    let text = draw_text(&mut state, 130, 35).join("\n");
     for expected in [
-        "you",
-        "Bob",
-        "claude",
-        "codex",
-        "shell",
-        "read only",
-        "typing Carol",
+        "Seer Bob",
+        "Alice",
+        "host",
+        "Permissions not granted for Bob",
+        "127.0.0.1:7321",
     ] {
-        assert!(text.contains(expected), "screen must show {expected}");
+        assert!(
+            text.contains(expected),
+            "picker must show {expected}: {text}"
+        );
+    }
+
+    panels::open(&mut state, Panel::Session);
+    let text = draw_text(&mut state, 130, 35).join("\n");
+    for expected in ["claude", "codex", "shell", "Read only", "typing Carol"] {
+        assert!(text.contains(expected), "session must show {expected}");
     }
 }
 
@@ -85,7 +87,7 @@ fn first_run_shows_the_join_line() {
     assert!(text.contains("Nobody else is here yet."));
     assert!(text.contains("seer join"));
     assert!(text.contains("SEER1-host-7321-invite"));
-    assert!(text.contains("Your terminal"));
+    assert!(text.contains("Seer Alice"));
     state
         .terminals
         .insert("alice".into(), vec![terminal_info("shell")]);
@@ -118,9 +120,7 @@ fn backgrounds_preserve_the_host_terminal() {
     let buffer = terminal.backend().buffer();
     for y in 0..35 {
         for x in 0..130 {
-            let selected = [state.chrome.chip_area, state.chrome.handle_area]
-                .iter()
-                .any(|area| area.contains(Position::new(x, y)));
+            let selected = state.chrome.chip_area.contains(Position::new(x, y));
             assert_eq!(
                 buffer[(x, y)].bg,
                 if selected {
@@ -165,7 +165,9 @@ fn session_lists_terminals_and_keeps_actions_visible_on_short_screens() {
             .map(|i| terminal_info(&format!("shell{i}")))
             .collect(),
     );
-    let (mut stream, _peer) = std::os::unix::net::UnixStream::pair().expect("streams");
+    let (local, _peer) = std::os::unix::net::UnixStream::pair().expect("streams");
+    let mut stream =
+        crate::routes::Routes::new(seer_net::Socket::from(local), None, "alice".to_owned());
     panels::open(&mut state, Panel::Session);
     for _ in 0..22 {
         crate::input::command(
@@ -204,25 +206,83 @@ fn viewer_fills_the_screen_and_access_stays_visible() {
     for width in [9, 20, 36, 80, 130] {
         let text = draw_text(&mut state, width, 24).join("\n");
         assert!(
-            text.contains("Read only"),
-            "access must survive narrow widths: {text}"
+            text.contains("Bob"),
+            "the viewed name must survive narrow widths: {text}"
         );
         assert_eq!(
             state.viewer.as_ref().expect("viewer").area,
             ratatui::layout::Rect::new(0, 0, width, 24)
         );
-        assert!(!text.contains("people"));
-        state.you_may_type_into.insert("bob".into());
-        assert!(
-            draw_text(&mut state, width, 24)
-                .join("\n")
-                .contains("Can type")
-        );
-        state.you_may_type_into.clear();
+        for absent in ["people", "Read only", "Can type"] {
+            assert!(!text.contains(absent), "the control must not show {absent}");
+        }
     }
     panels::open(&mut state, Panel::Session);
     let text = draw_text(&mut state, 80, 24).join("\n");
     for label in ["Bob", "Read only", "1 codex", "back"] {
         assert!(text.contains(label), "missing {label}");
     }
+    state.you_may_type_into.insert("bob".into());
+    assert!(
+        draw_text(&mut state, 80, 24)
+            .join("\n")
+            .contains("Can type")
+    );
+}
+
+#[test]
+fn the_picker_takes_the_height_of_the_people_and_fills_five_row_columns() {
+    for count in [1, 2, 4, 5, 6, 11] {
+        let mut state = ClientState::new(Tree::new(), "alice".into());
+        let mut people = vec![person("alice", "alice")];
+        people.extend((1..count).map(|index| {
+            let user = format!("u{index}");
+            person(&user, &format!("name{index}"))
+        }));
+        state.note_people(&people);
+        panels::open(&mut state, Panel::Picker);
+        draw_text(&mut state, 100, 30);
+
+        let rows = count.min(5);
+        assert_eq!(
+            state.chrome.panel_area.height,
+            6 + rows as u16,
+            "{count} people must take {rows} rows"
+        );
+        assert_eq!(state.people_areas.len(), count, "{count} people must show");
+        let (top, left, width) = (
+            state.people_areas[0].1.y,
+            state.people_areas[0].1.x,
+            state.people_areas[0].1.width,
+        );
+        for (index, rect) in &state.people_areas {
+            assert_eq!(
+                (rect.x, rect.y),
+                (
+                    left + (index / rows) as u16 * width,
+                    top + (index % rows) as u16
+                ),
+                "person {index} of {count} must fill the column downwards"
+            );
+        }
+    }
+}
+
+#[test]
+fn the_picker_measures_wide_names_by_display_width() {
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    let wide_name = "\u{5f20}".repeat(10);
+    state.note_people(&[person("alice", "alice"), person("bob", &wide_name)]);
+    panels::open(&mut state, Panel::Picker);
+    draw_text(&mut state, 100, 30);
+    let wide = state
+        .people_areas
+        .iter()
+        .find(|(index, _)| *index == 1)
+        .expect("the wide name must show")
+        .1;
+    assert!(
+        wide.width >= 22,
+        "ten two cell names need twenty cells, not ten: {wide:?}"
+    );
 }

@@ -66,6 +66,17 @@ pub enum ClientMsg {
     },
     AttachRuntime,
     ObserveRuntime,
+    PublishRuntime {
+        user_id: String,
+        credential: String,
+        version: String,
+        generation: String,
+    },
+    RuntimeStream {
+        user_id: String,
+        credential: String,
+        token: String,
+    },
     QueryTargets {
         user: String,
     },
@@ -111,6 +122,12 @@ pub enum ServerMsg {
     },
     RuntimeReady {
         generation: String,
+    },
+    Published {
+        generation: String,
+    },
+    OpenStream {
+        token: String,
     },
     Welcome {
         user_id: String,
@@ -201,6 +218,8 @@ pub struct Person {
     pub name: String,
     pub attached_clients: u32,
     pub peekable: bool,
+    #[serde(default)]
+    pub host: bool,
     #[serde(default)]
     pub state: PersonState,
     #[serde(default)]

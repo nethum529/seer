@@ -11,7 +11,6 @@ use ratatui::{
 };
 use seer_core::TerminalInput;
 use seer_core::proto::ClientMsg;
-use seer_net::Stream;
 use std::io;
 
 pub(crate) struct Viewer {
@@ -81,7 +80,7 @@ impl Viewer {
 
 pub(crate) fn key(
     key: KeyEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<()> {
     if let Some(input) = key_to_input(key) {
@@ -91,12 +90,22 @@ pub(crate) fn key(
 }
 
 pub(crate) fn input_message(
-    stream: &mut impl Stream,
-    state: &ClientState,
+    stream: &mut crate::routes::Routes,
+    state: &mut ClientState,
     input: TerminalInput,
 ) -> io::Result<()> {
     if state.chrome_owns_input() {
         return Ok(());
+    }
+    if state.viewer.is_none()
+        && matches!(
+            input.event,
+            seer_core::InputEvent::Key(_)
+                | seer_core::InputEvent::Text(_)
+                | seer_core::InputEvent::Paste(_)
+        )
+    {
+        state.open_focused();
     }
     let Some(viewer) = &state.viewer else {
         return Ok(());

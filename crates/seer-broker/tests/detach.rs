@@ -1,148 +1,84 @@
 #![cfg(target_os = "linux")]
 
-use std::net::TcpStream;
-use std::time::{Duration, Instant};
-
 use seer_core::proto::{ClientMsg, ServerMsg};
-use seer_core::{InputEvent, TerminalInput};
 
 #[path = "support/binary.rs"]
 mod binary;
-#[path = "forwarding/extras.rs"]
-mod extras;
-#[path = "forwarding/support.rs"]
-mod support;
+mod room;
+use room::*;
 
-use extras::{
-    assert_process_running, assert_runtime_arguments, assert_socket_directory, pane_pid, send,
-    wait_for_cells, write_config,
-};
-use support::{
-    ProcessGuard, TestFiles, connect_when_ready, read_message, send_hello, unused_address,
-    wait_for_disconnect, wait_for_tree_with_tab, welcome_client_id,
-};
-
-const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
-
+// Detaching reaches only your own windows, and it does not touch the shells.
 #[test]
-fn detaches_own_client_refuses_another_person_and_keeps_the_pane() {
-    let temporary = TestFiles::new();
-    let address = unused_address();
-    write_config(&temporary, address);
-    temporary.write_runtime_wrapper();
-    let broker = temporary.start_broker();
-    let _broker = ProcessGuard::new(broker);
+fn a_person_detaches_only_their_own_client_and_keeps_their_terminals() {
+    let mut room = Room::start(false);
+    let mut alice_window = room.publish("alice", ALICE_SECRET);
+    let tree = own_tree(&mut alice_window);
+    let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();
 
-    let mut alice = connect_when_ready(address);
-    send_hello(&mut alice, "alice", "alice-secret");
-    let alice_client = welcome_client_id(read_message(&mut alice), "alice");
-    drop(wait_for_tree_with_tab(&mut alice));
-    assert!(wait_for_cells(&mut alice));
-    send(
-        &mut alice,
-        &ClientMsg::TerminalInput {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            pane: "w1:p1".into(),
-            input: TerminalInput::new(InputEvent::Text(
-                "sh -c 'printf \"%s\\n\" \"$PPID\" > \"$SEER_TEST_FILES/alice-pane.pid\"'\n".into(),
-            )),
-        },
-    );
-    let pane_pid = pane_pid(&temporary, "alice");
-    let runtime_pid = temporary.runtime_pid("alice");
+    let mut first = join_room(room.address, "alice", ALICE_SECRET);
+    let mut second = join_room(room.address, "alice", ALICE_SECRET);
+    let mut bob = join_room(room.address, "bob", BOB_SECRET);
+    wait_for_published(&mut first, "alice");
 
-    let mut bob = connect_when_ready(address);
-    send_hello(&mut bob, "bob", "bob-secret");
-    let bob_client = welcome_client_id(read_message(&mut bob), "bob");
-    assert_ne!(alice_client, bob_client);
     send(
-        &mut bob,
-        &ClientMsg::DetachClient {
-            client_id: alice_client.clone(),
-        },
-    );
-    assert_eq!(
-        wait_for(&mut bob, |message| matches!(
-            message,
-            ServerMsg::Refused { .. }
-        )),
-        ServerMsg::Refused {
-            reason: "client does not belong to this person".into()
-        }
-    );
-    assert_runtime_arguments(&temporary, "alice");
-    assert_socket_directory(&temporary);
-
-    let mut controller = connect_when_ready(address);
-    send_hello(&mut controller, "alice", "alice-secret");
-    let controller_id = welcome_client_id(read_message(&mut controller), "alice");
-    assert_ne!(alice_client, controller_id);
-    send(
-        &mut controller,
+        &mut first,
         &ClientMsg::DetachClient {
             client_id: String::new(),
         },
     );
-    let clients = wait_for(&mut controller, |message| {
+    let listed = wait_for(&mut first, |message| {
         matches!(message, ServerMsg::Clients { .. })
     });
-    let ServerMsg::Clients { clients } = clients else {
-        panic!("expected Clients");
+    let ServerMsg::Clients { clients } = listed else {
+        panic!("the room must list this person's other windows");
     };
-    assert_eq!(clients.len(), 1);
-    assert_eq!(clients[0].client_id, alice_client);
-    let detach_started = Instant::now();
+    let other = clients
+        .first()
+        .expect("a second window must be listed")
+        .client_id
+        .clone();
+
     send(
-        &mut controller,
+        &mut bob,
         &ClientMsg::DetachClient {
-            client_id: alice_client,
+            client_id: other.clone(),
         },
     );
-    assert_eq!(
-        wait_for(&mut alice, |message| matches!(
-            message,
-            ServerMsg::Bye { .. }
-        )),
-        ServerMsg::Bye {
-            reason: "detached".into()
-        }
-    );
-    wait_for_disconnect(&mut alice);
-    assert!(detach_started.elapsed() < Duration::from_secs(1));
-    assert_eq!(
-        wait_for(&mut controller, |message| matches!(
-            message,
-            ServerMsg::Clients { .. }
-        )),
-        ServerMsg::Clients {
-            clients: Vec::new()
-        }
+    let refused = wait_for(&mut bob, |message| {
+        matches!(message, ServerMsg::Refused { .. })
+    });
+    let ServerMsg::Refused { reason } = refused else {
+        panic!("a refusal must carry a reason");
+    };
+    assert!(
+        reason.contains("does not belong"),
+        "one person must not detach another person's window: {reason}"
     );
 
-    assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
-    assert_process_running(pane_pid);
-    let mut reattached = connect_when_ready(address);
-    send_hello(&mut reattached, "alice", "alice-secret");
-    welcome_client_id(read_message(&mut reattached), "alice");
-    drop(wait_for_tree_with_tab(&mut reattached));
-    assert_eq!(temporary.runtime_pid("alice"), runtime_pid);
-    assert_process_running(pane_pid);
+    send(&mut first, &ClientMsg::DetachClient { client_id: other });
+    wait_for(&mut second, |message| {
+        matches!(message, ServerMsg::Bye { .. })
+    });
 
-    drop(reattached);
-    drop(controller);
-    drop(bob);
-    temporary.terminate_runtime("alice");
-    temporary.terminate_runtime("bob");
+    assert!(
+        still_listed(&mut first, &pane),
+        "detaching a window must leave the terminals running"
+    );
 }
 
-fn wait_for(stream: &mut TcpStream, expected: impl Fn(&ServerMsg) -> bool) -> ServerMsg {
-    let deadline = Instant::now() + WAIT_TIMEOUT;
-    while Instant::now() < deadline {
-        let message = read_message(stream);
-        if expected(&message) {
-            return message;
-        }
-    }
-    panic!("expected server message was not received");
+fn still_listed(stream: &mut std::net::TcpStream, pane: &str) -> bool {
+    send(
+        stream,
+        &ClientMsg::Terminals {
+            user: "alice".into(),
+        },
+    );
+    let listed = wait_for(
+        stream,
+        |message| matches!(message, ServerMsg::Terminals { user, terminals } if user == "alice" && !terminals.is_empty()),
+    );
+    let ServerMsg::Terminals { terminals, .. } = listed else {
+        return false;
+    };
+    terminals.iter().any(|terminal| terminal.pane == pane)
 }

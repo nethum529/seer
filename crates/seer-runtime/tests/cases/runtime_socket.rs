@@ -1,5 +1,3 @@
-#![cfg(target_os = "linux")]
-
 use std::fs;
 use std::os::unix::fs::MetadataExt;
 use std::os::unix::net::UnixListener;
@@ -10,10 +8,8 @@ use std::time::{Duration, Instant};
 use seer_core::SplitDirection;
 use seer_core::proto::{ClientMsg, codec};
 
-mod runtime_socket_helpers;
-mod support;
-use runtime_socket_helpers::*;
-use support::*;
+use crate::runtime_socket_helpers::*;
+use crate::support::*;
 
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 

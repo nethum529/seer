@@ -7,8 +7,8 @@ Codex alike. Read this file before you start a task.
 
 - This project is a Rust multi-user terminal multiplexer for coding agents.
   Seer is the multiplayer and collaboration layer for coding agent terminals:
-  one person hosts, friends join with one pasted line, and each person gets
-  their own tree of shells on the host. herdr and luvus stay the reference
+  one person hosts the room, friends join with one pasted line, and each
+  person runs their own tree of shells on their own computer. herdr and luvus stay the reference
   code bases for the terminal core.
 - Research is complete and lives under docs/research/. Read the relevant
   document before you design or build.
@@ -20,10 +20,13 @@ Codex alike. Read this file before you start a task.
 
 Do not reopen these. The reasons are in docs/research/.
 
-- PTYs and shells run on the server, never on the client.
-- Process model: one broker plus one runtime per user. The broker owns
-  identity, routing, supervision, and metadata. It never owns PTYs or agent
-  child processes.
+- Issue 338 replaces server-only execution, approved by the owner on
+  2026-09-09. PTYs and shells run on each participant's own computer, using
+  that person's local account, files, installed tools, and credentials.
+- Process model: one trusted room broker plus one local runtime per person
+  per room. The broker owns identity, shared routing, grants, and metadata.
+  Each local runtime owns its PTYs and agent child processes. Local input
+  and process lifetime do not depend on the room connection or broker.
 - TUI stack: ratatui plus crossterm.
 - Linux and macOS only, as host and as client. No Windows.
 - Seer is not a herdr replacement. Do not build herdr parity features unless

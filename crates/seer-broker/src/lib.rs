@@ -7,12 +7,10 @@ mod config;
 mod connection_limit;
 mod forwarding;
 mod grants;
-mod lifecycle;
-mod os_identity;
+mod published_address;
+mod publishing;
 mod registry;
 mod runtime;
-mod runtime_paths;
-mod runtime_supervisor;
 mod server;
 #[cfg(test)]
 mod test_support;

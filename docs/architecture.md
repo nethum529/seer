@@ -1,135 +1,120 @@
 # Seer architecture
 
-Seer is a Rust terminal multiplexer for coding agents. The current multiplayer
-MVP has one Linux server and Linux or macOS clients. Each person owns a private
-workspace tree. Another person can view that tree through read-only peek.
+Seer shares live terminals between people in a trusted room. Each person runs
+shells on their own computer. The room broker routes shared views and input;
+it does not start those shells. ADR 0009 defines this model from version 0.5.0.
 
 ## Crate map
 
-The workspace has five crates.
-
 | Crate | Job |
 | --- | --- |
-| `seer-core` | Defines frontend-neutral cells, colors, workspace trees, pane layout, protocol messages, and the length-prefixed JSON codec. |
-| `seer-net` | Wraps iroh endpoint identity, encrypted remote transport, relay or direct connections, and blocking stream adapters. |
-| `seer-broker` | Authenticates people, manages invitation seats, tracks clients, routes messages, supervises one runtime per person, and stores broker metadata. |
-| `seer-runtime` | Owns one person's workspace tree, PTYs, shells, terminal grids, and runtime connections. It sends tree and cell updates. |
-| `seer` | Provides the command-line client, start and update commands, local credential store, input adapter, and Ratatui TUI. It also builds the `seer-broker` and `seer-runtime` binaries. |
-
-The crate list comes from the workspace `Cargo.toml`. Each job comes from the
-crate manifest and its source entry point.
+| seer-core | Workspace trees, terminal cells, protocol messages, and the JSON codec. |
+| seer-net | Iroh identity, encrypted connections, multiple streams, and blocking adapters. |
+| seer-broker | Identity, invitations, grants, people, runtime registrations, and shared routing. |
+| seer-runtime | One person's local workspace tree, PTYs, shells, snapshots, and terminal frames. |
+| seer | CLI, local runtime startup, saved room credentials, and the Ratatui TUI. Builds all three binaries. |
 
 ## Process model
 
-One Linux host runs these server processes:
-
 ```text
-Linux host
+Room host (currently Linux)
   seer-broker
-    one seer-runtime process for Alice
-      Alice workspace tree, PTYs, and shells
-    one seer-runtime process for Bob
-      Bob workspace tree, PTYs, and shells
 
-Linux or macOS client
-  seer command and TUI
+Alice's computer (Linux or macOS)
+  seer window <--- private local socket ---> seer-runtime ---> Alice's shells
+       |                                        |
+       +--- room connection ---> broker <--- outbound publication
+
+Bob's computer (Linux or macOS)
+  seer window <--- private local socket ---> seer-runtime ---> Bob's shells
+       |                                        |
+       +--- room connection ---> broker <--- outbound publication
 ```
 
-The broker owns identity, routing, runtime supervision, invitations, client
-attachments, and metadata. It does not own PTYs or agent child processes.
+The first window starts its local runtime under the local OS account. Windows
+for the same room identity share that runtime. A startup lock prevents
+concurrent windows from starting separate runtimes. The state directory and
+socket are private and scoped by the person ID minted for that room.
 
-The broker starts a runtime when it first needs that person's tree. It connects
-to the runtime through a Unix socket. The runtime starts one shell when the
-first client connects to an empty tree. A pipe from the broker is the runtime
-lifeline.
+The runtime uses the local shell, current directory, tools, and provider
+logins. The broker does not receive credential files. It is trusted: it can
+read shared terminal frames and the input it routes.
 
-Detach closes one client connection. It does not stop the runtime or its live
-PTYs. Cold restore after a broker or runtime restart is planned in issue 93. A
-separate viewport and control lease for each attachment is planned in issue 95.
+## Lifetime and persistence
 
-## Network and local transport
+Closing or detaching a window leaves its local runtime and shells running.
+The runtime also survives room loss or broker restart. Own typing and terminal
+management use the local socket and do not wait for a room handshake.
 
-The broker listens on `127.0.0.1:7321` for local clients and tests. Remote
-clients use iroh with ALPN `seer/1`. Iroh authenticates the server endpoint,
-encrypts the connection, tries a direct path, and can use a relay.
+The runtime republishes after a lost connection. The window separately
+reconnects to the room and requests current trees and frames. It discards
+unsent remote input; it does not replay keystrokes. One active runtime can
+publish for a person in a room. A second computer is refused without replacing
+the first runtime.
 
-The asynchronous iroh connection is bridged to a Unix stream. The existing
-broker and client logic use the blocking stream interface. Remote transport
-does not create a network interface, route, or DNS change.
+The seer stop command ends the local runtime for the selected room. It also
+stops the broker if this computer hosts that room. If the room selection is
+missing, it can still stop the locally hosted broker. Other participants'
+processes stay on their computers.
 
-## Protocol location
+A runtime restart restores a saved layout with new shells. It cannot restore
+process memory. See the [upgrade steps](../README.md#upgrade-from-047-to-050)
+for the transition from hosted terminals.
 
-Protocol types are in `crates/seer-core/src/proto/mod.rs`:
+## Transport and protocol
 
-- `ClientMsg` defines join, authentication, invitation, tree control, input,
-  resize, peek, and detach requests.
-- `ServerMsg` defines welcome, join, invitation, people, client, tree, frame,
-  cell, refusal, and close replies.
-- `Person` and `ClientInfo` are shared protocol records.
+The broker supports local TCP, normally 127.0.0.1:7321, and remote iroh
+connections with ALPN seer/1. Iroh uses encrypted direct or relayed connections.
+Each network connection ends at the broker; this is not protection from a
+hostile room host. No network interface or machine-wide route is installed.
 
-The codec is in `crates/seer-core/src/proto/codec.rs`. It uses a four-byte
-big-endian length followed by JSON. One frame can be at most 16 MiB.
+A Session in seer-net carries multiple streams over one iroh connection.
+Blocking Unix stream adapters connect the async transport to the runtime and
+broker code. Own terminal traffic uses a private Unix socket directly.
+
+ClientMsg and ServerMsg live in crates/seer-core/src/proto/mod.rs. The codec
+uses a four-byte big-endian length followed by JSON, with a 16 MiB frame limit.
+The broker, clients, and published runtimes must match major and minor versions.
 
 ## Message flows
 
-### Join
+### Join and local attach
 
-1. The client parses a one-use `SEER2` capsule and opens an iroh connection.
-2. The client sends `ClientMsg::Join` with the seat token and display name.
-3. The broker checks the unused seat and the unique name. It stores the new
-   person and a hash of the new credential.
-4. The broker sends `ServerMsg::Joined` with the person ID and credential.
-5. The client saves the endpoint, person ID, name, and credential in its private
-   `servers.toml` file.
-6. The client starts the normal attach flow.
+1. The client exchanges a one-use SEER2 invitation for a room identity and
+   credential. It saves these in its private servers.toml.
+2. It starts or finds its local runtime and attaches through the local socket.
+3. The runtime sends the current tree and frames. The window can type locally.
+4. In the background, the window authenticates to the room for people and
+   grants. The runtime independently publishes its terminal service.
 
-### Attach
+### Publish and watch
 
-1. The client loads the current server record and sends `ClientMsg::Hello` with
-   its person ID, credential, and version.
-2. The broker checks the major and minor version and authenticates the person.
-3. The broker records a client attachment and sends `ServerMsg::Welcome`.
-4. The broker connects to, or starts, that person's runtime.
-5. The runtime sends the current `ServerMsg::Tree`. The broker forwards it to
-   the client.
+1. The runtime sends PublishRuntime with its credential and process generation
+   on an outbound control connection.
+2. A viewer asks the broker for another person's terminals or frames.
+3. The broker sends OpenStream with a fresh random token to that runtime.
+4. The runtime opens a stream and writes RuntimeStream with the token first.
+   Iroh delivers a new stream only after the opener writes. This order avoids
+   a deadlock. TCP uses the same exchange on a new connection.
+5. The broker checks the credential and pending token, then routes the stream
+   to the viewer. The runtime sends the current frame even for a quiet shell.
 
-### Input
+### Input and frames
 
-1. Crossterm reads a key. The client converts it to bytes and sends
-   `ClientMsg::Input` with the focused pane ID.
-2. The broker forwards owner input to the owner's runtime.
-3. The runtime writes the bytes to the pane PTY.
+Own input, create, split, close, focus, and resize go through the local socket.
+PTY output updates the runtime's terminal grid, then subscribed windows.
 
-### Cells
+Remote viewing goes through the broker. A remote stream can watch and list
+terminals. GrantedInput is allowed only after the broker checks the owner's
+can-type-here grant. Revoke blocks subsequent input; it cannot recall bytes
+already written to a PTY. A remote stream cannot create, close, focus, split,
+or resize terminals.
 
-1. A runtime reader collects output bytes from each PTY.
-2. The runtime poll driver feeds new bytes to an Alacritty terminal grid.
-3. The runtime sends `ServerMsg::Cells` to its connected broker streams.
-4. The broker forwards the cell rows to clients.
-5. The client stores the rows and Ratatui draws them with Crossterm.
+## Design record
 
-### Peek
-
-1. The client authenticates as itself and requests the people list.
-2. The client resolves an exact display name and sends `ClientMsg::Peek` with
-   the target person ID and workspace ID.
-3. The broker checks that the target exists. It changes only this client route
-   from the owner's runtime to the target runtime.
-4. The target runtime marks that connection read-only and sends its tree and
-   cell updates.
-5. The TUI blocks input and resize. The broker drops input during peek. The
-   runtime also drops all mutating messages on the read-only connection.
-
-## Settled decisions
-
-Do not reopen these decisions:
-
-- PTYs and shells run on the server. See [session lifecycle research](research/10-session-lifecycle.md).
-- The process model is one broker and one runtime per person. See [session lifecycle research](research/10-session-lifecycle.md).
-- The TUI uses Ratatui and Crossterm. See [rendering research](research/04-rendering-and-gpui.md).
-- Linux and macOS are supported. Windows is not supported. See [ADR 0001](adr/0001-one-line-install-and-join.md).
-- GPUI is a far-future frontend. Core types stay frontend-neutral. See [rendering research](research/04-rendering-and-gpui.md).
-- Remote connections use iroh and expose only Seer. See [ADR 0002](adr/0002-builtin-connect.md), [security research](research/16-service-only-security.md), and [terminal sharing research](research/17-terminal-sharing-prior-art.md).
-- Join uses one pasted install line and a one-use seat. See [ADR 0001](adr/0001-one-line-install-and-join.md) and [command UX research](research/11-session-command-ux.md).
-
-The [research index](research/README.md) links the wider design record.
+- [ADR 0009: participant-owned terminals](adr/0009-participant-owned-terminals.md)
+  supersedes the server execution and broker lifetime rules in ADRs 0004 and 0007.
+- [ADR 0008: user picker](adr/0008-top-right-user-picker.md) defines the top right
+  people control. Terminal keys go to the shell until an explicit menu opens.
+- [ADR 0002: built-in connection](adr/0002-builtin-connect.md) records iroh.
+- [Research index](research/README.md) records earlier design evidence.

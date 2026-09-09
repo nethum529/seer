@@ -198,6 +198,7 @@ fn run(config: &TestConfig, command: &str, input: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_seer"))
         .arg(command)
         .env("XDG_CONFIG_HOME", &config.root)
+        .env("XDG_STATE_HOME", config.root.join("state-home"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -233,6 +234,7 @@ fn run_terminal(config: &TestConfig, input: &str) -> Output {
     let mut child = Command::new("script")
         .args(["-qec", command.as_str(), "/dev/null"])
         .env("XDG_CONFIG_HOME", &config.root)
+        .env("XDG_STATE_HOME", config.root.join("state-home"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -294,6 +296,13 @@ impl TestConfig {
 
 impl Drop for TestConfig {
     fn drop(&mut self) {
+        let _ = Command::new(env!("CARGO_BIN_EXE_seer"))
+            .arg("stop")
+            .env("XDG_CONFIG_HOME", &self.root)
+            .env("XDG_STATE_HOME", self.root.join("state-home"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         let _ = fs::remove_dir_all(&self.root);
     }
 }

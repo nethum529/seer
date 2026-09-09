@@ -2,10 +2,10 @@ use std::collections::BTreeMap;
 use std::io;
 use std::time::Instant;
 
-use seer_core::proto::ClientMsg;
+use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_core::{InputEvent, MouseKind, PaneSize};
 
-use super::{SharedSession, connection::Connection, lock};
+use super::{SharedSession, connection::Connection, lock, writer};
 use crate::user_session::VisibleSize;
 
 impl SharedSession {
@@ -16,8 +16,17 @@ impl SharedSession {
         size: Option<PaneSize>,
     ) -> io::Result<bool> {
         let lease = lock(&self.lease)?;
-        let valid = lock(&self.session)?.pane_hosts.contains_key(pane)
-            && size.is_none_or(|size| size.cols > 0 && size.rows > 0);
+        let (valid, current) = {
+            let session = lock(&self.session)?;
+            let valid = session.pane_hosts.contains_key(pane)
+                && size.is_none_or(|size| size.cols > 0 && size.rows > 0);
+            let current = session.pane_hosts.get(pane).map(|host| ServerMsg::Cells {
+                user: session.user.clone(),
+                pane: pane.to_owned(),
+                frame: host.frame(),
+            });
+            (valid, current)
+        };
         if !valid {
             drop(lease);
             self.send_refused(id, "terminal or size is invalid".into())?;
@@ -38,6 +47,11 @@ impl SharedSession {
                     connection.watch_ended = false;
                     if reported != Some(size) {
                         connection.claimed.insert(pane.into(), Instant::now());
+                    }
+                    // A new watcher must see the screen as it stands. A quiet
+                    // terminal produces nothing to poll, so send it here.
+                    if let Some(current) = &current {
+                        connection.send(writer::encode(current)?);
                     }
                 }
                 None => {

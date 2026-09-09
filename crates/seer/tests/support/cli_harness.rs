@@ -29,6 +29,13 @@ impl TestConfig {
 
 impl Drop for TestConfig {
     fn drop(&mut self) {
+        let _ = Command::new(env!("CARGO_BIN_EXE_seer"))
+            .arg("stop")
+            .env("XDG_CONFIG_HOME", &self.root)
+            .env("XDG_STATE_HOME", self.root.join("state-home"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         let _ = fs::remove_dir_all(&self.root);
     }
 }
@@ -69,6 +76,7 @@ pub(crate) fn run(config: &TestConfig, arguments: &[&str], input: &str) -> Outpu
     let mut child = Command::new(env!("CARGO_BIN_EXE_seer"))
         .args(arguments)
         .env("XDG_CONFIG_HOME", &config.root)
+        .env("XDG_STATE_HOME", config.root.join("state-home"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())
@@ -132,6 +140,7 @@ pub(crate) fn person(user_id: &str, name: &str, attached_clients: u32) -> Person
         name: name.into(),
         attached_clients,
         peekable: true,
+        host: false,
         state: PersonState::Idle,
         tabs: 2,
         foreground: "bash".into(),

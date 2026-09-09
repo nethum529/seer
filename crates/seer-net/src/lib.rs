@@ -14,9 +14,11 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::timeout;
 
+mod session;
 mod stream;
 
 pub use iroh::{EndpointId, SecretKey};
+pub use session::Session;
 pub use stream::{Socket, Stream};
 
 pub const ALPN: &[u8] = b"seer/1";
@@ -25,7 +27,7 @@ const ONLINE_TIMEOUT: Duration = Duration::from_secs(4);
 const PRE_STREAM_CONNECTION_LIMIT: usize = 32;
 const PRE_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
 
-type AcceptedStream = io::Result<(EndpointId, UnixStream)>;
+type AcceptedStream = io::Result<(EndpointId, UnixStream, Session)>;
 
 struct PreStreamLimit(Arc<AtomicUsize>);
 
@@ -136,6 +138,82 @@ pub fn dial(secret_key: SecretKey, remote: EndpointId) -> io::Result<UnixStream>
     result_rx
         .recv()
         .map_err(|_| io::Error::other("dialer thread stopped"))?
+}
+
+/// Opens one persistent connection that both sides can add streams to.
+///
+/// The runtime uses this to reach the broker. Dropping the session closes the
+/// connection.
+pub fn dial_session(secret_key: SecretKey, remote: EndpointId) -> io::Result<Session> {
+    let (control, worker_control) = UnixStream::pair()?;
+    worker_control.set_nonblocking(true)?;
+    let (session, parts) = session::session_pair(Some(control));
+    let (ready_tx, ready_rx) = mpsc::channel();
+    thread::Builder::new()
+        .name("seer-net-session".to_owned())
+        .spawn(move || session_thread(secret_key, remote, worker_control, ready_tx, parts))?;
+    ready_rx
+        .recv()
+        .map_err(|_| io::Error::other("session thread stopped"))??;
+    Ok(session)
+}
+
+fn session_thread(
+    secret_key: SecretKey,
+    remote: EndpointId,
+    control: UnixStream,
+    ready: Sender<io::Result<()>>,
+    parts: session::SessionParts,
+) {
+    let runtime = match build_runtime() {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return;
+        }
+    };
+    runtime.block_on(run_session(secret_key, remote, control, ready, parts));
+}
+
+async fn run_session(
+    secret_key: SecretKey,
+    remote: EndpointId,
+    control: UnixStream,
+    ready: Sender<io::Result<()>>,
+    parts: session::SessionParts,
+) {
+    let control = match tokio::net::UnixStream::from_std(control) {
+        Ok(control) => control,
+        Err(_) => {
+            let _ = ready.send(Err(io::Error::other("could not open session control")));
+            return;
+        }
+    };
+    let endpoint = match bind_endpoint(secret_key).await {
+        Ok(endpoint) => endpoint,
+        Err(error) => {
+            let _ = ready.send(Err(error));
+            return;
+        }
+    };
+    let connection = match endpoint.connect(remote, ALPN).await {
+        Ok(connection) => connection,
+        Err(_) => {
+            let _ = ready.send(Err(io::Error::other("could not connect to endpoint")));
+            endpoint.close().await;
+            return;
+        }
+    };
+    if ready.send(Ok(())).is_err() {
+        endpoint.close().await;
+        return;
+    }
+    tokio::select! {
+        () = session::serve_connection(connection.clone(), parts) => {}
+        () = session::shutdown_on_control(control) => {}
+    }
+    connection.close(0_u8.into(), b"seer session closed");
+    endpoint.close().await;
 }
 
 fn create_secret_key(path: &Path) -> io::Result<SecretKey> {
@@ -266,9 +344,16 @@ async fn handle_incoming(
         Ok(streams) => streams,
         Err(_) => return,
     };
-    if accepted.send(Ok((remote, caller_stream))).is_ok() {
-        let _ = bridge(send, recv, bridge_stream).await;
+    let (session, parts) = session::session_pair(None);
+    if accepted.send(Ok((remote, caller_stream, session))).is_err() {
+        connection.close(0_u8.into(), b"seer listener stopped");
+        return;
     }
+    let first = tokio::spawn(async move {
+        let _ = bridge(send, recv, bridge_stream).await;
+    });
+    session::serve_connection(connection, parts).await;
+    first.abort();
 }
 
 fn dialer_thread(
@@ -335,14 +420,14 @@ fn build_runtime() -> io::Result<tokio::runtime::Runtime> {
         .map_err(|_| io::Error::other("could not start network runtime"))
 }
 
-fn stream_pair() -> io::Result<(UnixStream, tokio::net::UnixStream)> {
+pub(crate) fn stream_pair() -> io::Result<(UnixStream, tokio::net::UnixStream)> {
     let (caller_stream, bridge_stream) = UnixStream::pair()?;
     bridge_stream.set_nonblocking(true)?;
     let bridge_stream = tokio::net::UnixStream::from_std(bridge_stream)?;
     Ok((caller_stream, bridge_stream))
 }
 
-async fn bridge(
+pub(crate) async fn bridge(
     send: SendStream,
     recv: RecvStream,
     unix: tokio::net::UnixStream,

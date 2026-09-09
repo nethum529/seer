@@ -1,7 +1,6 @@
 use std::fs;
 use std::os::unix::fs::PermissionsExt;
 use std::path::Path;
-use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -66,7 +65,7 @@ fn help_detach_and_missing_attach_have_exact_results() {
 }
 
 #[test]
-fn stop_ends_the_local_server_and_attached_client() {
+fn stop_ends_the_room_hosted_here_and_leaves_another_room_alone() {
     let config = TestConfig::new();
     let listener = listener();
     let address = listener
@@ -91,39 +90,39 @@ fn stop_ends_the_local_server_and_attached_client() {
     let broker_pid = read_pid(&pid_path);
     let _broker = ProcessGroup(broker_pid);
     let (user_id, credential) = owner_identity(&state_dir.join("broker.log"));
-    write_identity(&config, address.port(), &user_id, &credential);
-    let mut attached = Command::new(env!("CARGO_BIN_EXE_seer"))
-        .arg("attach")
-        .env("XDG_CONFIG_HOME", &config.root)
-        .stdin(Stdio::null())
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("attached client must start");
-    let runtime_pid = wait_for_child_pid(broker_pid);
 
+    // A room joined on someone else's computer must not stop the one hosted here.
+    write_identity(&config, address.port() ^ 1, &user_id, &credential);
+    let other = run(&config, &["stop"], "");
+    assert_eq!(other.status.code(), Some(1));
+    assert!(
+        other.stdout.is_empty(),
+        "stopping a joined room must not stop the room hosted here"
+    );
+    assert!(process_exists(broker_pid));
+
+    write_identity(&config, address.port(), &user_id, &credential);
     let started = Instant::now();
     let stop = run(&config, &["stop"], "");
 
     assert!(started.elapsed() < Duration::from_secs(5));
     assert_eq!(stop.status.code(), Some(0));
-    assert_eq!(stop.stdout, b"Server stopped.\n");
+    assert_eq!(stop.stdout, b"Room server stopped.\n");
     assert!(stop.stderr.is_empty());
     assert!(!pid_path.exists());
     wait_for_process_end(broker_pid);
-    wait_for_process_end(runtime_pid);
-    wait_for_child_exit(&mut attached);
 }
 
 #[test]
-fn join_persists_private_store_without_seat_token_and_reconnects_after_restart() {
+fn join_persists_the_private_store_without_the_seat_token() {
     let config = TestConfig::new();
     let listener =
         seer_net::Listener::bind(seer_net::SecretKey::generate()).expect("iroh listener must bind");
     let endpoint = listener.id().to_string();
     let alias = endpoint[..8].to_owned();
     let server = thread::spawn(move || {
-        let (device_id, mut first) = listener.accept().expect("first client must connect");
+        let (device_id, mut first, _session) =
+            listener.accept().expect("first client must connect");
         assert_eq!(
             receive(&mut first),
             ClientMsg::Join {
@@ -138,7 +137,8 @@ fn join_persists_private_store_without_seat_token_and_reconnects_after_restart()
             },
         );
 
-        let (retry_id, mut second) = listener.accept().expect("retry client must connect");
+        let (retry_id, mut second, _session) =
+            listener.accept().expect("retry client must connect");
         assert_eq!(retry_id, device_id);
         assert_eq!(
             receive(&mut second),
@@ -157,7 +157,8 @@ fn join_persists_private_store_without_seat_token_and_reconnects_after_restart()
         );
         drop(second);
 
-        let (attached_id, mut attached) = listener.accept().expect("first attach must connect");
+        let (attached_id, mut attached, _session) =
+            listener.accept().expect("first attach must connect");
         assert_eq!(attached_id, device_id);
         assert_eq!(
             receive(&mut attached),
@@ -168,10 +169,6 @@ fn join_persists_private_store_without_seat_token_and_reconnects_after_restart()
             }
         );
         send_welcome(&mut attached, "user-bob", "bob");
-        let (restarted_id, mut restarted) = listener.accept().expect("second attach must connect");
-        assert_eq!(restarted_id, device_id);
-        assert_hello(&mut restarted);
-        send_welcome(&mut restarted, "user-bob", "bob");
     });
     let capsule = format!("curl -fsSL example/install.sh | sh -s -- SEER2-{endpoint}-seat-token");
     let output = run(&config, &["join", &capsule], "alice\nbob\n");
@@ -213,14 +210,6 @@ fn attach_uses_the_saved_identity() {
         .local_addr()
         .expect("listener must have an address");
     write_store(&config, &[saved(address.port(), "team.example.com", true)]);
-    let server = thread::spawn(move || {
-        for _ in 0..3 {
-            let mut stream = accept(&listener);
-            assert_hello(&mut stream);
-            send_welcome(&mut stream, "user-bob", "bob");
-        }
-    });
-
     let output = run(&config, &["attach"], "");
 
     assert_eq!(output.status.code(), Some(0));
@@ -251,7 +240,7 @@ fn attach_uses_the_saved_identity() {
         b"Select a server:\n  1. first (bob)\n  2. second (bob)\nServer: Attached to second as bob.\n"
     );
     assert!(output.stderr.is_empty());
-    server.join().expect("server must finish");
+    drop(listener);
 }
 
 #[test]
@@ -390,21 +379,6 @@ fn write_identity(config: &TestConfig, port: u16, user_id: &str, credential: &st
     .expect("owner identity must be written");
 }
 
-fn wait_for_child_pid(parent: i32) -> i32 {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    let path = format!("/proc/{parent}/task/{parent}/children");
-    loop {
-        if let Some(pid) = fs::read_to_string(&path)
-            .ok()
-            .and_then(|contents| contents.split_whitespace().next()?.parse().ok())
-        {
-            return pid;
-        }
-        assert!(Instant::now() < deadline, "runtime must start");
-        thread::sleep(Duration::from_millis(10));
-    }
-}
-
 fn wait_for_process_end(pid: i32) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while process_exists(pid) && Instant::now() < deadline {
@@ -417,25 +391,6 @@ fn process_exists(pid: i32) -> bool {
     fs::read_to_string(format!("/proc/{pid}/stat"))
         .ok()
         .is_some_and(|stat| stat.split_whitespace().nth(2) != Some("Z"))
-}
-
-fn wait_for_child_exit(child: &mut Child) {
-    let deadline = Instant::now() + Duration::from_secs(2);
-    loop {
-        if child
-            .try_wait()
-            .expect("attached client status must be available")
-            .is_some()
-        {
-            return;
-        }
-        if Instant::now() >= deadline {
-            child.kill().expect("attached client must be killed");
-            let _ = child.wait();
-            panic!("attached client must exit");
-        }
-        thread::sleep(Duration::from_millis(10));
-    }
 }
 
 struct ProcessGroup(i32);

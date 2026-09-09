@@ -5,112 +5,59 @@ use crate::{
 };
 use ratatui::{
     Frame,
-    buffer::Buffer,
     layout::Rect,
-    style::{Color, Modifier},
+    style::Modifier,
     text::{Line, Span},
     widgets::Paragraph,
 };
 
-const HANDLE_ROWS: u16 = 3;
-const PINNED_WIDTH: u16 = 20;
-const PINNED_MIN_WIDTH: u16 = 60;
-
-pub(super) fn reserve(state: &mut ClientState, full: Rect) -> Rect {
-    state.chrome.pinned_area = Rect::default();
-    if !state.chrome.pinned || full.is_empty() || full.width < PINNED_MIN_WIDTH {
-        return full;
-    }
-    state.chrome.pinned_area = Rect::new(full.x, full.y, PINNED_WIDTH, full.height);
-    Rect::new(
-        full.x + PINNED_WIDTH,
-        full.y,
-        full.width - PINNED_WIDTH,
-        full.height,
-    )
-}
-
-pub(super) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, content: Rect) {
+pub(super) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     let full = frame.area();
-    state.chrome.handle_area = Rect::default();
     state.chrome.chip_area = Rect::default();
     state.chrome.panel_area = Rect::default();
     state.chrome.close_area = Rect::default();
-    state.chrome.search_area = Rect::default();
-    state.chrome.pin_area = Rect::default();
     state.chrome.rows.clear();
     if full.is_empty() {
         return;
     }
-    let pinned = state.chrome.pinned_area;
-    if !pinned.is_empty() {
-        column(frame, state, pinned, true);
-        if state.chrome.panel == Some(Panel::People) {
-            state.chrome.panel_area = pinned;
-        }
-    } else if state.chrome.panel != Some(Panel::People) {
-        handle(frame, state, full);
-    }
     chip(frame, state, full);
     match state.chrome.panel {
-        Some(Panel::People) if pinned.is_empty() => people(frame, state, full),
-        Some(Panel::Session) => session(frame, state, content),
-        _ => {}
+        Some(Panel::Picker) => super::picker::draw(frame, state, full),
+        Some(Panel::Session) => session(frame, state, full),
+        None => {}
     }
 }
 
-fn handle(frame: &mut Frame<'_>, state: &mut ClientState, full: Rect) {
-    if full.height < HANDLE_ROWS {
-        return;
-    }
-    let palette = Palette::default();
-    let area = Rect::new(
-        full.x,
-        full.y + (full.height - HANDLE_ROWS) / 2,
-        1,
-        HANDLE_ROWS,
-    );
-    frame.render_widget(
-        Paragraph::new(vec![Line::from("\u{00b7}"); usize::from(HANDLE_ROWS)])
-            .style(palette.style().fg(palette.overlay0).bg(palette.surface0)),
-        area,
-    );
-    state.chrome.handle_area = area;
-}
-
-fn access(state: &ClientState) -> (&'static str, bool) {
-    let user = state
+pub(super) fn viewed(state: &ClientState) -> &str {
+    state
         .viewer
         .as_ref()
-        .map_or(state.user(), |viewer| viewer.user.as_str());
+        .map_or(state.user(), |viewer| viewer.user.as_str())
+}
+
+fn access(state: &ClientState) -> &'static str {
+    let user = viewed(state);
     if user == state.own_user {
-        ("Your terminal", false)
+        "Your terminal"
     } else if state.may_type(user) {
-        ("Can type", true)
+        "Can type"
     } else {
-        ("Read only", true)
+        "Read only"
     }
 }
 
 fn chip(frame: &mut Frame<'_>, state: &mut ClientState, full: Rect) {
     let palette = Palette::default();
-    let (label, remote) = access(state);
     let style = palette.style().bg(palette.surface0);
-    let mark = Span::styled(" seer ", style.fg(palette.overlay0));
-    let access = Span::styled(
-        format!(" {label} "),
-        style.fg(if remote && label == "Read only" {
-            palette.subtext0
-        } else {
-            palette.accent
-        }),
+    let mark = Span::styled(" Seer ", style.fg(palette.overlay0));
+    let name = Span::styled(
+        format!("{} ", state.display_name(viewed(state))),
+        style.fg(palette.accent),
     );
-    let spans = if (mark.width() + access.width()) as u16 <= full.width {
-        vec![mark, access]
-    } else if remote {
-        vec![Span::styled(label, access.style)]
+    let spans = if (mark.width() + name.width()) as u16 <= full.width {
+        vec![mark, name]
     } else {
-        vec![mark]
+        vec![name]
     };
     let line = Line::from(spans);
     let width = (line.width() as u16).min(full.width);
@@ -119,33 +66,32 @@ fn chip(frame: &mut Frame<'_>, state: &mut ClientState, full: Rect) {
     state.chrome.chip_area = area;
 }
 
-fn people(frame: &mut Frame<'_>, state: &mut ClientState, full: Rect) {
-    let width = if full.width < PINNED_MIN_WIDTH {
-        16
-    } else {
-        PINNED_WIDTH
-    }
-    .min(full.width);
-    let area = Rect::new(full.x, full.y, width, full.height);
-    column(frame, state, area, false);
-    state.chrome.panel_area = area;
-}
-
-fn column(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, pinned: bool) {
+pub(super) fn status_lines(state: &ClientState) -> Vec<Line<'static>> {
     let palette = Palette::default();
-    palette.clear(frame.buffer_mut(), area);
-    super::people::column(frame, state, area, pinned);
-    solidify(frame.buffer_mut(), area, palette.panel_bg);
-}
-
-fn solidify(buffer: &mut Buffer, area: Rect, background: Color) {
-    for y in area.y..area.bottom() {
-        for x in area.x..area.right() {
-            if buffer[(x, y)].bg == Color::Reset {
-                buffer[(x, y)].bg = background;
-            }
-        }
+    let dim = palette.style().fg(palette.subtext0);
+    let user = viewed(state);
+    let mut lines = Vec::new();
+    if let Some(person) = state.people.iter().find(|p| p.user_id == user && !p.online) {
+        lines.push(Line::styled(
+            format!(" away {}", super::idle_text(person.idle_secs)),
+            dim,
+        ));
     }
+    let focused = state.focused();
+    let typist = state
+        .terminals
+        .get(user)
+        .into_iter()
+        .flatten()
+        .find(|t| Some(t.pane.as_str()) == focused)
+        .and_then(|t| t.last_typist.as_deref());
+    if let Some(name) = typist {
+        lines.push(Line::styled(
+            format!(" typing {name}"),
+            palette.style().fg(palette.yellow),
+        ));
+    }
+    lines
 }
 
 fn label(state: &ClientState, row: Row) -> String {
@@ -167,21 +113,11 @@ fn label(state: &ClientState, row: Row) -> String {
 fn header(state: &ClientState) -> Vec<Line<'static>> {
     let palette = Palette::default();
     let dim = palette.style().bg(palette.surface0).fg(palette.subtext0);
-    let user = state
-        .viewer
-        .as_ref()
-        .map_or(state.user(), |viewer| viewer.user.as_str());
-    let name = if user == state.own_user {
-        "you".to_owned()
-    } else {
-        state.person_name(user).to_owned()
-    };
-    let (access, _) = access(state);
     let mut lines = vec![
         Line::from(vec![
             Span::styled("person ", dim),
             Span::styled(
-                name,
+                state.display_name(viewed(state)).to_owned(),
                 palette
                     .style()
                     .bg(palette.surface0)
@@ -191,7 +127,7 @@ fn header(state: &ClientState) -> Vec<Line<'static>> {
         ]),
         Line::from(vec![
             Span::styled("access ", dim),
-            Span::styled(access, palette.style().bg(palette.surface0)),
+            Span::styled(access(state), palette.style().bg(palette.surface0)),
         ]),
     ];
     if !state.server.is_empty() {
@@ -200,7 +136,7 @@ fn header(state: &ClientState) -> Vec<Line<'static>> {
             Span::styled(state.server.clone(), palette.style().bg(palette.surface0)),
         ]));
     }
-    lines.extend(super::people::status_lines(state).into_iter().map(|line| {
+    lines.extend(status_lines(state).into_iter().map(|line| {
         Line::from(
             line.spans
                 .into_iter()

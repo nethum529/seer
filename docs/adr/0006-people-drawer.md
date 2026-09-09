@@ -1,5 +1,7 @@
 # ADR 0006: The people view is a drawer
 
+Status: superseded by ADR 0008 on 2026-09-09.
+
 Date: 2026-09-04
 Status: Accepted
 

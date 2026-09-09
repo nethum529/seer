@@ -3,6 +3,7 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::Path;
+use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Condvar, Mutex};
 use std::thread;
 use std::time::{Duration, Instant};
@@ -11,15 +12,16 @@ use crate::UserSession;
 use crate::user_session::validate_capabilities;
 
 mod connection;
+mod room_link;
 mod size_lease;
 mod status;
 mod util;
 mod writer;
 
 use connection::{
-    Connection, ReportedViewport, evict_connection, grant_next_owner, handle_connection,
-    reported_viewport,
+    Connection, ReportedViewport, evict_connection, grant_next_owner, reported_viewport,
 };
+use room_link::{spawn_connection, start_room};
 use util::{connection_closed, lock, remove_stale_socket, stop_after_snapshot_failure};
 
 const POLL_INTERVAL: Duration = Duration::from_millis(5);
@@ -32,35 +34,25 @@ pub fn bind(path: &Path) -> io::Result<UnixListener> {
 }
 
 pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
-    serve_with_generation(listener, session, String::new())
+    serve_with_generation(listener, session, String::new(), None)
 }
 
 pub(crate) fn serve_with_generation(
     listener: UnixListener,
     session: UserSession,
     generation: String,
+    room: Option<crate::room::RoomConfig>,
 ) -> io::Result<()> {
     let shared = Arc::new(SharedSession::new(session));
     start_poll_driver(Arc::clone(&shared))?;
-
-    for connection_id in 0_u64.. {
-        let (stream, _) = listener.accept()?;
-        let connection = Arc::clone(&shared);
-        let generation = generation.clone();
-        thread::Builder::new()
-            .name(format!("runtime-connection-{connection_id}"))
-            .spawn(move || {
-                if let Err(error) =
-                    handle_connection(stream, &connection, connection_id, generation)
-                {
-                    if crate::persistence::is_fatal(&error) {
-                        stop_after_snapshot_failure(&error);
-                    }
-                    eprintln!("runtime connection error: {error}");
-                }
-            })?;
+    let ids = Arc::new(AtomicU64::new(0));
+    if let Some(room) = room {
+        start_room(room, &generation, &shared, &ids)?;
     }
-    Ok(())
+    loop {
+        let (stream, _) = listener.accept()?;
+        spawn_connection(stream, &shared, &ids, &generation, false)?;
+    }
 }
 
 fn connection_loop(
