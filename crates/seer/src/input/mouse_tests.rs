@@ -195,3 +195,176 @@ fn one_click_gives_typing_to_a_granted_remote_terminal() {
     press(&mut state, &mut wires.routes, CrosstermKeyCode::Char('n'));
     assert!(wires.quiet(), "a revoked grant must stop input");
 }
+
+#[test]
+fn a_click_reaches_a_terminal_program_that_asked_for_the_mouse() {
+    let (mut state, pane) = one_terminal_state();
+    let mut wires = wires("alice");
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+    state
+        .frames
+        .get_mut(&("alice".into(), pane.clone()))
+        .expect("frame")
+        .modes
+        .mouse_tracking = seer_core::MouseTracking::Click;
+    state.open_focused();
+    draw(&mut terminal, &mut state);
+    let area = state.viewer.as_ref().expect("viewer").area;
+
+    let event = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: area.x + 5,
+        row: area.y + 2,
+        modifiers: KeyModifiers::NONE,
+    };
+    mouse(event, &mut wires.routes, &mut state).expect("mouse must work");
+
+    match codec::decode::<_, ClientMsg>(&mut wires.local).expect("the click must reach the program")
+    {
+        ClientMsg::TerminalInput {
+            pane: target,
+            input,
+            ..
+        } => {
+            assert_eq!(target, pane);
+            assert_eq!(
+                input.event,
+                seer_core::InputEvent::Mouse(seer_core::MouseInput {
+                    kind: seer_core::MouseKind::Down,
+                    button: Some(seer_core::MouseButton::Left),
+                    column: 5,
+                    row: 2,
+                    modifiers: Modifiers::default(),
+                }),
+                "the program must get the click at its own cell"
+            );
+        }
+        other => panic!("expected terminal input, got {other:?}"),
+    }
+    assert!(
+        state.selection.is_none(),
+        "the program owns the click, so no selection starts"
+    );
+}
+
+#[test]
+fn the_top_right_control_keeps_its_click_when_the_program_asked_for_the_mouse() {
+    let (mut state, pane) = one_terminal_state();
+    let mut wires = wires("alice");
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+    state
+        .frames
+        .get_mut(&("alice".into(), pane))
+        .expect("frame")
+        .modes
+        .mouse_tracking = seer_core::MouseTracking::Click;
+    state.open_focused();
+    draw(&mut terminal, &mut state);
+
+    let chip = state.chrome.chip_area;
+    press_at(
+        &mut state,
+        &mut wires.routes,
+        MouseEventKind::Down(MouseButton::Left),
+        chip,
+    );
+    assert_eq!(
+        state.chrome.panel,
+        Some(Panel::Picker),
+        "the control must still open the picker"
+    );
+    assert!(
+        wires.quiet(),
+        "the control click must not reach the program"
+    );
+}
+
+#[test]
+fn a_chrome_action_that_opens_a_terminal_does_not_leak_its_release() {
+    let (mut state, pane) = one_terminal_state();
+    let mut wires = wires("alice");
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+    state
+        .frames
+        .get_mut(&("alice".into(), pane))
+        .expect("frame")
+        .modes
+        .mouse_tracking = seer_core::MouseTracking::Click;
+    crate::panels::open(&mut state, Panel::Session);
+    draw(&mut terminal, &mut state);
+    let row = state
+        .chrome
+        .rows
+        .iter()
+        .find(|(index, _)| crate::panels::rows(&state)[*index] == crate::panels::Row::Terminal(0))
+        .expect("terminal row")
+        .1;
+
+    press_at(
+        &mut state,
+        &mut wires.routes,
+        MouseEventKind::Down(MouseButton::Left),
+        row,
+    );
+    draw(&mut terminal, &mut state);
+    assert!(state.viewer.is_some(), "the row must open the terminal");
+    let area = state.viewer.as_ref().expect("viewer").area;
+    press_at(
+        &mut state,
+        &mut wires.routes,
+        MouseEventKind::Up(MouseButton::Left),
+        area,
+    );
+    assert!(
+        wires.quiet(),
+        "a release from a chrome press must not reach the program"
+    );
+}
+
+#[test]
+fn the_first_click_after_attach_reaches_a_program_that_asked_for_the_mouse() {
+    let (mut state, pane) = one_terminal_state();
+    let mut wires = wires("alice");
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+    state
+        .frames
+        .get_mut(&("alice".into(), pane.clone()))
+        .expect("frame")
+        .modes
+        .mouse_tracking = seer_core::MouseTracking::Click;
+    draw(&mut terminal, &mut state);
+    assert!(state.viewer.is_none(), "attach starts in the overview");
+    let tile = state.box_areas[0].content;
+
+    let event = MouseEvent {
+        kind: MouseEventKind::Down(MouseButton::Left),
+        column: tile.x + 3,
+        row: tile.y + 1,
+        modifiers: KeyModifiers::NONE,
+    };
+    mouse(event, &mut wires.routes, &mut state).expect("mouse must work");
+
+    assert!(state.viewer.is_some(), "the click must open the terminal");
+    match codec::decode::<_, ClientMsg>(&mut wires.local).expect("the click must reach the program")
+    {
+        ClientMsg::TerminalInput {
+            pane: target,
+            input,
+            ..
+        } => {
+            assert_eq!(target, pane);
+            assert_eq!(
+                input.event,
+                seer_core::InputEvent::Mouse(seer_core::MouseInput {
+                    kind: seer_core::MouseKind::Down,
+                    button: Some(seer_core::MouseButton::Left),
+                    column: 3,
+                    row: 1,
+                    modifiers: Modifiers::default(),
+                }),
+                "the first click must land on the cell the user saw"
+            );
+        }
+        other => panic!("expected terminal input, got {other:?}"),
+    }
+}
