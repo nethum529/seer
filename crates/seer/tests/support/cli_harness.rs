@@ -133,6 +133,7 @@ pub(crate) fn person(user_id: &str, name: &str, attached_clients: u32) -> Person
         name: name.into(),
         attached_clients,
         peekable: true,
+        host: false,
         state: PersonState::Idle,
         tabs: 2,
         foreground: "bash".into(),

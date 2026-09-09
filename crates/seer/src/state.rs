@@ -32,13 +32,10 @@ pub(crate) struct ClientState {
     pub(crate) you_may_type_into: BTreeSet<String>,
     pub(crate) people_areas: Vec<(usize, Rect)>,
     pub(crate) box_areas: Vec<Tile>,
-    pub(crate) people_scroll: usize,
+    pub(crate) picker_scroll: usize,
     pub(crate) grid_scroll: usize,
     pub(crate) grid_columns: usize,
     pub(crate) grid_rows: usize,
-    pub(crate) search: String,
-    pub(crate) searching: bool,
-    pub(crate) quit_prompt: bool,
     pub(crate) invite: Option<String>,
     pub(crate) invite_pending: bool,
     pub(crate) notice: String,
@@ -49,10 +46,7 @@ pub(crate) struct ClientState {
 
 impl ClientState {
     pub(crate) fn chrome_owns_input(&self) -> bool {
-        self.chrome.panel.is_some()
-            || self.menu.is_some()
-            || self.chrome.context.is_some()
-            || self.quit_prompt
+        self.chrome.panel.is_some() || self.menu.is_some() || self.chrome.context.is_some()
     }
     pub(crate) fn new(tree: Tree, own_user: String) -> Self {
         let own = Person {
@@ -62,6 +56,7 @@ impl ClientState {
             idle_secs: 0,
             attached_clients: 1,
             peekable: true,
+            host: false,
             state: PersonState::Active,
             tabs: 0,
             foreground: String::new(),
@@ -84,13 +79,10 @@ impl ClientState {
             you_may_type_into: BTreeSet::new(),
             people_areas: Vec::new(),
             box_areas: Vec::new(),
-            people_scroll: 0,
+            picker_scroll: 0,
             grid_scroll: 0,
             grid_columns: 1,
             grid_rows: 0,
-            search: String::new(),
-            searching: false,
-            quit_prompt: false,
             invite: None,
             invite_pending: false,
             notice: String::new(),
@@ -109,6 +101,13 @@ impl ClientState {
         self.people
             .get(self.selected)
             .map_or(&self.own_user, |person| person.user_id.as_str())
+    }
+
+    pub(crate) fn display_name(&self, user: &str) -> &str {
+        if user == self.own_user {
+            return &self.own_name;
+        }
+        self.person_name(user)
     }
 
     pub(crate) fn person_name(&self, user: &str) -> &str {
@@ -165,19 +164,6 @@ impl ClientState {
         self.chrome.grid_focus = false;
         self.grid_scroll = 0;
         self.notice.clear();
-    }
-
-    pub(crate) fn matches(&self) -> Vec<usize> {
-        let query = self.search.to_lowercase();
-        self.people
-            .iter()
-            .enumerate()
-            .filter(|(_, person)| {
-                person.name.to_lowercase().contains(&query)
-                    || (person.user_id == self.own_user && "you".contains(&query))
-            })
-            .map(|(index, _)| index)
-            .collect()
     }
 
     pub(crate) fn open_focused(&mut self) {

@@ -130,6 +130,7 @@ impl BrokerState {
                     online: attached_clients > 0,
                     attached_clients,
                     peekable: self.runtimes.is_running(&person.user_id),
+                    host: person.is_owner,
                     state: person_state(attached_clients, idle_secs),
                     tabs,
                     foreground,

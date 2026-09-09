@@ -32,13 +32,15 @@ Open the people and terminals screen:
 
     seer
 
-The people column puts you first. Select a person to see their live terminals.
-A terminal takes its name from its foreground process, or uses "shell" for a
-shell. A shell is idle; another foreground process is busy.
+The terminal keeps the whole window. The control at the top right shows
+"Seer" and the name of the person you look at. Left click it to open the
+picker, then select a person to see their live terminals. A terminal takes
+its name from its foreground process, or uses "shell" for a shell. A shell
+is idle; another foreground process is busy.
 
 When you are alone, the screen shows a join line that expires in 24 hours.
-Click the seer chip at the top right to copy the invite or open a terminal.
-Clipboard access must be enabled in your terminal.
+Right click the control at the top right to copy the invite or open a
+terminal. Clipboard access must be enabled in your terminal.
 
 ## Controls
 
@@ -46,21 +48,26 @@ Main screen:
 
 - Type or paste to open the selected terminal and send the first input.
 - All terminal keys, including q, Escape, and Ctrl+B, go to the terminal.
-- Click the left handle to open people, or the top right chip for session.
-- Use the session panel to open, close, or select a terminal and quit Seer.
+- Left click the top right control to open the picker. It shows your typing
+  permission for the person you look at, every person with the host marked,
+  and the server address. Five names fill one column, then a new column is
+  added to the left. Select a person to see their terminals.
+- Right click the same control for the session panel. Use it to open, close,
+  or select a terminal, copy the invite, go back, and quit Seer.
 - Click a terminal to open it for typing. Drag to select and copy text.
-- Scroll over the people column or terminal area to scroll that area.
+- Scroll over the picker to see more columns, or over the terminal area.
 
 Viewer:
 
 - Use the mouse to open the session panel and select Back for the overview.
 - Input is enabled for your terminals and for people who gave you a grant.
-- Seer has no prefix. Keys belong to the terminal until you open a panel,
-  menu, or search field.
+- Seer has no prefix. Keys belong to the terminal until you open a panel
+  or a menu.
 
-Right click another person's row to open their menu. It shows their presence, idle
-time, terminals, watch actions, and your "can type here" grant for them. Use
-j and k to select an action, Enter to watch, and Space to toggle the grant.
+Right click another person's row in the picker to open their menu. It shows
+their presence, idle time, terminals, watch actions, and your "can type here"
+grant for them. Use j and k to select an action, Enter to watch, and Space to
+toggle the grant.
 The checkbox changes when the broker confirms it. Esc or a click outside
 closes the menu.
 

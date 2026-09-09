@@ -97,13 +97,10 @@ pub(crate) fn raw_bytes(input: &TerminalInput) -> std::io::Result<Option<Vec<u8>
     seer_runtime::PaneGrid::new(1, 1).handle_input(input)
 }
 
-use crate::{state::ClientState, tui_navigation as navigation};
+use crate::state::ClientState;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Position;
-use std::{
-    io,
-    time::{Duration, Instant},
-};
+use std::io;
 
 pub(crate) fn command(
     key: KeyEvent,
@@ -113,9 +110,6 @@ pub(crate) fn command(
     if state.chrome.context.is_some() {
         crate::person_menu::context_key(key, stream, state)?;
         return Ok(false);
-    }
-    if state.quit_prompt {
-        return navigation::key(key, stream, state);
     }
     if state.menu.is_some() {
         crate::person_menu::key(key, stream, state)?;
@@ -132,7 +126,6 @@ pub(crate) fn mouse(
     mouse: MouseEvent,
     stream: &mut crate::routes::Routes,
     state: &mut ClientState,
-    last: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<bool> {
     if mouse.modifiers.contains(KeyModifiers::SHIFT) {
         return Ok(false);
@@ -140,9 +133,6 @@ pub(crate) fn mouse(
     // A live selection means the press landed on terminal content, so chrome
     // that consumed the press cannot release into the terminal behind it.
     let pressed_content = state.selection.is_some();
-    if state.quit_prompt {
-        return click_hint(mouse, stream, state);
-    }
     if state.chrome.context.is_some() {
         crate::person_menu::context_mouse(mouse, stream, state)?;
         return Ok(false);
@@ -151,13 +141,12 @@ pub(crate) fn mouse(
         crate::person_menu::mouse(mouse, stream, state)?;
         return Ok(false);
     }
-    match crate::panels::mouse(mouse, stream, state, last)? {
+    match crate::panels::mouse(mouse, stream, state)? {
         crate::panels::Handled::Consumed => return Ok(false),
         crate::panels::Handled::Quit => return Ok(true),
         crate::panels::Handled::Passed => {}
     }
     if selection::mouse(mouse, state)? {
-        *last = None;
         return Ok(false);
     }
     if matches!(
@@ -181,33 +170,6 @@ pub(crate) fn mouse(
     }
     click_target(mouse, state);
     Ok(false)
-}
-
-fn click_hint(
-    mouse: MouseEvent,
-    stream: &mut crate::routes::Routes,
-    state: &mut ClientState,
-) -> io::Result<bool> {
-    if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return Ok(false);
-    }
-    let areas = &state.chrome.dialog_areas;
-    let key = areas
-        .iter()
-        .find(|(_, area)| area.contains(Position::new(mouse.column, mouse.row)))
-        .map(|(key, _)| key.clone());
-    let Some(key) = key else {
-        return Ok(false);
-    };
-    let (code, modifiers) = match key.as_str() {
-        "enter" => (CrosstermKeyCode::Enter, KeyModifiers::NONE),
-        "esc" => (CrosstermKeyCode::Esc, KeyModifiers::NONE),
-        _ => match key.chars().next() {
-            Some(character) => (CrosstermKeyCode::Char(character), KeyModifiers::NONE),
-            None => return Ok(false),
-        },
-    };
-    command(KeyEvent::new(code, modifiers), stream, state)
 }
 
 fn click_target(mouse: MouseEvent, state: &mut ClientState) {
@@ -235,22 +197,6 @@ fn open_clicked(mouse: MouseEvent, state: &mut ClientState) {
     {
         state.select_tab(index);
         state.open_focused();
-    }
-}
-
-pub(crate) fn double_click(
-    last: &mut Option<(String, usize, Instant)>,
-    target: String,
-    index: usize,
-) -> bool {
-    if last.as_ref().is_some_and(|(old, i, time)| {
-        *old == target && *i == index && time.elapsed() < Duration::from_millis(400)
-    }) {
-        *last = None;
-        true
-    } else {
-        *last = Some((target, index, Instant::now()));
-        false
     }
 }
 

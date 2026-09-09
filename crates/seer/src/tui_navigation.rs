@@ -1,5 +1,4 @@
 use crate::{state::ClientState, tui::send};
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use seer_core::proto::ClientMsg;
 use std::{cell::RefCell, io};
 
@@ -9,113 +8,6 @@ pub(crate) fn set_peek_person(person: Option<&str>) {
 }
 pub(crate) fn take_start_person() -> Option<String> {
     START_PERSON.take()
-}
-
-pub(crate) fn key(
-    key: KeyEvent,
-    stream: &mut crate::routes::Routes,
-    state: &mut ClientState,
-) -> io::Result<bool> {
-    if key.modifiers.intersects(
-        KeyModifiers::CONTROL
-            | KeyModifiers::ALT
-            | KeyModifiers::SUPER
-            | KeyModifiers::HYPER
-            | KeyModifiers::META,
-    ) {
-        return Ok(false);
-    }
-    if state.quit_prompt {
-        match key.code {
-            KeyCode::Enter | KeyCode::Char('q') => return Ok(true),
-            KeyCode::Esc => state.quit_prompt = false,
-            _ => {}
-        }
-        return Ok(false);
-    }
-    if state.searching {
-        search(key, state);
-        return Ok(false);
-    }
-    match key.code {
-        KeyCode::Char(number @ '1'..='9') => state.select_tab(number as usize - '1' as usize),
-        KeyCode::Char('x') => state.request_close(stream)?,
-        KeyCode::Char('q') => return Ok(true),
-        KeyCode::Esc => state.quit_prompt = true,
-        KeyCode::Char('j') | KeyCode::Down => move_person(state, true),
-        KeyCode::Char('k') | KeyCode::Up => move_person(state, false),
-        KeyCode::Char('h') | KeyCode::Left => move_box(state, false),
-        KeyCode::Char('l') | KeyCode::Right => move_box(state, true),
-        KeyCode::Enter => state.open_focused(),
-        KeyCode::Char('/') => state.searching = true,
-        KeyCode::Char('n') => new_terminal(stream, state)?,
-        KeyCode::Char('c') if state.people.len() == 1 => copy_invite(state)?,
-        _ => {}
-    }
-    Ok(false)
-}
-
-fn search(key: KeyEvent, state: &mut ClientState) {
-    match key.code {
-        KeyCode::Esc => {
-            state.searching = false;
-            state.search.clear();
-        }
-        KeyCode::Enter => state.searching = false,
-        KeyCode::Backspace => {
-            state.search.pop();
-        }
-        KeyCode::Char(character) => state.search.push(character),
-        _ => {}
-    }
-    if let Some(index) = state.matches().first() {
-        state.select_person(*index);
-    }
-    if key.code == KeyCode::Enter {
-        state.search.clear();
-    }
-    state.people_scroll = 0;
-}
-
-fn move_person(state: &mut ClientState, forward: bool) {
-    state.chrome.grid_focus = false;
-    let matches = state.matches();
-    if matches.is_empty() {
-        return;
-    }
-    let index = matches
-        .iter()
-        .position(|index| *index == state.selected)
-        .unwrap_or(0);
-    let index = step(index, matches.len(), forward);
-    state.select_person(matches[index]);
-    let height = state.people_areas.len().max(1);
-    if index < state.people_scroll {
-        state.people_scroll = index;
-    }
-    if index >= state.people_scroll + height {
-        state.people_scroll = index + 1 - height;
-    }
-}
-
-fn move_box(state: &mut ClientState, forward: bool) {
-    state.chrome.grid_focus = true;
-    let count = state.selected_terminals().len();
-    if count == 0 {
-        return;
-    }
-    state.focus = step(state.focus, count, forward);
-    if !state.box_areas.iter().any(|tile| tile.index == state.focus) {
-        state.grid_scroll = state.focus / state.grid_columns;
-    }
-}
-
-pub(crate) fn step(index: usize, count: usize, forward: bool) -> usize {
-    if forward {
-        (index + 1) % count
-    } else {
-        (index + count - 1) % count
-    }
 }
 
 pub(crate) fn new_terminal(

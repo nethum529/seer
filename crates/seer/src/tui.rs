@@ -18,7 +18,7 @@ use seer_net::{Socket, Stream};
 use std::io::{self, Stdout};
 use std::net::Shutdown;
 use std::sync::mpsc::TryRecvError;
-use std::time::{Duration, Instant};
+use std::time::Duration;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum SessionExit {
@@ -94,7 +94,6 @@ fn run_loop(
     start_person: &mut Option<String>,
 ) -> io::Result<SessionExit> {
     let mut dirty = true;
-    let mut last_click = None;
     let mut readers = Vec::new();
     loop {
         for _ in 0..64 {
@@ -127,7 +126,7 @@ fn run_loop(
             dirty = false;
         }
         if event::poll(Duration::from_millis(25))? {
-            if handle_event(event::read()?, stream, state, &mut last_click)? {
+            if handle_event(event::read()?, stream, state)? {
                 return Ok(SessionExit::Client);
             }
             dirty = true;
@@ -271,7 +270,6 @@ fn handle_event(
     event: Event,
     stream: &mut crate::routes::Routes,
     state: &mut ClientState,
-    last_click: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<bool> {
     let old_user = state.user().to_owned();
     match event {
@@ -296,7 +294,7 @@ fn handle_event(
             state,
             TerminalInput::new(InputEvent::Focus(false)),
         )?,
-        Event::Mouse(mouse) if crate::input::mouse(mouse, stream, state, last_click)? => {
+        Event::Mouse(mouse) if crate::input::mouse(mouse, stream, state)? => {
             send(stream, &ClientMsg::Detach)?;
             return Ok(true);
         }

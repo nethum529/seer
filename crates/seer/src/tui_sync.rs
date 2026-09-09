@@ -164,7 +164,7 @@ mod tests {
         let viewer_area = state.viewer.as_ref().expect("viewer must exist").area;
         assert_eq!(viewer_area, ratatui::layout::Rect::new(0, 0, 100, 30));
         for panel in [
-            Some(crate::panels::Panel::People),
+            Some(crate::panels::Panel::Picker),
             Some(crate::panels::Panel::Session),
             None,
         ] {
@@ -183,38 +183,19 @@ mod tests {
                 viewer_area
             );
         }
-        for (pinned, expected) in [
-            (true, ratatui::layout::Rect::new(20, 0, 80, 30)),
-            (false, ratatui::layout::Rect::new(0, 0, 100, 30)),
-        ] {
-            state.chrome.pinned = pinned;
-            terminal
-                .draw(|frame| render::draw(frame, &mut state))
-                .expect("pin change must draw");
-            sync_watches(&mut stream, &mut state).expect("pinned watch must send");
-            sync_resize(&mut stream, &mut state).expect("pinned resize must send");
-            assert_eq!(
-                state.viewer.as_ref().expect("viewer must exist").area,
-                expected
-            );
-            assert_viewer_watch(&mut peer, &state);
-            assert_viewer_resize(&mut peer, &state);
-        }
-        state.chrome.pinned = true;
         terminal.backend_mut().resize(50, 20);
         terminal
             .draw(|frame| render::draw(frame, &mut state))
-            .expect("narrow pin must draw");
+            .expect("narrow window must draw");
         sync_watches(&mut stream, &mut state).expect("narrow watch must send");
         sync_resize(&mut stream, &mut state).expect("narrow resize must send");
         assert_eq!(
             state.viewer.as_ref().expect("viewer must exist").area,
             ratatui::layout::Rect::new(0, 0, 50, 20),
-            "a collapsed pin must report the whole window"
+            "a narrow window must report the whole window"
         );
         assert_viewer_watch(&mut peer, &state);
         assert_viewer_resize(&mut peer, &state);
-        state.chrome.pinned = false;
         terminal.backend_mut().resize(100, 30);
         terminal
             .draw(|frame| render::draw(frame, &mut state))

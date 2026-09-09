@@ -219,6 +219,8 @@ pub struct Person {
     pub attached_clients: u32,
     pub peekable: bool,
     #[serde(default)]
+    pub host: bool,
+    #[serde(default)]
     pub state: PersonState,
     #[serde(default)]
     pub tabs: u32,

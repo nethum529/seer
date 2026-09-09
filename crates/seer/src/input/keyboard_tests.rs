@@ -1,4 +1,4 @@
-use super::tests::{one_terminal_state, quiet, wires};
+use super::tests::{one_terminal_state, wires};
 use super::*;
 use seer_core::proto::{ClientMsg, codec};
 
@@ -16,31 +16,27 @@ fn typing_from_the_overview_sends_the_first_key_instead_of_running_shortcuts() {
         ])
         .collect::<Vec<_>>();
 
-    for pinned in [false, true] {
-        state.chrome.pinned = pinned;
-        for key in &keys {
-            state.viewer = None;
-            assert!(
-                !command(*key, &mut wires.routes, &mut state).expect("typing"),
-                "{key:?} must not quit Seer"
-            );
-            let message: ClientMsg =
-                codec::decode(&mut wires.local).expect("first key must reach PTY");
-            let ClientMsg::TerminalInput {
-                pane: target,
-                input,
-                ..
-            } = message
-            else {
-                panic!("typing must send terminal input, got {message:?}");
-            };
-            assert_eq!(target, pane);
-            assert_eq!(input, key_to_input(*key).expect("terminal key"));
-            assert!(
-                !state.chrome_owns_input(),
-                "typing must not open Seer controls"
-            );
-        }
+    for key in &keys {
+        state.viewer = None;
+        assert!(
+            !command(*key, &mut wires.routes, &mut state).expect("typing"),
+            "{key:?} must not quit Seer"
+        );
+        let message: ClientMsg = codec::decode(&mut wires.local).expect("first key must reach PTY");
+        let ClientMsg::TerminalInput {
+            pane: target,
+            input,
+            ..
+        } = message
+        else {
+            panic!("typing must send terminal input, got {message:?}");
+        };
+        assert_eq!(target, pane);
+        assert_eq!(input, key_to_input(*key).expect("terminal key"));
+        assert!(
+            !state.chrome_owns_input(),
+            "typing must not open Seer controls"
+        );
     }
 }
 
@@ -58,10 +54,7 @@ fn typing_from_the_overview_respects_remote_grants() {
     state.select_person(1);
     let key = KeyEvent::new(CrosstermKeyCode::Char('q'), KeyModifiers::NONE);
     assert!(!command(key, &mut wires.routes, &mut state).expect("read-only typing"));
-    assert!(
-        wires.quiet(),
-        "input for a person who has not granted it must stay off both routes"
-    );
+    assert!(wires.quiet(), "read-only input must stay off the wire");
 
     state.you_may_type_into.insert("bob".into());
     state.viewer = None;
@@ -77,10 +70,7 @@ fn typing_from_the_overview_respects_remote_grants() {
     state.you_may_type_into.clear();
     state.viewer = None;
     assert!(!command(key, &mut wires.routes, &mut state).expect("revoked typing"));
-    assert!(
-        quiet(&mut wires.local),
-        "revoked input must stay off the wire"
-    );
+    assert!(wires.quiet(), "revoked input must stay off the wire");
 }
 
 #[test]
@@ -112,8 +102,5 @@ fn an_empty_overview_has_no_keyboard_actions() {
         );
         assert!(!state.chrome_owns_input());
     }
-    assert!(
-        quiet(&mut wires.local),
-        "letters must not create or close terminals"
-    );
+    assert!(wires.quiet(), "letters must not create or close terminals");
 }
