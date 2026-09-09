@@ -130,7 +130,7 @@ fn the_search_field_takes_keys_and_gives_them_back_to_the_terminal() {
     assert_eq!(state.search, "x", "pinned search must take its own input");
     crate::viewer::input_message(
         &mut stream,
-        &state,
+        &mut state,
         TerminalInput::new(InputEvent::Paste("query".into())),
     )
     .expect("paste must be handled");

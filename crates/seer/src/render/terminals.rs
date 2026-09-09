@@ -34,7 +34,7 @@ pub(super) fn first_run(frame: &mut Frame<'_>, state: &ClientState, area: Rect) 
         ),
         Line::from(""),
         Line::styled(
-            "c copy   n new terminal",
+            "Click seer at the top right to copy the invite or open a terminal.",
             palette.style().fg(palette.subtext0),
         ),
     ];

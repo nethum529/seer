@@ -98,7 +98,8 @@ fn the_people_panel_opens_closes_and_pins() {
         !draw(&mut terminal, &mut state).contains("people"),
         "no people column may take content space by default"
     );
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('p'));
+    let handle = state.chrome.handle_area;
+    click(&mut state, &mut stream, handle);
     assert!(draw(&mut terminal, &mut state).contains("people"));
     assert!(matches!(state.chrome.panel, Some(Panel::People)));
 
@@ -135,7 +136,8 @@ fn the_people_panel_opens_closes_and_pins() {
 
     terminal.backend_mut().resize(45, 20);
     draw(&mut terminal, &mut state);
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('p'));
+    let handle = state.chrome.handle_area;
+    click(&mut state, &mut stream, handle);
     assert!(
         draw(&mut terminal, &mut state).contains("people"),
         "narrow screens keep the panel"
@@ -146,7 +148,8 @@ fn the_people_panel_opens_closes_and_pins() {
 
     terminal.backend_mut().resize(100, 30);
     draw(&mut terminal, &mut state);
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('p'));
+    let handle = state.chrome.handle_area;
+    click(&mut state, &mut stream, handle);
     draw(&mut terminal, &mut state);
     let pin = state.chrome.pin_area;
     assert!(pin.width > 0 && pin.height == 1, "header must offer pin");
@@ -310,7 +313,7 @@ fn the_viewer_forwards_keys_until_a_panel_takes_them() {
     );
     crate::viewer::input_message(
         &mut stream,
-        &state,
+        &mut state,
         seer_core::TerminalInput::new(seer_core::InputEvent::Paste("hello".into())),
     )
     .expect("paste must be handled");
@@ -371,7 +374,9 @@ fn the_session_panel_reaches_the_terminal_actions() {
         .expect("timeout");
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
 
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('s'));
+    draw(&mut terminal, &mut state);
+    let chip = state.chrome.chip_area;
+    click(&mut state, &mut stream, chip);
     let text = draw(&mut terminal, &mut state);
     assert!(matches!(state.chrome.panel, Some(Panel::Session)));
     for label in ["1 shell", "new terminal", "close terminal", "quit"] {

@@ -41,7 +41,7 @@ The owner approved terminal-first option 3 on 2026-09-08.
   two columns at widths of 80 or more, one column below that. Grid
   focus, scrolling, and the more cue remain available.
 - A small handle at the middle of the left edge opens the people
-  panel. The p key opens it in overview. The panel draws over the
+  panel. The panel draws over the
   terminal and does not change the terminal size. Its heading closes
   it. Escape or a click outside also closes it.
 - The people panel heading has a pin control. When pinned, the people
@@ -59,7 +59,7 @@ The owner approved terminal-first option 3 on 2026-09-08.
 - A small chip at the top right shows seer and Your terminal, Read
   only, or Can type. The input grant determines the remote access
   text. On narrow screens, the access text takes priority over seer.
-- Click the chip or press s in overview for the session panel. It
+- Click the chip for the session panel. It
   shows the selected person, access, host, terminal list, and actions.
   Use j/k or arrows to select, Enter or a click to act. The list
   scrolls with selection or the mouse wheel. Short screens reduce
@@ -77,9 +77,11 @@ The owner approved terminal-first option 3 on 2026-09-08.
 - Notices draw over a small part of the last row and clear after
   three seconds. They do not reserve a row.
 
-The overview keeps j/k people, h/l boxes, Enter view, n new terminal,
-x close, 1-9 terminal selection, / find, q quit, and Escape to ask
-before quitting. The existing person menu keeps its grant actions.
+The overview has no keyboard shortcuts. Typing or pasting opens the
+selected terminal and forwards that first input. Without a selected
+terminal, keys do not perform Seer actions. This also applies when the
+people column is pinned. Explicit panels, menus, and search fields
+handle their own input. The person menu keeps its grant actions.
 A click on terminal content in the grid opens that terminal and gives
 it the keys. A click on the search row in the people panel starts a
 search, the same as the / key.
@@ -133,8 +135,8 @@ The first run block shows only when the owner has zero terminals. It
 is one centered block, at most 80 columns wide: "Nobody else is here
 yet.", the sentence "Send this line to a friend. Your friend pastes it
 in a terminal. It expires in 24 hours.", the join line with the
-capsule token on its own line, and the hints c copy and n new
-terminal. When the owner has terminals, the session panel offers c copy invite.
+capsule token on its own line, and a hint to click seer at the top right
+to copy the invite or open a terminal. The session panel offers those actions.
 The people panel shows the owner as "you".
 
 ### 2.5 Mouse

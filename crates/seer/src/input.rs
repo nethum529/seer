@@ -125,34 +125,7 @@ pub(crate) fn command(
     if state.chrome.panel.is_some() {
         return crate::panels::key(key, stream, state);
     }
-    if state.viewer.is_none() && key.modifiers.is_empty() && !state.searching {
-        let panel = match key.code {
-            CrosstermKeyCode::Char('p' | '/') => Some(crate::panels::Panel::People),
-            CrosstermKeyCode::Char('s') => Some(crate::panels::Panel::Session),
-            _ => None,
-        };
-        if let Some(panel) = panel {
-            crate::panels::open(state, panel);
-            state.searching = key.code == CrosstermKeyCode::Char('/');
-            return Ok(false);
-        }
-    }
-    if key.code == CrosstermKeyCode::Char('m')
-        && key.modifiers.is_empty()
-        && state.viewer.is_none()
-        && !state.searching
-    {
-        let row = state
-            .people_areas
-            .iter()
-            .find(|(i, _)| *i == state.selected)
-            .map_or(state.chrome.panel_area, |(_, row)| *row);
-        crate::person_menu::open(state, state.selected, row);
-    } else if state.viewer.is_some() {
-        crate::viewer::key(key, stream, state)?;
-    } else {
-        return navigation::key(key, stream, state);
-    }
+    crate::viewer::key(key, stream, state)?;
     Ok(false)
 }
 
@@ -298,6 +271,8 @@ fn scroll(mouse: MouseEvent, state: &mut ClientState) {
     }
 }
 
+#[cfg(test)]
+mod keyboard_tests;
 #[cfg(test)]
 mod mouse_tests;
 #[cfg(test)]

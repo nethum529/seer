@@ -37,31 +37,28 @@ A terminal takes its name from its foreground process, or uses "shell" for a
 shell. A shell is idle; another foreground process is busy.
 
 When you are alone, the screen shows a join line that expires in 24 hours.
-Press c to request a clipboard copy. Clipboard access must be enabled in your
-terminal. Press n to refresh the invite and open a new terminal.
+Click the seer chip at the top right to copy the invite or open a terminal.
+Clipboard access must be enabled in your terminal.
 
 ## Controls
 
 Main screen:
 
-- j and k select a person.
-- h and l focus a terminal.
-- Enter opens the viewer.
-- n creates your own terminal and opens it for input.
-- / searches names.
-- Esc asks to quit. q quits.
-- Click a terminal to focus it. Double click to open it.
+- Type or paste to open the selected terminal and send the first input.
+- All terminal keys, including q, Escape, and Ctrl+B, go to the terminal.
+- Click the left handle to open people, or the top right chip for session.
+- Use the session panel to open, close, or select a terminal and quit Seer.
+- Click a terminal to open it for typing. Drag to select and copy text.
 - Scroll over the people column or terminal area to scroll that area.
 
 Viewer:
 
-- Esc returns to the main screen.
-- Tab opens the next terminal of the same person.
-- f turns following output on or off.
+- Use the mouse to open the session panel and select Back for the overview.
 - Input is enabled for your terminals and for people who gave you a grant.
-- Esc, Tab, and f are viewer controls. Paste text to send these literal bytes.
+- Seer has no prefix. Keys belong to the terminal until you open a panel,
+  menu, or search field.
 
-Click another person's row to open their menu. It shows their presence, idle
+Right click another person's row to open their menu. It shows their presence, idle
 time, terminals, watch actions, and your "can type here" grant for them. Use
 j and k to select an action, Enter to watch, and Space to toggle the grant.
 The checkbox changes when the broker confirms it. Esc or a click outside
