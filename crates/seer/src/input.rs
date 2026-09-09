@@ -1,6 +1,8 @@
 mod selection;
 use crossterm::event::{KeyCode as CrosstermKeyCode, KeyEvent, KeyModifiers};
-use seer_core::{InputEvent, KeyCode, KeyInput, Modifiers, TerminalInput};
+use seer_core::{
+    InputEvent, KeyCode, KeyInput, Modifiers, MouseInput, MouseKind, MouseTracking, TerminalInput,
+};
 pub(crate) use selection::{Selection, copy_text};
 
 const SCROLLBACK_PAGE_LINES: i32 = 20;
@@ -97,9 +99,9 @@ pub(crate) fn raw_bytes(input: &TerminalInput) -> std::io::Result<Option<Vec<u8>
     seer_runtime::PaneGrid::new(1, 1).handle_input(input)
 }
 
-use crate::state::ClientState;
+use crate::{state::ClientState, terminal_cells::start_row};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
-use ratatui::layout::Position;
+use ratatui::layout::{Position, Rect};
 use std::io;
 
 pub(crate) fn command(
@@ -130,6 +132,9 @@ pub(crate) fn mouse(
     if mouse.modifiers.contains(KeyModifiers::SHIFT) {
         return Ok(false);
     }
+    if matches!(mouse.kind, MouseEventKind::Down(_)) {
+        state.program_pressed = false;
+    }
     // A live selection means the press landed on terminal content, so chrome
     // that consumed the press cannot release into the terminal behind it.
     let pressed_content = state.selection.is_some();
@@ -145,6 +150,9 @@ pub(crate) fn mouse(
         crate::panels::Handled::Consumed => return Ok(false),
         crate::panels::Handled::Quit => return Ok(true),
         crate::panels::Handled::Passed => {}
+    }
+    if forward_to_program(mouse, stream, state)? {
+        return Ok(false);
     }
     if selection::mouse(mouse, state)? {
         return Ok(false);
@@ -170,6 +178,105 @@ pub(crate) fn mouse(
     }
     click_target(mouse, state);
     Ok(false)
+}
+
+fn forward_to_program(
+    mouse: MouseEvent,
+    stream: &mut crate::routes::Routes,
+    state: &mut ClientState,
+) -> io::Result<bool> {
+    let (kind, button) = mouse_kind(mouse.kind);
+    let cell = program_cell(mouse, kind, state);
+    if kind == MouseKind::Down {
+        state.program_pressed = cell.is_some();
+    }
+    let Some((open, column, row)) = cell else {
+        return Ok(false);
+    };
+    if let Some(index) = open {
+        state.select_tab(index);
+        state.open_focused();
+    }
+    let input = TerminalInput::new(InputEvent::Mouse(MouseInput {
+        kind,
+        button,
+        column,
+        row,
+        modifiers: map_modifiers(mouse.modifiers),
+    }));
+    crate::viewer::input_message(stream, state, input)?;
+    Ok(true)
+}
+
+fn program_cell(
+    mouse: MouseEvent,
+    kind: MouseKind,
+    state: &ClientState,
+) -> Option<(Option<usize>, u16, u16)> {
+    if matches!(kind, MouseKind::Up | MouseKind::Drag) && !state.program_pressed {
+        return None;
+    }
+    let position = Position::new(mouse.column, mouse.row);
+    let (open, area, key) = program_target(kind, position, state)?;
+    let frame = state.frames.get(&key)?;
+    if frame.modes.mouse_tracking == MouseTracking::None {
+        return None;
+    }
+    let start = match &state.viewer {
+        Some(viewer) => start_row(&viewer.visible_rows(area.height), area.height),
+        None => start_row(&frame.rows, area.height),
+    };
+    let row = u16::try_from(usize::from(position.y - area.y) + start).ok()?;
+    Some((open, position.x - area.x, row))
+}
+
+fn program_target(
+    kind: MouseKind,
+    position: Position,
+    state: &ClientState,
+) -> Option<(Option<usize>, Rect, (String, String))> {
+    // A remote pane is driven by raw bytes, and this client does not know that
+    // pane's mouse mode, so it cannot encode a report for it.
+    if let Some(viewer) = &state.viewer {
+        if viewer.user != state.own_user || viewer.offset != 0 || !viewer.area.contains(position) {
+            return None;
+        }
+        return Some((None, viewer.area, viewer.target()));
+    }
+    if kind != MouseKind::Down || state.user() != state.own_user {
+        return None;
+    }
+    let tile = state
+        .box_areas
+        .iter()
+        .find(|tile| tile.content.contains(position))?;
+    let pane = state.selected_terminals().get(tile.index)?.pane.clone();
+    Some((
+        Some(tile.index),
+        tile.content,
+        (state.own_user.clone(), pane),
+    ))
+}
+
+fn mouse_kind(kind: MouseEventKind) -> (MouseKind, Option<seer_core::MouseButton>) {
+    match kind {
+        MouseEventKind::Down(button) => (MouseKind::Down, Some(map_button(button))),
+        MouseEventKind::Up(button) => (MouseKind::Up, Some(map_button(button))),
+        MouseEventKind::Drag(button) => (MouseKind::Drag, Some(map_button(button))),
+        MouseEventKind::Moved => (MouseKind::Moved, None),
+        MouseEventKind::ScrollUp => (MouseKind::ScrollUp, None),
+        MouseEventKind::ScrollDown => (MouseKind::ScrollDown, None),
+        MouseEventKind::ScrollLeft => (MouseKind::ScrollLeft, None),
+        MouseEventKind::ScrollRight => (MouseKind::ScrollRight, None),
+    }
+}
+
+fn map_button(button: MouseButton) -> seer_core::MouseButton {
+    match button {
+        MouseButton::Left => seer_core::MouseButton::Left,
+        MouseButton::Middle => seer_core::MouseButton::Middle,
+        MouseButton::Right => seer_core::MouseButton::Right,
+    }
 }
 
 fn click_target(mouse: MouseEvent, state: &mut ClientState) {

@@ -250,7 +250,11 @@ fn closed_mouse(mouse: MouseEvent, state: &mut ClientState, position: Position) 
     match mouse.kind {
         MouseEventKind::Down(MouseButton::Left) => open(state, Panel::Picker),
         MouseEventKind::Down(MouseButton::Right) => open(state, Panel::Session),
-        _ => return Handled::Passed,
+        MouseEventKind::ScrollDown
+        | MouseEventKind::ScrollUp
+        | MouseEventKind::ScrollLeft
+        | MouseEventKind::ScrollRight => return Handled::Passed,
+        _ => {}
     }
     Handled::Consumed
 }
