@@ -1,5 +1,3 @@
-#![cfg(target_os = "linux")]
-
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::path::Path;
@@ -10,8 +8,7 @@ use std::time::{Duration, Instant};
 use seer_core::PaneSize;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
-mod support;
-use support::*;
+use crate::support::*;
 
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 const FIRST: PaneSize = PaneSize {

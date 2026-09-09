@@ -1,13 +1,10 @@
-#![cfg(target_os = "linux")]
-
 use std::process::Stdio;
 use std::thread;
 use std::time::Duration;
 
 use seer_core::proto::ClientMsg;
 
-mod support;
-use support::*;
+use crate::support::*;
 
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
 

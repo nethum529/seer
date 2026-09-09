@@ -1,6 +1,3 @@
-// Each test binary in this crate uses a subset of these helpers.
-#![allow(dead_code)]
-
 use std::fs;
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -182,10 +179,6 @@ impl RuntimeProcess {
         Self(Some(child))
     }
 
-    /// Ends the runtime with a signal.
-    ///
-    /// Closing the parent pipe no longer stops it: a runtime outlives whoever
-    /// started it, so the broker and the window can both go away.
     pub fn stop(&mut self) -> Output {
         let child = self.0.as_mut().expect("runtime process must exist");
         signal(child.id(), libc::SIGTERM);

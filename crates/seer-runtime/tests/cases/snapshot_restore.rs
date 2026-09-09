@@ -1,5 +1,3 @@
-#![cfg(target_os = "linux")]
-
 use std::fs;
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -10,8 +8,7 @@ use std::time::Instant;
 use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_core::{SplitDirection, Tree};
 
-mod support;
-use support::*;
+use crate::support::*;
 
 const SNAPSHOT_FILE: &str = "session.json";
 const SNAPSHOT_DIR_VAR: &str = "SEER_SNAPSHOT_DIR";
