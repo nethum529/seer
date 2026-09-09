@@ -61,6 +61,10 @@ impl PaneHost {
         Ok(())
     }
 
+    pub(crate) fn remember_owner_size(&mut self, size: seer_core::PaneSize) {
+        self.owner_size = size;
+    }
+
     pub(crate) fn resize_visible(&mut self, cols: u16, rows: u16) -> io::Result<()> {
         self.session.resize(cols, rows)?;
         self.grid.resize(cols, rows);

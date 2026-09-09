@@ -1,9 +1,15 @@
 use super::*;
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) struct VisibleSize {
+    pub(crate) size: PaneSize,
+    pub(crate) own: bool,
+}
+
 impl UserSession {
     pub(crate) fn apply_visible_sizes(
         &mut self,
-        sizes: &BTreeMap<String, PaneSize>,
+        sizes: &BTreeMap<String, VisibleSize>,
     ) -> io::Result<Vec<ServerMsg>> {
         let mut changed = false;
         for pane in self
@@ -16,7 +22,11 @@ impl UserSession {
             let Some(host) = self.pane_hosts.get_mut(&pane.id) else {
                 continue;
             };
-            let size = sizes.get(&pane.id).copied().unwrap_or(host.owner_size);
+            let visible = sizes.get(&pane.id);
+            if let Some(controlling) = visible.filter(|visible| visible.own) {
+                host.remember_owner_size(controlling.size);
+            }
+            let size = visible.map_or(host.owner_size, |visible| visible.size);
             if pane.size != size {
                 host.resize_visible(size.cols, size.rows)?;
                 pane.size = size;
@@ -24,6 +34,55 @@ impl UserSession {
             }
         }
         Ok(if changed { self.snapshot() } else { Vec::new() })
+    }
+
+    // The server resizes to the selected size only, so a watched pane never shrinks to its tab rect first.
+    pub(crate) fn record_viewport(
+        &mut self,
+        workspace: &str,
+        tab: &str,
+        cols: u16,
+        rows: u16,
+        sizes: &BTreeMap<String, VisibleSize>,
+    ) -> io::Result<Vec<ServerMsg>> {
+        self.tab(workspace, tab)?;
+        self.viewport = PaneSize { cols, rows };
+        for (pane, size) in self.pane_rects(workspace, tab, cols, rows) {
+            if let Some(host) = self.pane_hosts.get_mut(&pane) {
+                host.remember_owner_size(size);
+            }
+        }
+        let applied = self.apply_visible_sizes(sizes)?;
+        persistence::persist(self)?;
+        Ok(if applied.is_empty() {
+            self.snapshot()
+        } else {
+            applied
+        })
+    }
+
+    pub(crate) fn pane_rects(
+        &self,
+        workspace: &str,
+        tab: &str,
+        cols: u16,
+        rows: u16,
+    ) -> Vec<(String, PaneSize)> {
+        let Ok(tab) = self.tab(workspace, tab) else {
+            return Vec::new();
+        };
+        rects(tab, cols, rows)
+            .into_iter()
+            .map(|pane_rect| {
+                (
+                    pane_rect.pane,
+                    PaneSize {
+                        cols: pane_rect.cols,
+                        rows: pane_rect.rows,
+                    },
+                )
+            })
+            .collect()
     }
 
     pub(super) fn terminals(&self) -> Vec<TerminalInfo> {

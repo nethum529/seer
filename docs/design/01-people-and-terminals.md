@@ -85,9 +85,12 @@ changed Watch or Resize. A real window resize updates those dimensions.
 Hidden terminals are unwatched and keep running. Remote input still
 requires the owner's grant; the client does not add typing markers.
 
-The runtime pane size remains the smallest size among its watchers.
-If another watcher is smaller, the frame stays at the top left and
-the remaining area is empty. This UI change does not alter that rule.
+The owner's active window controls the size of each visible terminal.
+If the owner opens several windows, a changed size, input, or gained
+focus selects that window. Passive viewers and lost focus do not take
+control. Read-only viewers cannot shrink a terminal the owner shows.
+When only remote viewers show a terminal, their smallest size applies.
+When nobody shows it, the last active owner size applies.
 
 ### 2.3 Person menu
 
@@ -337,10 +340,10 @@ crates/seer-runtime, and crates/seer-core protocol changes.
   two locks, does a handshake, and blocks up to 5 seconds. Keep one
   runtime stream per target user in the forwarding session.
 - The marker rule in section 3.4.
-- Pane size rule for nitpick 13: a pane has the size of the smallest
-  client that shows it, the owner's client or any watcher of that
-  pane, like tmux. When nobody watches, the owner's size. Watch
-  carries cols and rows. The size lease in the runtime applies it.
+- Pane size rule: use the active owner window described in section 2.2.
+  When only remote viewers show the pane, use their smallest size.
+  When nobody watches, keep the last active owner size. Watch carries
+  cols and rows.
 - Check the Cells path: poll interval, full frame versus dirty rows,
   socket buffering, and the client render tick.
 

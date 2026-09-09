@@ -11,6 +11,7 @@ use crate::UserSession;
 use crate::user_session::validate_capabilities;
 
 mod connection;
+mod size_lease;
 mod status;
 mod util;
 mod writer;
@@ -215,17 +216,35 @@ impl SharedSession {
     }
 
     fn adopt_locked(&self, viewport: ReportedViewport) -> io::Result<()> {
-        let messages = match self.apply(ClientMsg::Resize {
-            workspace: viewport.workspace,
-            tab: viewport.tab,
-            cols: viewport.cols,
-            rows: viewport.rows,
-        }) {
+        let messages = match self.record_viewport(
+            &viewport.workspace,
+            &viewport.tab,
+            viewport.cols,
+            viewport.rows,
+        ) {
             Ok(messages) => messages,
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => return Ok(()),
             Err(error) => return Err(error),
         };
         self.flush_messages(&messages)
+    }
+
+    fn record_viewport(
+        &self,
+        workspace: &str,
+        tab: &str,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<Vec<ServerMsg>> {
+        let sizes = Self::visible_sizes(&lock(&self.connections)?);
+        let mut session = lock(&self.session)?;
+        match session.record_viewport(workspace, tab, cols, rows, &sizes) {
+            Ok(messages) => Ok(messages),
+            Err(error) if crate::persistence::is_fatal(&error) => {
+                stop_after_snapshot_failure(&error)
+            }
+            Err(error) => Err(error),
+        }
     }
 
     fn refresh_read_only(&self, id: u64) -> io::Result<Option<bool>> {
@@ -245,6 +264,12 @@ impl SharedSession {
         if read_only && !matches!(message, ClientMsg::GrantedInput { .. }) {
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);
+        }
+        // Arbitrate before the input reaches the PTY so the first keystroke or click sees the right viewport.
+        if let Some(pane) = size_lease::claimed_pane(&message)
+            && self.claim_pane(connection_id, pane)?
+        {
+            self.flush_messages(&[])?;
         }
         let applied = self.apply(message);
         match applied {
@@ -288,6 +313,7 @@ impl SharedSession {
         rows: u16,
     ) -> io::Result<bool> {
         let _lease = lock(&self.lease)?;
+        let pane_rects = lock(&self.session)?.pane_rects(workspace, tab, cols, rows);
         {
             let mut connections = lock(&self.connections)?;
             let Some(position) = connections.iter().position(|c| c.id == id) else {
@@ -297,6 +323,13 @@ impl SharedSession {
                 return Ok(false);
             }
             connections[position].last_active = Instant::now();
+            let now = Instant::now();
+            // Watch carries the real content geometry, so a resize only reclaims the panes it already watches.
+            for (pane, _) in &pane_rects {
+                if connections[position].watches.contains_key(pane) {
+                    connections[position].claimed.insert(pane.clone(), now);
+                }
+            }
             let lease_vacant = !connections.iter().any(|c| c.size_owner);
             let owner_stale = connections
                 .iter()
@@ -304,16 +337,12 @@ impl SharedSession {
             if !connections[position].size_owner && !lease_vacant && !owner_stale {
                 connections[position].viewport =
                     Some(reported_viewport(workspace, tab, cols, rows));
+                drop(connections);
+                self.flush_messages(&[])?;
                 return Ok(false);
             }
         }
-        let message = ClientMsg::Resize {
-            workspace: workspace.to_owned(),
-            tab: tab.to_owned(),
-            cols,
-            rows,
-        };
-        let applied = self.apply(message);
+        let applied = self.record_viewport(workspace, tab, cols, rows);
         match applied {
             Ok(messages) => {
                 let mut connections = lock(&self.connections)?;
@@ -451,5 +480,3 @@ impl SharedSession {
 
 #[cfg(test)]
 mod tests;
-
-mod size_lease;

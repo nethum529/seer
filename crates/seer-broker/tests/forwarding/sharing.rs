@@ -124,7 +124,7 @@ fn grant_survives_a_broker_restart() {
 }
 
 #[test]
-fn pane_uses_smallest_visible_size_and_recovers_after_unwatch_or_disconnect() {
+fn the_active_own_client_holds_the_pane_size_against_remote_watchers() {
     let files = TestFiles::new();
     let address = unused_address();
     write_config(&files, address);
@@ -145,23 +145,11 @@ fn pane_uses_smallest_visible_size_and_recovers_after_unwatch_or_disconnect() {
         let watch = serde_json::json!({"Watch": {"user": "alice", "pane": pane, "cols": cols, "rows": rows}});
         seer_core::proto::codec::encode(stream, &watch).unwrap();
     }
-    wait_for_size(&mut alice, &pane, 90, 40);
-    send(
-        &mut bob,
-        &ClientMsg::Unwatch {
-            user: "alice".into(),
-            pane: pane.clone(),
-        },
-    );
-    wait_for_size(&mut alice, &pane, 120, 40);
+    // Bob is a remote watcher, so alice keeps control. The old smallest rule would give 90 columns here.
     let watch =
-        serde_json::json!({"Watch": {"user": "alice", "pane": pane, "cols": 60, "rows": 20}});
-    seer_core::proto::codec::encode(&mut bob, &watch).unwrap();
-    wait_for_size(&mut alice, &pane, 60, 20);
-    bob.shutdown(std::net::Shutdown::Both).unwrap();
-    reader.join().unwrap();
-    drop(bob);
-    wait_for_size(&mut alice, &pane, 120, 40);
+        serde_json::json!({"Watch": {"user": "alice", "pane": pane, "cols": 100, "rows": 30}});
+    seer_core::proto::codec::encode(&mut alice, &watch).unwrap();
+    wait_for_size(&mut alice, &pane, 100, 30);
     send(
         &mut alice,
         &ClientMsg::Unwatch {
@@ -169,7 +157,15 @@ fn pane_uses_smallest_visible_size_and_recovers_after_unwatch_or_disconnect() {
             pane: pane.clone(),
         },
     );
-    wait_for_size(&mut alice, &pane, 80, 24);
+    wait_for_size(&mut alice, &pane, 90, 50);
+    let watch =
+        serde_json::json!({"Watch": {"user": "alice", "pane": pane, "cols": 60, "rows": 20}});
+    seer_core::proto::codec::encode(&mut bob, &watch).unwrap();
+    wait_for_size(&mut alice, &pane, 60, 20);
+    bob.shutdown(std::net::Shutdown::Both).unwrap();
+    reader.join().unwrap();
+    drop(bob);
+    wait_for_size(&mut alice, &pane, 100, 30);
 }
 
 fn wait_for_size(stream: &mut TcpStream, pane: &str, cols: u16, rows: u16) {
