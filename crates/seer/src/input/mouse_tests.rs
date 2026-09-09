@@ -121,6 +121,34 @@ fn the_search_field_takes_keys_and_gives_them_back_to_the_terminal() {
         ),
         "keys must go back to the terminal"
     );
+
+    state.chrome.pinned = true;
+    draw(&mut terminal, &mut state);
+    let field = state.chrome.search_area;
+    click_release(&mut state, &mut stream, field);
+    press(&mut state, &mut stream, CrosstermKeyCode::Char('x'));
+    assert_eq!(state.search, "x", "pinned search must take its own input");
+    crate::viewer::input_message(
+        &mut stream,
+        &state,
+        TerminalInput::new(InputEvent::Paste("query".into())),
+    )
+    .expect("paste must be handled");
+    assert!(
+        quiet(&mut peer),
+        "pinned search must not leak keys or paste"
+    );
+    let content = state.viewer.as_ref().expect("viewer must stay open").area;
+    click_release(&mut state, &mut stream, content);
+    press(&mut state, &mut stream, CrosstermKeyCode::Char('n'));
+    assert!(
+        matches!(
+            codec::decode::<_, ClientMsg>(&mut peer).expect("input"),
+            ClientMsg::TerminalInput { pane: target, .. } if target == pane
+        ),
+        "clicking content must restore typing while keeping the sidebar pinned"
+    );
+    assert!(state.chrome.pinned);
 }
 
 #[test]
@@ -154,4 +182,74 @@ fn a_drag_selects_text_and_does_not_open_the_terminal() {
         state.viewer.is_none(),
         "a drag must not open the terminal it selected in"
     );
+}
+
+fn typed_bytes(peer: &mut UnixStream, pane: &str) -> Vec<u8> {
+    match codec::decode::<_, ClientMsg>(peer).expect("input must reach the terminal") {
+        ClientMsg::TypeInto {
+            user,
+            pane: target,
+            bytes,
+        } => {
+            assert_eq!(user, "bob", "input must go to the watched person");
+            assert_eq!(target, pane);
+            bytes
+        }
+        other => panic!("expected remote terminal input, got {other:?}"),
+    }
+}
+
+#[test]
+fn one_click_gives_typing_to_a_granted_remote_terminal() {
+    let (mut state, pane) = one_terminal_state();
+    let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
+    peer.set_read_timeout(Some(Duration::from_millis(50)))
+        .expect("timeout must apply");
+    let mut bob = state.people[0].clone();
+    bob.user_id = "bob".into();
+    bob.name = "Bob".into();
+    state.people.push(bob);
+    state
+        .terminals
+        .insert("bob".into(), state.terminals["alice"].clone());
+    state.frames.insert(
+        ("bob".into(), pane.clone()),
+        state.frames[&("alice".into(), pane.clone())].clone(),
+    );
+    state.you_may_type_into.insert("bob".into());
+    state.selected = 1;
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+    draw(&mut terminal, &mut state);
+
+    let tile = state.box_areas[0].content;
+    click_release(&mut state, &mut stream, tile);
+    assert_eq!(
+        state.viewer.as_ref().map(|viewer| viewer.user.as_str()),
+        Some("bob"),
+        "one click on terminal content must take typing"
+    );
+
+    press(&mut state, &mut stream, CrosstermKeyCode::Char('n'));
+    assert_eq!(
+        typed_bytes(&mut peer, &pane),
+        b"n",
+        "a letter must reach the terminal, not create one"
+    );
+
+    command(
+        KeyEvent::new(CrosstermKeyCode::Char('b'), KeyModifiers::CONTROL),
+        &mut stream,
+        &mut state,
+    )
+    .expect("ctrl+b must work");
+    assert_eq!(
+        typed_bytes(&mut peer, &pane),
+        b"\x02",
+        "ctrl+b must reach the terminal"
+    );
+    assert!(state.viewer.is_some(), "ctrl+b must not leave the terminal");
+
+    state.you_may_type_into.remove("bob");
+    press(&mut state, &mut stream, CrosstermKeyCode::Char('n'));
+    assert!(quiet(&mut peer), "a revoked grant must stop input");
 }

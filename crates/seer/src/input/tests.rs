@@ -87,9 +87,11 @@ pub(super) fn one_terminal_state() -> (ClientState, String) {
 }
 
 #[test]
-fn the_people_panel_opens_and_closes_by_key_click_and_escape() {
+fn the_people_panel_opens_closes_and_pins() {
     let (mut state, _pane) = one_terminal_state();
-    let (mut stream, _peer) = UnixStream::pair().expect("streams must open");
+    let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
+    peer.set_read_timeout(Some(Duration::from_millis(50)))
+        .expect("timeout must apply");
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
 
     assert!(
@@ -141,6 +143,128 @@ fn the_people_panel_opens_and_closes_by_key_click_and_escape() {
     let handle = state.chrome.close_area;
     click(&mut state, &mut stream, handle);
     assert!(state.chrome.panel.is_none());
+
+    terminal.backend_mut().resize(100, 30);
+    draw(&mut terminal, &mut state);
+    press(&mut state, &mut stream, CrosstermKeyCode::Char('p'));
+    draw(&mut terminal, &mut state);
+    let pin = state.chrome.pin_area;
+    assert!(pin.width > 0 && pin.height == 1, "header must offer pin");
+    click(&mut state, &mut stream, pin);
+    assert!(state.chrome.pinned, "a click on pin must pin the sidebar");
+    crate::panels::close(&mut state);
+    let text = draw(&mut terminal, &mut state);
+    assert!(text.contains("unpin"), "a pinned header must offer unpin");
+    let column = state.chrome.pinned_area;
+    assert_eq!(column, Rect::new(0, 0, 20, 30));
+    assert_eq!(
+        state.box_areas[0].content,
+        Rect::new(20, 0, 80, 30),
+        "terminal content must use the area beside the pinned column"
+    );
+
+    click(&mut state, &mut stream, Rect::new(90, 25, 1, 1));
+    assert!(state.chrome.pinned, "an outside click must keep the pin");
+
+    let target = state.chrome.chip_area;
+    click(&mut state, &mut stream, target);
+    draw(&mut terminal, &mut state);
+    assert!(matches!(state.chrome.panel, Some(Panel::Session)));
+    assert!(state.chrome.pinned, "session controls must keep the pin");
+    assert!(
+        state.chrome.panel_area.x >= column.right(),
+        "the session overlay must not sit on the pinned column"
+    );
+    assert_ne!(state.chrome.close_area, state.chrome.pin_area);
+    terminal.backend_mut().resize(60, 20);
+    crate::panels::open(&mut state, Panel::Session);
+    draw(&mut terminal, &mut state);
+    assert!(
+        state.chrome.panel_area.x >= state.chrome.pinned_area.right(),
+        "the session overlay must not cover the pinned column at the smallest pinned width"
+    );
+    terminal.backend_mut().resize(100, 30);
+    draw(&mut terminal, &mut state);
+
+    let mut bob = state.people[0].clone();
+    bob.user_id = "bob".into();
+    bob.name = "Bob".into();
+    state.people.push(bob);
+    crate::panels::open(&mut state, Panel::Session);
+    draw(&mut terminal, &mut state);
+    let row = state
+        .people_areas
+        .iter()
+        .find(|(index, _)| *index == 1)
+        .expect("the pinned column must list Bob")
+        .1;
+    click(&mut state, &mut stream, row);
+    assert_eq!(
+        state.selected, 1,
+        "the pinned column must act on the first click while session is open"
+    );
+    assert!(state.chrome.panel.is_none(), "the click must close session");
+    state.select_person(0);
+    assert!(state.chrome.pinned && !state.quit_prompt);
+
+    state.open_focused();
+    draw(&mut terminal, &mut state);
+    assert_eq!(
+        state.viewer.as_ref().expect("viewer must open").area,
+        Rect::new(20, 0, 80, 30),
+        "the viewer must report the area beside the pinned column"
+    );
+    press(&mut state, &mut stream, CrosstermKeyCode::Char('z'));
+    assert!(
+        matches!(
+            codec::decode::<_, ClientMsg>(&mut peer).expect("typing must reach the terminal"),
+            ClientMsg::TerminalInput { .. }
+        ),
+        "a pinned sidebar alone must not capture terminal keys"
+    );
+
+    terminal.backend_mut().resize(50, 20);
+    draw(&mut terminal, &mut state);
+    assert!(state.chrome.pinned, "a narrow window must keep the pin");
+    assert!(
+        state.chrome.pinned_area.is_empty(),
+        "a narrow window must collapse the pinned column"
+    );
+    assert_eq!(
+        state.viewer.as_ref().expect("viewer must stay").area,
+        Rect::new(0, 0, 50, 20),
+        "a narrow window must give the terminal the whole area"
+    );
+    assert!(
+        state.chrome.handle_area.width >= 1,
+        "the handle must stay reachable while collapsed"
+    );
+    let target = state.chrome.handle_area;
+    click(&mut state, &mut stream, target);
+    assert!(
+        draw(&mut terminal, &mut state).contains("unpin"),
+        "the collapsed sidebar must still reach unpin"
+    );
+    press(&mut state, &mut stream, CrosstermKeyCode::Esc);
+
+    terminal.backend_mut().resize(100, 30);
+    draw(&mut terminal, &mut state);
+    assert_eq!(
+        state.chrome.pinned_area.width, 20,
+        "widening must restore the pinned column"
+    );
+    let target = state.chrome.pin_area;
+    click(&mut state, &mut stream, target);
+    draw(&mut terminal, &mut state);
+    assert!(
+        !state.chrome.pinned,
+        "a click on unpin must release the pin"
+    );
+    assert_eq!(
+        state.viewer.as_ref().expect("viewer must stay").area,
+        Rect::new(0, 0, 100, 30),
+        "unpinning must give the area back to the terminal"
+    );
 }
 
 #[test]
@@ -307,74 +431,4 @@ pub(super) fn click_release(state: &mut ClientState, stream: &mut UnixStream, ar
         )
         .expect("click must work");
     }
-}
-
-fn typed_bytes(peer: &mut UnixStream, pane: &str) -> Vec<u8> {
-    match codec::decode::<_, ClientMsg>(peer).expect("input must reach the terminal") {
-        ClientMsg::TypeInto {
-            user,
-            pane: target,
-            bytes,
-        } => {
-            assert_eq!(user, "bob", "input must go to the watched person");
-            assert_eq!(target, pane);
-            bytes
-        }
-        other => panic!("expected remote terminal input, got {other:?}"),
-    }
-}
-
-#[test]
-fn one_click_gives_typing_to_a_granted_remote_terminal() {
-    let (mut state, pane) = one_terminal_state();
-    let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
-    peer.set_read_timeout(Some(Duration::from_millis(50)))
-        .expect("timeout must apply");
-    let mut bob = state.people[0].clone();
-    bob.user_id = "bob".into();
-    bob.name = "Bob".into();
-    state.people.push(bob);
-    state
-        .terminals
-        .insert("bob".into(), state.terminals["alice"].clone());
-    state.frames.insert(
-        ("bob".into(), pane.clone()),
-        state.frames[&("alice".into(), pane.clone())].clone(),
-    );
-    state.you_may_type_into.insert("bob".into());
-    state.selected = 1;
-    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
-    draw(&mut terminal, &mut state);
-
-    let tile = state.box_areas[0].content;
-    click_release(&mut state, &mut stream, tile);
-    assert_eq!(
-        state.viewer.as_ref().map(|viewer| viewer.user.as_str()),
-        Some("bob"),
-        "one click on terminal content must take typing"
-    );
-
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('n'));
-    assert_eq!(
-        typed_bytes(&mut peer, &pane),
-        b"n",
-        "a letter must reach the terminal, not create one"
-    );
-
-    command(
-        KeyEvent::new(CrosstermKeyCode::Char('b'), KeyModifiers::CONTROL),
-        &mut stream,
-        &mut state,
-    )
-    .expect("ctrl+b must work");
-    assert_eq!(
-        typed_bytes(&mut peer, &pane),
-        b"\x02",
-        "ctrl+b must reach the terminal"
-    );
-    assert!(state.viewer.is_some(), "ctrl+b must not leave the terminal");
-
-    state.you_may_type_into.remove("bob");
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('n'));
-    assert!(quiet(&mut peer), "a revoked grant must stop input");
 }

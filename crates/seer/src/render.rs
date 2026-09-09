@@ -16,6 +16,9 @@ pub(crate) struct Chrome {
     pub(crate) panel_area: Rect,
     pub(crate) close_area: Rect,
     pub(crate) search_area: Rect,
+    pub(crate) pinned: bool,
+    pub(crate) pin_area: Rect,
+    pub(crate) pinned_area: Rect,
     pub(crate) rows: Vec<(usize, Rect)>,
     pub(crate) context: Option<crate::person_menu::TerminalMenu>,
     pub(crate) dialog_areas: Vec<(String, Rect)>,
@@ -47,17 +50,23 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     frame.render_widget(Paragraph::new("").style(palette.style()), full);
     state.people_areas.clear();
     state.box_areas.clear();
+    let content = panels::reserve(state, full);
     if state.viewer.is_some() {
-        crate::viewer::draw(frame, state, full);
+        crate::viewer::draw(frame, state, content);
     } else if state.people.len() == 1 && state.selected_terminals().is_empty() {
-        terminals::first_run(frame, state, full);
+        terminals::first_run(frame, state, content);
     } else {
-        grid::draw(frame, state, full, if full.width >= 80 { 2 } else { 1 });
+        grid::draw(
+            frame,
+            state,
+            content,
+            if content.width >= 80 { 2 } else { 1 },
+        );
     }
     if let Some(selection) = &state.selection {
         selection.draw(frame.buffer_mut());
     }
-    panels::draw(frame, state);
+    panels::draw(frame, state, content);
     chrome::notice(frame, state);
     crate::person_menu::draw(frame, state);
     crate::person_menu::draw_context(frame, state);

@@ -13,26 +13,49 @@ use ratatui::{
 };
 
 const HANDLE_ROWS: u16 = 3;
+const PINNED_WIDTH: u16 = 20;
+const PINNED_MIN_WIDTH: u16 = 60;
 
-pub(super) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
+pub(super) fn reserve(state: &mut ClientState, full: Rect) -> Rect {
+    state.chrome.pinned_area = Rect::default();
+    if !state.chrome.pinned || full.is_empty() || full.width < PINNED_MIN_WIDTH {
+        return full;
+    }
+    state.chrome.pinned_area = Rect::new(full.x, full.y, PINNED_WIDTH, full.height);
+    Rect::new(
+        full.x + PINNED_WIDTH,
+        full.y,
+        full.width - PINNED_WIDTH,
+        full.height,
+    )
+}
+
+pub(super) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, content: Rect) {
     let full = frame.area();
     state.chrome.handle_area = Rect::default();
     state.chrome.chip_area = Rect::default();
     state.chrome.panel_area = Rect::default();
     state.chrome.close_area = Rect::default();
     state.chrome.search_area = Rect::default();
+    state.chrome.pin_area = Rect::default();
     state.chrome.rows.clear();
     if full.is_empty() {
         return;
     }
-    if state.chrome.panel != Some(Panel::People) {
+    let pinned = state.chrome.pinned_area;
+    if !pinned.is_empty() {
+        column(frame, state, pinned, true);
+        if state.chrome.panel == Some(Panel::People) {
+            state.chrome.panel_area = pinned;
+        }
+    } else if state.chrome.panel != Some(Panel::People) {
         handle(frame, state, full);
     }
     chip(frame, state, full);
     match state.chrome.panel {
-        Some(Panel::People) => people(frame, state, full),
-        Some(Panel::Session) => session(frame, state, full),
-        None => {}
+        Some(Panel::People) if pinned.is_empty() => people(frame, state, full),
+        Some(Panel::Session) => session(frame, state, content),
+        _ => {}
     }
 }
 
@@ -97,13 +120,22 @@ fn chip(frame: &mut Frame<'_>, state: &mut ClientState, full: Rect) {
 }
 
 fn people(frame: &mut Frame<'_>, state: &mut ClientState, full: Rect) {
-    let palette = Palette::default();
-    let width = if full.width < 60 { 16 } else { 20 }.min(full.width);
+    let width = if full.width < PINNED_MIN_WIDTH {
+        16
+    } else {
+        PINNED_WIDTH
+    }
+    .min(full.width);
     let area = Rect::new(full.x, full.y, width, full.height);
-    palette.clear(frame.buffer_mut(), area);
-    super::people::column(frame, state, area);
-    solidify(frame.buffer_mut(), area, palette.panel_bg);
+    column(frame, state, area, false);
     state.chrome.panel_area = area;
+}
+
+fn column(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect, pinned: bool) {
+    let palette = Palette::default();
+    palette.clear(frame.buffer_mut(), area);
+    super::people::column(frame, state, area, pinned);
+    solidify(frame.buffer_mut(), area, palette.panel_bg);
 }
 
 fn solidify(buffer: &mut Buffer, area: Rect, background: Color) {

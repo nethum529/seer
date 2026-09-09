@@ -186,27 +186,20 @@ pub(crate) fn mouse(
     last: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<Handled> {
     let position = Position::new(mouse.column, mouse.row);
+    if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+        && state.chrome.pin_area.contains(position)
+    {
+        state.chrome.pinned = !state.chrome.pinned;
+        return Ok(Handled::Consumed);
+    }
     let Some(panel) = state.chrome.panel else {
-        return Ok(closed_mouse(mouse, state, position));
+        return closed_mouse(mouse, state, position, last);
     };
     if matches!(
         mouse.kind,
         MouseEventKind::ScrollDown | MouseEventKind::ScrollUp
     ) {
-        if panel == Panel::People && state.chrome.panel_area.contains(position) {
-            let up = mouse.kind == MouseEventKind::ScrollUp;
-            state.people_scroll = if up {
-                state.people_scroll.saturating_sub(1)
-            } else {
-                state.people_scroll.saturating_add(1)
-            };
-        } else if panel == Panel::Session && state.chrome.panel_area.contains(position) {
-            state.chrome.row = if mouse.kind == MouseEventKind::ScrollUp {
-                state.chrome.row.saturating_sub(1)
-            } else {
-                (state.chrome.row + 1).min(rows(state).len().saturating_sub(1))
-            };
-        }
+        panel_scroll(mouse, state, panel);
         return Ok(Handled::Consumed);
     }
     if !matches!(
@@ -225,6 +218,12 @@ pub(crate) fn mouse(
             return Ok(Handled::Consumed);
         }
     }
+    if state.chrome.pinned_area.contains(position)
+        && state.chrome.panel_area != state.chrome.pinned_area
+    {
+        close(state);
+        return pinned_mouse(mouse, state, position, last);
+    }
     if !state.chrome.panel_area.contains(position) || state.chrome.close_area.contains(position) {
         let on_terminal = mouse.kind == MouseEventKind::Down(MouseButton::Left)
             && !state.chrome.close_area.contains(position)
@@ -241,6 +240,22 @@ pub(crate) fn mouse(
     match panel {
         Panel::People => people_click(mouse, state, position, last),
         Panel::Session => session_click(stream, state, position),
+    }
+}
+
+fn panel_scroll(mouse: MouseEvent, state: &mut ClientState, panel: Panel) {
+    let position = Position::new(mouse.column, mouse.row);
+    let up = mouse.kind == MouseEventKind::ScrollUp;
+    if state.chrome.pinned_area.contains(position)
+        || (panel == Panel::People && state.chrome.panel_area.contains(position))
+    {
+        scroll_people(state, up);
+    } else if panel == Panel::Session && state.chrome.panel_area.contains(position) {
+        state.chrome.row = if up {
+            state.chrome.row.saturating_sub(1)
+        } else {
+            (state.chrome.row + 1).min(rows(state).len().saturating_sub(1))
+        };
     }
 }
 
@@ -264,19 +279,53 @@ fn session_click(
     Ok(Handled::Consumed)
 }
 
-fn closed_mouse(mouse: MouseEvent, state: &mut ClientState, position: Position) -> Handled {
+fn scroll_people(state: &mut ClientState, up: bool) {
+    state.people_scroll = if up {
+        state.people_scroll.saturating_sub(1)
+    } else {
+        state.people_scroll.saturating_add(1)
+    };
+}
+
+fn closed_mouse(
+    mouse: MouseEvent,
+    state: &mut ClientState,
+    position: Position,
+    last: &mut Option<(String, usize, Instant)>,
+) -> io::Result<Handled> {
+    if state.chrome.pinned_area.contains(position) {
+        return pinned_mouse(mouse, state, position, last);
+    }
     if mouse.kind != MouseEventKind::Down(MouseButton::Left) {
-        return Handled::Passed;
+        return Ok(Handled::Passed);
     }
     if state.chrome.handle_area.contains(position) {
         open(state, Panel::People);
-        return Handled::Consumed;
+        return Ok(Handled::Consumed);
     }
     if state.chrome.chip_area.contains(position) {
         open(state, Panel::Session);
-        return Handled::Consumed;
+        return Ok(Handled::Consumed);
     }
-    Handled::Passed
+    Ok(Handled::Passed)
+}
+
+fn pinned_mouse(
+    mouse: MouseEvent,
+    state: &mut ClientState,
+    position: Position,
+    last: &mut Option<(String, usize, Instant)>,
+) -> io::Result<Handled> {
+    match mouse.kind {
+        MouseEventKind::ScrollUp | MouseEventKind::ScrollDown => {
+            scroll_people(state, mouse.kind == MouseEventKind::ScrollUp);
+            Ok(Handled::Consumed)
+        }
+        MouseEventKind::Down(MouseButton::Left | MouseButton::Right) => {
+            people_click(mouse, state, position, last)
+        }
+        _ => Ok(Handled::Consumed),
+    }
 }
 
 fn people_click(
@@ -286,6 +335,11 @@ fn people_click(
     last: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<Handled> {
     if state.chrome.search_area.contains(position) {
+        if mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && state.chrome.panel != Some(Panel::People)
+        {
+            open(state, Panel::People);
+        }
         state.searching = mouse.kind == MouseEventKind::Down(MouseButton::Left);
         return Ok(Handled::Consumed);
     }
