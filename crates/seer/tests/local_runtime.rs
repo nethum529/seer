@@ -3,8 +3,9 @@
 use std::fs;
 use std::net::TcpListener;
 use std::os::unix::net::UnixStream;
+use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -23,7 +24,10 @@ fn windows_opening_together_share_one_runtime_while_the_room_is_offline() {
     fs::create_dir_all(&root).expect("test directory must be created");
     write_store(&root);
 
-    let mut windows: Vec<_> = (0..4).map(|_| open_window(&root)).collect();
+    let _windows = Windows {
+        root: root.clone(),
+        children: (0..4).map(|_| open_window(&root)).collect(),
+    };
     let socket = root
         .join("state-home/seer/runtimes")
         .join(USER)
@@ -38,30 +42,58 @@ fn windows_opening_together_share_one_runtime_while_the_room_is_offline() {
     }
 
     let directory = root.join("state-home/seer/runtimes").join(USER);
-    let pid: i32 = fs::read_to_string(directory.join("runtime.pid"))
-        .expect("the runtime PID must be recorded")
-        .trim()
-        .parse()
-        .expect("the runtime PID must parse");
+    let pid = wait_for_pid(&directory);
     assert!(
         Path::new(&format!("/proc/{pid}")).exists(),
         "the recorded PID must be the runtime that is running, not one that lost the race"
     );
+}
 
-    for window in &mut windows {
-        let _ = window.kill();
-        let _ = window.wait();
+struct Windows {
+    root: PathBuf,
+    children: Vec<Child>,
+}
+
+impl Drop for Windows {
+    fn drop(&mut self) {
+        for child in &mut self.children {
+            // SAFETY: each child starts a private process group owned by this test.
+            unsafe {
+                libc::kill(-(child.id() as i32), libc::SIGKILL);
+            }
+            let _ = child.wait();
+        }
+        let _ = Command::new(env!("CARGO_BIN_EXE_seer"))
+            .arg("stop")
+            .env("XDG_CONFIG_HOME", &self.root)
+            .env("XDG_STATE_HOME", self.root.join("state-home"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
+        let _ = fs::remove_dir_all(&self.root);
     }
-    // SAFETY: kill takes a process ID and a signal number and touches no memory.
-    unsafe {
-        libc::kill(pid, libc::SIGTERM);
+}
+
+fn wait_for_pid(directory: &Path) -> i32 {
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if let Ok(text) = fs::read_to_string(directory.join("runtime.pid"))
+            && let Ok(pid) = text.trim().parse()
+        {
+            return pid;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "the runtime PID must be recorded"
+        );
+        thread::sleep(Duration::from_millis(25));
     }
-    let _ = fs::remove_dir_all(&root);
 }
 
 // A window needs a real terminal, which is what starts the local runtime.
 fn open_window(root: &Path) -> std::process::Child {
     Command::new("script")
+        .process_group(0)
         .args([
             "-qec",
             &format!("{} attach", env!("CARGO_BIN_EXE_seer")),
@@ -134,7 +166,10 @@ fn a_room_that_never_answers_does_not_hold_up_this_computer() {
     fs::create_dir_all(&root).expect("test directory must be created");
     write_store_for(&root, &endpoint);
 
-    let mut window = open_window(&root);
+    let _windows = Windows {
+        root: root.clone(),
+        children: vec![open_window(&root)],
+    };
     let socket = root
         .join("state-home/seer/runtimes")
         .join(USER)
@@ -146,17 +181,7 @@ fn a_room_that_never_answers_does_not_hold_up_this_computer() {
         "the local runtime must answer while the room stays silent"
     );
 
-    let _ = window.kill();
-    let _ = window.wait();
     let directory = root.join("state-home/seer/runtimes").join(USER);
-    if let Ok(pid) = fs::read_to_string(directory.join("runtime.pid"))
-        && let Ok(pid) = pid.trim().parse::<i32>()
-    {
-        // SAFETY: kill takes a process ID and a signal number and touches no memory.
-        unsafe {
-            libc::kill(pid, libc::SIGTERM);
-        }
-    }
+    wait_for_pid(&directory);
     drop(held);
-    let _ = fs::remove_dir_all(&root);
 }

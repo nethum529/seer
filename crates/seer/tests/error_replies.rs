@@ -296,6 +296,13 @@ impl TestConfig {
 
 impl Drop for TestConfig {
     fn drop(&mut self) {
+        let _ = Command::new(env!("CARGO_BIN_EXE_seer"))
+            .arg("stop")
+            .env("XDG_CONFIG_HOME", &self.root)
+            .env("XDG_STATE_HOME", self.root.join("state-home"))
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .status();
         let _ = fs::remove_dir_all(&self.root);
     }
 }
