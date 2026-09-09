@@ -258,13 +258,11 @@ fn broadcasts_to_concurrent_connections() {
             rows: 40,
         },
     );
+    // The owner does not watch this pane, so the viewer that watches it keeps the geometry.
     let owner_resized = read_until_tree(&mut owner);
     assert_eq!(
         owner_resized.workspaces[0].tabs[0].panes[0].size,
-        seer_core::PaneSize {
-            cols: 120,
-            rows: 40
-        }
+        seer_core::PaneSize { cols: 80, rows: 24 }
     );
     assert_eq!(
         owner_resized.workspaces[0].tabs[1].panes[0].size,

@@ -11,20 +11,22 @@ pub(crate) fn sync_resize(stream: &mut impl Stream, state: &mut ClientState) -> 
     if viewer.user != state.own_user || viewer.area.is_empty() || viewer.sent_size == Some(size) {
         return Ok(());
     }
-    viewer.sent_size = Some(size);
     let pane = viewer.pane.clone();
-    if let Some((workspace, tab)) = state.location(&pane) {
-        send(
-            stream,
-            &ClientMsg::Resize {
-                workspace,
-                tab,
-                cols: size.width,
-                rows: size.height,
-            },
-        )?;
+    let Some((workspace, tab)) = state.location(&pane) else {
+        return Ok(());
+    };
+    if let Some(viewer) = state.viewer.as_mut() {
+        viewer.sent_size = Some(size);
     }
-    Ok(())
+    send(
+        stream,
+        &ClientMsg::Resize {
+            workspace,
+            tab,
+            cols: size.width,
+            rows: size.height,
+        },
+    )
 }
 
 pub(crate) fn sync_watches(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
@@ -190,6 +192,38 @@ mod tests {
         assert_eq!(tile.content.right(), 100);
         assert_eq!(tile.content.bottom(), 30);
         assert_eq!(tile.content.x, 0);
+    }
+
+    #[test]
+    fn resize_retries_after_the_pane_location_arrives() {
+        let mut tree = Tree::new();
+        let workspace = tree.create_workspace("main").expect("workspace must open");
+        let tab = tree
+            .create_tab(
+                &workspace.id,
+                "one",
+                seer_core::PaneSize { cols: 80, rows: 24 },
+            )
+            .expect("tab must open");
+        let pane = tab.panes[0].id.clone();
+        let mut state = ClientState::new(Tree::new(), "alice".into());
+        let mut viewer = crate::viewer::Viewer::new("alice".into(), pane);
+        viewer.area = ratatui::layout::Rect::new(0, 0, 190, 50);
+        state.viewer = Some(viewer);
+        let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
+        peer.set_read_timeout(Some(Duration::from_millis(50)))
+            .expect("timeout must apply");
+
+        sync_resize(&mut stream, &mut state).expect("resize must sync");
+        let mut byte = [0];
+        assert!(
+            std::io::Read::read(&mut peer, &mut byte).is_err(),
+            "a pane with no location must not resize"
+        );
+
+        state.replace_tree(tree);
+        sync_resize(&mut stream, &mut state).expect("resize must retry");
+        assert_viewer_resize(&mut peer, &state);
     }
 
     fn assert_grid_watches(peer: &mut UnixStream, state: &ClientState) {

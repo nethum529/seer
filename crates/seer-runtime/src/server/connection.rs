@@ -80,6 +80,7 @@ enum ConnectionProjection {
 pub(super) struct Connection {
     pub(super) id: u64,
     pub(super) watches: BTreeMap<String, PaneSize>,
+    pub(super) claimed: BTreeMap<String, Instant>,
     pub(super) output: SyncSender<Arc<[u8]>>,
     pub(super) stream: UnixStream,
     pub(super) capabilities: Option<TerminalCapabilities>,
@@ -100,6 +101,7 @@ impl Connection {
         Ok(Self {
             id,
             watches: BTreeMap::new(),
+            claimed: BTreeMap::new(),
             output,
             stream,
             capabilities: None,
@@ -178,6 +180,7 @@ impl Connection {
             .cloned()
             .collect();
         self.watches.retain(|pane, _| valid.contains(pane));
+        self.claimed.retain(|pane, _| valid.contains(pane));
         if self.catalog {
             return ConnectionProjection::Catalog(valid);
         }
