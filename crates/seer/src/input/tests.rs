@@ -6,7 +6,7 @@ use seer_core::proto::{ClientMsg, TerminalInfo, codec};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-fn draw(terminal: &mut Terminal<TestBackend>, state: &mut ClientState) -> String {
+pub(super) fn draw(terminal: &mut Terminal<TestBackend>, state: &mut ClientState) -> String {
     terminal
         .draw(|frame| crate::render::draw(frame, state))
         .expect("screen must draw");
@@ -14,7 +14,7 @@ fn draw(terminal: &mut Terminal<TestBackend>, state: &mut ClientState) -> String
     buffer.content.iter().map(|cell| cell.symbol()).collect()
 }
 
-fn click(state: &mut ClientState, stream: &mut UnixStream, area: Rect) {
+pub(super) fn click(state: &mut ClientState, stream: &mut UnixStream, area: Rect) {
     let event = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: area.x + area.width / 2,
@@ -24,16 +24,16 @@ fn click(state: &mut ClientState, stream: &mut UnixStream, area: Rect) {
     mouse(event, stream, state, &mut None).expect("click must work");
 }
 
-fn press(state: &mut ClientState, stream: &mut UnixStream, code: CrosstermKeyCode) {
+pub(super) fn press(state: &mut ClientState, stream: &mut UnixStream, code: CrosstermKeyCode) {
     command(KeyEvent::new(code, KeyModifiers::NONE), stream, state).expect("key must work");
 }
 
-fn quiet(peer: &mut UnixStream) -> bool {
+pub(super) fn quiet(peer: &mut UnixStream) -> bool {
     let mut byte = [0];
     std::io::Read::read(peer, &mut byte).is_err()
 }
 
-fn one_terminal_state() -> (ClientState, String) {
+pub(super) fn one_terminal_state() -> (ClientState, String) {
     let mut tree = Tree::new();
     let workspace = tree.create_workspace("main").expect("workspace must open");
     let pane = tree
@@ -120,12 +120,16 @@ fn the_people_panel_opens_and_closes_by_key_click_and_escape() {
     draw(&mut terminal, &mut state);
     assert!(matches!(state.chrome.panel, Some(Panel::People)));
 
-    click(&mut state, &mut stream, Rect::new(90, 25, 1, 1));
+    click_release(&mut state, &mut stream, Rect::new(90, 25, 1, 1));
     assert!(
         state.chrome.panel.is_none(),
         "a click outside must close the panel"
     );
-    assert!(state.selection.is_none(), "the click must not start a drag");
+    assert!(
+        state.viewer.is_some(),
+        "a click outside on terminal content must also take typing"
+    );
+    state.viewer = None;
 
     terminal.backend_mut().resize(45, 20);
     draw(&mut terminal, &mut state);
@@ -281,4 +285,96 @@ fn the_session_panel_reaches_the_terminal_actions() {
     state.quit_prompt = true;
     press(&mut state, &mut stream, CrosstermKeyCode::Esc);
     assert!(!state.quit_prompt);
+}
+
+pub(super) fn click_release(state: &mut ClientState, stream: &mut UnixStream, area: Rect) {
+    let column = area.x + area.width / 2;
+    let row = area.y + area.height / 2;
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+    ] {
+        mouse(
+            MouseEvent {
+                kind,
+                column,
+                row,
+                modifiers: KeyModifiers::NONE,
+            },
+            stream,
+            state,
+            &mut None,
+        )
+        .expect("click must work");
+    }
+}
+
+fn typed_bytes(peer: &mut UnixStream, pane: &str) -> Vec<u8> {
+    match codec::decode::<_, ClientMsg>(peer).expect("input must reach the terminal") {
+        ClientMsg::TypeInto {
+            user,
+            pane: target,
+            bytes,
+        } => {
+            assert_eq!(user, "bob", "input must go to the watched person");
+            assert_eq!(target, pane);
+            bytes
+        }
+        other => panic!("expected remote terminal input, got {other:?}"),
+    }
+}
+
+#[test]
+fn one_click_gives_typing_to_a_granted_remote_terminal() {
+    let (mut state, pane) = one_terminal_state();
+    let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
+    peer.set_read_timeout(Some(Duration::from_millis(50)))
+        .expect("timeout must apply");
+    let mut bob = state.people[0].clone();
+    bob.user_id = "bob".into();
+    bob.name = "Bob".into();
+    state.people.push(bob);
+    state
+        .terminals
+        .insert("bob".into(), state.terminals["alice"].clone());
+    state.frames.insert(
+        ("bob".into(), pane.clone()),
+        state.frames[&("alice".into(), pane.clone())].clone(),
+    );
+    state.you_may_type_into.insert("bob".into());
+    state.selected = 1;
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+    draw(&mut terminal, &mut state);
+
+    let tile = state.box_areas[0].content;
+    click_release(&mut state, &mut stream, tile);
+    assert_eq!(
+        state.viewer.as_ref().map(|viewer| viewer.user.as_str()),
+        Some("bob"),
+        "one click on terminal content must take typing"
+    );
+
+    press(&mut state, &mut stream, CrosstermKeyCode::Char('n'));
+    assert_eq!(
+        typed_bytes(&mut peer, &pane),
+        b"n",
+        "a letter must reach the terminal, not create one"
+    );
+
+    command(
+        KeyEvent::new(CrosstermKeyCode::Char('b'), KeyModifiers::CONTROL),
+        &mut stream,
+        &mut state,
+    )
+    .expect("ctrl+b must work");
+    assert_eq!(
+        typed_bytes(&mut peer, &pane),
+        b"\x02",
+        "ctrl+b must reach the terminal"
+    );
+    assert!(state.viewer.is_some(), "ctrl+b must not leave the terminal");
+
+    state.you_may_type_into.remove("bob");
+    press(&mut state, &mut stream, CrosstermKeyCode::Char('n'));
+    assert!(quiet(&mut peer), "a revoked grant must stop input");
 }

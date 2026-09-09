@@ -4,7 +4,7 @@ use crate::{
     terminal_cells::{PaneCells, start_row},
     tui::{send, send_viewer_input},
 };
-use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
+use crossterm::event::KeyEvent;
 use ratatui::{
     Frame,
     layout::{Rect, Size},
@@ -84,15 +84,8 @@ pub(crate) fn key(
     stream: &mut impl Stream,
     state: &mut ClientState,
 ) -> io::Result<()> {
-    match (key.code, key.modifiers) {
-        (KeyCode::Char('b'), KeyModifiers::CONTROL) => {
-            state.viewer = None;
-        }
-        _ => {
-            if let Some(input) = key_to_input(key) {
-                input_message(stream, state, input)?;
-            }
-        }
+    if let Some(input) = key_to_input(key) {
+        input_message(stream, state, input)?;
     }
     Ok(())
 }

@@ -17,9 +17,6 @@ pub(crate) fn key(
     stream: &mut impl Stream,
     state: &mut ClientState,
 ) -> io::Result<bool> {
-    if std::mem::take(&mut state.discard_prefix) {
-        return Ok(false);
-    }
     if key.modifiers.intersects(
         KeyModifiers::CONTROL
             | KeyModifiers::ALT
@@ -27,8 +24,6 @@ pub(crate) fn key(
             | KeyModifiers::HYPER
             | KeyModifiers::META,
     ) {
-        state.discard_prefix =
-            key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL;
         return Ok(false);
     }
     if state.quit_prompt {
