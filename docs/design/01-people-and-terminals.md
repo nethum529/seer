@@ -3,13 +3,13 @@
 Status: terminal-first option 3 approved on 2026-09-08. The earlier
 people-and-terminals design was decided on 2026-09-04. Wave one shipped as 0.4.1
 the same day. The owner then used it and gave 15 nitpicks. Sections 2,
-4, 6, 7 and 8 carry those decisions. The broker and runtime process
-model does not change.
+4, 6, 7 and 8 carry those decisions. ADR 0009 later changed execution to participant-owned runtimes. The
+implementation waves below are a historical record of the TUI work.
 
 ## 1. What seer is now
 
 Seer is not a terminal multiplexer. Herdr is the multiplexer on each
-machine. Seer is a window onto everyone's terminals on one server, and
+machine. Seer is a window onto everyone's terminals in a room, and
 an inbox that agents use to talk to each other across users.
 
 Decisions. Do not reopen them.
@@ -19,8 +19,8 @@ Decisions. Do not reopen them.
   terminal of every person.
 - The only grant is "can type here": a person lets another person send
   input to their terminals. No block feature. No other grant.
-- Shells and agents run on the seer server, in the runtime per user,
-  the same as today. A person opens their own terminals from the TUI.
+- Shells and agents run on each person's own computer, in their local
+  runtime. A person opens their own terminals from the TUI. See ADR 0009.
 - The agent inbox is wave two. This spec covers wave one only: the TUI
   with people, live boxes, the viewer, and the input grant.
 - Everything is ratatui plus crossterm. The TUI must look as good as

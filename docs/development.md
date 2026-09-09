@@ -9,9 +9,9 @@ Install these tools:
 - A current Rust toolchain with Cargo and Rust 2024 edition support.
 - `cargo-udeps` for the unused dependency gate.
 
-The workspace builds on Linux and macOS. The client runs on both systems. The
-broker, runtimes, PTYs, and shells run on Linux. `seer start` reports an error
-on macOS.
+The client and local runtime target Linux and macOS. Each participant runs
+their own PTYs and shells. The room host command, seer start, currently runs
+on Linux only. A Linux test run does not verify the macOS build or execution.
 
 ## Build
 
@@ -30,8 +30,8 @@ target/debug/seer-runtime
 ```
 
 Build the complete workspace before you run from source. The `seer start`
-command finds `seer-broker` next to the `seer` binary. The broker finds
-`seer-runtime` in the same directory.
+command finds seer-broker next to the seer binary. The client finds
+seer-runtime in the same directory, then on PATH.
 
 ## Required checks
 
@@ -64,9 +64,10 @@ complexity rules.
 
 ## Run a local two-person session
 
-This check needs Linux because the server starts only on Linux. Use three
-terminal windows. Use short and separate config paths so the two clients have
-different saved identities.
+This check needs a Linux room host. Use three terminal windows. Give each
+person separate config and state paths. Set both paths on every command so
+the check cannot attach to or stop your normal runtime. Use a machine with
+port 7321 free, or an isolated test environment.
 
 First, build the workspace:
 
@@ -86,7 +87,7 @@ Enter the owner name. Copy the capsule from the printed install command. A seat
 works once. If this is not the first start, create a new seat:
 
 ```sh
-XDG_CONFIG_HOME=/tmp/seer-owner-config target/debug/seer invite
+XDG_CONFIG_HOME=/tmp/seer-owner-config XDG_STATE_HOME=/tmp/seer-owner-state target/debug/seer invite
 ```
 
 In terminal 2, join as the second person. Replace `<capsule>` with the copied
@@ -94,6 +95,7 @@ value:
 
 ```sh
 XDG_CONFIG_HOME=/tmp/seer-friend-config \
+XDG_STATE_HOME=/tmp/seer-friend-state \
 target/debug/seer join '<capsule>'
 ```
 
@@ -103,18 +105,21 @@ Bob's tree. The runtime creates the first shell for the empty tree.
 In terminal 3, attach as the owner:
 
 ```sh
-XDG_CONFIG_HOME=/tmp/seer-owner-config target/debug/seer
+XDG_CONFIG_HOME=/tmp/seer-owner-config XDG_STATE_HOME=/tmp/seer-owner-state target/debug/seer
 ```
 
 Open another owner terminal to list people or view Bob's tree:
 
 ```sh
-XDG_CONFIG_HOME=/tmp/seer-owner-config target/debug/seer list
-XDG_CONFIG_HOME=/tmp/seer-owner-config target/debug/seer peek bob
+XDG_CONFIG_HOME=/tmp/seer-owner-config XDG_STATE_HOME=/tmp/seer-owner-state target/debug/seer list
+XDG_CONFIG_HOME=/tmp/seer-owner-config XDG_STATE_HOME=/tmp/seer-owner-state target/debug/seer peek bob
 ```
 
-Peek is read-only. Press Control-Q to leave a TUI. Run bare `seer` with the same
-XDG_CONFIG_HOME value to attach again.
+Watch Bob through the top right picker. Bob can grant you typing permission
+from your person menu. Revoke it and check that further input is blocked.
+Right click the top right control and select Quit to close a window. Run bare
+seer with the same config and state paths to return to the same local shells.
+Stop each test runtime with seer stop and that person's config and state paths.
 
 The normal installed flow is in the [README quickstart](../README.md#quickstart).
 The installer source is `scripts/install.sh`. It installs `seer`, `seer-broker`,
@@ -124,21 +129,29 @@ and `seer-runtime` in `~/.local/bin`.
 
 ### Port 7321 is busy
 
-`seer start` and its start tests use `127.0.0.1:7321`. Stop the process that
-owns this port before you start the broker or run the test suite. Do not stop an
-unknown process.
+seer start and its start tests use 127.0.0.1:7321. Keep live sessions running.
+On Linux, run the tests in a private network namespace instead:
+
+```sh
+cargo test -p seer --test start --test restore --no-run
+unshare -Urn sh -c 'ip link set lo up && cargo test --offline -p seer --test start --test restore -- --test-threads=1'
+```
+
+This requires unprivileged user namespaces and the ip command. Run the other
+crate tests normally. Do not skip the start and restore tests when the live
+port is busy.
 
 On macOS, port 7321 must also be free when the workspace runs the start tests.
 
 ### A Unix socket path is too long
 
-The broker limits runtime socket paths to 99 bytes. A long XDG_RUNTIME_DIR can
-make the path invalid. Use a short private runtime directory, such as a path
-under `/tmp`, and run the command again.
+Local runtime sockets live under XDG_STATE_HOME/seer/runtimes/PERSON/socket,
+or ~/.local/state/seer/runtimes/PERSON/socket. Unix socket paths have an OS
+length limit. Use a short private XDG_STATE_HOME for test fixtures.
 
 ### A source binary is missing
 
-If `seer start` cannot find `seer-broker`, or the broker cannot find
+If `seer start` cannot find `seer-broker`, or the client cannot find
 `seer-runtime`, run this command again:
 
 ```sh
@@ -149,9 +162,10 @@ Run `target/debug/seer`. Do not move only one binary to another directory.
 
 ### The remote server is not reachable
 
-The built-in remote path needs the owner broker to be running and both machines
-to have internet access. Ask the owner to run `seer start`. Then use a new
-one-use invitation if the old seat was already used or expired.
+Shared views need the room broker and a network path to it. Your own local
+terminals remain usable without the room. With a saved identity, Seer retries
+the connection automatically. A new invitation is needed only for joining,
+not for reconnecting an existing member.
 
 ### The client and server versions do not match
 
