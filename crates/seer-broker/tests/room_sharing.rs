@@ -14,7 +14,7 @@ use room::*;
 // room and may type only while Alice allows it.
 #[test]
 fn a_watcher_sees_another_persons_terminals_and_types_only_with_a_grant() {
-    let mut room = Room::start();
+    let mut room = Room::start(false);
     let mut alice_window = room.publish("alice", ALICE_SECRET);
     let tree = own_tree(&mut alice_window);
     let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();
@@ -113,7 +113,7 @@ fn a_watcher_sees_another_persons_terminals_and_types_only_with_a_grant() {
 // A second computer must never take over or stop the work on the first one.
 #[test]
 fn a_second_computer_is_refused_and_the_first_keeps_working() {
-    let mut room = Room::start();
+    let mut room = Room::start(false);
     let mut alice_window = room.publish("alice", ALICE_SECRET);
     let at = first_terminal(&own_tree(&mut alice_window));
     let mut alice = join_room(room.address, "alice", ALICE_SECRET);
@@ -151,7 +151,7 @@ fn a_second_computer_is_refused_and_the_first_keeps_working() {
 // The room is for sharing. Losing it must not touch the shells.
 #[test]
 fn stopping_the_room_leaves_the_local_terminals_running() {
-    let mut room = Room::start();
+    let mut room = Room::start(false);
     let mut alice_window = room.publish("alice", ALICE_SECRET);
     let at = first_terminal(&own_tree(&mut alice_window));
     let mut alice = join_room(room.address, "alice", ALICE_SECRET);
@@ -170,7 +170,7 @@ fn stopping_the_room_leaves_the_local_terminals_running() {
 // Grants belong to the room and must outlive a restart of it.
 #[test]
 fn a_grant_survives_a_room_restart() {
-    let mut room = Room::start();
+    let mut room = Room::start(false);
     let mut alice_window = room.publish("alice", ALICE_SECRET);
     own_tree(&mut alice_window);
     let mut alice = join_room(room.address, "alice", ALICE_SECRET);

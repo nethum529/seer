@@ -24,20 +24,17 @@ static RUNTIME: OnceLock<PathBuf> = OnceLock::new();
 pub(crate) const ALICE_SECRET: &str = "alice-secret";
 pub(crate) const BOB_SECRET: &str = "bob-secret";
 
-/// One room on this machine: a broker plus the runtimes people publish to it.
-///
-/// Nothing here starts a shell on the broker. Each runtime is a separate
-/// process that connects outward, which is what the product does.
 pub(crate) struct Room {
     pub(crate) root: PathBuf,
     pub(crate) address: SocketAddr,
+    endpoint: String,
     config: PathBuf,
     broker: Option<Child>,
     runtimes: Vec<Child>,
 }
 
 impl Room {
-    pub(crate) fn start() -> Self {
+    pub(crate) fn start(remote: bool) -> Self {
         let counter = NEXT.fetch_add(1, Ordering::Relaxed);
         let stamp = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -57,7 +54,7 @@ impl Room {
         fs::write(
             &config,
             format!(
-                "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"alice\"\n",
+                "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = {remote}\nstate_dir = \"{}\"\nowner_name = \"alice\"\n",
                 state_dir.display()
             ),
         )
@@ -65,12 +62,32 @@ impl Room {
         let mut room = Self {
             root,
             address,
+            endpoint: address.to_string(),
             config,
             broker: None,
             runtimes: Vec::new(),
         };
         room.start_broker();
+        if remote {
+            room.endpoint = room.saved_iroh_endpoint();
+        }
         room
+    }
+
+    fn saved_iroh_endpoint(&self) -> String {
+        let mut owner = join_room(self.address, "alice", ALICE_SECRET);
+        send(&mut owner, &ClientMsg::Invite { hours: Some(1) });
+        let ServerMsg::Seat { capsule, .. } = wait_for(&mut owner, |message| {
+            matches!(message, ServerMsg::Seat { .. })
+        }) else {
+            panic!("the room must answer an invitation with a seat");
+        };
+        let key = capsule
+            .strip_prefix("SEER2-")
+            .and_then(|body| body.split_once('-'))
+            .map(|(key, _)| key)
+            .expect("a remote room must invite with an iroh capsule");
+        format!("iroh:{key}")
     }
 
     pub(crate) fn start_broker(&mut self) {
@@ -93,8 +110,6 @@ impl Room {
         }
     }
 
-    /// Starts a runtime on this machine for one person and waits until the
-    /// broker reports it published.
     pub(crate) fn publish(&mut self, user: &str, credential: &str) -> UnixStream {
         let directory = self.root.join(user);
         fs::create_dir_all(&directory).expect("runtime directory must be created");
@@ -105,7 +120,7 @@ impl Room {
             .arg("sh")
             .arg(format!("gen-{user}"))
             .env("SEER_SNAPSHOT_DIR", &directory)
-            .env("SEER_ROOM_ENDPOINT", self.address.to_string())
+            .env("SEER_ROOM_ENDPOINT", &self.endpoint)
             .env("SEER_ROOM_CREDENTIAL", credential)
             .env("SEER_ROOM_KEY", directory.join("runtime.key"))
             .current_dir(&directory)
@@ -130,7 +145,6 @@ impl Drop for Room {
     }
 }
 
-/// The person's own window: a private local socket, never the room.
 pub(crate) fn own_window(socket: &std::path::Path) -> UnixStream {
     let deadline = Instant::now() + WAIT;
     while Instant::now() < deadline {

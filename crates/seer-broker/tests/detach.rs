@@ -10,7 +10,7 @@ use room::*;
 // Detaching reaches only your own windows, and it does not touch the shells.
 #[test]
 fn a_person_detaches_only_their_own_client_and_keeps_their_terminals() {
-    let mut room = Room::start();
+    let mut room = Room::start(false);
     let mut alice_window = room.publish("alice", ALICE_SECRET);
     let tree = own_tree(&mut alice_window);
     let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();

@@ -12,6 +12,8 @@ use seer_net::{Session, Socket, Stream};
 const ENDPOINT_VAR: &str = "SEER_ROOM_ENDPOINT";
 const CREDENTIAL_VAR: &str = "SEER_ROOM_CREDENTIAL";
 const KEY_VAR: &str = "SEER_ROOM_KEY";
+// The client saves an iroh room as iroh:<id>, the capsule form.
+const IROH_PREFIX: &str = "iroh:";
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
 
@@ -122,10 +124,17 @@ enum Link {
 
 impl Link {
     fn connect(config: &RoomConfig) -> io::Result<Self> {
+        if let Some(id) = config.endpoint.strip_prefix(IROH_PREFIX) {
+            return Self::iroh(id, config);
+        }
         if let Some(address) = tcp_address(&config.endpoint) {
             return Ok(Self::Tcp(address));
         }
-        let id = seer_net::decode_endpoint_id(&config.endpoint)?;
+        Self::iroh(&config.endpoint, config)
+    }
+
+    fn iroh(id: &str, config: &RoomConfig) -> io::Result<Self> {
+        let id = seer_net::decode_endpoint_id(id)?;
         let key = seer_net::load_or_create_secret_key(&config.key_path)?;
         Ok(Self::Iroh(seer_net::dial_session(key, id)?))
     }
