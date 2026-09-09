@@ -24,6 +24,7 @@ pub(super) fn column(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect)
     let heading_area = Rect::new(area.x, area.y, width, 1);
     heading(frame, state, heading_area);
     state.chrome.close_area = heading_area;
+    search_field(frame, state, Rect::new(area.x, area.y + 1, width, 1));
     let full = !compact(area);
     let status = if full {
         status_lines(state)
@@ -133,11 +134,7 @@ fn identity(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
 fn heading(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
     let palette = Palette::default();
     let style = palette.style().fg(palette.overlay0);
-    let title = if state.search.is_empty() && !state.searching {
-        " people".into()
-    } else {
-        format!(" people /{}", state.search)
-    };
+    let title = " people";
     let used = title.chars().count() as u16;
     frame.render_widget(
         Paragraph::new(Line::from(Span::styled(
@@ -163,6 +160,20 @@ fn heading(frame: &mut Frame<'_>, state: &ClientState, area: Rect) {
         Paragraph::new(count).style(style),
         Rect::new(area.right().saturating_sub(width + 2), area.y, width, 1),
     );
+}
+
+fn search_field(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
+    if area.height == 0 {
+        return;
+    }
+    let palette = Palette::default();
+    let (text, color) = if state.searching || !state.search.is_empty() {
+        (format!(" /{}", state.search), palette.accent)
+    } else {
+        (" / find".to_owned(), palette.overlay0)
+    };
+    frame.render_widget(Paragraph::new(text).style(palette.style().fg(color)), area);
+    state.chrome.search_area = area;
 }
 
 fn rows(frame: &mut Frame<'_>, state: &mut ClientState, list: Rect, width: u16) -> u16 {

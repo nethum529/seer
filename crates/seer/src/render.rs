@@ -15,6 +15,7 @@ pub(crate) struct Chrome {
     pub(crate) chip_area: Rect,
     pub(crate) panel_area: Rect,
     pub(crate) close_area: Rect,
+    pub(crate) search_area: Rect,
     pub(crate) rows: Vec<(usize, Rect)>,
     pub(crate) context: Option<crate::person_menu::TerminalMenu>,
     pub(crate) dialog_areas: Vec<(String, Rect)>,

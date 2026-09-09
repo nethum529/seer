@@ -56,8 +56,10 @@ The owner approved terminal-first option 3 on 2026-09-08.
   scrolls with selection or the mouse wheel. Short screens reduce
   the header to keep actions reachable.
 - The session panel supports 1-9 terminal selection, n new terminal,
-  x close terminal, c copy invite when available, Ctrl+B back from
-  the viewer, and q quit. Escape or the x at its top closes it.
+  x close terminal, c copy invite when available, a back row from the
+  viewer, and q quit. Escape or the x at its top closes it. Back is a
+  mouse action: no key leaves a terminal, because every key belongs to
+  that terminal.
   New, close, and copy actions apply to the owner's own terminals.
 - People and session panels are mutually exclusive. Opening or
   closing a panel clears text selection. Panels consume key, paste,
@@ -69,14 +71,19 @@ The owner approved terminal-first option 3 on 2026-09-08.
 The overview keeps j/k people, h/l boxes, Enter view, n new terminal,
 x close, 1-9 terminal selection, / find, q quit, and Escape to ask
 before quitting. The existing person menu keeps its grant actions.
+A click on terminal content in the grid opens that terminal and gives
+it the keys. A click on the search row in the people panel starts a
+search, the same as the / key.
 
 ### 2.2 Viewer
 
 The viewer uses the full window, with the same handle and access chip.
-Ctrl+B returns to overview. Then p opens people and s opens session.
-Other keys, including p, s, q, and Escape, go to the terminal when
-no panel or dialog is open. Mouse controls can open a panel without
-leaving the viewer. Escape then closes that panel and keeps the viewer.
+Every key goes to the terminal when no panel or dialog is open,
+including p, s, q, Escape, and Ctrl+B. Seer keeps no prefix key, so a
+tmux or screen session in the terminal gets its own prefix. The mouse
+opens a panel without leaving the viewer, and the back row in the
+session panel returns to the overview. Escape closes an open panel and
+keeps the viewer.
 The terminal cursor is hidden while a panel or dialog owns input.
 
 Watch, Resize, cursor, selection, and mouse targets use the actual
@@ -124,7 +131,11 @@ The people panel shows the owner as "you".
 ### 2.5 Mouse
 
 - The edge handle opens people. The top-right chip opens session.
-- A click outside a panel closes it and is consumed.
+- A click outside a panel closes it. A click on terminal content also
+  gives the keys to that terminal, so one click is enough. A click
+  elsewhere, and a click on the panel heading or its x, is consumed.
+- A click on a menu, a dialog, or a panel action is consumed. Its
+  release cannot reach the terminal behind it.
 - Click a person to select them. Double click opens their first
   terminal. Right click opens the person menu.
 - Click a terminal row in session to open it. Click a session action

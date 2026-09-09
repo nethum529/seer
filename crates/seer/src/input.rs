@@ -165,6 +165,9 @@ pub(crate) fn mouse(
     if mouse.modifiers.contains(KeyModifiers::SHIFT) {
         return Ok(false);
     }
+    // A live selection means the press landed on terminal content, so chrome
+    // that consumed the press cannot release into the terminal behind it.
+    let pressed_content = state.selection.is_some();
     if state.quit_prompt {
         return click_hint(mouse, stream, state);
     }
@@ -192,13 +195,19 @@ pub(crate) fn mouse(
         scroll(mouse, state);
         return Ok(false);
     }
+    if mouse.kind == MouseEventKind::Up(MouseButton::Left) {
+        if pressed_content {
+            open_clicked(mouse, state);
+        }
+        return Ok(false);
+    }
     if !matches!(
         mouse.kind,
         MouseEventKind::Down(MouseButton::Left | MouseButton::Right)
     ) {
         return Ok(false);
     }
-    click_target(mouse, state, last);
+    click_target(mouse, state);
     Ok(false)
 }
 
@@ -221,7 +230,6 @@ fn click_hint(
     let (code, modifiers) = match key.as_str() {
         "enter" => (CrosstermKeyCode::Enter, KeyModifiers::NONE),
         "esc" => (CrosstermKeyCode::Esc, KeyModifiers::NONE),
-        "ctrl+b" => (CrosstermKeyCode::Char('b'), KeyModifiers::CONTROL),
         _ => match key.chars().next() {
             Some(character) => (CrosstermKeyCode::Char(character), KeyModifiers::NONE),
             None => return Ok(false),
@@ -230,13 +238,8 @@ fn click_hint(
     command(KeyEvent::new(code, modifiers), stream, state)
 }
 
-fn click_target(
-    mouse: MouseEvent,
-    state: &mut ClientState,
-    last: &mut Option<(String, usize, Instant)>,
-) {
+fn click_target(mouse: MouseEvent, state: &mut ClientState) {
     let position = Position::new(mouse.column, mouse.row);
-    let right = mouse.kind == MouseEventKind::Down(MouseButton::Right);
     if let Some(index) = state
         .box_areas
         .iter()
@@ -244,11 +247,22 @@ fn click_target(
         .map(|tile| tile.index)
     {
         state.select_tab(index);
-        if right {
+        if mouse.kind == MouseEventKind::Down(MouseButton::Right) {
             crate::person_menu::open_context(state, position);
-        } else if double_click(last, format!("box:{}", state.user()), index) {
-            state.open_focused();
         }
+    }
+}
+
+fn open_clicked(mouse: MouseEvent, state: &mut ClientState) {
+    let position = Position::new(mouse.column, mouse.row);
+    if let Some(index) = state
+        .box_areas
+        .iter()
+        .find(|tile| tile.content.contains(position))
+        .map(|tile| tile.index)
+    {
+        state.select_tab(index);
+        state.open_focused();
     }
 }
 
@@ -284,5 +298,7 @@ fn scroll(mouse: MouseEvent, state: &mut ClientState) {
     }
 }
 
+#[cfg(test)]
+mod mouse_tests;
 #[cfg(test)]
 mod tests;

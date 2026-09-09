@@ -73,11 +73,6 @@ pub(crate) fn key(
     let Some(panel) = state.chrome.panel else {
         return Ok(false);
     };
-    if key.code == KeyCode::Char('b') && key.modifiers == KeyModifiers::CONTROL {
-        state.viewer = None;
-        close(state);
-        return Ok(false);
-    }
     if key.modifiers.intersects(
         KeyModifiers::CONTROL
             | KeyModifiers::ALT
@@ -231,27 +226,42 @@ pub(crate) fn mouse(
         }
     }
     if !state.chrome.panel_area.contains(position) || state.chrome.close_area.contains(position) {
+        let on_terminal = mouse.kind == MouseEventKind::Down(MouseButton::Left)
+            && !state.chrome.close_area.contains(position)
+            && state
+                .box_areas
+                .iter()
+                .any(|tile| tile.content.contains(position));
         close(state);
+        if on_terminal {
+            return Ok(Handled::Passed);
+        }
         return Ok(Handled::Consumed);
     }
     match panel {
         Panel::People => people_click(mouse, state, position, last),
-        Panel::Session => {
-            let row = state
-                .chrome
-                .rows
-                .iter()
-                .find(|(_, area)| area.contains(position))
-                .map(|(index, _)| *index);
-            if let Some(index) = row {
-                state.chrome.row = index;
-                if activate(stream, state, index)? {
-                    return Ok(Handled::Quit);
-                }
-            }
-            Ok(Handled::Consumed)
+        Panel::Session => session_click(stream, state, position),
+    }
+}
+
+fn session_click(
+    stream: &mut impl Stream,
+    state: &mut ClientState,
+    position: Position,
+) -> io::Result<Handled> {
+    let row = state
+        .chrome
+        .rows
+        .iter()
+        .find(|(_, area)| area.contains(position))
+        .map(|(index, _)| *index);
+    if let Some(index) = row {
+        state.chrome.row = index;
+        if activate(stream, state, index)? {
+            return Ok(Handled::Quit);
         }
     }
+    Ok(Handled::Consumed)
 }
 
 fn closed_mouse(mouse: MouseEvent, state: &mut ClientState, position: Position) -> Handled {
@@ -275,6 +285,10 @@ fn people_click(
     position: Position,
     last: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<Handled> {
+    if state.chrome.search_area.contains(position) {
+        state.searching = mouse.kind == MouseEventKind::Down(MouseButton::Left);
+        return Ok(Handled::Consumed);
+    }
     let Some((index, row)) = state
         .people_areas
         .iter()
@@ -287,6 +301,7 @@ fn people_click(
         crate::person_menu::open(state, index, row);
         return Ok(Handled::Consumed);
     }
+    state.searching = false;
     state.select_person(index);
     if crate::input::double_click(last, format!("person:{}", state.user()), index) {
         state.open_focused();

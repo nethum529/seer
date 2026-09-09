@@ -20,6 +20,7 @@ pub(super) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     state.chrome.chip_area = Rect::default();
     state.chrome.panel_area = Rect::default();
     state.chrome.close_area = Rect::default();
+    state.chrome.search_area = Rect::default();
     state.chrome.rows.clear();
     if full.is_empty() {
         return;
@@ -125,7 +126,7 @@ fn label(state: &ClientState, row: Row) -> String {
             }),
         Row::New => "n new terminal".into(),
         Row::Close => "x close terminal".into(),
-        Row::Back => "ctrl+b back".into(),
+        Row::Back => "back".into(),
         Row::CopyInvite => "c copy invite".into(),
         Row::Quit => "q quit".into(),
     }

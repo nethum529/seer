@@ -222,7 +222,7 @@ fn viewer_fills_the_screen_and_access_stays_visible() {
     }
     panels::open(&mut state, Panel::Session);
     let text = draw_text(&mut state, 80, 24).join("\n");
-    for label in ["Bob", "Read only", "1 codex", "ctrl+b back"] {
+    for label in ["Bob", "Read only", "1 codex", "back"] {
         assert!(text.contains(label), "missing {label}");
     }
 }
