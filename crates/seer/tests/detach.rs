@@ -164,6 +164,7 @@ fn run(config: &TestConfig, input: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_seer"))
         .arg("detach")
         .env("XDG_CONFIG_HOME", &config.root)
+        .env("XDG_STATE_HOME", config.root.join("state-home"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

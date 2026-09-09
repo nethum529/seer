@@ -1,3 +1,6 @@
+// Each test binary in this crate uses a subset of these helpers.
+#![allow(dead_code)]
+
 use std::fs;
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -179,10 +182,28 @@ impl RuntimeProcess {
         Self(Some(child))
     }
 
+    /// Ends the runtime with a signal.
+    ///
+    /// Closing the parent pipe no longer stops it: a runtime outlives whoever
+    /// started it, so the broker and the window can both go away.
     pub fn stop(&mut self) -> Output {
         let child = self.0.as_mut().expect("runtime process must exist");
-        drop(child.stdin.take());
+        signal(child.id(), libc::SIGTERM);
         self.wait_for_exit()
+    }
+
+    pub fn is_running(&mut self) -> bool {
+        self.0
+            .as_mut()
+            .expect("runtime process must exist")
+            .try_wait()
+            .expect("runtime status must be available")
+            .is_none()
+    }
+
+    pub fn close_parent_pipe(&mut self) {
+        let child = self.0.as_mut().expect("runtime process must exist");
+        drop(child.stdin.take());
     }
 
     pub fn wait_for_exit(&mut self) -> Output {
@@ -200,6 +221,14 @@ impl Drop for RuntimeProcess {
             let _ = child.kill();
             wait_until_exit(&mut child, "runtime did not stop during cleanup");
         }
+    }
+}
+
+pub fn signal(pid: u32, number: i32) {
+    let pid = i32::try_from(pid).expect("process ID must fit");
+    // SAFETY: kill takes a process ID and a signal number and touches no memory.
+    unsafe {
+        libc::kill(pid, number);
     }
 }
 

@@ -32,17 +32,19 @@ fn round_trip_between_two_endpoints() {
 
     let (server_result_tx, server_result_rx) = mpsc::channel();
     thread::spawn(move || {
-        let result = listener.accept().and_then(|(_remote, mut stream)| {
-            stream.set_read_timeout(Some(TIMEOUT))?;
-            stream.set_write_timeout(Some(TIMEOUT))?;
-            let mut request = [0_u8; 5];
-            stream.read_exact(&mut request)?;
-            if request != *b"ping\n" {
-                return Err(std::io::Error::other("server received an invalid request"));
-            }
-            stream.write_all(b"pong\n")?;
-            stream.flush()
-        });
+        let result = listener
+            .accept()
+            .and_then(|(_remote, mut stream, _session)| {
+                stream.set_read_timeout(Some(TIMEOUT))?;
+                stream.set_write_timeout(Some(TIMEOUT))?;
+                let mut request = [0_u8; 5];
+                stream.read_exact(&mut request)?;
+                if request != *b"ping\n" {
+                    return Err(std::io::Error::other("server received an invalid request"));
+                }
+                stream.write_all(b"pong\n")?;
+                stream.flush()
+            });
         let _ = server_result_tx.send(result);
     });
 

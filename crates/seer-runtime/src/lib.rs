@@ -1,15 +1,15 @@
 use std::env;
 use std::ffi::{CString, c_char, c_int};
-use std::io::{self, Read};
+use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicPtr, Ordering};
-use std::thread;
 
 mod input;
 pub mod pane_grid;
 mod pane_host;
 mod persistence;
 mod pty;
+mod room;
 mod server;
 mod snapshot;
 mod user_session;
@@ -25,36 +25,17 @@ const SNAPSHOT_DIRECTORY_VAR: &str = "SEER_SNAPSHOT_DIR";
 
 pub fn run() -> io::Result<()> {
     let (socket_path, user, shell, generation) = arguments()?;
-    start_lifeline_watch()?;
     let snapshot_dir = snapshot_directory();
     let session = persistence::load_session(user, shell, snapshot_dir.as_deref())?;
     let listener = bind(Path::new(&socket_path))?;
     install_sigterm_cleanup(&socket_path);
-    server::serve_with_generation(listener, session, generation)
+    server::serve_with_generation(listener, session, generation, room::from_environment())
 }
 
 fn snapshot_directory() -> Option<PathBuf> {
     env::var_os(SNAPSHOT_DIRECTORY_VAR)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)
-}
-
-fn start_lifeline_watch() -> io::Result<()> {
-    thread::Builder::new()
-        .name("broker-lifeline".into())
-        .spawn(watch_lifeline)?;
-    Ok(())
-}
-
-fn watch_lifeline() {
-    let mut lifeline = io::stdin();
-    let mut byte = [0];
-    loop {
-        match lifeline.read(&mut byte) {
-            Ok(1) => {}
-            Ok(_) | Err(_) => std::process::exit(0),
-        }
-    }
 }
 
 fn arguments() -> io::Result<(String, String, String, String)> {

@@ -66,6 +66,17 @@ pub enum ClientMsg {
     },
     AttachRuntime,
     ObserveRuntime,
+    PublishRuntime {
+        user_id: String,
+        credential: String,
+        version: String,
+        generation: String,
+    },
+    RuntimeStream {
+        user_id: String,
+        credential: String,
+        token: String,
+    },
     QueryTargets {
         user: String,
     },
@@ -111,6 +122,12 @@ pub enum ServerMsg {
     },
     RuntimeReady {
         generation: String,
+    },
+    Published {
+        generation: String,
+    },
+    OpenStream {
+        token: String,
     },
     Welcome {
         user_id: String,

@@ -2,10 +2,9 @@ use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
 use seer_core::{TerminalFrame, Tree};
-use seer_net::Stream;
+use seer_net::{Socket, Stream};
 use std::collections::HashMap;
 use std::io;
-use std::os::unix::net::UnixStream;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{SyncSender, TrySendError};
@@ -13,7 +12,7 @@ use std::thread::{self, JoinHandle};
 use std::time::Duration;
 
 pub(super) struct RuntimeConnection {
-    pub(super) stream: UnixStream,
+    pub(super) stream: Socket,
     pub(super) identity: Arc<()>,
     pub(super) tree: Tree,
     pub(super) frames: HashMap<String, TerminalFrame>,
@@ -22,36 +21,27 @@ pub(super) struct RuntimeConnection {
 }
 
 impl RuntimeConnection {
+    // The broker asks; the runtime opens and writes first, so this side reads
+    // the readiness reply before anything else.
     pub(super) fn connect(
         broker: &BrokerState,
         person: &PersonRecord,
-        start: bool,
         sender: &SyncSender<Event>,
     ) -> io::Result<Self> {
-        let mut stream = if start {
-            broker.runtimes().connect(&person.user_id, &person.name)?
-        } else {
-            broker
-                .runtimes()
-                .connect_existing(&person.user_id, &person.name)?
-        };
+        let mut stream = broker.runtimes().open(&person.user_id)?;
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(2)))?;
-        codec::encode(
-            &mut stream,
-            &if start {
-                ClientMsg::AttachRuntime
-            } else {
-                ClientMsg::ObserveRuntime
-            },
-        )?;
+        codec::encode(&mut stream, &ClientMsg::ObserveRuntime)?;
+        let ServerMsg::RuntimeReady { .. } = codec::decode(&mut stream)? else {
+            return Err(io::Error::other("runtime did not report readiness"));
+        };
         let ServerMsg::Tree { tree } = codec::decode(&mut stream)? else {
             return Err(io::Error::other("expected runtime tree"));
         };
         stream.set_read_timeout(None)?;
         let identity = Arc::new(());
         let reader = spawn_runtime_reader(
-            stream.try_clone()?,
+            stream.clone(),
             person.user_id.clone(),
             Arc::clone(&identity),
             sender.clone(),
@@ -65,6 +55,7 @@ impl RuntimeConnection {
             reader,
         })
     }
+
     pub(super) fn send(&mut self, message: &ClientMsg) -> io::Result<()> {
         codec::encode(&mut self.stream, message)
     }
@@ -118,7 +109,7 @@ pub(super) fn spawn_client_reader<S: Stream>(
 }
 
 fn spawn_runtime_reader(
-    mut stream: UnixStream,
+    mut stream: Socket,
     user: String,
     identity: Arc<()>,
     sender: SyncSender<Event>,

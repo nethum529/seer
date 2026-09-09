@@ -95,6 +95,7 @@ fn run_seer(config: &Path, arguments: &[&str], input: &str) -> Output {
     let mut child = Command::new(env!("CARGO_BIN_EXE_seer"))
         .args(arguments)
         .env("XDG_CONFIG_HOME", config)
+        .env("XDG_STATE_HOME", config.join("state-home"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

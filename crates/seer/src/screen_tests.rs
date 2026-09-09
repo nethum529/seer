@@ -165,7 +165,9 @@ fn session_lists_terminals_and_keeps_actions_visible_on_short_screens() {
             .map(|i| terminal_info(&format!("shell{i}")))
             .collect(),
     );
-    let (mut stream, _peer) = std::os::unix::net::UnixStream::pair().expect("streams");
+    let (local, _peer) = std::os::unix::net::UnixStream::pair().expect("streams");
+    let mut stream =
+        crate::routes::Routes::new(seer_net::Socket::from(local), None, "alice".to_owned());
     panels::open(&mut state, Panel::Session);
     for _ in 0..22 {
         crate::input::command(

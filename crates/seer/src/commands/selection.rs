@@ -125,15 +125,13 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
         return Err(CommandError::usage(format!("no person named {target}")));
     };
     drop(stream);
-    let (stream, tree) = authenticate(&server)?;
+    let name = person.name.clone();
+    let (stream, _) = authenticate(&server)?;
     finish_session(
         io::stdout().is_terminal(),
-        stream,
-        tree,
-        Some(&person.name),
-        &server.alias,
-        server.user_id.clone(),
-        crate::tui::run,
+        Some(stream),
+        Some(&name),
+        &server,
     )
 }
 

@@ -2,7 +2,6 @@ use crate::viewer::Viewer;
 use ratatui::layout::{Rect, Size};
 use seer_core::proto::{ClientMsg, Person, PersonState, TerminalInfo};
 use seer_core::{Cursor, TerminalFrame, Tree};
-use seer_net::Stream;
 use std::{
     collections::{BTreeMap, BTreeSet, HashMap},
     io,
@@ -43,6 +42,7 @@ pub(crate) struct ClientState {
     pub(crate) invite: Option<String>,
     pub(crate) invite_pending: bool,
     pub(crate) notice: String,
+    pub(crate) room_was_lost: bool,
     pub(crate) watches: BTreeMap<(String, String), Size>,
     pub(crate) pending_new: Option<BTreeSet<String>>,
 }
@@ -94,6 +94,7 @@ impl ClientState {
             invite: None,
             invite_pending: false,
             notice: String::new(),
+            room_was_lost: false,
             watches: BTreeMap::new(),
             pending_new: None,
         }
@@ -201,7 +202,7 @@ impl ClientState {
         }
     }
 
-    pub(crate) fn request_close(&self, stream: &mut impl Stream) -> io::Result<()> {
+    pub(crate) fn request_close(&self, stream: &mut crate::routes::Routes) -> io::Result<()> {
         if self.user() != self.own_user {
             return Ok(());
         }

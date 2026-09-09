@@ -89,6 +89,8 @@ impl UserSession {
             | ClientMsg::DetachClient { .. }
             | ClientMsg::AttachRuntime
             | ClientMsg::ObserveRuntime
+            | ClientMsg::PublishRuntime { .. }
+            | ClientMsg::RuntimeStream { .. }
             | ClientMsg::QueryTargets { .. }
             | ClientMsg::Watch { .. }
             | ClientMsg::Unwatch { .. }

@@ -1,7 +1,6 @@
 use crate::{state::ClientState, tui::send};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers};
 use seer_core::proto::ClientMsg;
-use seer_net::Stream;
 use std::{cell::RefCell, io};
 
 thread_local! { static START_PERSON: RefCell<Option<String>> = const { RefCell::new(None) }; }
@@ -14,7 +13,7 @@ pub(crate) fn take_start_person() -> Option<String> {
 
 pub(crate) fn key(
     key: KeyEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<bool> {
     if key.modifiers.intersects(
@@ -119,7 +118,10 @@ pub(crate) fn step(index: usize, count: usize, forward: bool) -> usize {
     }
 }
 
-pub(crate) fn new_terminal(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
+pub(crate) fn new_terminal(
+    stream: &mut crate::routes::Routes,
+    state: &mut ClientState,
+) -> io::Result<()> {
     let Some(workspace) = state.tree.workspaces.first() else {
         state.set_notice("Waiting for your terminals.");
         return Ok(());
@@ -143,7 +145,10 @@ pub(crate) fn new_terminal(stream: &mut impl Stream, state: &mut ClientState) ->
     Ok(())
 }
 
-pub(crate) fn invite(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
+pub(crate) fn invite(
+    stream: &mut crate::routes::Routes,
+    state: &mut ClientState,
+) -> io::Result<()> {
     if !state.invite_pending {
         send(stream, &ClientMsg::Invite { hours: Some(24) })?;
         state.invite_pending = true;

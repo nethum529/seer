@@ -69,6 +69,7 @@ pub(crate) fn run(config: &TestConfig, arguments: &[&str], input: &str) -> Outpu
     let mut child = Command::new(env!("CARGO_BIN_EXE_seer"))
         .args(arguments)
         .env("XDG_CONFIG_HOME", &config.root)
+        .env("XDG_STATE_HOME", config.root.join("state-home"))
         .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .stderr(Stdio::piped())

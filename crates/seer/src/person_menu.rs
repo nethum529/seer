@@ -7,7 +7,6 @@ use ratatui::{
     widgets::Paragraph,
 };
 use seer_core::proto::ClientMsg;
-use seer_net::Stream;
 use std::io;
 
 pub(crate) struct PersonMenu {
@@ -37,7 +36,7 @@ pub(crate) fn open(state: &mut ClientState, index: usize, row: Rect) {
 
 pub(crate) fn key(
     key: KeyEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<()> {
     let Some(mut menu) = state.menu.take() else {
@@ -62,7 +61,7 @@ pub(crate) fn key(
     Ok(())
 }
 
-fn toggle(stream: &mut impl Stream, state: &ClientState, user: &str) -> io::Result<()> {
+fn toggle(stream: &mut crate::routes::Routes, state: &ClientState, user: &str) -> io::Result<()> {
     send(
         stream,
         &ClientMsg::SetGrant {
@@ -73,7 +72,7 @@ fn toggle(stream: &mut impl Stream, state: &ClientState, user: &str) -> io::Resu
 }
 
 fn activate(
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
     menu: &PersonMenu,
     count: usize,
@@ -116,7 +115,7 @@ fn action_row(selected: usize, count: usize) -> usize {
 
 pub(crate) fn mouse(
     mouse: MouseEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<()> {
     let Some(mut menu) = state.menu.take() else {
@@ -272,7 +271,7 @@ pub(crate) fn open_context(state: &mut ClientState, anchor: Position) {
 
 pub(crate) fn context_key(
     key: KeyEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<()> {
     let Some(mut menu) = state.chrome.context.take() else {
@@ -294,7 +293,7 @@ pub(crate) fn context_key(
 }
 
 fn context_action(
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
     index: usize,
 ) -> io::Result<()> {
@@ -308,7 +307,7 @@ fn context_action(
 
 pub(crate) fn context_mouse(
     mouse: MouseEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<()> {
     let Some(menu) = state.chrome.context.take() else {

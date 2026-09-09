@@ -100,7 +100,6 @@ pub(crate) fn raw_bytes(input: &TerminalInput) -> std::io::Result<Option<Vec<u8>
 use crate::{state::ClientState, tui_navigation as navigation};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Position;
-use seer_net::Stream;
 use std::{
     io,
     time::{Duration, Instant},
@@ -108,7 +107,7 @@ use std::{
 
 pub(crate) fn command(
     key: KeyEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<bool> {
     if state.chrome.context.is_some() {
@@ -131,7 +130,7 @@ pub(crate) fn command(
 
 pub(crate) fn mouse(
     mouse: MouseEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
     last: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<bool> {
@@ -186,7 +185,7 @@ pub(crate) fn mouse(
 
 fn click_hint(
     mouse: MouseEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<bool> {
     if mouse.kind != MouseEventKind::Down(MouseButton::Left) {

@@ -1,7 +1,6 @@
 use crate::{state::ClientState, tui_navigation as navigation};
 use crossterm::event::{KeyCode, KeyEvent, KeyModifiers, MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::Position;
-use seer_net::Stream;
 use std::{io, time::Instant};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -67,7 +66,7 @@ pub(crate) fn rows(state: &ClientState) -> Vec<Row> {
 
 pub(crate) fn key(
     key: KeyEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<bool> {
     let Some(panel) = state.chrome.panel else {
@@ -90,7 +89,7 @@ pub(crate) fn key(
 
 fn people_key(
     key: KeyEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<bool> {
     if !state.searching {
@@ -126,7 +125,7 @@ fn people_key(
 
 fn session_key(
     key: KeyEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
 ) -> io::Result<bool> {
     let count = rows(state).len();
@@ -153,14 +152,22 @@ fn session_key(
     Ok(false)
 }
 
-fn activate_row(stream: &mut impl Stream, state: &mut ClientState, row: Row) -> io::Result<bool> {
+fn activate_row(
+    stream: &mut crate::routes::Routes,
+    state: &mut ClientState,
+    row: Row,
+) -> io::Result<bool> {
     if let Some(index) = rows(state).iter().position(|item| *item == row) {
         return activate(stream, state, index);
     }
     Ok(false)
 }
 
-fn activate(stream: &mut impl Stream, state: &mut ClientState, index: usize) -> io::Result<bool> {
+fn activate(
+    stream: &mut crate::routes::Routes,
+    state: &mut ClientState,
+    index: usize,
+) -> io::Result<bool> {
     let Some(row) = rows(state).get(index).copied() else {
         return Ok(false);
     };
@@ -181,7 +188,7 @@ fn activate(stream: &mut impl Stream, state: &mut ClientState, index: usize) -> 
 
 pub(crate) fn mouse(
     mouse: MouseEvent,
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
     last: &mut Option<(String, usize, Instant)>,
 ) -> io::Result<Handled> {
@@ -260,7 +267,7 @@ fn panel_scroll(mouse: MouseEvent, state: &mut ClientState, panel: Panel) {
 }
 
 fn session_click(
-    stream: &mut impl Stream,
+    stream: &mut crate::routes::Routes,
     state: &mut ClientState,
     position: Position,
 ) -> io::Result<Handled> {

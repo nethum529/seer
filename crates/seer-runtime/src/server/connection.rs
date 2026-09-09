@@ -18,12 +18,18 @@ pub(super) fn handle_connection(
     shared: &SharedSession,
     connection_id: u64,
     generation: String,
+    remote: bool,
 ) -> io::Result<()> {
-    codec::encode(&mut stream, &ServerMsg::RuntimeReady { generation })?;
-    let Ok(first) = codec::decode(&mut stream) else {
+    let Some(first) = greet(&mut stream, generation, remote)? else {
         return Ok(());
     };
     match first {
+        ClientMsg::AttachRuntime if remote => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "a room stream cannot own this runtime",
+            ));
+        }
         ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
         ClientMsg::ObserveRuntime => {
             shared.add_view_connection(connection_id, stream.try_clone()?, None, true)?
@@ -57,6 +63,24 @@ pub(super) fn handle_connection(
     shared.remove_connection(connection_id)?;
     let _ = stream.shutdown(std::net::Shutdown::Both);
     result
+}
+
+/// The local socket sends readiness first. A room stream is opened by this
+/// runtime after the broker asks for it, so the request arrives first.
+fn greet(
+    stream: &mut UnixStream,
+    generation: String,
+    remote: bool,
+) -> io::Result<Option<ClientMsg>> {
+    if remote {
+        let Ok(first) = codec::decode(stream) else {
+            return Ok(None);
+        };
+        codec::encode(stream, &ServerMsg::RuntimeReady { generation })?;
+        return Ok(Some(first));
+    }
+    codec::encode(stream, &ServerMsg::RuntimeReady { generation })?;
+    Ok(codec::decode(stream).ok())
 }
 
 // A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.

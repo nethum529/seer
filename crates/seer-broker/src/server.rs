@@ -6,10 +6,12 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientInfo, ClientMsg, Person, PersonState, ServerMsg, codec};
-use seer_net::{EndpointId, Listener, Socket, Stream, load_or_create_secret_key};
+use seer_net::{EndpointId, Listener, Session, Socket, Stream, load_or_create_secret_key};
 
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
 use crate::forwarding::forward;
+use crate::published_address::PublishedAddress;
+use crate::publishing::{claim_runtime_stream, publish_handshake, serve_runtime};
 use crate::registry::{MAX_SEAT_LIFETIME_SECS, PersonRecord, Registry};
 use crate::runtime::RuntimeManager;
 use crate::{
@@ -22,7 +24,7 @@ const STATUS_INTERVAL: Duration = Duration::from_secs(1);
 const STATUS_TIMEOUT: Duration = Duration::from_millis(500);
 const ACTIVE_LIMIT_SECS: u64 = 60;
 const IDLE_LIMIT_SECS: u64 = 600;
-const INVALID_CREDENTIALS: &str = "invalid credentials";
+pub(crate) const INVALID_CREDENTIALS: &str = "invalid credentials";
 const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
 
@@ -46,7 +48,7 @@ pub fn serve(
     for connection in listener.incoming() {
         let connection = connection?;
         let source = ConnectionKey::direct(connection.peer_addr()?);
-        spawn_connection(Socket::from(connection), Arc::clone(&broker), source);
+        spawn_connection(Socket::from(connection), Arc::clone(&broker), source, None);
     }
     Ok(())
 }
@@ -66,7 +68,7 @@ pub(crate) struct BrokerState {
 impl BrokerState {
     pub(crate) fn new(config: &Config) -> io::Result<(Self, Option<(String, String)>)> {
         let published = PublishedAddress::parse(&config.published_addr)?;
-        let runtimes = RuntimeManager::new(config.state_dir.clone(), config.os_users.clone())?;
+        let runtimes = RuntimeManager::default();
         let (registry, owner_identity) = Registry::open(&config.state_dir, &config.owner_name)?;
         Ok((
             Self {
@@ -127,7 +129,7 @@ impl BrokerState {
                 Person {
                     online: attached_clients > 0,
                     attached_clients,
-                    peekable: self.runtimes.is_running(&person.user_id, &person.name),
+                    peekable: self.runtimes.is_running(&person.user_id),
                     state: person_state(attached_clients, idle_secs),
                     tabs,
                     foreground,
@@ -143,10 +145,10 @@ impl BrokerState {
     fn refresh_statuses(&self) -> io::Result<()> {
         let mut statuses = HashMap::new();
         for person in self.registry.people()? {
-            if !self.runtimes.is_running(&person.user_id, &person.name) {
+            if !self.runtimes.is_running(&person.user_id) {
                 continue;
             }
-            if let Some(status) = self.query_status(&person.user_id, &person.name) {
+            if let Some(status) = self.query_status(&person.user_id) {
                 statuses.insert(person.user_id, status);
             }
         }
@@ -154,15 +156,19 @@ impl BrokerState {
         self.publish_people()
     }
 
-    fn query_status(&self, user_id: &str, person_name: &str) -> Option<ServerMsg> {
-        let mut stream = self.runtimes.connect_existing(user_id, person_name).ok()?;
+    fn query_status(&self, user_id: &str) -> Option<ServerMsg> {
+        let mut stream = self.runtimes.open(user_id).ok()?;
         stream.set_read_timeout(Some(STATUS_TIMEOUT)).ok()?;
         codec::encode(&mut stream, &ClientMsg::QueryStatus).ok()?;
+        let ServerMsg::RuntimeReady { .. } = codec::decode(&mut stream).ok()? else {
+            return None;
+        };
         let status = codec::decode(&mut stream).ok()?;
+        let _ = stream.shutdown(std::net::Shutdown::Both);
         matches!(status, ServerMsg::Status { .. }).then_some(status)
     }
 
-    fn publish_people(&self) -> io::Result<()> {
+    pub(crate) fn publish_people(&self) -> io::Result<()> {
         let ServerMsg::People { people } = self.people()? else {
             return Ok(());
         };
@@ -245,36 +251,6 @@ fn spawn_status_ticker(broker: Arc<BrokerState>) {
     });
 }
 
-struct PublishedAddress {
-    host: String,
-    port: u16,
-}
-
-impl PublishedAddress {
-    fn parse(value: &str) -> io::Result<Self> {
-        let (host, port) = value.rsplit_once(':').ok_or_else(invalid_published_addr)?;
-        if host.is_empty() {
-            return Err(invalid_published_addr());
-        }
-        let port = port.parse().map_err(|_| invalid_published_addr())?;
-        Ok(Self {
-            host: host.to_owned(),
-            port,
-        })
-    }
-
-    fn capsule(&self, token: &str) -> String {
-        format!("SEER1-{}-{}-{token}", self.host, self.port)
-    }
-}
-
-fn invalid_published_addr() -> io::Error {
-    io::Error::new(
-        io::ErrorKind::InvalidInput,
-        "published_addr must contain a host and port",
-    )
-}
-
 pub(crate) fn bind_remote_listener(config: &Config) -> io::Result<Option<Listener>> {
     if !config.remote {
         return Ok(None);
@@ -288,10 +264,11 @@ fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
     thread::spawn(move || {
         loop {
             match listener.accept() {
-                Ok((remote, stream)) => spawn_connection(
+                Ok((remote, stream, session)) => spawn_connection(
                     Socket::from(stream),
                     Arc::clone(&broker),
                     ConnectionKey::Relay(remote),
+                    Some(session),
                 ),
                 Err(error) => {
                     eprintln!("broker remote accept error: {error}");
@@ -302,14 +279,19 @@ fn spawn_remote_accept_loop(listener: Listener, broker: Arc<BrokerState>) {
     });
 }
 
-fn spawn_connection<S: Stream + Clone>(stream: S, broker: Arc<BrokerState>, source: ConnectionKey) {
+fn spawn_connection(
+    stream: Socket,
+    broker: Arc<BrokerState>,
+    source: ConnectionKey,
+    session: Option<Session>,
+) {
     let Some(connection) = broker.connection_limit.try_acquire_for(source) else {
         eprintln!("broker refused connection: connection limit reached");
         let _ = stream.shutdown(std::net::Shutdown::Both);
         return;
     };
     thread::spawn(move || {
-        report_connection(handle_connection(stream, &broker, connection));
+        report_connection(handle_connection(stream, &broker, connection, session));
     });
 }
 
@@ -322,32 +304,45 @@ fn report_connection(result: io::Result<()>) -> bool {
     }
 }
 
-fn handle_connection<S>(
-    mut stream: S,
-    broker: &BrokerState,
+fn handle_connection(
+    mut stream: Socket,
+    broker: &Arc<BrokerState>,
     connection: ConnectionGuard,
-) -> io::Result<()>
-where
-    S: Stream + Clone,
-{
-    let Some(person) = handshake(&mut stream, broker, HANDSHAKE_TIMEOUT)? else {
-        return Ok(());
-    };
-    drop(connection);
-    stream.set_read_timeout(None)?;
-    forward(stream, &person, broker)
+    session: Option<Session>,
+) -> io::Result<()> {
+    match handshake(&mut stream, broker, HANDSHAKE_TIMEOUT)? {
+        Handshake::Client(person) => {
+            drop(connection);
+            stream.set_read_timeout(None)?;
+            forward(stream, &person, broker)
+        }
+        Handshake::Runtime {
+            user_id,
+            generation,
+        } => {
+            drop(connection);
+            serve_runtime(stream, broker, &user_id, &generation, session)
+        }
+        Handshake::Done => Ok(()),
+    }
 }
 
-fn handshake<S: Stream>(
-    stream: &mut S,
+pub(crate) enum Handshake {
+    Client(PersonRecord),
+    Runtime { user_id: String, generation: String },
+    Done,
+}
+
+fn handshake(
+    stream: &mut Socket,
     broker: &BrokerState,
     timeout: Duration,
-) -> io::Result<Option<PersonRecord>> {
+) -> io::Result<Handshake> {
     let deadline = Instant::now() + timeout;
     let message = match read_message(stream, deadline) {
         Ok(message) => message,
-        Err(error) if connection_was_silent(&error) => return Ok(None),
-        Err(_) => return refuse(stream, INVALID_MESSAGE).map(|()| None),
+        Err(error) if connection_was_silent(&error) => return Ok(Handshake::Done),
+        Err(_) => return refuse(stream, INVALID_MESSAGE).map(|()| Handshake::Done),
     };
 
     match message {
@@ -355,21 +350,41 @@ fn handshake<S: Stream>(
             user_id,
             credential,
             version,
-        } => {
-            let server_version = env!("CARGO_PKG_VERSION");
-            if major_minor(&version) != major_minor(server_version) {
-                let reason = format!(
-                    "version mismatch: server {server_version}, client {version}. Run: seer update"
-                );
-                return refuse(stream, &reason).map(|()| None);
-            }
-            authenticate(stream, broker.registry(), &user_id, &credential)
-        }
+        } => match check_version(stream, &version)? {
+            true => authenticate(stream, broker.registry(), &user_id, &credential)
+                .map(|person| person.map_or(Handshake::Done, Handshake::Client)),
+            false => Ok(Handshake::Done),
+        },
+        ClientMsg::PublishRuntime {
+            user_id,
+            credential,
+            version,
+            generation,
+        } => match check_version(stream, &version)? {
+            true => publish_handshake(stream, broker, user_id, &credential, generation),
+            false => Ok(Handshake::Done),
+        },
+        ClientMsg::RuntimeStream {
+            user_id,
+            credential,
+            token,
+        } => claim_runtime_stream(stream, broker, &user_id, &credential, &token)
+            .map(|()| Handshake::Done),
         ClientMsg::Join { seat_token, name } => {
-            join(stream, broker.registry(), &seat_token, &name).map(|()| None)
+            join(stream, broker.registry(), &seat_token, &name).map(|()| Handshake::Done)
         }
-        _ => refuse(stream, EXPECTED_HELLO).map(|()| None),
+        _ => refuse(stream, EXPECTED_HELLO).map(|()| Handshake::Done),
     }
+}
+
+fn check_version(stream: &mut Socket, version: &str) -> io::Result<bool> {
+    let server_version = env!("CARGO_PKG_VERSION");
+    if major_minor(version) == major_minor(server_version) {
+        return Ok(true);
+    }
+    let reason =
+        format!("version mismatch: server {server_version}, client {version}. Run: seer update");
+    refuse(stream, &reason).map(|()| false)
 }
 
 fn major_minor(version: &str) -> Option<(&str, &str)> {
@@ -378,14 +393,14 @@ fn major_minor(version: &str) -> Option<(&str, &str)> {
     Some((major, minor))
 }
 
-fn read_message<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ClientMsg> {
+pub(crate) fn read_message<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ClientMsg> {
     codec::decode_with_limit(
         &mut DeadlineReader { stream, deadline },
         codec::MAX_PRE_AUTH_FRAME_SIZE,
     )
 }
 
-fn authenticate<S: Stream>(
+pub(crate) fn authenticate<S: Stream>(
     stream: &mut S,
     registry: &Registry,
     user_id: &str,
@@ -466,7 +481,6 @@ mod tests {
             remote: false,
             state_dir: PathBuf::from("/tmp/not-created-by-invalid-config"),
             owner_name: "Owner".into(),
-            os_users: std::collections::HashMap::new(),
         };
         assert!(super::BrokerState::new(&config).is_err());
     }

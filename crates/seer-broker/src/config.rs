@@ -1,4 +1,3 @@
-use std::collections::HashMap;
 use std::fs;
 use std::io;
 use std::net::SocketAddr;
@@ -15,8 +14,6 @@ pub struct Config {
     #[serde(default = "default_state_dir")]
     pub state_dir: PathBuf,
     pub owner_name: String,
-    #[serde(default)]
-    pub os_users: HashMap<String, String>,
 }
 
 fn default_remote() -> bool {
@@ -78,9 +75,5 @@ mod tests {
         assert_eq!(config.published_addr, "seer.example.com:7321");
         assert_eq!(config.state_dir, Path::new("/var/lib/seer"));
         assert_eq!(config.owner_name, "owner");
-        assert_eq!(
-            config.os_users.get("owner").map(String::as_str),
-            Some("owner")
-        );
     }
 }

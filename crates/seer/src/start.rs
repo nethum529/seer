@@ -5,6 +5,7 @@ use std::process::ExitCode;
 mod restore;
 #[cfg(target_os = "linux")]
 pub(crate) use restore::restore_owner;
+mod shutdown;
 #[cfg(target_os = "linux")]
 mod stop;
 #[cfg(target_os = "linux")]
@@ -62,14 +63,9 @@ pub fn run(restore: bool) -> ExitCode {
     }
 }
 pub fn stop() -> ExitCode {
-    #[cfg(target_os = "macos")]
-    {
-        eprintln!("the server runs on Linux only");
-        ExitCode::FAILURE
-    }
-    #[cfg(target_os = "linux")]
-    stop::run()
+    shutdown::run()
 }
+
 #[cfg(target_os = "linux")]
 fn run_linux(restore: bool) -> io::Result<()> {
     let config_dir = config_dir()?;

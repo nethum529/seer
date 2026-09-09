@@ -6,6 +6,36 @@ use seer_core::proto::{ClientMsg, TerminalInfo, codec};
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
+pub(super) struct Wires {
+    pub(super) routes: crate::routes::Routes,
+    pub(super) local: UnixStream,
+    pub(super) room: UnixStream,
+}
+
+impl Wires {
+    pub(super) fn quiet(&mut self) -> bool {
+        quiet(&mut self.local) && quiet(&mut self.room)
+    }
+}
+
+pub(super) fn wires(own_user: &str) -> Wires {
+    let (local, local_peer) = UnixStream::pair().expect("streams");
+    let (room, room_peer) = UnixStream::pair().expect("streams");
+    for peer in [&local_peer, &room_peer] {
+        peer.set_read_timeout(Some(Duration::from_millis(50)))
+            .expect("timeout");
+    }
+    Wires {
+        routes: crate::routes::Routes::new(
+            seer_net::Socket::from(local),
+            Some(seer_net::Socket::from(room)),
+            own_user.to_owned(),
+        ),
+        local: local_peer,
+        room: room_peer,
+    }
+}
+
 pub(super) fn draw(terminal: &mut Terminal<TestBackend>, state: &mut ClientState) -> String {
     terminal
         .draw(|frame| crate::render::draw(frame, state))
@@ -14,7 +44,7 @@ pub(super) fn draw(terminal: &mut Terminal<TestBackend>, state: &mut ClientState
     buffer.content.iter().map(|cell| cell.symbol()).collect()
 }
 
-pub(super) fn click(state: &mut ClientState, stream: &mut UnixStream, area: Rect) {
+pub(super) fn click(state: &mut ClientState, stream: &mut crate::routes::Routes, area: Rect) {
     let event = MouseEvent {
         kind: MouseEventKind::Down(MouseButton::Left),
         column: area.x + area.width / 2,
@@ -24,7 +54,11 @@ pub(super) fn click(state: &mut ClientState, stream: &mut UnixStream, area: Rect
     mouse(event, stream, state, &mut None).expect("click must work");
 }
 
-pub(super) fn press(state: &mut ClientState, stream: &mut UnixStream, code: CrosstermKeyCode) {
+pub(super) fn press(
+    state: &mut ClientState,
+    stream: &mut crate::routes::Routes,
+    code: CrosstermKeyCode,
+) {
     command(KeyEvent::new(code, KeyModifiers::NONE), stream, state).expect("key must work");
 }
 
@@ -89,9 +123,7 @@ pub(super) fn one_terminal_state() -> (ClientState, String) {
 #[test]
 fn the_people_panel_opens_closes_and_pins() {
     let (mut state, _pane) = one_terminal_state();
-    let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
-    peer.set_read_timeout(Some(Duration::from_millis(50)))
-        .expect("timeout must apply");
+    let mut wires = wires("alice");
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
 
     assert!(
@@ -99,31 +131,31 @@ fn the_people_panel_opens_closes_and_pins() {
         "no people column may take content space by default"
     );
     let handle = state.chrome.handle_area;
-    click(&mut state, &mut stream, handle);
+    click(&mut state, &mut wires.routes, handle);
     assert!(draw(&mut terminal, &mut state).contains("people"));
     assert!(matches!(state.chrome.panel, Some(Panel::People)));
 
-    press(&mut state, &mut stream, CrosstermKeyCode::Esc);
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Esc);
     assert!(state.chrome.panel.is_none(), "esc must close the panel");
     assert!(!state.quit_prompt, "esc must close before asking to quit");
     draw(&mut terminal, &mut state);
 
     let handle = state.chrome.handle_area;
     assert!(handle.width >= 1 && handle.height == 3, "{handle:?}");
-    click(&mut state, &mut stream, handle);
+    click(&mut state, &mut wires.routes, handle);
     draw(&mut terminal, &mut state);
     assert!(matches!(state.chrome.panel, Some(Panel::People)));
 
     let chip = state.chrome.chip_area;
-    click(&mut state, &mut stream, chip);
+    click(&mut state, &mut wires.routes, chip);
     draw(&mut terminal, &mut state);
     assert!(matches!(state.chrome.panel, Some(Panel::Session)));
     let handle = state.chrome.handle_area;
-    click(&mut state, &mut stream, handle);
+    click(&mut state, &mut wires.routes, handle);
     draw(&mut terminal, &mut state);
     assert!(matches!(state.chrome.panel, Some(Panel::People)));
 
-    click_release(&mut state, &mut stream, Rect::new(90, 25, 1, 1));
+    click_release(&mut state, &mut wires.routes, Rect::new(90, 25, 1, 1));
     assert!(
         state.chrome.panel.is_none(),
         "a click outside must close the panel"
@@ -137,23 +169,23 @@ fn the_people_panel_opens_closes_and_pins() {
     terminal.backend_mut().resize(45, 20);
     draw(&mut terminal, &mut state);
     let handle = state.chrome.handle_area;
-    click(&mut state, &mut stream, handle);
+    click(&mut state, &mut wires.routes, handle);
     assert!(
         draw(&mut terminal, &mut state).contains("people"),
         "narrow screens keep the panel"
     );
     let handle = state.chrome.close_area;
-    click(&mut state, &mut stream, handle);
+    click(&mut state, &mut wires.routes, handle);
     assert!(state.chrome.panel.is_none());
 
     terminal.backend_mut().resize(100, 30);
     draw(&mut terminal, &mut state);
     let handle = state.chrome.handle_area;
-    click(&mut state, &mut stream, handle);
+    click(&mut state, &mut wires.routes, handle);
     draw(&mut terminal, &mut state);
     let pin = state.chrome.pin_area;
     assert!(pin.width > 0 && pin.height == 1, "header must offer pin");
-    click(&mut state, &mut stream, pin);
+    click(&mut state, &mut wires.routes, pin);
     assert!(state.chrome.pinned, "a click on pin must pin the sidebar");
     crate::panels::close(&mut state);
     let text = draw(&mut terminal, &mut state);
@@ -166,11 +198,11 @@ fn the_people_panel_opens_closes_and_pins() {
         "terminal content must use the area beside the pinned column"
     );
 
-    click(&mut state, &mut stream, Rect::new(90, 25, 1, 1));
+    click(&mut state, &mut wires.routes, Rect::new(90, 25, 1, 1));
     assert!(state.chrome.pinned, "an outside click must keep the pin");
 
     let target = state.chrome.chip_area;
-    click(&mut state, &mut stream, target);
+    click(&mut state, &mut wires.routes, target);
     draw(&mut terminal, &mut state);
     assert!(matches!(state.chrome.panel, Some(Panel::Session)));
     assert!(state.chrome.pinned, "session controls must keep the pin");
@@ -201,7 +233,7 @@ fn the_people_panel_opens_closes_and_pins() {
         .find(|(index, _)| *index == 1)
         .expect("the pinned column must list Bob")
         .1;
-    click(&mut state, &mut stream, row);
+    click(&mut state, &mut wires.routes, row);
     assert_eq!(
         state.selected, 1,
         "the pinned column must act on the first click while session is open"
@@ -217,10 +249,11 @@ fn the_people_panel_opens_closes_and_pins() {
         Rect::new(20, 0, 80, 30),
         "the viewer must report the area beside the pinned column"
     );
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('z'));
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Char('z'));
     assert!(
         matches!(
-            codec::decode::<_, ClientMsg>(&mut peer).expect("typing must reach the terminal"),
+            codec::decode::<_, ClientMsg>(&mut wires.local)
+                .expect("typing must reach the terminal"),
             ClientMsg::TerminalInput { .. }
         ),
         "a pinned sidebar alone must not capture terminal keys"
@@ -243,12 +276,12 @@ fn the_people_panel_opens_closes_and_pins() {
         "the handle must stay reachable while collapsed"
     );
     let target = state.chrome.handle_area;
-    click(&mut state, &mut stream, target);
+    click(&mut state, &mut wires.routes, target);
     assert!(
         draw(&mut terminal, &mut state).contains("unpin"),
         "the collapsed sidebar must still reach unpin"
     );
-    press(&mut state, &mut stream, CrosstermKeyCode::Esc);
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Esc);
 
     terminal.backend_mut().resize(100, 30);
     draw(&mut terminal, &mut state);
@@ -257,7 +290,7 @@ fn the_people_panel_opens_closes_and_pins() {
         "widening must restore the pinned column"
     );
     let target = state.chrome.pin_area;
-    click(&mut state, &mut stream, target);
+    click(&mut state, &mut wires.routes, target);
     draw(&mut terminal, &mut state);
     assert!(
         !state.chrome.pinned,
@@ -273,15 +306,14 @@ fn the_people_panel_opens_closes_and_pins() {
 #[test]
 fn the_viewer_forwards_keys_until_a_panel_takes_them() {
     let (mut state, pane) = one_terminal_state();
-    let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
-    peer.set_read_timeout(Some(Duration::from_millis(50)))
-        .expect("timeout must apply");
+    let mut wires = wires("alice");
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
     state.open_focused();
     draw(&mut terminal, &mut state);
 
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('p'));
-    let sent = codec::decode::<_, ClientMsg>(&mut peer).expect("input must reach the terminal");
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Char('p'));
+    let sent =
+        codec::decode::<_, ClientMsg>(&mut wires.local).expect("input must reach the terminal");
     let ClientMsg::TerminalInput {
         pane: target,
         input,
@@ -301,33 +333,33 @@ fn the_viewer_forwards_keys_until_a_panel_takes_them() {
     );
 
     let handle = state.chrome.handle_area;
-    click(&mut state, &mut stream, handle);
+    click(&mut state, &mut wires.routes, handle);
     draw(&mut terminal, &mut state);
     assert!(matches!(state.chrome.panel, Some(Panel::People)));
     assert!(state.viewer.is_some(), "the viewer must stay open");
 
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('z'));
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Char('z'));
     assert!(
-        quiet(&mut peer),
+        quiet(&mut wires.local),
         "an open panel must keep keys off the child"
     );
     crate::viewer::input_message(
-        &mut stream,
+        &mut wires.routes,
         &mut state,
         seer_core::TerminalInput::new(seer_core::InputEvent::Paste("hello".into())),
     )
     .expect("paste must be handled");
     assert!(
-        quiet(&mut peer),
+        quiet(&mut wires.local),
         "an open panel must keep a paste off the child"
     );
 
-    press(&mut state, &mut stream, CrosstermKeyCode::Esc);
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Esc);
     assert!(state.chrome.panel.is_none());
     assert!(state.viewer.is_some(), "esc must close only the panel");
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('p'));
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Char('p'));
     assert!(
-        codec::decode::<_, ClientMsg>(&mut peer).is_ok(),
+        codec::decode::<_, ClientMsg>(&mut wires.local).is_ok(),
         "a closed panel gives the keys back to the terminal"
     );
 
@@ -353,12 +385,12 @@ fn the_viewer_forwards_keys_until_a_panel_takes_them() {
             row: row.y,
             modifiers: KeyModifiers::NONE,
         },
-        &mut stream,
+        &mut wires.routes,
         &mut state,
         &mut None,
     )
     .expect("person menu");
-    press(&mut state, &mut stream, CrosstermKeyCode::Enter);
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Enter);
     assert_eq!(state.viewer.as_ref().expect("viewer").user, "bob");
     assert!(
         !state.chrome_owns_input(),
@@ -369,21 +401,19 @@ fn the_viewer_forwards_keys_until_a_panel_takes_them() {
 #[test]
 fn the_session_panel_reaches_the_terminal_actions() {
     let (mut state, pane) = one_terminal_state();
-    let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
-    peer.set_read_timeout(Some(Duration::from_millis(50)))
-        .expect("timeout");
+    let mut wires = wires("alice");
     let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
 
     draw(&mut terminal, &mut state);
     let chip = state.chrome.chip_area;
-    click(&mut state, &mut stream, chip);
+    click(&mut state, &mut wires.routes, chip);
     let text = draw(&mut terminal, &mut state);
     assert!(matches!(state.chrome.panel, Some(Panel::Session)));
     for label in ["1 shell", "new terminal", "close terminal", "quit"] {
         assert!(text.contains(label), "session panel must offer {label}");
     }
 
-    press(&mut state, &mut stream, CrosstermKeyCode::Enter);
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Enter);
     assert_eq!(
         state.viewer.as_ref().map(|viewer| viewer.pane.as_str()),
         Some(pane.as_str()),
@@ -391,32 +421,36 @@ fn the_session_panel_reaches_the_terminal_actions() {
     );
 
     crate::panels::open(&mut state, Panel::Session);
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('n'));
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Char('n'));
     let workspace = state.tree.workspaces[0].id.clone();
     assert_eq!(
-        codec::decode::<_, ClientMsg>(&mut peer).expect("create"),
+        codec::decode::<_, ClientMsg>(&mut wires.local).expect("create"),
         ClientMsg::CreateTab { workspace }
     );
     crate::panels::open(&mut state, Panel::Session);
-    press(&mut state, &mut stream, CrosstermKeyCode::Char('x'));
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Char('x'));
     assert!(
-        matches!(codec::decode::<_, ClientMsg>(&mut peer).expect("close"), ClientMsg::ClosePane { pane: target, .. } if target == pane)
+        matches!(codec::decode::<_, ClientMsg>(&mut wires.local).expect("close"), ClientMsg::ClosePane { pane: target, .. } if target == pane)
     );
     crate::panels::open(&mut state, Panel::Session);
     assert!(
         command(
             KeyEvent::new(CrosstermKeyCode::Char('q'), KeyModifiers::NONE),
-            &mut stream,
+            &mut wires.routes,
             &mut state
         )
         .expect("quit")
     );
     state.quit_prompt = true;
-    press(&mut state, &mut stream, CrosstermKeyCode::Esc);
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Esc);
     assert!(!state.quit_prompt);
 }
 
-pub(super) fn click_release(state: &mut ClientState, stream: &mut UnixStream, area: Rect) {
+pub(super) fn click_release(
+    state: &mut ClientState,
+    stream: &mut crate::routes::Routes,
+    area: Rect,
+) {
     let column = area.x + area.width / 2;
     let row = area.y + area.height / 2;
     for kind in [

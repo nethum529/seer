@@ -127,31 +127,17 @@ fn complete_join(
     store.make_current(server.clone());
     store.save().map_err(CommandError::system)?;
     println!("Joined as {name}. Attaching...");
-    let (stream, tree) = authenticate(&server)?;
-    finish_session(
-        io::stdout().is_terminal(),
-        stream,
-        tree,
-        None,
-        &capsule.alias,
-        server.user_id.clone(),
-        tui::run,
-    )
+    let (stream, _) = authenticate(&server)?;
+    finish_session(io::stdout().is_terminal(), Some(stream), None, &server)
 }
 
 pub(crate) fn attach() -> Result<(), CommandError> {
     let server = selected_server()?;
-    let (stream, tree) = authenticate(&server)?;
     println!("Attached to {} as {}.", server.alias, server.name);
-    finish_session(
-        io::stdout().is_terminal(),
-        stream,
-        tree,
-        None,
-        &server.alias,
-        server.user_id.clone(),
-        tui::run,
-    )
+    // Issue 338: the local terminals must open without waiting for the room.
+    // A broker that accepts the connection and never answers would otherwise
+    // hold up the window. The window reaches the room in the background.
+    finish_session(io::stdout().is_terminal(), None, None, &server)
 }
 
 pub(crate) fn invite(hours: Option<&str>) -> Result<(), CommandError> {
@@ -426,25 +412,28 @@ impl<S: Stream> Read for DeadlineReader<'_, S> {
     }
 }
 
+/// Runs the window on both routes.
+///
+/// The local runtime is reached first and the room is optional: the window
+/// must render and type in its own terminals whether or not the room answers.
 fn finish_session(
     terminal: bool,
-    stream: Socket,
-    tree: Tree,
+    room: Option<Socket>,
     peek_person: Option<&str>,
-    alias: &str,
-    own_user: String,
-    run: impl FnOnce(Socket, Tree, String) -> io::Result<tui::SessionExit>,
+    server: &ServerEntry,
 ) -> Result<(), CommandError> {
     if !terminal {
         return Ok(());
     }
-    stream
-        .set_read_timeout(None)
-        .map_err(CommandError::system)?;
+    let (local, tree) = crate::local::attach(server).map_err(CommandError::system)?;
+    if let Some(room) = &room {
+        crate::tui_link::prepare_room(room).map_err(CommandError::system)?;
+    }
     tui::set_peek_person(peek_person);
-    let exit = run(stream, tree, own_user).map_err(CommandError::system)?;
+    let exit = tui::run(local, room, tree, server.user_id.clone(), server.clone())
+        .map_err(CommandError::system)?;
     match exit {
-        tui::SessionExit::Detached => print_detached(alias),
+        tui::SessionExit::Detached => print_detached(&server.alias),
         tui::SessionExit::ServerStopped => print_server_stopped(),
         tui::SessionExit::Client => {}
     }

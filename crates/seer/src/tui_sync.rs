@@ -1,9 +1,11 @@
 use crate::{state::ClientState, tui::send};
 use seer_core::proto::ClientMsg;
-use seer_net::Stream;
 use std::io;
 
-pub(crate) fn sync_resize(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
+pub(crate) fn sync_resize(
+    stream: &mut crate::routes::Routes,
+    state: &mut ClientState,
+) -> io::Result<()> {
     let Some(viewer) = &mut state.viewer else {
         return Ok(());
     };
@@ -29,7 +31,10 @@ pub(crate) fn sync_resize(stream: &mut impl Stream, state: &mut ClientState) -> 
     )
 }
 
-pub(crate) fn sync_watches(stream: &mut impl Stream, state: &mut ClientState) -> io::Result<()> {
+pub(crate) fn sync_watches(
+    stream: &mut crate::routes::Routes,
+    state: &mut ClientState,
+) -> io::Result<()> {
     let visible = if let Some(viewer) = &state.viewer {
         vec![(viewer.target(), viewer.area)]
     } else {
@@ -119,9 +124,11 @@ mod tests {
                 })
                 .collect(),
         );
-        let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
+        let (local, mut peer) = UnixStream::pair().expect("streams must open");
         peer.set_read_timeout(Some(Duration::from_millis(50)))
             .expect("timeout must apply");
+        let mut stream =
+            crate::routes::Routes::new(seer_net::Socket::from(local), None, "alice".to_owned());
         let mut terminal = Terminal::new(TestBackend::new(140, 40)).expect("backend must open");
         terminal
             .draw(|frame| render::draw(frame, &mut state))
@@ -250,9 +257,11 @@ mod tests {
         let mut viewer = crate::viewer::Viewer::new("alice".into(), pane);
         viewer.area = ratatui::layout::Rect::new(0, 0, 190, 50);
         state.viewer = Some(viewer);
-        let (mut stream, mut peer) = UnixStream::pair().expect("streams must open");
+        let (local, mut peer) = UnixStream::pair().expect("streams must open");
         peer.set_read_timeout(Some(Duration::from_millis(50)))
             .expect("timeout must apply");
+        let mut stream =
+            crate::routes::Routes::new(seer_net::Socket::from(local), None, "alice".to_owned());
 
         sync_resize(&mut stream, &mut state).expect("resize must sync");
         let mut byte = [0];

@@ -61,33 +61,9 @@ impl<'a> Coordinator<'a> {
                 tree: Tree::new(),
             },
         )?;
-        let runtime = match RuntimeConnection::connect(broker, owner, true, &event_sender) {
-            Ok(runtime) => runtime,
-            Err(error) => {
-                codec::encode(&mut *initial, &broker.grants.message(&owner.user_id)?)?;
-                codec::encode(
-                    &mut *initial,
-                    &ServerMsg::Refused {
-                        reason: error.to_string(),
-                    },
-                )?;
-                return Err(error);
-            }
-        };
-        let setup =
-            codec::encode(&mut *initial, &broker.grants.message(&owner.user_id)?).and_then(|()| {
-                codec::encode(
-                    &mut *initial,
-                    &ServerMsg::Tree {
-                        tree: runtime.tree.clone(),
-                    },
-                )
-            });
+        let setup = codec::encode(&mut *initial, &broker.grants.message(&owner.user_id)?);
         drop(initial);
-        if let Err(error) = setup {
-            let _ = runtime.close();
-            return Err(error);
-        }
+        setup?;
         let client_reader = spawn_client_reader(reader, event_sender.clone());
         Ok(Self {
             client,
@@ -98,7 +74,7 @@ impl<'a> Coordinator<'a> {
             broker,
             event_sender,
             events,
-            runtimes: HashMap::from([(owner.user_id.clone(), runtime)]),
+            runtimes: HashMap::new(),
             watches: HashMap::new(),
             lists: BTreeSet::new(),
         })
@@ -149,8 +125,6 @@ impl<'a> Coordinator<'a> {
                     }
                     if let Ok(message) = result {
                         self.handle_runtime(&user, message)?;
-                    } else if user == self.owner.user_id {
-                        return Ok(());
                     } else {
                         if let Some(runtime) = self.runtimes.remove(&user) {
                             runtime.close()?;
@@ -194,7 +168,9 @@ impl<'a> Coordinator<'a> {
                 if message.is_mutating()
                     || matches!(message, ClientMsg::TerminalCapabilities { .. }) =>
             {
-                self.runtime(&self.owner.user_id.clone())?.send(&message)
+                Err(io::Error::other(
+                    "own terminal actions go to the local runtime, not the room",
+                ))
             }
             _ => Err(io::Error::other("unsupported client message")),
         }
@@ -203,8 +179,7 @@ impl<'a> Coordinator<'a> {
     fn runtime(&mut self, user: &str) -> io::Result<&mut RuntimeConnection> {
         if !self.runtimes.contains_key(user) {
             let person = self.person(user)?;
-            let mut runtime =
-                RuntimeConnection::connect(self.broker, &person, false, &self.event_sender)?;
+            let mut runtime = RuntimeConnection::connect(self.broker, &person, &self.event_sender)?;
             for ((target, pane), size) in &self.watches {
                 if target == user {
                     runtime.send(&ClientMsg::Watch {
@@ -305,12 +280,14 @@ impl<'a> Coordinator<'a> {
 
     fn query_targets(&mut self, user: &str) -> io::Result<()> {
         let person = self.person(user)?;
-        let mut stream = self
-            .broker
-            .runtimes()
-            .connect_existing(user, &person.name)?;
+        let _ = &person;
+        let mut stream = self.broker.runtimes().open(user)?;
         codec::encode(&mut stream, &ClientMsg::QueryTargets { user: user.into() })?;
+        let ServerMsg::RuntimeReady { .. } = codec::decode(&mut stream)? else {
+            return Err(io::Error::other("runtime did not report readiness"));
+        };
         let message: ServerMsg = codec::decode(&mut stream)?;
+        let _ = stream.shutdown(std::net::Shutdown::Both);
         self.write(&message)
     }
 
@@ -331,15 +308,10 @@ impl<'a> Coordinator<'a> {
                 runtime
                     .frames
                     .retain(|pane, _| panes.contains(pane.as_str()));
-                if user == self.owner.user_id {
-                    self.write(&ServerMsg::Tree { tree })?;
-                }
             }
             ServerMsg::Cells { pane, frame, .. } => {
                 runtime.frames.insert(pane.clone(), frame.clone());
-                if user == self.owner.user_id
-                    || self.watches.contains_key(&(user.into(), pane.clone()))
-                {
+                if self.watches.contains_key(&(user.into(), pane.clone())) {
                     self.write(&ServerMsg::Cells {
                         user: user.into(),
                         pane,
@@ -360,7 +332,7 @@ impl<'a> Coordinator<'a> {
                     })
                     .collect();
                 runtime.terminals.clone_from(&terminals);
-                if user == self.owner.user_id || self.lists.contains(user) {
+                if self.lists.contains(user) {
                     self.write(&ServerMsg::Terminals {
                         user: user.into(),
                         terminals,
