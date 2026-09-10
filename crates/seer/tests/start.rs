@@ -226,6 +226,25 @@ fn prompt_defaults_create_config_and_owner_store() {
 }
 
 #[test]
+fn a_new_room_drops_the_people_of_the_old_room() {
+    let _serial = PROCESS_TEST.lock().expect("process test lock must work");
+    let directory = TestDirectory::new();
+    ensure_default_port_is_free();
+    fs::create_dir_all(directory.state_dir()).expect("state directory must be created");
+    fs::write(
+        directory.state_dir().join("registry.json"),
+        "{\"people\":[{\"user_id\":\"old-id\",\"name\":\"don\",\"credential_hash\":\"aa\",\"created_at\":1,\"is_owner\":true}],\"seats\":[]}",
+    )
+    .expect("old registry must be written");
+    let executable = install_binaries(&directory);
+
+    let output = run_start(&executable, &directory, "\n", &[]);
+
+    assert!(output.status.success(), "{}", output.stderr);
+    assert!(!directory.state_dir().join("registry.json").exists());
+}
+
+#[test]
 fn second_start_uses_the_live_broker() {
     let _serial = PROCESS_TEST.lock().expect("process test lock must work");
     let directory = TestDirectory::new();
