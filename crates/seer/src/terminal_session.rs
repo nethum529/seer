@@ -7,6 +7,7 @@ use crossterm::event::{
     PushKeyboardEnhancementFlags,
 };
 use crossterm::execute;
+use crossterm::style::Print;
 use crossterm::terminal::{
     EnterAlternateScreen, LeaveAlternateScreen, SetTitle, disable_raw_mode, enable_raw_mode,
 };
@@ -15,6 +16,12 @@ use ratatui::backend::CrosstermBackend;
 use seer_core::CursorShape;
 
 use crate::state::ClientState;
+
+// Mode 1007 makes the host send wheel events to the program instead of
+// scrolling its own scrollback while the alternate screen is up. Without it a
+// host with alternate scroll off shows the lines from before Seer started.
+const ALTERNATE_SCROLL_ON: &str = "\x1b[?1007h";
+const ALTERNATE_SCROLL_OFF: &str = "\x1b[?1007l";
 
 pub(crate) struct TerminalSession {
     pub(crate) terminal: Terminal<CrosstermBackend<Stdout>>,
@@ -27,6 +34,7 @@ impl TerminalSession {
         if let Err(error) = execute!(
             stdout,
             EnterAlternateScreen,
+            Print(ALTERNATE_SCROLL_ON),
             EnableMouseCapture,
             EnableBracketedPaste,
             EnableFocusChange,
@@ -68,6 +76,7 @@ fn restore_terminal() {
         DisableFocusChange,
         DisableBracketedPaste,
         DisableMouseCapture,
+        Print(ALTERNATE_SCROLL_OFF),
         LeaveAlternateScreen
     );
 }
