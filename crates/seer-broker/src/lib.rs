@@ -16,6 +16,7 @@ mod server;
 mod test_support;
 
 pub use config::Config;
+pub use registry::clear_people;
 pub use server::serve;
 
 pub fn run() -> io::Result<()> {

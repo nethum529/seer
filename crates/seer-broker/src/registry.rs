@@ -225,6 +225,17 @@ impl Registry {
     }
 }
 
+pub fn clear_people(state_dir: &Path) -> io::Result<()> {
+    for name in [REGISTRY_FILE, PEOPLE_FILE, SEATS_FILE] {
+        match fs::remove_file(state_dir.join(name)) {
+            Ok(()) => {}
+            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+    }
+    Ok(())
+}
+
 fn new_person(
     name: &str,
     credential: &str,
