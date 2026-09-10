@@ -141,7 +141,6 @@ pub(crate) fn attach_bare() -> Result<(), CommandError> {
         .servers
         .is_empty()
     {
-        #[cfg(target_os = "linux")]
         crate::start::restore_owner().map_err(CommandError::system)?;
     }
     super::attach()

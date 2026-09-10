@@ -1,6 +1,7 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::VecDeque;
 use std::fmt::Display;
+#[cfg(target_os = "linux")]
 use std::fs;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -83,9 +84,22 @@ fn process_name(group: i32) -> String {
         .unwrap_or_default()
 }
 
-#[cfg(not(target_os = "linux"))]
-fn process_name(_group: i32) -> String {
-    String::new()
+#[cfg(target_os = "macos")]
+fn process_name(group: i32) -> String {
+    let mut name = [0_u8; 256];
+    let length = unsafe {
+        // SAFETY: name is a valid writable buffer for the process name.
+        libc::proc_name(group, name.as_mut_ptr().cast(), name.len() as u32)
+    };
+    if length <= 0 {
+        return String::new();
+    }
+    let length = (length as usize).min(name.len());
+    let length = name[..length]
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(length);
+    String::from_utf8_lossy(&name[..length]).trim().to_owned()
 }
 
 fn pty_size(cols: u16, rows: u16) -> PtySize {
@@ -133,7 +147,7 @@ fn to_io_error(error: impl Display) -> io::Error {
     io::Error::other(error.to_string())
 }
 
-#[cfg(all(test, target_os = "linux"))]
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -154,5 +168,10 @@ mod tests {
                 .copied()
                 .eq(bytes[1..].iter().copied())
         );
+    }
+
+    #[test]
+    fn process_name_finds_current_process() {
+        assert!(!process_name(std::process::id().cast_signed()).is_empty());
     }
 }

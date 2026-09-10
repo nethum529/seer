@@ -50,10 +50,10 @@ fn read_config() -> io::Result<Option<BrokerConfig>> {
 fn stop_process_group(pid: i32) -> io::Result<()> {
     signal_process_group(pid, libc::SIGTERM)?;
     let deadline = Instant::now() + START_TIMEOUT;
-    while process_exists(pid) && Instant::now() < deadline {
+    while super::process_exists(pid) && Instant::now() < deadline {
         thread::sleep(POLL_INTERVAL);
     }
-    if process_exists(pid) {
+    if super::process_exists(pid) {
         signal_process_group(pid, libc::SIGKILL)?;
     }
     Ok(())
@@ -70,10 +70,6 @@ fn signal_process_group(pid: i32, signal: i32) -> io::Result<()> {
     } else {
         Err(error)
     }
-}
-
-fn process_exists(pid: i32) -> bool {
-    Path::new(&format!("/proc/{pid}")).exists()
 }
 
 fn remove_pid_file(path: &Path) -> io::Result<()> {
