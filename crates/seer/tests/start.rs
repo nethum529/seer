@@ -245,6 +245,25 @@ fn a_new_room_drops_the_people_of_the_old_room() {
 }
 
 #[test]
+fn a_restart_after_stop_drops_the_people_of_the_old_room() {
+    let _serial = PROCESS_TEST.lock().expect("process test lock must work");
+    let directory = TestDirectory::new();
+    let address = unused_address();
+    write_config(&directory, address);
+    fs::write(
+        directory.state_dir().join("registry.json"),
+        "{\"people\":[{\"user_id\":\"old-id\",\"name\":\"don\",\"credential_hash\":\"aa\",\"created_at\":1,\"is_owner\":true}],\"seats\":[]}",
+    )
+    .expect("old registry must be written");
+    let executable = install_binaries(&directory);
+
+    let output = run_start(&executable, &directory, "", &[]);
+
+    assert!(output.status.success(), "{}", output.stderr);
+    assert!(!directory.state_dir().join("registry.json").exists());
+}
+
+#[test]
 fn second_start_uses_the_live_broker() {
     let _serial = PROCESS_TEST.lock().expect("process test lock must work");
     let directory = TestDirectory::new();

@@ -83,9 +83,10 @@ fn run_linux(restore: bool) -> io::Result<()> {
         println!("Server already running at {}.", config.published_addr);
         return Ok(());
     }
-    if first_start && !restore {
-        // A missing broker.toml makes a new room, so the people of the old room
-        // must not come back. seer start --restore reopens the old room instead.
+    if !restore {
+        // The server is not running here, so seer start opens a new room and
+        // the people of the old room must not come back. seer start --restore
+        // reopens the old room with its members instead.
         seer_broker::clear_people(&config.state_dir)?;
     }
     if restore {
