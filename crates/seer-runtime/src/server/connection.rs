@@ -52,6 +52,9 @@ pub(super) fn handle_connection(
             return handle_target_query(&mut stream, shared, connection_id);
         }
         ClientMsg::QueryStatus => return super::status::handle_status_query(&mut stream, shared),
+        ClientMsg::ExitClient { pane } if !remote => {
+            return super::size_lease::handle_exit_client(&mut stream, shared, &pane);
+        }
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,

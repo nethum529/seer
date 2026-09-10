@@ -24,7 +24,8 @@ fn help_detach_and_missing_attach_have_exact_results() {
     assert_eq!(help.status.code(), Some(0));
     let help_text = text(&help.stdout);
     for command in [
-        "start", "stop", "update", "invite", "join", "list", "attach", "detach", "peek", "help",
+        "start", "stop", "update", "invite", "join", "list", "attach", "detach", "exit", "peek",
+        "help",
     ] {
         assert!(help_text.contains(command), "help must list {command}");
     }
@@ -54,7 +55,7 @@ fn help_detach_and_missing_attach_have_exact_results() {
         text(&invalid.stderr),
         "unknown command: unknown. Run seer help.\n"
     );
-    for command in ["start", "invite", "list", "attach", "detach"] {
+    for command in ["start", "invite", "list", "attach", "detach", "exit"] {
         let extra = run(&config, &[command, "extra"], "");
         assert_eq!(extra.status.code(), Some(2));
         assert!(text(&extra.stderr).contains("join [capsule]      Join a server"));

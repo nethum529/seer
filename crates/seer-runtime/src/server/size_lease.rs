@@ -1,8 +1,9 @@
 use std::collections::BTreeMap;
 use std::io;
+use std::os::unix::net::UnixStream;
 use std::time::Instant;
 
-use seer_core::proto::{ClientMsg, ServerMsg};
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, MouseKind, PaneSize};
 
 use super::{SharedSession, connection::Connection, lock, writer};
@@ -154,4 +155,51 @@ fn own_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize> {
         .into_iter()
         .map(|(pane, (_, size))| (pane, size))
         .collect()
+}
+
+// seer exit names a terminal, not a client. The client that leaves is the
+// local one that last typed into or started watching that terminal. When no
+// client holds a claim, the only local client leaves.
+pub(super) fn handle_exit_client(
+    stream: &mut UnixStream,
+    shared: &SharedSession,
+    pane: &str,
+) -> io::Result<()> {
+    let bye = ServerMsg::Bye {
+        reason: "detached".into(),
+    };
+    let reply = match shared.exit_target(pane)? {
+        Some(id) if shared.send_to(id, &bye).is_ok() => bye,
+        Some(_) => refused("the Seer client has already left"),
+        None => refused("no Seer client is on this terminal"),
+    };
+    codec::encode(stream, &reply)
+}
+
+fn refused(reason: &str) -> ServerMsg {
+    ServerMsg::Refused {
+        reason: reason.into(),
+    }
+}
+
+impl SharedSession {
+    fn exit_target(&self, pane: &str) -> io::Result<Option<u64>> {
+        if !lock(&self.session)?.pane_hosts.contains_key(pane) {
+            return Ok(None);
+        }
+        let connections = lock(&self.connections)?;
+        let local: Vec<&Connection> = connections
+            .iter()
+            .filter(|connection| !connection.read_only)
+            .collect();
+        let claimed = local
+            .iter()
+            .filter_map(|connection| connection.claimed.get(pane).map(|at| (*at, connection.id)))
+            .max_by_key(|(at, _)| *at)
+            .map(|(_, id)| id);
+        Ok(claimed.or(match local.as_slice() {
+            [only] => Some(only.id),
+            _ => None,
+        }))
+    }
 }
