@@ -49,6 +49,7 @@ fn windows_opening_together_share_one_runtime_while_the_room_is_offline() {
 #[test]
 fn a_runtime_that_stops_early_reports_the_runtime_failure() {
     let root = test_root("seer-runtime-stopped");
+    let _cleanup = CleanOnDrop(root.clone());
     write_store(&root);
     let directory = runtime_directory(&root);
     fs::create_dir_all(directory.join("socket")).expect("blocked socket must be created");
@@ -63,6 +64,16 @@ fn a_runtime_that_stops_early_reports_the_runtime_failure() {
     );
     assert!(text.contains("runtime.log"), "{text}");
     assert!(!text.contains("No such file or directory"), "{text}");
+}
+
+// The window ends on its own here, so nothing else removes the scratch
+// directory, and a failed assertion would leave it behind.
+struct CleanOnDrop(PathBuf);
+
+impl Drop for CleanOnDrop {
+    fn drop(&mut self) {
+        let _ = fs::remove_dir_all(&self.0);
+    }
 }
 
 struct Windows {
