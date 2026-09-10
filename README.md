@@ -89,6 +89,9 @@ unchanged.
 - seer stop ends your local terminals for the selected room. If this computer
   hosts that room, it also stops the room server. Other people's shells keep
   running.
+- seer start opens a new room. The people of the old room are removed. An
+  invitation made before a stop stays valid. seer start --restore reopens the
+  old room with its members.
 
 Remote connections to the broker are encrypted. See docs/adr/0002-builtin-connect.md.
 Research notes are in docs/research/. Read CONTRIBUTING.md before a change.

@@ -225,15 +225,22 @@ impl Registry {
     }
 }
 
+// The seats stay, so an invitation made before a stop still works after the
+// next start.
 pub fn clear_people(state_dir: &Path) -> io::Result<()> {
-    for name in [REGISTRY_FILE, PEOPLE_FILE, SEATS_FILE] {
-        match fs::remove_file(state_dir.join(name)) {
-            Ok(()) => {}
-            Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-            Err(error) => return Err(error),
+    let registry_path = state_dir.join(REGISTRY_FILE);
+    match load_json_required::<RegistryData>(&registry_path) {
+        Ok(mut data) => {
+            data.people.clear();
+            write_json_atomically(&registry_path, &data)?;
         }
+        Err(error) if error.kind() == io::ErrorKind::NotFound => {}
+        Err(error) => return Err(error),
     }
-    Ok(())
+    match fs::remove_file(state_dir.join(PEOPLE_FILE)) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
 }
 
 fn new_person(

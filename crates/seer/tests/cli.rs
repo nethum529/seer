@@ -8,15 +8,12 @@ use seer_core::proto::{ClientMsg, ServerMsg};
 
 #[path = "support/cli_harness.rs"]
 mod cli_harness;
-#[path = "support/cli.rs"]
-mod cli_support;
 #[path = "support/server_io.rs"]
 mod server_io;
 
 use cli_harness::{
     TestConfig, accept, assert_hello, listener, person, run, send, send_welcome, text,
 };
-use cli_support::read_owner_identity;
 use server_io::receive;
 
 #[test]
@@ -89,7 +86,7 @@ fn stop_ends_the_room_hosted_here_and_leaves_another_room_alone() {
     let pid_path = state_dir.join("broker.pid");
     let broker_pid = read_pid(&pid_path);
     let _broker = ProcessGroup(broker_pid);
-    let (user_id, credential) = owner_identity(&state_dir.join("broker.log"));
+    let (user_id, credential) = saved_identity(&config);
 
     // A room joined on someone else's computer must not stop the one hosted here.
     write_identity(&config, address.port() ^ 1, &user_id, &credential);
@@ -358,15 +355,18 @@ fn read_pid(path: &Path) -> i32 {
         .expect("pid must be valid")
 }
 
-fn owner_identity(path: &Path) -> (String, String) {
-    let deadline = Instant::now() + Duration::from_secs(5);
-    loop {
-        if let Some(identity) = read_owner_identity(path) {
-            return identity;
-        }
-        assert!(Instant::now() < deadline, "owner identity must be ready");
-        thread::sleep(Duration::from_millis(10));
-    }
+fn saved_identity(config: &TestConfig) -> (String, String) {
+    let store = fs::read_to_string(config.root.join("seer/servers.toml"))
+        .expect("owner store must be readable");
+    let servers: toml::Value = toml::from_str(&store).expect("owner store must parse");
+    let owner = &servers["servers"][0];
+    let field = |name: &str| {
+        owner[name]
+            .as_str()
+            .expect("owner field must exist")
+            .to_owned()
+    };
+    (field("user_id"), field("credential"))
 }
 
 fn write_identity(config: &TestConfig, port: u16, user_id: &str, credential: &str) {

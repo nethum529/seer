@@ -226,14 +226,15 @@ fn prompt_defaults_create_config_and_owner_store() {
 }
 
 #[test]
-fn a_new_room_drops_the_people_of_the_old_room() {
+fn a_new_room_drops_the_people_of_the_old_room_and_keeps_the_seats() {
     let _serial = PROCESS_TEST.lock().expect("process test lock must work");
     let directory = TestDirectory::new();
     ensure_default_port_is_free();
     fs::create_dir_all(directory.state_dir()).expect("state directory must be created");
+    let registry_path = directory.state_dir().join("registry.json");
     fs::write(
-        directory.state_dir().join("registry.json"),
-        "{\"people\":[{\"user_id\":\"old-id\",\"name\":\"don\",\"credential_hash\":\"aa\",\"created_at\":1,\"is_owner\":true}],\"seats\":[]}",
+        &registry_path,
+        "{\"people\":[{\"user_id\":\"old-id\",\"name\":\"don\",\"credential_hash\":\"aa\",\"created_at\":1,\"is_owner\":true}],\"seats\":[{\"token_hash\":\"cc\",\"expires_at\":9999999999,\"used\":false}]}",
     )
     .expect("old registry must be written");
     let executable = install_binaries(&directory);
@@ -241,26 +242,11 @@ fn a_new_room_drops_the_people_of_the_old_room() {
     let output = run_start(&executable, &directory, "\n", &[]);
 
     assert!(output.status.success(), "{}", output.stderr);
-    assert!(!directory.state_dir().join("registry.json").exists());
-}
-
-#[test]
-fn a_restart_after_stop_drops_the_people_of_the_old_room() {
-    let _serial = PROCESS_TEST.lock().expect("process test lock must work");
-    let directory = TestDirectory::new();
-    let address = unused_address();
-    write_config(&directory, address);
-    fs::write(
-        directory.state_dir().join("registry.json"),
-        "{\"people\":[{\"user_id\":\"old-id\",\"name\":\"don\",\"credential_hash\":\"aa\",\"created_at\":1,\"is_owner\":true}],\"seats\":[]}",
-    )
-    .expect("old registry must be written");
-    let executable = install_binaries(&directory);
-
-    let output = run_start(&executable, &directory, "", &[]);
-
-    assert!(output.status.success(), "{}", output.stderr);
-    assert!(!directory.state_dir().join("registry.json").exists());
+    let registry: serde_json::Value =
+        serde_json::from_str(&fs::read_to_string(registry_path).expect("registry must be read"))
+            .expect("registry must parse");
+    assert_eq!(registry["people"].as_array().map(Vec::len), Some(0));
+    assert_eq!(registry["seats"].as_array().map(Vec::len), Some(1));
 }
 
 #[test]
@@ -372,7 +358,7 @@ fn install_binaries(directory: &TestDirectory) -> PathBuf {
     let test_binary = std::env::current_exe().expect("test binary path must be available");
     assert!(!test_binary.to_string_lossy().contains('\''));
     let script = format!(
-        "#!/bin/sh\nif [ \"$SEER_FAKE_FAIL\" = 1 ]; then\n  i=1\n  while [ $i -le 25 ]; do echo failure-line-$i; i=$((i + 1)); done\n  exit 7\nfi\nexport SEER_FAKE_CONFIG=\"$1\"\nexec '{}' fake_broker_process --exact --nocapture\n",
+        "#!/bin/sh\nif [ \"$2\" = --remint-owner ]; then\n  echo 'owner-id: owner-id'\n  echo 'owner-credential: owner-secret'\n  exit 0\nfi\nif [ \"$SEER_FAKE_FAIL\" = 1 ]; then\n  i=1\n  while [ $i -le 25 ]; do echo failure-line-$i; i=$((i + 1)); done\n  exit 7\nfi\nexport SEER_FAKE_CONFIG=\"$1\"\nexec '{}' fake_broker_process --exact --nocapture\n",
         test_binary.display()
     );
     let broker = bin_dir.join("seer-broker");

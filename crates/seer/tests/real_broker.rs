@@ -8,11 +8,6 @@ use std::sync::atomic::{AtomicUsize, Ordering};
 use std::thread;
 use std::time::{Duration, Instant};
 
-#[path = "support/cli.rs"]
-mod cli_support;
-
-use cli_support::read_owner_identity;
-
 const WAIT_TIMEOUT: Duration = Duration::from_secs(7);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
@@ -331,4 +326,15 @@ fn remove_directory(path: &Path) {
 
 fn text(bytes: &[u8]) -> String {
     String::from_utf8(bytes.to_vec()).expect("command output must be UTF-8")
+}
+
+fn read_owner_identity(path: &Path) -> Option<(String, String)> {
+    let output = fs::read_to_string(path).ok()?;
+    let user_id = output
+        .lines()
+        .find_map(|line| line.strip_prefix("owner-id: "))?;
+    let credential = output
+        .lines()
+        .find_map(|line| line.strip_prefix("owner-credential: "))?;
+    Some((user_id.to_owned(), credential.to_owned()))
 }

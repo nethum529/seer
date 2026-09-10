@@ -84,12 +84,13 @@ fn run_linux(restore: bool) -> io::Result<()> {
         return Ok(());
     }
     if !restore {
-        // The server is not running here, so seer start opens a new room and
-        // the people of the old room must not come back. seer start --restore
-        // reopens the old room with its members instead.
+        // A plain start opens a new room, so the people of the old room must
+        // not come back. seer start --restore reopens the old room instead.
         seer_broker::clear_people(&config.state_dir)?;
     }
-    if restore {
+    if restore || !first_start {
+        // The broker prints the owner identity only on a first start. Every
+        // other start mints the owner here, so servers.toml matches the room.
         restore::remint_owner(&config_path, &config, &config_dir)?;
         first_start = false;
     }
