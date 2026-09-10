@@ -24,6 +24,9 @@ pub enum ClientMsg {
     DetachClient {
         client_id: String,
     },
+    ExitClient {
+        pane: String,
+    },
     CreateTab {
         workspace: String,
     },

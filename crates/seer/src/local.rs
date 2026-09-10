@@ -80,7 +80,7 @@ fn attach_stream(mut stream: UnixStream) -> io::Result<(Socket, Tree)> {
 
 // The user ID is minted for one person in one room, so it scopes the local
 // state to both. Another room cannot reach these terminals.
-fn runtime_directory(user_id: &str) -> io::Result<PathBuf> {
+pub(crate) fn runtime_directory(user_id: &str) -> io::Result<PathBuf> {
     let directory = state_dir()?.join("runtimes").join(user_id);
     fs::create_dir_all(&directory)?;
     fs::set_permissions(&directory, fs::Permissions::from_mode(0o700))?;
@@ -96,7 +96,7 @@ fn state_dir() -> io::Result<PathBuf> {
     Ok(PathBuf::from(home).join(".local/state/seer"))
 }
 
-fn connect(socket: &Path, generation: Option<&str>) -> io::Result<UnixStream> {
+pub(crate) fn connect(socket: &Path, generation: Option<&str>) -> io::Result<UnixStream> {
     let mut stream = UnixStream::connect(socket)?;
     stream.set_read_timeout(Some(READY_TIMEOUT))?;
     match codec::decode::<_, ServerMsg>(&mut stream)? {

@@ -12,7 +12,9 @@ use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
+pub(crate) use exit::exit;
 pub(crate) use selection::{attach_bare, peek, selected_server};
+mod exit;
 mod selection;
 use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
