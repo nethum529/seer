@@ -27,8 +27,9 @@ Restart the terminal if the installer asks you to. Start the server:
 
     seer start
 
-Send the printed install and join line to a friend. The friend pastes it into
-Terminal and selects a name. They do not need Rust, Git, or a GitHub account.
+Send the printed seer join line to a friend who has Seer. The friend pastes it
+into Terminal and selects a name. A friend without Seer pastes the install line
+printed under it. They do not need Rust, Git, or a GitHub account.
 
 Open the people and terminals screen:
 
