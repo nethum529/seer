@@ -66,13 +66,13 @@ fn invitation_from(output: &[u8]) -> String {
         Some(&"Seat ready. It works once and expires in 1 hour.")
     );
     assert_eq!(lines.get(1), Some(&"Send this to a friend:"));
-    let join = lines.get(4).expect("install command must print");
+    let join = lines.get(4).expect("join command must print");
     let invitation = join
-        .strip_prefix(
-            "curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- ",
-        )
-        .expect("install command must include the invitation");
-    assert_eq!(lines.len(), 5);
+        .strip_prefix("seer join ")
+        .expect("join command must include the invitation");
+    let install = lines.get(7).expect("install command must print");
+    assert!(install.ends_with(invitation));
+    assert_eq!(lines.len(), 8);
     assert!(invitation.starts_with("SEER1-127.0.0.1-"));
     invitation.to_owned()
 }

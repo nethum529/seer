@@ -341,7 +341,7 @@ fn invite_prints_the_worked_example_block() {
     assert_eq!(output.status.code(), Some(0));
     assert_eq!(
         output.stdout,
-        b"Seat ready. It works once and expires in 1 hour.\nSend this to a friend:\n\nPaste this in Terminal:\ncurl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- SEER1-team.example.com-7321-A7K4Q9P2\n"
+        b"Seat ready. It works once and expires in 1 hour.\nSend this to a friend:\n\nHas Seer? Paste this in Terminal:\nseer join SEER1-team.example.com-7321-A7K4Q9P2\n\nNo Seer yet? Paste this instead:\ncurl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- SEER1-team.example.com-7321-A7K4Q9P2\n"
     );
     assert!(output.stderr.is_empty());
     server.join().expect("server must finish");

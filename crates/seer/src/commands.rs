@@ -163,8 +163,11 @@ pub(crate) fn invite(hours: Option<&str>) -> Result<(), CommandError> {
             println!("Seat ready. It works once and expires in {hours} {unit}.");
             println!("Send this to a friend:");
             println!();
-            println!("Paste this in Terminal:");
+            println!("Has Seer? Paste this in Terminal:");
             println!("{}", join_line(&capsule));
+            println!();
+            println!("No Seer yet? Paste this instead:");
+            println!("curl -fsSL {INSTALL_URL} | sh -s -- {capsule}");
             Ok(())
         }
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
@@ -441,7 +444,7 @@ fn finish_session(
 }
 
 pub(crate) fn join_line(capsule: &str) -> String {
-    format!("curl -fsSL {INSTALL_URL} | sh -s -- {capsule}")
+    format!("seer join {capsule}")
 }
 
 fn unexpected_reply() -> CommandError {
