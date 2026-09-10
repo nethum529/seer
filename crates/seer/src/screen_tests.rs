@@ -286,3 +286,45 @@ fn the_picker_measures_wide_names_by_display_width() {
         "ten two cell names need twenty cells, not ten: {wide:?}"
     );
 }
+
+#[test]
+fn application_colors_keep_the_terminal_palette() {
+    use crate::terminal_cells::PaneCells;
+    use ratatui::style::Color;
+    use seer_core::{Cell, Color as CellColor};
+    let cell = |fg: CellColor, bg: CellColor| Cell {
+        character: 'x',
+        fg,
+        bg,
+        bold: false,
+        italic: false,
+        underline: false,
+        dim: false,
+        inverse: false,
+        hidden: false,
+        strikeout: false,
+    };
+    let rows = vec![vec![
+        cell(CellColor::Indexed(3), CellColor::Indexed(7)),
+        cell(CellColor::Default, CellColor::Default),
+        cell(
+            CellColor::Rgb {
+                red: 10,
+                green: 20,
+                blue: 30,
+            },
+            CellColor::Indexed(123),
+        ),
+    ]];
+    let mut terminal = Terminal::new(TestBackend::new(3, 1)).expect("backend must open");
+    terminal
+        .draw(|frame| frame.render_widget(PaneCells::new(&rows), frame.area()))
+        .expect("screen must draw");
+    let buffer = terminal.backend().buffer();
+    assert_eq!(buffer[(0, 0)].fg, Color::Indexed(3));
+    assert_eq!(buffer[(0, 0)].bg, Color::Indexed(7));
+    assert_eq!(buffer[(1, 0)].fg, Color::Reset);
+    assert_eq!(buffer[(1, 0)].bg, Color::Reset);
+    assert_eq!(buffer[(2, 0)].fg, Color::Rgb(10, 20, 30));
+    assert_eq!(buffer[(2, 0)].bg, Color::Indexed(123));
+}

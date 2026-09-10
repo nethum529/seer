@@ -73,9 +73,12 @@ toggle the grant.
 The checkbox changes when the broker confirms it. Esc or a click outside
 closes the menu.
 
-The screen uses Catppuccin Mocha when COLORTERM is truecolor. Otherwise it uses
-a 16-color palette. Focused borders use the accent color. Other borders use
-overlay0. Terminal output colors map to the selected palette.
+Seer controls use Catppuccin Mocha when COLORTERM is truecolor. Otherwise they
+use a 16-color palette. Focused borders use the accent color. Other borders use
+overlay0. Terminal output keeps your own terminal colors: the default text and
+background colors and the 16 ANSI colors of your terminal profile, also when you
+watch another person. Explicit RGB colors and color indexes 16 to 255 stay
+unchanged.
 
 ## Server commands
 

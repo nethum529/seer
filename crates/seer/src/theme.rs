@@ -5,18 +5,14 @@ use ratatui::widgets::{Block, Borders};
 pub(crate) struct Palette {
     pub(crate) accent: Color,
     pub(crate) blue: Color,
-    pub(crate) panel_bg: Color,
     pub(crate) surface0: Color,
     pub(crate) surface1: Color,
     pub(crate) overlay0: Color,
     pub(crate) text: Color,
     pub(crate) subtext0: Color,
-    pub(crate) mauve: Color,
     pub(crate) green: Color,
     pub(crate) yellow: Color,
     pub(crate) red: Color,
-    pub(crate) teal: Color,
-    pub(crate) peach: Color,
 }
 
 impl Default for Palette {
@@ -36,18 +32,14 @@ impl Palette {
         Self {
             accent: Color::Rgb(137, 180, 250),
             blue: Color::Rgb(137, 180, 250),
-            panel_bg: Color::Rgb(24, 24, 37),
             surface0: Color::Rgb(49, 50, 68),
             surface1: Color::Rgb(69, 71, 90),
             overlay0: Color::Rgb(108, 112, 134),
             text: Color::Rgb(205, 214, 244),
             subtext0: Color::Rgb(166, 173, 200),
-            mauve: Color::Rgb(203, 166, 247),
             green: Color::Rgb(166, 227, 161),
             yellow: Color::Rgb(249, 226, 175),
             red: Color::Rgb(243, 139, 168),
-            teal: Color::Rgb(148, 226, 213),
-            peach: Color::Rgb(250, 179, 135),
         }
     }
 
@@ -55,18 +47,14 @@ impl Palette {
         Self {
             accent: Color::LightBlue,
             blue: Color::LightBlue,
-            panel_bg: Color::Black,
             surface0: Color::DarkGray,
             surface1: Color::DarkGray,
             overlay0: Color::Gray,
             text: Color::White,
             subtext0: Color::Gray,
-            mauve: Color::LightMagenta,
             green: Color::LightGreen,
             yellow: Color::LightYellow,
             red: Color::LightRed,
-            teal: Color::LightCyan,
-            peach: Color::Yellow,
         }
     }
 
@@ -91,36 +79,5 @@ impl Palette {
                 buffer[(x, y)].set_style(self.style());
             }
         }
-    }
-
-    pub(crate) fn terminal_color(self, color: seer_core::Color, default: Color) -> Color {
-        match color {
-            seer_core::Color::Default => default,
-            seer_core::Color::Indexed(index) if index < 16 => self.ansi(index),
-            seer_core::Color::Indexed(index) => Color::Indexed(index),
-            seer_core::Color::Rgb { red, green, blue } => Color::Rgb(red, green, blue),
-        }
-    }
-
-    pub(crate) fn ansi(self, index: u8) -> Color {
-        let colors = [
-            self.panel_bg,
-            self.red,
-            self.green,
-            self.yellow,
-            self.blue,
-            self.mauve,
-            self.teal,
-            self.surface1,
-            self.surface0,
-            self.red,
-            self.green,
-            self.peach,
-            self.blue,
-            self.mauve,
-            self.teal,
-            self.text,
-        ];
-        colors[usize::from(index % 16)]
     }
 }
