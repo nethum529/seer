@@ -10,8 +10,8 @@ Install these tools:
 - `cargo-udeps` for the unused dependency gate.
 
 The client and local runtime target Linux and macOS. Each participant runs
-their own PTYs and shells. The room host command, seer start, currently runs
-on Linux only. A Linux test run does not verify the macOS build or execution.
+their own PTYs and shells. The room host command, seer start, runs on Linux
+and macOS. A Linux test run does not verify the macOS build or execution.
 
 ## Build
 
@@ -142,6 +142,17 @@ crate tests normally. Do not skip the start and restore tests when the live
 port is busy.
 
 On macOS, port 7321 must also be free when the workspace runs the start tests.
+
+### The macOS host check
+
+The release workflow runs this command on the macOS runner before it builds:
+
+```sh
+cargo clippy -p seer --target aarch64-apple-darwin --all-targets -- -D warnings
+```
+
+A Linux host cannot run it. The ring crate needs an Apple C toolchain for that
+target. Use the runner in nethum529/seer-releases, or a Mac.
 
 ### A Unix socket path is too long
 
