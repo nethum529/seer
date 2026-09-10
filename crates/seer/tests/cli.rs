@@ -380,8 +380,6 @@ fn write_identity(config: &TestConfig, port: u16, user_id: &str, credential: &st
     .expect("owner identity must be written");
 }
 
-
-
 fn wait_for_process_end(pid: i32) {
     let deadline = Instant::now() + Duration::from_secs(2);
     while process_exists(pid) && Instant::now() < deadline {
@@ -393,9 +391,9 @@ fn wait_for_process_end(pid: i32) {
 fn process_exists(pid: i32) -> bool {
     #[cfg(target_os = "linux")]
     {
-        return fs::read_to_string(format!("/proc/{pid}/stat"))
+        fs::read_to_string(format!("/proc/{pid}/stat"))
             .ok()
-            .is_some_and(|stat| stat.split_whitespace().nth(2) != Some("Z"));
+            .is_some_and(|stat| stat.split_whitespace().nth(2) != Some("Z"))
     }
     #[cfg(target_os = "macos")]
     {
