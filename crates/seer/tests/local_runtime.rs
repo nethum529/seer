@@ -5,7 +5,7 @@ use std::net::TcpListener;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Child, Command, Stdio};
+use std::process::{Child, Command, Output, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
@@ -19,19 +19,14 @@ const USER: &str = "alice-user-id";
 // must not leave two runtimes or a stale PID.
 #[test]
 fn windows_opening_together_share_one_runtime_while_the_room_is_offline() {
-    let root = PathBuf::from(format!("/tmp/seer-local-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("test directory must be created");
+    let root = test_root("seer-local");
     write_store(&root);
 
     let _windows = Windows {
         root: root.clone(),
         children: (0..4).map(|_| open_window(&root)).collect(),
     };
-    let socket = root
-        .join("state-home/seer/runtimes")
-        .join(USER)
-        .join("socket");
+    let socket = socket_path(&root);
     let first = read_tree(&socket);
     for _ in 0..3 {
         assert_eq!(
@@ -41,12 +36,33 @@ fn windows_opening_together_share_one_runtime_while_the_room_is_offline() {
         );
     }
 
-    let directory = root.join("state-home/seer/runtimes").join(USER);
+    let directory = runtime_directory(&root);
     let pid = wait_for_pid(&directory);
     assert!(
         Path::new(&format!("/proc/{pid}")).exists(),
         "the recorded PID must be the runtime that is running, not one that lost the race"
     );
+}
+
+// Issue 362: a runtime that stops before it opens its socket must be reported
+// as a runtime failure. The missing socket alone reads as a missing file.
+#[test]
+fn a_runtime_that_stops_early_reports_the_runtime_failure() {
+    let root = test_root("seer-runtime-stopped");
+    write_store(&root);
+    let directory = runtime_directory(&root);
+    fs::create_dir_all(directory.join("socket")).expect("blocked socket must be created");
+
+    let output = run_window_to_end(&root);
+
+    let text = String::from_utf8_lossy(&output.stdout).into_owned();
+    assert_eq!(output.status.code(), Some(2), "{text}");
+    assert!(
+        text.contains("the runtime stopped before it opened its socket"),
+        "{text}"
+    );
+    assert!(text.contains("runtime.log"), "{text}");
+    assert!(!text.contains("No such file or directory"), "{text}");
 }
 
 struct Windows {
@@ -74,6 +90,21 @@ impl Drop for Windows {
     }
 }
 
+fn test_root(name: &str) -> PathBuf {
+    let root = PathBuf::from(format!("/tmp/{name}-{}", std::process::id()));
+    let _ = fs::remove_dir_all(&root);
+    fs::create_dir_all(&root).expect("test directory must be created");
+    root
+}
+
+fn runtime_directory(root: &Path) -> PathBuf {
+    root.join("state-home/seer/runtimes").join(USER)
+}
+
+fn socket_path(root: &Path) -> PathBuf {
+    runtime_directory(root).join("socket")
+}
+
 fn wait_for_pid(directory: &Path) -> i32 {
     let deadline = Instant::now() + WAIT;
     loop {
@@ -92,7 +123,39 @@ fn wait_for_pid(directory: &Path) -> i32 {
 
 // A window needs a real terminal, which is what starts the local runtime.
 fn open_window(root: &Path) -> std::process::Child {
-    Command::new("script")
+    window_command(root).spawn().expect("a window must start")
+}
+
+fn run_window_to_end(root: &Path) -> Output {
+    let mut child = window_command(root)
+        .stdin(Stdio::null())
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("a window must start");
+    let deadline = Instant::now() + WAIT;
+    loop {
+        if child
+            .try_wait()
+            .expect("window status must be available")
+            .is_some()
+        {
+            return child
+                .wait_with_output()
+                .expect("window output must be read");
+        }
+        if Instant::now() >= deadline {
+            let _ = child.kill();
+            let _ = child.wait();
+            panic!("the window did not finish before the timeout");
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+fn window_command(root: &Path) -> Command {
+    let mut command = Command::new("script");
+    command
         .process_group(0)
         .args([
             "-qec",
@@ -104,9 +167,8 @@ fn open_window(root: &Path) -> std::process::Child {
         .env("TERM", "xterm")
         .stdin(Stdio::null())
         .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("a window must start")
+        .stderr(Stdio::null());
+    command
 }
 
 fn read_tree(socket: &Path) -> String {
@@ -161,27 +223,20 @@ fn a_room_that_never_answers_does_not_hold_up_this_computer() {
         }
     });
 
-    let root = PathBuf::from(format!("/tmp/seer-silent-{}", std::process::id()));
-    let _ = fs::remove_dir_all(&root);
-    fs::create_dir_all(&root).expect("test directory must be created");
+    let root = test_root("seer-silent");
     write_store_for(&root, &endpoint);
 
     let _windows = Windows {
         root: root.clone(),
         children: vec![open_window(&root)],
     };
-    let socket = root
-        .join("state-home/seer/runtimes")
-        .join(USER)
-        .join("socket");
     let start = Instant::now();
-    read_tree(&socket);
+    read_tree(&socket_path(&root));
     assert!(
         start.elapsed() < Duration::from_secs(10),
         "the local runtime must answer while the room stays silent"
     );
 
-    let directory = root.join("state-home/seer/runtimes").join(USER);
-    wait_for_pid(&directory);
+    wait_for_pid(&runtime_directory(&root));
     drop(held);
 }
