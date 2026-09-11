@@ -100,7 +100,7 @@ impl<'a> Coordinator<'a> {
                     .cloned()
                     .collect();
                 for user in users {
-                    let _ = self.runtime(&user);
+                    let _ = self.list(&user);
                 }
                 refreshed = std::time::Instant::now();
             }
@@ -171,14 +171,11 @@ impl<'a> Coordinator<'a> {
         if let Some(runtime) = self.runtimes.remove(user) {
             runtime.close()?;
         }
-        self.write(&ServerMsg::Terminals {
-            user: user.into(),
-            terminals: Vec::new(),
-        })
+        Ok(())
     }
 
     fn remove_departed_runtimes(&mut self) -> io::Result<()> {
-        let users: Vec<_> = self.runtimes.keys().cloned().collect();
+        let users: BTreeSet<_> = self.runtimes.keys().chain(&self.lists).cloned().collect();
         for user in users {
             if self.broker.registry().person(&user)?.is_some() {
                 continue;
@@ -186,6 +183,10 @@ impl<'a> Coordinator<'a> {
             self.close_runtime(&user)?;
             self.lists.remove(&user);
             self.watches.retain(|(owner, _), _| owner != &user);
+            self.write(&ServerMsg::Terminals {
+                user,
+                terminals: Vec::new(),
+            })?;
         }
         Ok(())
     }
@@ -287,7 +288,7 @@ impl<'a> Coordinator<'a> {
         self.lists.insert(user.to_owned());
         let terminals = match self.runtime(user) {
             Ok(runtime) => runtime.terminals.clone(),
-            Err(_) => Vec::new(),
+            Err(_) => return Ok(()),
         };
         self.write(&ServerMsg::Terminals {
             user: user.into(),

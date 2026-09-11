@@ -361,3 +361,30 @@ fn remote_mouse_is_grant_checked_and_encoded_in_the_destination_mode() {
         "1b 5b 3c 30 3b 36 3b 33 4d"
     ));
 }
+
+#[test]
+fn reconnecting_a_viewer_does_not_report_a_live_terminal_as_empty() {
+    let mut room = Room::start(false);
+    let mut window = room.publish("alice", ALICE_SECRET);
+    let at = first_terminal(&own_tree(&mut window));
+    let mut alice = join_room(room.address, "alice", ALICE_SECRET);
+    wait_for_published(&mut alice, "alice");
+    for _ in 0..4 {
+        let mut viewer = join_room(room.address, "bob", BOB_SECRET);
+        send(
+            &mut viewer,
+            &ClientMsg::Terminals {
+                user: "alice".into(),
+            },
+        );
+        let first = wait_for(
+            &mut viewer,
+            |message| matches!(message, ServerMsg::Terminals { user, .. } if user == "alice"),
+        );
+        assert!(
+            matches!(first, ServerMsg::Terminals { terminals, .. }
+            if terminals.iter().any(|terminal| terminal.pane == at.pane)),
+            "reconnecting must not turn an unread catalog into an empty terminal list"
+        );
+    }
+}
