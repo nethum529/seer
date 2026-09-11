@@ -1,7 +1,7 @@
 use crate::{
     input::key_to_input,
     state::ClientState,
-    terminal_cells::{PaneCells, start_row},
+    terminal_cells::PaneCells,
     tui::{send, send_viewer_input},
 };
 use crossterm::event::KeyEvent;
@@ -154,17 +154,16 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     }
     if let Some(content) = state.frames.get(&viewer.target()) {
         let rows = viewer.visible_rows(area.height);
-        let start = start_row(&rows, area.height);
         frame.render_widget(PaneCells::new(&rows), area);
         if allowed
             && !state.chrome_owns_input()
             && viewer.offset == 0
             && content.cursor.visible
-            && let Some(row) = usize::from(content.cursor.row).checked_sub(start)
-            && row < usize::from(area.height)
+            && content.cursor.row < area.height
             && content.cursor.column < area.width
         {
-            frame.set_cursor_position((area.x + content.cursor.column, area.y + row as u16));
+            frame
+                .set_cursor_position((area.x + content.cursor.column, area.y + content.cursor.row));
         }
     }
 }
