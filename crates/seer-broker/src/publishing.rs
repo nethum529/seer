@@ -46,7 +46,9 @@ pub(crate) fn serve_runtime(
     };
     // Every path after the registration must retire it. A runtime that is
     // left published locks that person out of the room for good.
+    seer_core::debug_log!("runtime published user={user_id} generation={generation}");
     let result = confirm_and_hold(&mut stream, broker, generation, session);
+    seer_core::debug_log!("runtime retired user={user_id} generation={generation}");
     broker.runtimes().retire(user_id, &registration);
     let _ = broker.publish_people();
     result

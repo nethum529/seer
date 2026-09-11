@@ -43,6 +43,7 @@ pub(crate) fn spawn_reader(
     thread::spawn(move || {
         loop {
             let message = codec::decode(&mut stream);
+            log_received(source, &message);
             let failed = message.is_err();
             if sender.send(Envelope { source, message }).is_err() || failed {
                 break;
@@ -50,6 +51,21 @@ pub(crate) fn spawn_reader(
         }
     })
 }
+
+#[cfg(debug_assertions)]
+fn log_received(source: Source, message: &io::Result<ServerMsg>) {
+    match message {
+        Ok(ServerMsg::Cells { .. }) => {}
+        Ok(message) => seer_core::debug_log!(
+            "recv source={source:?} {}",
+            seer_core::debug_log::server_summary(message)
+        ),
+        Err(error) => seer_core::debug_log!("recv source={source:?} error={error}"),
+    }
+}
+
+#[cfg(not(debug_assertions))]
+fn log_received(_source: Source, _message: &io::Result<ServerMsg>) {}
 
 pub(crate) fn join_reader(reader: JoinHandle<()>) -> io::Result<()> {
     reader

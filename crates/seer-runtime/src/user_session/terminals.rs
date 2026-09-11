@@ -28,6 +28,15 @@ impl UserSession {
             }
             let size = visible.map_or(host.owner_size, |visible| visible.size);
             if pane.size != size {
+                seer_core::debug_log!(
+                    "pty resize pane={} size={}x{} owner_size={}x{} visible={}",
+                    pane.id,
+                    size.cols,
+                    size.rows,
+                    host.owner_size.cols,
+                    host.owner_size.rows,
+                    visible.is_some()
+                );
                 host.resize_visible(size.cols, size.rows)?;
                 pane.size = size;
                 changed = true;
@@ -48,6 +57,11 @@ impl UserSession {
         self.tab(workspace, tab)?;
         self.viewport = PaneSize { cols, rows };
         for (pane, size) in self.pane_rects(workspace, tab, cols, rows) {
+            seer_core::debug_log!(
+                "viewport tab={tab} size={cols}x{rows} pane={pane} owner_size={}x{}",
+                size.cols,
+                size.rows
+            );
             if let Some(host) = self.pane_hosts.get_mut(&pane) {
                 host.remember_owner_size(size);
             }

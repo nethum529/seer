@@ -95,6 +95,7 @@ pub(crate) fn input_message(
     input: TerminalInput,
 ) -> io::Result<()> {
     if state.chrome_owns_input() {
+        seer_core::debug_log!("input dropped reason=chrome-open");
         return Ok(());
     }
     if state.viewer.is_none()
@@ -108,14 +109,17 @@ pub(crate) fn input_message(
         state.open_focused();
     }
     let Some(viewer) = &state.viewer else {
+        seer_core::debug_log!("input dropped reason=no-viewer");
         return Ok(());
     };
     if viewer.user == state.own_user {
         return send_viewer_input(stream, state, input);
     }
-    if state.you_may_type_into.contains(&viewer.user)
-        && let Some(bytes) = crate::input::raw_bytes(&input)?
-    {
+    if !state.you_may_type_into.contains(&viewer.user) {
+        seer_core::debug_log!("input dropped reason=no-grant user={}", viewer.user);
+        return Ok(());
+    }
+    if let Some(bytes) = crate::input::raw_bytes(&input)? {
         send(
             stream,
             &ClientMsg::TypeInto {

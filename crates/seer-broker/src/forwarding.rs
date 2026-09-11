@@ -105,7 +105,18 @@ impl<'a> Coordinator<'a> {
             match event {
                 Event::Client(Ok(ClientMsg::Detach)) | Event::Client(Err(_)) => return Ok(()),
                 Event::Client(Ok(message)) => {
+                    seer_core::debug_log!(
+                        "recv user={} client={} {}",
+                        self.owner.user_id,
+                        self.client_id,
+                        seer_core::debug_log::client_summary(&message)
+                    );
                     if let Err(error) = self.handle_client(message) {
+                        seer_core::debug_log!(
+                            "refused user={} client={} reason={error}",
+                            self.owner.user_id,
+                            self.client_id
+                        );
                         self.write(&ServerMsg::Refused {
                             reason: error.to_string(),
                         })?;
@@ -126,6 +137,11 @@ impl<'a> Coordinator<'a> {
                     if let Ok(message) = result {
                         self.handle_runtime(&user, message)?;
                     } else {
+                        seer_core::debug_log!(
+                            "runtime lost user={user} client={} error={:?}",
+                            self.client_id,
+                            result.err()
+                        );
                         if let Some(runtime) = self.runtimes.remove(&user) {
                             runtime.close()?;
                         }
@@ -244,6 +260,10 @@ impl<'a> Coordinator<'a> {
 
     fn set_grant(&self, user: &str, can_type: bool) -> io::Result<()> {
         self.person(user)?;
+        seer_core::debug_log!(
+            "grant owner={} user={user} can_type={can_type}",
+            self.owner.user_id
+        );
         self.broker
             .grants
             .set(&self.owner.user_id, user, can_type)?;
@@ -259,6 +279,11 @@ impl<'a> Coordinator<'a> {
             )));
         }
         let (workspace, tab) = self.runtime(user)?.location(pane)?;
+        seer_core::debug_log!(
+            "input forwarded from={} to={user} pane={pane} bytes={}",
+            self.owner.user_id,
+            bytes.len()
+        );
         let sender = self.owner.name.clone();
         self.runtime(user)?.send(&ClientMsg::GrantedInput {
             workspace,
@@ -332,6 +357,15 @@ impl<'a> Coordinator<'a> {
                     })
                     .collect();
                 runtime.terminals.clone_from(&terminals);
+                seer_core::debug_log!(
+                    "client={} listed={} {}",
+                    self.client_id,
+                    self.lists.contains(user),
+                    seer_core::debug_log::server_summary(&ServerMsg::Terminals {
+                        user: user.into(),
+                        terminals: terminals.clone(),
+                    })
+                );
                 if self.lists.contains(user) {
                     self.write(&ServerMsg::Terminals {
                         user: user.into(),

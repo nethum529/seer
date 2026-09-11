@@ -37,6 +37,11 @@ impl Routes {
     }
 
     pub(crate) fn send(&mut self, message: &ClientMsg) -> io::Result<()> {
+        seer_core::debug_log!(
+            "send route={} {}",
+            self.route(message),
+            seer_core::debug_log::client_summary(message)
+        );
         if matches!(message, ClientMsg::Detach) {
             self.send_room(message)?;
             return codec::encode(&mut self.local, message);
@@ -45,6 +50,17 @@ impl Routes {
             return codec::encode(&mut self.local, message);
         }
         self.send_room(message)
+    }
+
+    #[cfg(debug_assertions)]
+    fn route(&self, message: &ClientMsg) -> &'static str {
+        if self.is_local(message) {
+            "local"
+        } else if self.room.is_some() {
+            "room"
+        } else {
+            "dropped-room-offline"
+        }
     }
 
     fn is_local(&self, message: &ClientMsg) -> bool {

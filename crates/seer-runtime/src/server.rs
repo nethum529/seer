@@ -75,6 +75,10 @@ fn handle_message(
     connection_id: u64,
     message: ClientMsg,
 ) -> io::Result<bool> {
+    seer_core::debug_log!(
+        "recv conn={connection_id} {}",
+        seer_core::debug_log::client_summary(&message)
+    );
     match message {
         ClientMsg::Detach => Ok(true),
         ClientMsg::Watch {
@@ -168,6 +172,11 @@ impl SharedSession {
         } else {
             connection.size_owner = !connections.iter().any(|c| c.size_owner);
         }
+        seer_core::debug_log!(
+            "attach conn={id} size_owner={} connections={}",
+            connection.size_owner,
+            connections.len() + 1
+        );
         connections.push(connection);
         self.poll_wake.notify_one();
         Ok(())
@@ -179,6 +188,10 @@ impl SharedSession {
             let mut connections = lock(&self.connections)?;
             let removed_owner = connections.iter().any(|c| c.id == id && c.size_owner);
             connections.retain(|connection| connection.id != id);
+            seer_core::debug_log!(
+                "detach conn={id} was_size_owner={removed_owner} connections={}",
+                connections.len()
+            );
             removed_owner
         };
         if owner_removed {
@@ -254,6 +267,7 @@ impl SharedSession {
             return Ok(true);
         };
         if read_only && !matches!(message, ClientMsg::GrantedInput { .. }) {
+            seer_core::debug_log!("input dropped conn={connection_id} reason=read-only");
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);
         }
@@ -266,10 +280,12 @@ impl SharedSession {
         let applied = self.apply(message);
         match applied {
             Ok(messages) => {
+                seer_core::debug_log!("input forwarded conn={connection_id}");
                 self.flush_messages(&messages)?;
                 Ok(false)
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                seer_core::debug_log!("input refused conn={connection_id} reason={error}");
                 drop(_lease);
                 self.send_refused(connection_id, error.to_string())?;
                 Ok(false)
@@ -327,6 +343,7 @@ impl SharedSession {
                 .iter()
                 .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
             if !connections[position].size_owner && !lease_vacant && !owner_stale {
+                seer_core::debug_log!("resize conn={id} size={cols}x{rows} deferred=not-owner");
                 connections[position].viewport =
                     Some(reported_viewport(workspace, tab, cols, rows));
                 drop(connections);
@@ -334,6 +351,7 @@ impl SharedSession {
                 return Ok(false);
             }
         }
+        seer_core::debug_log!("resize conn={id} size={cols}x{rows} applied=owner");
         let applied = self.record_viewport(workspace, tab, cols, rows);
         match applied {
             Ok(messages) => {

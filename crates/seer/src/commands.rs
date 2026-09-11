@@ -430,6 +430,10 @@ fn finish_session(
     if !terminal {
         return Ok(());
     }
+    #[cfg(debug_assertions)]
+    if let Ok(directory) = crate::local::runtime_directory(&server.user_id) {
+        seer_core::debug_log::open(&directory, "client", &server.user_id);
+    }
     let (local, tree) = crate::local::attach(server).map_err(CommandError::system)?;
     if let Some(room) = &room {
         crate::tui_link::prepare_room(room).map_err(CommandError::system)?;
