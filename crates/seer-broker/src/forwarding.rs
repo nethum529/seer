@@ -154,10 +154,11 @@ impl<'a> Coordinator<'a> {
                 {
                     match result {
                         Ok(message) => self.handle_runtime(&user, message)?,
-                        Err(error) => {
+                        Err(_) => {
                             seer_core::debug_log!(
-                                "runtime lost user={user} client={} error={error:?}",
-                                self.client_id
+                                "runtime lost user={user} client={} error={:?}",
+                                self.client_id,
+                                result.as_ref().err()
                             );
                             self.close_runtime(&user)?;
                         }

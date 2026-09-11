@@ -4,7 +4,11 @@ use std::process::ExitCode;
 #[cfg(target_os = "linux")]
 mod restore;
 #[cfg(target_os = "linux")]
+mod stop;
+#[cfg(target_os = "linux")]
 pub(crate) use restore::restore_owner;
+#[cfg(target_os = "linux")]
+pub(crate) use stop::stop_hosted_broker;
 #[cfg(target_os = "linux")]
 mod wordmark;
 #[cfg(target_os = "linux")]

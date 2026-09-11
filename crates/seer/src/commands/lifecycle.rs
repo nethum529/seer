@@ -21,6 +21,16 @@ pub(crate) fn leave() -> Result<(), CommandError> {
 }
 
 pub(crate) fn stop() -> Result<(), CommandError> {
+    #[cfg(target_os = "linux")]
+    if ServerStore::load()
+        .map_err(CommandError::system)?
+        .servers
+        .is_empty()
+        && crate::start::stop_hosted_broker().map_err(CommandError::system)?
+    {
+        println!("Room server stopped.");
+        return Ok(());
+    }
     let server = selected_server()?;
     let (mut stream, _) = authenticate(&server)?;
     send(&mut stream, &ClientMsg::Stop)?;
@@ -31,6 +41,9 @@ pub(crate) fn stop() -> Result<(), CommandError> {
             return Err(CommandError::usage("The server has not stopped yet."));
         }
         std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+    if crate::local::stop(&server.user_id).map_err(CommandError::system)? {
+        println!("Your terminals on this computer stopped.");
     }
     println!("Room server stopped.");
     Ok(())
