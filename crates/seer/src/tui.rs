@@ -34,6 +34,11 @@ pub(crate) fn run(
     own_user: String,
     server: crate::store::ServerEntry,
 ) -> io::Result<SessionExit> {
+    seer_core::debug_log!(
+        "session start server={} room={}",
+        server.endpoint,
+        room.is_some()
+    );
     let mut terminal = TerminalSession::start()?;
     let mut state = ClientState::new(tree, own_user);
     state.server.clone_from(&server.endpoint);
@@ -69,6 +74,7 @@ pub(crate) fn run(
     if let Some(reader) = room_reader {
         join_reader(reader)?;
     }
+    seer_core::debug_log!("session end result={result:?}");
     result
 }
 
@@ -201,9 +207,7 @@ fn apply_message(
             state.can_type_here = can_type_here.into_iter().collect();
         }
         ServerMsg::Tree { tree } => state.replace_tree(tree),
-        ServerMsg::Cells { user, pane, frame } => {
-            state.frames.insert((user, pane), frame);
-        }
+        ServerMsg::Cells { user, pane, frame } => state.note_frame(user, pane, frame),
         ServerMsg::Terminals { user, terminals } => {
             if let Some(viewer) = &state.viewer
                 && viewer.user == user

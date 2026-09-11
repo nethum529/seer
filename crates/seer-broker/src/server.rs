@@ -423,6 +423,11 @@ fn join<S: Stream>(
         Ok(result) => result,
         Err(error) => return refuse(stream, error.reason()),
     };
+    seer_core::debug_log!(
+        "seat joined user={} name={}",
+        result.person.user_id,
+        result.person.name
+    );
     codec::encode(
         stream,
         &ServerMsg::Joined {
@@ -434,6 +439,7 @@ fn join<S: Stream>(
 }
 
 pub(crate) fn refuse<S: Stream>(stream: &mut S, reason: &str) -> io::Result<()> {
+    seer_core::debug_log!("refused connection reason={reason}");
     eprintln!("refused connection: {reason}");
     codec::encode(
         stream,

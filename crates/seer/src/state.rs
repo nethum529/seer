@@ -239,6 +239,15 @@ impl ClientState {
         }
     }
 
+    pub(crate) fn note_frame(&mut self, user: String, pane: String, frame: TerminalFrame) {
+        #[cfg(debug_assertions)]
+        seer_core::debug_log::transition(
+            &format!("frame user={user} pane={pane}"),
+            seer_core::debug_log::frame_summary(&frame),
+        );
+        self.frames.insert((user, pane), frame);
+    }
+
     pub(crate) fn may_type(&self, user: &str) -> bool {
         user == self.own_user || self.you_may_type_into.contains(user)
     }

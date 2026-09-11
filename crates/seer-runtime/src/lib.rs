@@ -26,6 +26,11 @@ const SNAPSHOT_DIRECTORY_VAR: &str = "SEER_SNAPSHOT_DIR";
 pub fn run() -> io::Result<()> {
     let (socket_path, user, shell, generation) = arguments()?;
     let snapshot_dir = snapshot_directory();
+    #[cfg(debug_assertions)]
+    if let Some(directory) = &snapshot_dir {
+        seer_core::debug_log::open(directory, "runtime", &user);
+    }
+    seer_core::debug_log!("runtime start shell={shell} generation={generation}");
     let session = persistence::load_session(user, shell, snapshot_dir.as_deref())?;
     let listener = bind(Path::new(&socket_path))?;
     install_sigterm_cleanup(&socket_path);

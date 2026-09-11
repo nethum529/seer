@@ -108,20 +108,30 @@ impl UserSession {
             .pane_hosts
             .iter_mut()
             .filter_map(|(pane, host)| {
-                host.poll().then(|| ServerMsg::Cells {
-                    user: self.user.clone(),
-                    pane: pane.clone(),
-                    frame: host.frame(),
+                host.poll().then(|| {
+                    let frame = host.frame();
+                    #[cfg(debug_assertions)]
+                    seer_core::debug_log::transition(
+                        &format!("frame pane={pane}"),
+                        seer_core::debug_log::frame_summary(&frame),
+                    );
+                    ServerMsg::Cells {
+                        user: self.user.clone(),
+                        pane: pane.clone(),
+                        frame,
+                    }
                 })
             })
             .collect();
         let terminals = self.terminals();
         if terminals != self.published_terminals {
             self.published_terminals.clone_from(&terminals);
-            messages.push(ServerMsg::Terminals {
+            let message = ServerMsg::Terminals {
                 user: self.user.clone(),
                 terminals,
-            });
+            };
+            seer_core::debug_log!("{}", seer_core::debug_log::server_summary(&message));
+            messages.push(message);
         }
         messages
     }
@@ -331,6 +341,14 @@ impl UserSession {
         };
 
         for pane_rect in &pane_rects {
+            seer_core::debug_log!(
+                "pty resize pane={} size={}x{} viewport={}x{}",
+                pane_rect.pane,
+                pane_rect.cols,
+                pane_rect.rows,
+                self.viewport.cols,
+                self.viewport.rows
+            );
             self.pane_hosts
                 .get_mut(&pane_rect.pane)
                 .ok_or_else(|| pane_host_not_found(&pane_rect.pane))?
@@ -465,4 +483,3 @@ pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
 mod tests;
 
 mod terminals;
-pub(crate) use terminals::VisibleSize;

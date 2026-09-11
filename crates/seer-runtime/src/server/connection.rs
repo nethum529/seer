@@ -393,6 +393,7 @@ impl SharedSession {
         }
         connection.read_only = true;
         connection.catalog = catalog;
+        seer_core::debug_log!("attach conn={id} read_only=true catalog={catalog} pane={pane:?}");
         lock(&self.connections)?.push(connection);
         self.poll_wake.notify_one();
         Ok(())

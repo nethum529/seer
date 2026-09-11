@@ -58,6 +58,8 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState) {
     chrome::notice(frame, state);
     crate::person_menu::draw(frame, state);
     crate::person_menu::draw_context(frame, state);
+    #[cfg(debug_assertions)]
+    seer_core::debug_log::transition("render", crate::debug::render_summary(state, full));
 }
 
 pub(crate) fn idle_text(seconds: u64) -> String {
