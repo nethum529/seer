@@ -98,6 +98,7 @@ impl UserSession {
             | ClientMsg::Terminals { .. }
             | ClientMsg::SetGrant { .. }
             | ClientMsg::TypeInto { .. }
+            | ClientMsg::Stop
             | ClientMsg::Leave
             | ClientMsg::Detach => Ok(Vec::new()),
         }

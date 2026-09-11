@@ -5,9 +5,6 @@ use std::process::ExitCode;
 mod restore;
 #[cfg(target_os = "linux")]
 pub(crate) use restore::restore_owner;
-mod shutdown;
-#[cfg(target_os = "linux")]
-mod stop;
 #[cfg(target_os = "linux")]
 mod wordmark;
 #[cfg(target_os = "linux")]
@@ -61,9 +58,6 @@ pub fn run(restore: bool) -> ExitCode {
             ExitCode::FAILURE
         }
     }
-}
-pub fn stop() -> ExitCode {
-    shutdown::run()
 }
 
 #[cfg(target_os = "linux")]

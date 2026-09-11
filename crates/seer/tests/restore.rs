@@ -76,8 +76,8 @@ fn restore_recovers_an_owner_credential_that_authenticates() {
     let owner_id = original["servers"][0]["user_id"]
         .as_str()
         .expect("owner ID");
-    fs::remove_file(&path).expect("owner store must be deleted");
     host.run(&["stop"]);
+    fs::remove_file(&path).expect("owner store must be deleted");
     host.run(&["start", "--restore"]);
 
     let restored: toml::Value =

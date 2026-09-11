@@ -40,3 +40,22 @@ fn leaving_removes_membership_and_keeps_the_other_persons_room() {
     send(&mut alice, &ClientMsg::Invite { hours: None });
     wait_for(&mut alice, |m| matches!(m, ServerMsg::Seat { .. }));
 }
+
+#[test]
+fn only_the_host_can_stop_the_room() {
+    let room = Room::start(false);
+    let mut alice = join_room(room.address, "alice", ALICE_SECRET);
+    let mut bob = join_room(room.address, "bob", BOB_SECRET);
+    send(&mut bob, &ClientMsg::Stop);
+    let refused = wait_for(&mut bob, |m| matches!(m, ServerMsg::Refused { .. }));
+    assert!(matches!(refused, ServerMsg::Refused { reason } if reason.contains("seer leave")));
+    send(&mut alice, &ClientMsg::Invite { hours: None });
+    wait_for(&mut alice, |m| matches!(m, ServerMsg::Seat { .. }));
+    send(&mut alice, &ClientMsg::Stop);
+    wait_for(&mut alice, |m| matches!(m, ServerMsg::Bye { .. }));
+    let deadline = std::time::Instant::now() + WAIT;
+    while std::net::TcpStream::connect(room.address).is_ok() {
+        assert!(std::time::Instant::now() < deadline, "the room must stop");
+        std::thread::sleep(std::time::Duration::from_millis(25));
+    }
+}

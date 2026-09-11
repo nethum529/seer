@@ -45,15 +45,17 @@ pub fn serve(
     if let Some(remote_listener) = remote_listener {
         spawn_remote_accept_loop(remote_listener, Arc::clone(&broker));
     }
-    for connection in listener.incoming() {
-        let connection = connection?;
-        let source = ConnectionKey::direct(connection.peer_addr()?);
-        spawn_connection(Socket::from(connection), Arc::clone(&broker), source, None);
+    lifecycle::accept_loop(listener, broker)?;
+    match std::fs::remove_file(config.state_dir.join("broker.pid")) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
     }
-    Ok(())
 }
 
+mod lifecycle;
+
 pub(crate) struct BrokerState {
+    stopping: std::sync::atomic::AtomicBool,
     registry: Registry,
     pub(crate) grants: crate::grants::Grants,
     runtimes: RuntimeManager,
@@ -72,6 +74,7 @@ impl BrokerState {
         let (registry, owner_identity) = Registry::open(&config.state_dir, &config.owner_name)?;
         Ok((
             Self {
+                stopping: std::sync::atomic::AtomicBool::new(false),
                 grants: crate::grants::Grants::open(&config.state_dir, &registry.people()?)?,
                 registry,
                 runtimes,
@@ -218,15 +221,6 @@ impl BrokerState {
         self.attachments.clients(user_id, excluded)
     }
 
-    pub(crate) fn leave(&self, user_id: &str, caller: &str) -> io::Result<()> {
-        self.registry.remove_person(user_id)?;
-        self.runtimes.remove(user_id)?;
-        for client in self.attachments.clients(user_id, caller)? {
-            let _ = self.attachments.detach_client(user_id, &client.client_id);
-        }
-        self.publish_people()
-    }
-
     pub(crate) fn detach_client(&self, user_id: &str, client_id: &str) -> io::Result<bool> {
         self.attachments.detach_client(user_id, client_id)
     }
@@ -254,7 +248,7 @@ fn lock_statuses(
 
 fn spawn_status_ticker(broker: Arc<BrokerState>) {
     thread::spawn(move || {
-        loop {
+        while !broker.is_stopping() {
             thread::sleep(STATUS_INTERVAL);
             let _ = broker.refresh_statuses();
         }

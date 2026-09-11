@@ -111,48 +111,70 @@ impl<'a> Coordinator<'a> {
                     return Err(io::Error::other("forward event channel closed"));
                 }
             };
-            match event {
-                Event::Client(Ok(ClientMsg::Detach)) | Event::Client(Err(_)) => return Ok(()),
-                Event::Client(Ok(ClientMsg::Leave)) => {
-                    self.broker.leave(&self.owner.user_id, &self.client_id)?;
-                    self.write(&ServerMsg::Bye {
-                        reason: "left room".into(),
-                    })?;
-                    return Ok(());
-                }
-                Event::Client(Ok(message)) => {
-                    if let Err(error) = self.handle_client(message) {
-                        self.write(&ServerMsg::Refused {
-                            reason: error.to_string(),
-                        })?;
-                    }
-                }
-                Event::Runtime {
-                    user,
-                    identity,
-                    result,
-                } => {
-                    if !self
-                        .runtimes
-                        .get(&user)
-                        .is_some_and(|runtime| Arc::ptr_eq(&runtime.identity, &identity))
-                    {
-                        continue;
-                    }
-                    if let Ok(message) = result {
-                        self.handle_runtime(&user, message)?;
-                    } else {
-                        if let Some(runtime) = self.runtimes.remove(&user) {
-                            runtime.close()?;
-                        }
-                        self.write(&ServerMsg::Terminals {
-                            user,
-                            terminals: Vec::new(),
-                        })?;
+            if self.handle_event(event)? {
+                return Ok(());
+            }
+        }
+    }
+
+    fn handle_event(&mut self, event: Event) -> io::Result<bool> {
+        match event {
+            Event::Client(Ok(ClientMsg::Detach)) | Event::Client(Err(_)) => return Ok(true),
+            Event::Client(Ok(message)) => match self.client_event(message) {
+                Ok(ended) => return Ok(ended),
+                Err(error) => self.write(&ServerMsg::Refused {
+                    reason: error.to_string(),
+                })?,
+            },
+            Event::Runtime {
+                user,
+                identity,
+                result,
+            } => {
+                if self
+                    .runtimes
+                    .get(&user)
+                    .is_some_and(|runtime| Arc::ptr_eq(&runtime.identity, &identity))
+                {
+                    match result {
+                        Ok(message) => self.handle_runtime(&user, message)?,
+                        Err(_) => self.close_runtime(&user)?,
                     }
                 }
             }
         }
+        Ok(false)
+    }
+
+    fn client_event(&mut self, message: ClientMsg) -> io::Result<bool> {
+        match message {
+            ClientMsg::Stop => {
+                self.broker.require_host(&self.owner.user_id)?;
+                self.write(&ServerMsg::Bye {
+                    reason: "server stopped".into(),
+                })?;
+                self.broker.stop();
+                Ok(true)
+            }
+            ClientMsg::Leave => {
+                self.broker.leave(&self.owner.user_id, &self.client_id)?;
+                self.write(&ServerMsg::Bye {
+                    reason: "left room".into(),
+                })?;
+                Ok(true)
+            }
+            message => self.handle_client(message).map(|()| false),
+        }
+    }
+
+    fn close_runtime(&mut self, user: &str) -> io::Result<()> {
+        if let Some(runtime) = self.runtimes.remove(user) {
+            runtime.close()?;
+        }
+        self.write(&ServerMsg::Terminals {
+            user: user.into(),
+            terminals: Vec::new(),
+        })
     }
 
     fn remove_departed_runtimes(&mut self) -> io::Result<()> {
@@ -161,15 +183,9 @@ impl<'a> Coordinator<'a> {
             if self.broker.registry().person(&user)?.is_some() {
                 continue;
             }
-            if let Some(runtime) = self.runtimes.remove(&user) {
-                runtime.close()?;
-            }
+            self.close_runtime(&user)?;
             self.lists.remove(&user);
             self.watches.retain(|(owner, _), _| owner != &user);
-            self.write(&ServerMsg::Terminals {
-                user,
-                terminals: Vec::new(),
-            })?;
         }
         Ok(())
     }

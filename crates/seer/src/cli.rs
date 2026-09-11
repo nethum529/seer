@@ -58,7 +58,7 @@ fn execute(command: Command) -> ExitCode {
             Ok(())
         }
         Command::Start(restore) => return crate::start::run(restore),
-        Command::Stop => return crate::start::stop(),
+        Command::Stop => commands::stop(),
         Command::Invite(hours) => commands::invite(hours.as_deref()),
         Command::Join => commands::join(None),
         Command::JoinWithInvitation(invitation) => commands::join(Some(&invitation)),
