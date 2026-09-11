@@ -1,4 +1,3 @@
-use seer_core::TerminalCapabilities;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -9,7 +8,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::UserSession;
-use crate::user_session::validate_capabilities;
 
 mod connection;
 mod room_link;
@@ -75,6 +73,10 @@ fn handle_message(
     connection_id: u64,
     message: ClientMsg,
 ) -> io::Result<bool> {
+    seer_core::debug_log!(
+        "recv conn={connection_id} {}",
+        seer_core::debug_log::client_summary(&message)
+    );
     match message {
         ClientMsg::Detach => Ok(true),
         ClientMsg::Watch {
@@ -174,6 +176,11 @@ impl SharedSession {
         } else {
             connection.size_owner = !connections.iter().any(|c| c.size_owner);
         }
+        seer_core::debug_log!(
+            "attach conn={id} size_owner={} connections={}",
+            connection.size_owner,
+            connections.len() + 1
+        );
         connections.push(connection);
         self.poll_wake.notify_one();
         Ok(())
@@ -185,6 +192,10 @@ impl SharedSession {
             let mut connections = lock(&self.connections)?;
             let removed_owner = connections.iter().any(|c| c.id == id && c.size_owner);
             connections.retain(|connection| connection.id != id);
+            seer_core::debug_log!(
+                "detach conn={id} was_size_owner={removed_owner} connections={}",
+                connections.len()
+            );
             removed_owner
         };
         if owner_removed {
@@ -234,7 +245,7 @@ impl SharedSession {
         cols: u16,
         rows: u16,
     ) -> io::Result<Vec<ServerMsg>> {
-        let sizes = Self::visible_sizes(&lock(&self.connections)?);
+        let sizes = size_lease::own_sizes(&lock(&self.connections)?);
         let mut session = lock(&self.session)?;
         match session.record_viewport(workspace, tab, cols, rows, &sizes) {
             Ok(messages) => Ok(messages),
@@ -265,6 +276,7 @@ impl SharedSession {
                 ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
             )
         {
+            seer_core::debug_log!("input dropped conn={connection_id} reason=read-only");
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);
         }
@@ -277,34 +289,18 @@ impl SharedSession {
         let applied = self.apply(message);
         match applied {
             Ok(messages) => {
+                seer_core::debug_log!("input forwarded conn={connection_id}");
                 self.flush_messages(&messages)?;
                 Ok(false)
             }
             Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                seer_core::debug_log!("input refused conn={connection_id} reason={error}");
                 drop(_lease);
                 self.send_refused(connection_id, error.to_string())?;
                 Ok(false)
             }
             Err(error) => Err(error),
         }
-    }
-
-    fn record_capabilities(
-        &self,
-        connection_id: u64,
-        capabilities: TerminalCapabilities,
-    ) -> io::Result<bool> {
-        if let Err(error) = validate_capabilities(capabilities) {
-            self.send_refused(connection_id, error.to_string())?;
-            return Ok(false);
-        }
-        let mut connections = lock(&self.connections)?;
-        let Some(connection) = connections.iter_mut().find(|c| c.id == connection_id) else {
-            return Ok(true);
-        };
-        connection.capabilities = Some(capabilities);
-        connection.last_active = Instant::now();
-        Ok(false)
     }
 
     fn client_resize(
@@ -338,6 +334,7 @@ impl SharedSession {
                 .iter()
                 .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
             if !connections[position].size_owner && !lease_vacant && !owner_stale {
+                seer_core::debug_log!("resize conn={id} size={cols}x{rows} deferred=not-owner");
                 connections[position].viewport =
                     Some(reported_viewport(workspace, tab, cols, rows));
                 drop(connections);
@@ -345,6 +342,7 @@ impl SharedSession {
                 return Ok(false);
             }
         }
+        seer_core::debug_log!("resize conn={id} size={cols}x{rows} applied=owner");
         let applied = self.record_viewport(workspace, tab, cols, rows);
         match applied {
             Ok(messages) => {
@@ -445,9 +443,9 @@ impl SharedSession {
             let mut session = lock(&self.session)?;
             let mut connections = lock(&self.connections)?;
             let owner_present = connections.iter().any(|connection| connection.size_owner);
-            let sizes = Self::visible_sizes(&connections);
+            let sizes = size_lease::own_sizes(&connections);
             let mut all_messages = messages.to_vec();
-            all_messages.extend(session.apply_visible_sizes(&sizes)?);
+            all_messages.extend(session.apply_claimed_sizes(&sizes)?);
             let encoded = all_messages
                 .iter()
                 .map(writer::encode)

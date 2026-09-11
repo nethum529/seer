@@ -1,7 +1,7 @@
 use crate::{
     input::key_to_input,
     state::ClientState,
-    terminal_cells::PaneCells,
+    terminal_cells::{PaneCells, start_row},
     tui::{send, send_viewer_input},
 };
 use crossterm::event::KeyEvent;
@@ -37,10 +37,22 @@ impl Viewer {
     }
     pub(crate) fn scroll(&mut self, up: bool) {
         self.offset = if up {
-            (self.offset + 3).min(self.history.len())
+            (self.offset + 3).min(self.max_offset())
         } else {
             self.offset.saturating_sub(3)
         };
+    }
+
+    // A frame taller than this window shows its bottom rows. The rows above
+    // stay hidden until the person scrolls up, like older history.
+    pub(crate) fn hidden_rows(&self) -> usize {
+        self.previous
+            .len()
+            .saturating_sub(usize::from(self.area.height))
+    }
+
+    fn max_offset(&self) -> usize {
+        self.history.len() + self.hidden_rows()
     }
 
     fn note_rows(&mut self, rows: &[Vec<seer_core::Cell>]) {
@@ -58,16 +70,16 @@ impl Viewer {
             }
             let excess = self.history.len().saturating_sub(2000);
             self.history.drain(..excess);
-            self.offset = self.offset.min(self.history.len());
         }
         self.previous = rows.to_vec();
+        self.offset = self.offset.min(self.max_offset());
     }
 
     pub(crate) fn visible_rows(&self, height: u16) -> Vec<Vec<seer_core::Cell>> {
         self.history
             .iter()
             .chain(&self.previous)
-            .skip(self.history.len().saturating_sub(self.offset))
+            .skip(self.max_offset().saturating_sub(self.offset))
             .take(usize::from(height))
             .cloned()
             .collect()
@@ -95,6 +107,7 @@ pub(crate) fn input_message(
     input: TerminalInput,
 ) -> io::Result<()> {
     if state.chrome_owns_input() {
+        seer_core::debug_log!("input dropped reason=chrome-open");
         return Ok(());
     }
     if state.viewer.is_none()
@@ -108,12 +121,14 @@ pub(crate) fn input_message(
         state.open_focused();
     }
     let Some(viewer) = &state.viewer else {
+        seer_core::debug_log!("input dropped reason=no-viewer");
         return Ok(());
     };
     if viewer.user == state.own_user {
         return send_viewer_input(stream, state, input);
     }
     if !state.you_may_type_into.contains(&viewer.user) {
+        seer_core::debug_log!("input dropped reason=no-grant user={}", viewer.user);
         return Ok(());
     }
     let message = match input.event {
@@ -154,16 +169,18 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     }
     if let Some(content) = state.frames.get(&viewer.target()) {
         let rows = viewer.visible_rows(area.height);
+        let start = start_row(&rows, area.height);
         frame.render_widget(PaneCells::new(&rows), area);
         if allowed
             && !state.chrome_owns_input()
             && viewer.offset == 0
             && content.cursor.visible
-            && content.cursor.row < area.height
+            && let Some(row) =
+                usize::from(content.cursor.row).checked_sub(viewer.hidden_rows() + start)
+            && row < usize::from(area.height)
             && content.cursor.column < area.width
         {
-            frame
-                .set_cursor_position((area.x + content.cursor.column, area.y + content.cursor.row));
+            frame.set_cursor_position((area.x + content.cursor.column, area.y + row as u16));
         }
     }
 }

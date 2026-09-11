@@ -99,7 +99,7 @@ pub(crate) fn raw_bytes(input: &TerminalInput) -> std::io::Result<Option<Vec<u8>
     seer_runtime::PaneGrid::new(1, 1).handle_input(input)
 }
 
-use crate::state::ClientState;
+use crate::{state::ClientState, terminal_cells::start_row};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use std::io;
@@ -222,7 +222,14 @@ fn program_cell(
     if frame.modes.mouse_tracking == MouseTracking::None {
         return None;
     }
-    Some((open, position.x - area.x, position.y - area.y))
+    let start = match &state.viewer {
+        Some(viewer) => {
+            viewer.hidden_rows() + start_row(&viewer.visible_rows(area.height), area.height)
+        }
+        None => start_row(&frame.rows, area.height),
+    };
+    let row = u16::try_from(usize::from(position.y - area.y) + start).ok()?;
+    Some((open, position.x - area.x, row))
 }
 
 fn program_target(

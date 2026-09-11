@@ -38,6 +38,8 @@ pub fn run() -> io::Result<()> {
         }
     };
     let config = Config::load(config_path)?;
+    #[cfg(debug_assertions)]
+    seer_core::debug_log::open(&config.state_dir, "broker", &config.owner_name);
     if remint {
         let (registry, _) = registry::Registry::open(&config.state_dir, &config.owner_name)?;
         let (user_id, credential) = registry.remint_owner()?;

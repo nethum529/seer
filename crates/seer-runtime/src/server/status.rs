@@ -2,9 +2,12 @@ use std::io;
 use std::os::unix::net::UnixStream;
 use std::time::Instant;
 
+use seer_core::TerminalCapabilities;
+
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
 use super::{SharedSession, lock};
+use crate::user_session::validate_capabilities;
 
 pub(super) fn handle_status_query(
     stream: &mut UnixStream,
@@ -15,6 +18,24 @@ pub(super) fn handle_status_query(
 }
 
 impl SharedSession {
+    pub(super) fn record_capabilities(
+        &self,
+        connection_id: u64,
+        capabilities: TerminalCapabilities,
+    ) -> io::Result<bool> {
+        if let Err(error) = validate_capabilities(capabilities) {
+            self.send_refused(connection_id, error.to_string())?;
+            return Ok(false);
+        }
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections.iter_mut().find(|c| c.id == connection_id) else {
+            return Ok(true);
+        };
+        connection.capabilities = Some(capabilities);
+        connection.last_active = Instant::now();
+        Ok(false)
+    }
+
     pub(super) fn record_input(&self, message: &ClientMsg) {
         if matches!(
             message,

@@ -3,6 +3,8 @@ use std::process::ExitCode;
 mod capsule;
 mod cli;
 mod commands;
+#[cfg(debug_assertions)]
+mod debug;
 mod input;
 mod local;
 mod panels;

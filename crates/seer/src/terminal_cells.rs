@@ -19,7 +19,14 @@ impl<'a> PaneCells<'a> {
 impl Widget for PaneCells<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
         buffer.set_style(area, Style::default().fg(Color::Reset).bg(Color::Reset));
-        for (row_index, row) in self.rows.iter().take(area.height as usize).enumerate() {
+        let start = start_row(self.rows, area.height);
+        for (row_index, row) in self
+            .rows
+            .iter()
+            .skip(start)
+            .take(area.height as usize)
+            .enumerate()
+        {
             let y = area.y.saturating_add(row_index as u16);
             for (column_index, cell) in row.iter().take(area.width as usize).enumerate() {
                 let x = area.x.saturating_add(column_index as u16);
@@ -29,6 +36,20 @@ impl Widget for PaneCells<'_> {
             }
         }
     }
+}
+
+pub(crate) fn start_row(rows: &[Vec<Cell>], height: u16) -> usize {
+    content_rows(rows).saturating_sub(usize::from(height))
+}
+
+fn content_rows(rows: &[Vec<Cell>]) -> usize {
+    rows.iter()
+        .rposition(|row| row.iter().any(is_visible))
+        .map_or(0, |index| index + 1)
+}
+
+fn is_visible(cell: &Cell) -> bool {
+    cell.character != ' ' || cell.bg != seer_core::Color::Default || cell.inverse
 }
 
 fn cell_style(cell: &Cell) -> Style {

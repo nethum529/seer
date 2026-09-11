@@ -28,6 +28,10 @@ impl Attachments {
             return Err(io::Error::other("per-user attachment limit reached"));
         }
         let client_id = random_hex::<16>()?;
+        seer_core::debug_log!(
+            "session join user={user_id} client={client_id} clients={}",
+            clients.len() + 1
+        );
         clients.insert(
             client_id.clone(),
             Attachment {
@@ -171,6 +175,11 @@ impl AttachmentGuard<'_> {
 
 impl Drop for AttachmentGuard<'_> {
     fn drop(&mut self) {
+        seer_core::debug_log!(
+            "session leave user={} client={}",
+            self.user_id,
+            self.client_id
+        );
         self.attachments.remove(&self.user_id, &self.client_id);
     }
 }

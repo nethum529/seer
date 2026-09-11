@@ -1,4 +1,4 @@
-use crate::{state::ClientState, theme::Palette};
+use crate::{state::ClientState, terminal_cells::start_row, theme::Palette};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
@@ -120,7 +120,13 @@ fn begin(state: &ClientState, position: Position) -> Option<Selection> {
             .frames
             .get(&(state.user().into(), terminal.pane.clone()))?
             .rows;
-        (area, rows.clone())
+        (
+            area,
+            rows.iter()
+                .skip(start_row(rows, area.height))
+                .cloned()
+                .collect(),
+        )
     };
     if area.is_empty() || !area.contains(position) {
         return None;

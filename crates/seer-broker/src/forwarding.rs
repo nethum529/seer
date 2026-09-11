@@ -11,6 +11,7 @@ use crate::attachments::{AttachmentGuard, ClientWriter, lock_writer};
 use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 
+mod input;
 mod transport;
 use transport::{Event, ReaderTask, RuntimeConnection, spawn_client_reader};
 
@@ -120,12 +121,27 @@ impl<'a> Coordinator<'a> {
     fn handle_event(&mut self, event: Event) -> io::Result<bool> {
         match event {
             Event::Client(Ok(ClientMsg::Detach)) | Event::Client(Err(_)) => return Ok(true),
-            Event::Client(Ok(message)) => match self.client_event(message) {
-                Ok(ended) => return Ok(ended),
-                Err(error) => self.write(&ServerMsg::Refused {
-                    reason: error.to_string(),
-                })?,
-            },
+            Event::Client(Ok(message)) => {
+                seer_core::debug_log!(
+                    "recv user={} client={} {}",
+                    self.owner.user_id,
+                    self.client_id,
+                    seer_core::debug_log::client_summary(&message)
+                );
+                match self.client_event(message) {
+                    Ok(ended) => return Ok(ended),
+                    Err(error) => {
+                        seer_core::debug_log!(
+                            "refused user={} client={} reason={error}",
+                            self.owner.user_id,
+                            self.client_id
+                        );
+                        self.write(&ServerMsg::Refused {
+                            reason: error.to_string(),
+                        })?;
+                    }
+                }
+            }
             Event::Runtime {
                 user,
                 identity,
@@ -138,7 +154,13 @@ impl<'a> Coordinator<'a> {
                 {
                     match result {
                         Ok(message) => self.handle_runtime(&user, message)?,
-                        Err(_) => self.close_runtime(&user)?,
+                        Err(error) => {
+                            seer_core::debug_log!(
+                                "runtime lost user={user} client={} error={error:?}",
+                                self.client_id
+                            );
+                            self.close_runtime(&user)?;
+                        }
                     }
                 }
             }
@@ -296,74 +318,6 @@ impl<'a> Coordinator<'a> {
         })
     }
 
-    fn set_all_grants(&self, can_type: bool) -> io::Result<()> {
-        let users = if can_type {
-            self.broker
-                .registry()
-                .people()?
-                .into_iter()
-                .map(|person| person.user_id)
-                .filter(|user| user != &self.owner.user_id)
-                .collect()
-        } else {
-            BTreeSet::new()
-        };
-        self.broker.grants.set_all(&self.owner.user_id, users)?;
-        self.broker.publish_grants()?;
-        self.write(&ServerMsg::GrantsUpdated)
-    }
-
-    fn set_grant(&self, user: &str, can_type: bool) -> io::Result<()> {
-        self.person(user)?;
-        self.broker
-            .grants
-            .set(&self.owner.user_id, user, can_type)?;
-        self.broker.publish_grants()
-    }
-
-    fn mouse_into(
-        &mut self,
-        user: &str,
-        pane: &str,
-        mouse: seer_core::MouseInput,
-    ) -> io::Result<()> {
-        self.require_grant(user)?;
-        let (workspace, tab) = self.runtime(user)?.location(pane)?;
-        let sender = self.owner.name.clone();
-        self.runtime(user)?.send(&ClientMsg::GrantedMouse {
-            workspace,
-            tab,
-            pane: pane.into(),
-            mouse,
-            sender,
-        })
-    }
-
-    fn require_grant(&self, user: &str) -> io::Result<()> {
-        let person = self.person(user)?;
-        if self.broker.grants.permits(user, &self.owner.user_id)? {
-            Ok(())
-        } else {
-            Err(io::Error::other(format!(
-                "{} has not let you type",
-                person.name
-            )))
-        }
-    }
-
-    fn type_into(&mut self, user: &str, pane: &str, bytes: Vec<u8>) -> io::Result<()> {
-        self.require_grant(user)?;
-        let (workspace, tab) = self.runtime(user)?.location(pane)?;
-        let sender = self.owner.name.clone();
-        self.runtime(user)?.send(&ClientMsg::GrantedInput {
-            workspace,
-            tab,
-            pane: pane.into(),
-            bytes,
-            sender,
-        })
-    }
-
     fn detach_client(&self, client_id: &str) -> io::Result<()> {
         if !client_id.is_empty() && !self.broker.detach_client(&self.owner.user_id, client_id)? {
             return Err(io::Error::other("client does not belong to this person"));
@@ -427,6 +381,15 @@ impl<'a> Coordinator<'a> {
                     })
                     .collect();
                 runtime.terminals.clone_from(&terminals);
+                seer_core::debug_log!(
+                    "client={} listed={} {}",
+                    self.client_id,
+                    self.lists.contains(user),
+                    seer_core::debug_log::server_summary(&ServerMsg::Terminals {
+                        user: user.into(),
+                        terminals: terminals.clone(),
+                    })
+                );
                 if self.lists.contains(user) {
                     self.write(&ServerMsg::Terminals {
                         user: user.into(),

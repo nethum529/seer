@@ -55,7 +55,10 @@ fn publish_loop(config: &RoomConfig, user_id: &str, generation: &str, serve: &im
     loop {
         match publish_once(config, user_id, generation, serve) {
             Ok(()) => backoff = FIRST_BACKOFF,
-            Err(error) => eprintln!("runtime room connection ended: {error}"),
+            Err(error) => {
+                seer_core::debug_log!("room connection ended error={error}");
+                eprintln!("runtime room connection ended: {error}");
+            }
         }
         thread::sleep(backoff);
         backoff = (backoff * 2).min(MAX_BACKOFF);
