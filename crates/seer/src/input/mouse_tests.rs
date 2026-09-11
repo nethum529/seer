@@ -368,3 +368,49 @@ fn the_first_click_after_attach_reaches_a_program_that_asked_for_the_mouse() {
         other => panic!("expected terminal input, got {other:?}"),
     }
 }
+
+#[test]
+fn remote_mouse_events_reach_only_a_granted_terminal() {
+    let (mut state, pane) = one_terminal_state();
+    let mut wires = wires("alice");
+    let mut remote = state.frames[&("alice".into(), pane.clone())].clone();
+    remote.modes.mouse_tracking = MouseTracking::AnyMotion;
+    state.frames.insert(("bob".into(), pane.clone()), remote);
+    state.viewer = Some(crate::viewer::Viewer::new("bob".into(), pane.clone()));
+    state.you_may_type_into.insert("bob".into());
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+    draw(&mut terminal, &mut state);
+    for kind in [
+        MouseEventKind::Down(MouseButton::Left),
+        MouseEventKind::Drag(MouseButton::Left),
+        MouseEventKind::Up(MouseButton::Left),
+        MouseEventKind::ScrollDown,
+        MouseEventKind::Moved,
+    ] {
+        let event = MouseEvent {
+            kind,
+            column: 5,
+            row: 2,
+            modifiers: KeyModifiers::CONTROL,
+        };
+        mouse(event, &mut wires.routes, &mut state).expect("mouse must work");
+        assert!(
+            matches!(codec::decode::<_, ClientMsg>(&mut wires.room).expect("remote mouse"),
+            ClientMsg::MouseInto { user, pane: target, mouse } if user == "bob" && target == pane
+                && mouse.column == 5 && mouse.row == 2 && mouse.modifiers.control)
+        );
+    }
+    state.you_may_type_into.clear();
+    mouse(
+        MouseEvent {
+            kind: MouseEventKind::Down(MouseButton::Left),
+            column: 5,
+            row: 2,
+            modifiers: KeyModifiers::NONE,
+        },
+        &mut wires.routes,
+        &mut state,
+    )
+    .expect("revoked click");
+    assert!(wires.quiet(), "a revoked mouse grant must send nothing");
+}

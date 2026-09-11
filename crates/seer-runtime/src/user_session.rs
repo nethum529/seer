@@ -62,6 +62,13 @@ impl UserSession {
             ClientMsg::TerminalCapabilities { capabilities } => {
                 validate_capabilities(capabilities).map(|()| Vec::new())
             }
+            ClientMsg::GrantedMouse {
+                workspace,
+                tab,
+                pane,
+                mouse,
+                sender,
+            } => self.granted_mouse(&workspace, &tab, &pane, mouse, sender),
             ClientMsg::GrantedInput {
                 workspace,
                 tab,
@@ -98,6 +105,7 @@ impl UserSession {
             | ClientMsg::Terminals { .. }
             | ClientMsg::SetAllGrants { .. }
             | ClientMsg::SetGrant { .. }
+            | ClientMsg::MouseInto { .. }
             | ClientMsg::TypeInto { .. }
             | ClientMsg::Stop
             | ClientMsg::Leave

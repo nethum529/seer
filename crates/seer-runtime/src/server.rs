@@ -94,7 +94,13 @@ fn handle_message(
         ClientMsg::TerminalCapabilities { capabilities } => {
             shared.record_capabilities(connection_id, capabilities)
         }
-        message if message.is_mutating() || matches!(message, ClientMsg::GrantedInput { .. }) => {
+        message
+            if message.is_mutating()
+                || matches!(
+                    message,
+                    ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
+                ) =>
+        {
             shared.record_input(&message);
             shared.dispatch_input(connection_id, message)
         }
@@ -253,7 +259,12 @@ impl SharedSession {
         let Some(read_only) = self.refresh_read_only(connection_id)? else {
             return Ok(true);
         };
-        if read_only && !matches!(message, ClientMsg::GrantedInput { .. }) {
+        if read_only
+            && !matches!(
+                message,
+                ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
+            )
+        {
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);
         }

@@ -48,6 +48,21 @@ impl PaneHost {
         Ok(())
     }
 
+    pub(crate) fn write_granted_mouse(
+        &mut self,
+        mouse: seer_core::MouseInput,
+        sender: String,
+    ) -> io::Result<()> {
+        if self.grid.modes().mouse_tracking == seer_core::MouseTracking::None {
+            return Ok(());
+        }
+        let input = TerminalInput::new(seer_core::InputEvent::Mouse(mouse));
+        if let Some(bytes) = self.grid.handle_input(&input)? {
+            self.write_granted(&bytes, sender)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn last_typist(&self) -> Option<String> {
         self.last_typist
             .as_ref()

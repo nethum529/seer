@@ -60,6 +60,13 @@ pub enum ClientMsg {
         cols: u16,
         rows: u16,
     },
+    GrantedMouse {
+        workspace: String,
+        tab: String,
+        pane: String,
+        mouse: crate::MouseInput,
+        sender: String,
+    },
     GrantedInput {
         workspace: String,
         tab: String,
@@ -95,6 +102,11 @@ pub enum ClientMsg {
     },
     Terminals {
         user: String,
+    },
+    MouseInto {
+        user: String,
+        pane: String,
+        mouse: crate::MouseInput,
     },
     TypeInto {
         user: String,

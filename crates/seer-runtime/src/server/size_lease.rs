@@ -116,7 +116,9 @@ pub(super) fn claimed_pane(message: &ClientMsg) -> Option<&str> {
         ClientMsg::TerminalInput { pane, input, .. } => {
             claims_size(&input.event).then_some(pane.as_str())
         }
-        ClientMsg::GrantedInput { pane, .. } | ClientMsg::FocusPane { pane, .. } => Some(pane),
+        ClientMsg::GrantedInput { pane, .. }
+        | ClientMsg::GrantedMouse { pane, .. }
+        | ClientMsg::FocusPane { pane, .. } => Some(pane),
         _ => None,
     }
 }

@@ -206,6 +206,7 @@ impl<'a> Coordinator<'a> {
                 Ok(())
             }
             ClientMsg::Terminals { user } => self.list(&user),
+            ClientMsg::MouseInto { user, pane, mouse } => self.mouse_into(&user, &pane, mouse),
             ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
             ClientMsg::SetAllGrants { can_type } => self.set_all_grants(can_type),
             ClientMsg::SetGrant { user, can_type } => self.set_grant(&user, can_type),
@@ -319,14 +320,38 @@ impl<'a> Coordinator<'a> {
         self.broker.publish_grants()
     }
 
-    fn type_into(&mut self, user: &str, pane: &str, bytes: Vec<u8>) -> io::Result<()> {
+    fn mouse_into(
+        &mut self,
+        user: &str,
+        pane: &str,
+        mouse: seer_core::MouseInput,
+    ) -> io::Result<()> {
+        self.require_grant(user)?;
+        let (workspace, tab) = self.runtime(user)?.location(pane)?;
+        let sender = self.owner.name.clone();
+        self.runtime(user)?.send(&ClientMsg::GrantedMouse {
+            workspace,
+            tab,
+            pane: pane.into(),
+            mouse,
+            sender,
+        })
+    }
+
+    fn require_grant(&self, user: &str) -> io::Result<()> {
         let person = self.person(user)?;
-        if !self.broker.grants.permits(user, &self.owner.user_id)? {
-            return Err(io::Error::other(format!(
+        if self.broker.grants.permits(user, &self.owner.user_id)? {
+            Ok(())
+        } else {
+            Err(io::Error::other(format!(
                 "{} has not let you type",
                 person.name
-            )));
+            )))
         }
+    }
+
+    fn type_into(&mut self, user: &str, pane: &str, bytes: Vec<u8>) -> io::Result<()> {
+        self.require_grant(user)?;
         let (workspace, tab) = self.runtime(user)?.location(pane)?;
         let sender = self.owner.name.clone();
         self.runtime(user)?.send(&ClientMsg::GrantedInput {

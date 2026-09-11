@@ -113,18 +113,27 @@ pub(crate) fn input_message(
     if viewer.user == state.own_user {
         return send_viewer_input(stream, state, input);
     }
-    if state.you_may_type_into.contains(&viewer.user)
-        && let Some(bytes) = crate::input::raw_bytes(&input)?
-    {
-        send(
-            stream,
-            &ClientMsg::TypeInto {
+    if !state.you_may_type_into.contains(&viewer.user) {
+        return Ok(());
+    }
+    let message = match input.event {
+        seer_core::InputEvent::Mouse(mouse) => ClientMsg::MouseInto {
+            user: viewer.user.clone(),
+            pane: viewer.pane.clone(),
+            mouse,
+        },
+        _ => {
+            let Some(bytes) = crate::input::raw_bytes(&input)? else {
+                return Ok(());
+            };
+            ClientMsg::TypeInto {
                 user: viewer.user.clone(),
                 pane: viewer.pane.clone(),
                 bytes,
-            },
-        )?;
-    }
+            }
+        }
+    };
+    send(stream, &message)?;
     Ok(())
 }
 

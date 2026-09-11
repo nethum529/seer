@@ -137,7 +137,7 @@ impl PaneGrid {
         }
     }
 
-    fn modes(&self) -> TerminalModes {
+    pub(crate) fn modes(&self) -> TerminalModes {
         let mode = self.terminal.mode();
         TerminalModes {
             mouse_tracking: mouse_tracking(*mode),
