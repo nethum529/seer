@@ -1,4 +1,3 @@
-use seer_core::TerminalCapabilities;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::io;
 use std::os::unix::net::{UnixListener, UnixStream};
@@ -9,7 +8,6 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use crate::UserSession;
-use crate::user_session::validate_capabilities;
 
 mod connection;
 mod room_link;
@@ -98,7 +96,13 @@ fn handle_message(
         ClientMsg::TerminalCapabilities { capabilities } => {
             shared.record_capabilities(connection_id, capabilities)
         }
-        message if message.is_mutating() || matches!(message, ClientMsg::GrantedInput { .. }) => {
+        message
+            if message.is_mutating()
+                || matches!(
+                    message,
+                    ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
+                ) =>
+        {
             shared.record_input(&message);
             shared.dispatch_input(connection_id, message)
         }
@@ -266,7 +270,12 @@ impl SharedSession {
         let Some(read_only) = self.refresh_read_only(connection_id)? else {
             return Ok(true);
         };
-        if read_only && !matches!(message, ClientMsg::GrantedInput { .. }) {
+        if read_only
+            && !matches!(
+                message,
+                ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
+            )
+        {
             seer_core::debug_log!("input dropped conn={connection_id} reason=read-only");
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);
@@ -292,24 +301,6 @@ impl SharedSession {
             }
             Err(error) => Err(error),
         }
-    }
-
-    fn record_capabilities(
-        &self,
-        connection_id: u64,
-        capabilities: TerminalCapabilities,
-    ) -> io::Result<bool> {
-        if let Err(error) = validate_capabilities(capabilities) {
-            self.send_refused(connection_id, error.to_string())?;
-            return Ok(false);
-        }
-        let mut connections = lock(&self.connections)?;
-        let Some(connection) = connections.iter_mut().find(|c| c.id == connection_id) else {
-            return Ok(true);
-        };
-        connection.capabilities = Some(capabilities);
-        connection.last_active = Instant::now();
-        Ok(false)
     }
 
     fn client_resize(

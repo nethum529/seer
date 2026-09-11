@@ -11,6 +11,7 @@ use crate::attachments::{AttachmentGuard, ClientWriter, lock_writer};
 use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 
+mod input;
 mod transport;
 use transport::{Event, ReaderTask, RuntimeConnection, spawn_client_reader};
 
@@ -83,6 +84,15 @@ impl<'a> Coordinator<'a> {
     fn run(&mut self) -> io::Result<()> {
         let mut refreshed = std::time::Instant::now();
         loop {
+            if self
+                .broker
+                .registry()
+                .person(&self.owner.user_id)?
+                .is_none()
+            {
+                return Ok(());
+            }
+            self.remove_departed_runtimes()?;
             if refreshed.elapsed() >= std::time::Duration::from_secs(1) {
                 let users: Vec<_> = self
                     .lists
@@ -91,7 +101,7 @@ impl<'a> Coordinator<'a> {
                     .cloned()
                     .collect();
                 for user in users {
-                    let _ = self.runtime(&user);
+                    let _ = self.list(&user);
                 }
                 refreshed = std::time::Instant::now();
             }
@@ -102,16 +112,25 @@ impl<'a> Coordinator<'a> {
                     return Err(io::Error::other("forward event channel closed"));
                 }
             };
-            match event {
-                Event::Client(Ok(ClientMsg::Detach)) | Event::Client(Err(_)) => return Ok(()),
-                Event::Client(Ok(message)) => {
-                    seer_core::debug_log!(
-                        "recv user={} client={} {}",
-                        self.owner.user_id,
-                        self.client_id,
-                        seer_core::debug_log::client_summary(&message)
-                    );
-                    if let Err(error) = self.handle_client(message) {
+            if self.handle_event(event)? {
+                return Ok(());
+            }
+        }
+    }
+
+    fn handle_event(&mut self, event: Event) -> io::Result<bool> {
+        match event {
+            Event::Client(Ok(ClientMsg::Detach)) | Event::Client(Err(_)) => return Ok(true),
+            Event::Client(Ok(message)) => {
+                seer_core::debug_log!(
+                    "recv user={} client={} {}",
+                    self.owner.user_id,
+                    self.client_id,
+                    seer_core::debug_log::client_summary(&message)
+                );
+                match self.client_event(message) {
+                    Ok(ended) => return Ok(ended),
+                    Err(error) => {
                         seer_core::debug_log!(
                             "refused user={} client={} reason={error}",
                             self.owner.user_id,
@@ -122,37 +141,77 @@ impl<'a> Coordinator<'a> {
                         })?;
                     }
                 }
-                Event::Runtime {
-                    user,
-                    identity,
-                    result,
-                } => {
-                    if !self
-                        .runtimes
-                        .get(&user)
-                        .is_some_and(|runtime| Arc::ptr_eq(&runtime.identity, &identity))
-                    {
-                        continue;
-                    }
-                    if let Ok(message) = result {
-                        self.handle_runtime(&user, message)?;
-                    } else {
-                        seer_core::debug_log!(
-                            "runtime lost user={user} client={} error={:?}",
-                            self.client_id,
-                            result.err()
-                        );
-                        if let Some(runtime) = self.runtimes.remove(&user) {
-                            runtime.close()?;
+            }
+            Event::Runtime {
+                user,
+                identity,
+                result,
+            } => {
+                if self
+                    .runtimes
+                    .get(&user)
+                    .is_some_and(|runtime| Arc::ptr_eq(&runtime.identity, &identity))
+                {
+                    match result {
+                        Ok(message) => self.handle_runtime(&user, message)?,
+                        Err(_) => {
+                            seer_core::debug_log!(
+                                "runtime lost user={user} client={} error={:?}",
+                                self.client_id,
+                                result.as_ref().err()
+                            );
+                            self.close_runtime(&user)?;
                         }
-                        self.write(&ServerMsg::Terminals {
-                            user,
-                            terminals: Vec::new(),
-                        })?;
                     }
                 }
             }
         }
+        Ok(false)
+    }
+
+    fn client_event(&mut self, message: ClientMsg) -> io::Result<bool> {
+        match message {
+            ClientMsg::Stop => {
+                self.broker.require_host(&self.owner.user_id)?;
+                self.write(&ServerMsg::Bye {
+                    reason: "server stopped".into(),
+                })?;
+                self.broker.stop();
+                Ok(true)
+            }
+            ClientMsg::Leave => {
+                self.broker.leave(&self.owner.user_id, &self.client_id)?;
+                self.write(&ServerMsg::Bye {
+                    reason: "left room".into(),
+                })?;
+                Ok(true)
+            }
+            message => self.handle_client(message).map(|()| false),
+        }
+    }
+
+    fn close_runtime(&mut self, user: &str) -> io::Result<()> {
+        if let Some(runtime) = self.runtimes.remove(user) {
+            runtime.close()?;
+        }
+        Ok(())
+    }
+
+    fn remove_departed_runtimes(&mut self) -> io::Result<()> {
+        let users: BTreeSet<_> = self.runtimes.keys().chain(&self.lists).cloned().collect();
+        for user in users {
+            if self.broker.registry().person(&user)?.is_some() {
+                continue;
+            }
+            self.close_runtime(&user)?;
+            self.lists.remove(&user);
+            self.watches.retain(|(owner, _), _| owner != &user);
+            self.write(&ServerMsg::Terminals {
+                user,
+                terminals: Vec::new(),
+            })?;
+        }
+        Ok(())
     }
 
     fn handle_client(&mut self, message: ClientMsg) -> io::Result<()> {
@@ -171,7 +230,9 @@ impl<'a> Coordinator<'a> {
                 Ok(())
             }
             ClientMsg::Terminals { user } => self.list(&user),
+            ClientMsg::MouseInto { user, pane, mouse } => self.mouse_into(&user, &pane, mouse),
             ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
+            ClientMsg::SetAllGrants { can_type } => self.set_all_grants(can_type),
             ClientMsg::SetGrant { user, can_type } => self.set_grant(&user, can_type),
             ClientMsg::ListPeople => self.write(&self.broker.people()?),
             ClientMsg::Invite { hours } if self.owner.is_owner => {
@@ -250,47 +311,11 @@ impl<'a> Coordinator<'a> {
         self.lists.insert(user.to_owned());
         let terminals = match self.runtime(user) {
             Ok(runtime) => runtime.terminals.clone(),
-            Err(_) => Vec::new(),
+            Err(_) => return Ok(()),
         };
         self.write(&ServerMsg::Terminals {
             user: user.into(),
             terminals,
-        })
-    }
-
-    fn set_grant(&self, user: &str, can_type: bool) -> io::Result<()> {
-        self.person(user)?;
-        seer_core::debug_log!(
-            "grant owner={} user={user} can_type={can_type}",
-            self.owner.user_id
-        );
-        self.broker
-            .grants
-            .set(&self.owner.user_id, user, can_type)?;
-        self.broker.publish_grants()
-    }
-
-    fn type_into(&mut self, user: &str, pane: &str, bytes: Vec<u8>) -> io::Result<()> {
-        let person = self.person(user)?;
-        if !self.broker.grants.permits(user, &self.owner.user_id)? {
-            return Err(io::Error::other(format!(
-                "{} has not let you type",
-                person.name
-            )));
-        }
-        let (workspace, tab) = self.runtime(user)?.location(pane)?;
-        seer_core::debug_log!(
-            "input forwarded from={} to={user} pane={pane} bytes={}",
-            self.owner.user_id,
-            bytes.len()
-        );
-        let sender = self.owner.name.clone();
-        self.runtime(user)?.send(&ClientMsg::GrantedInput {
-            workspace,
-            tab,
-            pane: pane.into(),
-            bytes,
-            sender,
         })
     }
 

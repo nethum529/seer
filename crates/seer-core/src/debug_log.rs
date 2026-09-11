@@ -126,6 +126,21 @@ pub fn client_summary(message: &ClientMsg) -> String {
         ClientMsg::TypeInto { user, pane, bytes } => {
             format!("TypeInto user={user} pane={pane} bytes={}", bytes.len())
         }
+        ClientMsg::Stop => "Stop".to_owned(),
+        ClientMsg::Leave => "Leave".to_owned(),
+        ClientMsg::SetAllGrants { can_type } => format!("SetAllGrants can_type={can_type}"),
+        ClientMsg::MouseInto { user, pane, mouse } => {
+            format!("MouseInto user={user} pane={pane} kind={:?}", mouse.kind)
+        }
+        ClientMsg::GrantedMouse {
+            pane,
+            sender,
+            mouse,
+            ..
+        } => format!(
+            "GrantedMouse pane={pane} sender={sender} kind={:?}",
+            mouse.kind
+        ),
         ClientMsg::SetGrant { user, can_type } => {
             format!("SetGrant user={user} can_type={can_type}")
         }
@@ -140,6 +155,7 @@ pub fn client_summary(message: &ClientMsg) -> String {
 #[must_use]
 pub fn server_summary(message: &ServerMsg) -> String {
     match message {
+        ServerMsg::GrantsUpdated => "GrantsUpdated".to_owned(),
         ServerMsg::Terminals { user, terminals } => {
             let mut summary = format!("Terminals user={user}");
             for terminal in terminals {

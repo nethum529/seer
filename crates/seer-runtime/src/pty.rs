@@ -54,6 +54,10 @@ impl PtySession {
             .map_err(to_io_error)
     }
 
+    pub fn has_exited(&mut self) -> io::Result<bool> {
+        self.child.try_wait().map(|status| status.is_some())
+    }
+
     pub fn kill(&mut self) -> io::Result<()> {
         self.child.kill()
     }

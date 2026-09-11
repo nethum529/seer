@@ -132,6 +132,25 @@ impl UserSession {
             .collect()
     }
 
+    pub(super) fn granted_mouse(
+        &mut self,
+        workspace: &str,
+        tab: &str,
+        pane: &str,
+        mouse: seer_core::MouseInput,
+        sender: String,
+    ) -> io::Result<Vec<ServerMsg>> {
+        self.validate_pane(workspace, tab, pane)?;
+        self.pane_hosts
+            .get_mut(pane)
+            .ok_or_else(|| pane_host_not_found(pane))?
+            .write_granted_mouse(mouse, sender)?;
+        Ok(vec![ServerMsg::Terminals {
+            user: self.user.clone(),
+            terminals: self.terminals(),
+        }])
+    }
+
     pub(super) fn granted_input(
         &mut self,
         workspace: &str,

@@ -87,7 +87,9 @@ pub(super) fn claimed_pane(message: &ClientMsg) -> Option<&str> {
         ClientMsg::TerminalInput { pane, input, .. } => {
             claims_size(&input.event).then_some(pane.as_str())
         }
-        ClientMsg::GrantedInput { pane, .. } | ClientMsg::FocusPane { pane, .. } => Some(pane),
+        ClientMsg::GrantedInput { pane, .. }
+        | ClientMsg::GrantedMouse { pane, .. }
+        | ClientMsg::FocusPane { pane, .. } => Some(pane),
         _ => None,
     }
 }
@@ -128,9 +130,8 @@ pub(super) fn own_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize
         .collect()
 }
 
-// seer exit names a terminal, not a client. The client that leaves is the
-// local one that last typed into or started watching that terminal. When no
-// client holds a claim, the only local client leaves.
+// Nested terminal servers may not inherit Seer markers. Without a pane,
+// only a single local client can be selected.
 pub(super) fn handle_exit_client(
     stream: &mut UnixStream,
     shared: &SharedSession,
@@ -142,7 +143,7 @@ pub(super) fn handle_exit_client(
     let reply = match shared.exit_target(pane)? {
         Some(id) if shared.send_to(id, &bye).is_ok() => bye,
         Some(_) => refused("the Seer client has already left"),
-        None => refused("no Seer client is on this terminal"),
+        None => refused("cannot select one Seer client; run seer exit in the outer Seer shell"),
     };
     codec::encode(stream, &reply)
 }
@@ -155,7 +156,7 @@ fn refused(reason: &str) -> ServerMsg {
 
 impl SharedSession {
     fn exit_target(&self, pane: &str) -> io::Result<Option<u64>> {
-        if !lock(&self.session)?.pane_hosts.contains_key(pane) {
+        if !pane.is_empty() && !lock(&self.session)?.pane_hosts.contains_key(pane) {
             return Ok(None);
         }
         let connections = lock(&self.connections)?;

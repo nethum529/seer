@@ -223,7 +223,9 @@ fn program_cell(
         return None;
     }
     let start = match &state.viewer {
-        Some(viewer) => start_row(&viewer.visible_rows(area.height), area.height),
+        Some(viewer) => {
+            viewer.hidden_rows() + start_row(&viewer.visible_rows(area.height), area.height)
+        }
         None => start_row(&frame.rows, area.height),
     };
     let row = u16::try_from(usize::from(position.y - area.y) + start).ok()?;
@@ -235,15 +237,13 @@ fn program_target(
     position: Position,
     state: &ClientState,
 ) -> Option<(Option<usize>, Rect, (String, String))> {
-    // A remote pane is driven by raw bytes, and this client does not know that
-    // pane's mouse mode, so it cannot encode a report for it.
     if let Some(viewer) = &state.viewer {
-        if viewer.user != state.own_user || viewer.offset != 0 || !viewer.area.contains(position) {
+        if !state.may_type(&viewer.user) || viewer.offset != 0 || !viewer.area.contains(position) {
             return None;
         }
         return Some((None, viewer.area, viewer.target()));
     }
-    if kind != MouseKind::Down || state.user() != state.own_user {
+    if kind != MouseKind::Down || !state.may_type(state.user()) {
         return None;
     }
     let tile = state
@@ -251,11 +251,7 @@ fn program_target(
         .iter()
         .find(|tile| tile.content.contains(position))?;
     let pane = state.selected_terminals().get(tile.index)?.pane.clone();
-    Some((
-        Some(tile.index),
-        tile.content,
-        (state.own_user.clone(), pane),
-    ))
+    Some((Some(tile.index), tile.content, (state.user().into(), pane)))
 }
 
 fn mouse_kind(kind: MouseEventKind) -> (MouseKind, Option<seer_core::MouseButton>) {

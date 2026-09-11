@@ -131,16 +131,24 @@ pub(crate) fn input_message(
         seer_core::debug_log!("input dropped reason=no-grant user={}", viewer.user);
         return Ok(());
     }
-    if let Some(bytes) = crate::input::raw_bytes(&input)? {
-        send(
-            stream,
-            &ClientMsg::TypeInto {
+    let message = match input.event {
+        seer_core::InputEvent::Mouse(mouse) => ClientMsg::MouseInto {
+            user: viewer.user.clone(),
+            pane: viewer.pane.clone(),
+            mouse,
+        },
+        _ => {
+            let Some(bytes) = crate::input::raw_bytes(&input)? else {
+                return Ok(());
+            };
+            ClientMsg::TypeInto {
                 user: viewer.user.clone(),
                 pane: viewer.pane.clone(),
                 bytes,
-            },
-        )?;
-    }
+            }
+        }
+    };
+    send(stream, &message)?;
     Ok(())
 }
 
