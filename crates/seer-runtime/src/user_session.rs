@@ -115,6 +115,7 @@ impl UserSession {
                 })
             })
             .collect();
+        messages.extend(self.reap_shells());
         let terminals = self.terminals();
         if terminals != self.published_terminals {
             self.published_terminals.clone_from(&terminals);
@@ -270,14 +271,7 @@ impl UserSession {
             self.pane_hosts.insert(pane.to_owned(), host);
             return Err(error);
         }
-        let closed_tab = self.tree.close_pane(pane).map_err(tree_error)?;
-        if closed_tab.panes.is_empty() {
-            self.tree.close_tab(workspace, tab).map_err(tree_error)?;
-        } else {
-            self.resize_tab(workspace, tab)?;
-        }
-        persistence::persist(self)?;
-        Ok(self.tree_message())
+        self.remove_pane(workspace, tab, pane)
     }
 
     fn focus_pane(&mut self, workspace: &str, tab: &str, pane: &str) -> io::Result<Vec<ServerMsg>> {
@@ -466,3 +460,5 @@ mod tests;
 
 mod terminals;
 pub(crate) use terminals::VisibleSize;
+
+mod lifecycle;

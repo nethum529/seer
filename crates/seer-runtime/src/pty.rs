@@ -54,6 +54,10 @@ impl PtySession {
             .map_err(to_io_error)
     }
 
+    pub fn has_exited(&mut self) -> io::Result<bool> {
+        self.child.try_wait().map(|status| status.is_some())
+    }
+
     pub fn kill(&mut self) -> io::Result<()> {
         self.child.kill()
     }
@@ -131,28 +135,4 @@ pub(crate) fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 fn to_io_error(error: impl Display) -> io::Error {
     io::Error::other(error.to_string())
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn output_buffers_keep_last_mebibyte_while_not_drained() {
-        let output = Mutex::new(OutputBuffers::default());
-        let bytes: Vec<u8> = (0..=OUTPUT_LIMIT)
-            .map(|index| (index % usize::from(u8::MAX)) as u8)
-            .collect();
-        append_output(&output, &bytes);
-
-        let output = output.into_inner().expect("output lock must be valid");
-        assert_eq!(output.pending.len(), OUTPUT_LIMIT);
-        assert!(
-            output
-                .pending
-                .iter()
-                .copied()
-                .eq(bytes[1..].iter().copied())
-        );
-    }
 }

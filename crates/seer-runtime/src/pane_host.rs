@@ -79,6 +79,10 @@ impl PaneHost {
         self.session.foreground_name()
     }
 
+    pub(crate) fn has_exited(&mut self) -> io::Result<bool> {
+        self.session.has_exited()
+    }
+
     pub fn kill(&mut self) -> io::Result<()> {
         self.session.kill()
     }
