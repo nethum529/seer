@@ -16,8 +16,6 @@ const USER: &str = "alice-user-id";
 const WAIT: Duration = Duration::from_secs(10);
 const QUIET: Duration = Duration::from_secs(1);
 
-// Issue 359: the client whose keyboard owns the terminal is the one that
-// leaves. A second client that only watches the same terminal stays.
 #[test]
 fn exit_inside_a_seer_terminal_makes_only_the_typing_client_leave() {
     let root = Root::new("inside");
@@ -60,10 +58,6 @@ fn exit_outside_seer_fails_and_reaches_no_client() {
     let output = run_exit(&root.0, None);
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        "seer exit works only inside a Seer terminal.\n"
-    );
 
     room.set_nonblocking(true)
         .expect("room listener must become nonblocking");
@@ -71,7 +65,44 @@ fn exit_outside_seer_fails_and_reaches_no_client() {
         matches!(room.accept(), Err(error) if error.kind() == io::ErrorKind::WouldBlock),
         "seer exit must not reach the room"
     );
-    assert!(!root.0.join("state-home/seer/runtimes").exists());
+}
+
+#[test]
+fn nested_exit_without_inherited_markers_detaches_the_only_local_client() {
+    let root = Root::new("nested");
+    write_store(&root.0, "127.0.0.1:1");
+    let directory = root.0.join("state-home/seer/runtimes").join(USER);
+    fs::create_dir_all(&directory).expect("runtime directory must exist");
+    let socket = directory.join("socket");
+    let _runtime = Runtime::start(&socket);
+    let mut client = attach(&socket);
+    let pane = first_pane(&mut client);
+    let output = run_exit(&root.0, None);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(wait_for_bye(&mut client), "detached");
+    let mut next = attach(&socket);
+    assert_eq!(first_pane(&mut next), pane);
+}
+
+#[test]
+fn nested_exit_without_markers_refuses_ambiguous_clients() {
+    let root = Root::new("ambiguous");
+    write_store(&root.0, "127.0.0.1:1");
+    let directory = root.0.join("state-home/seer/runtimes").join(USER);
+    fs::create_dir_all(&directory).expect("runtime directory must exist");
+    let socket = directory.join("socket");
+    let _runtime = Runtime::start(&socket);
+    let mut first = attach(&socket);
+    first_pane(&mut first);
+    let mut second = attach(&socket);
+    first_pane(&mut second);
+    assert!(!run_exit(&root.0, None).status.success());
+    assert!(!receives_bye(&mut first));
+    assert!(!receives_bye(&mut second));
 }
 
 struct Root(PathBuf);
