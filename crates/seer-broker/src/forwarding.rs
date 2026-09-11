@@ -207,6 +207,7 @@ impl<'a> Coordinator<'a> {
             }
             ClientMsg::Terminals { user } => self.list(&user),
             ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
+            ClientMsg::SetAllGrants { can_type } => self.set_all_grants(can_type),
             ClientMsg::SetGrant { user, can_type } => self.set_grant(&user, can_type),
             ClientMsg::ListPeople => self.write(&self.broker.people()?),
             ClientMsg::Invite { hours } if self.owner.is_owner => {
@@ -291,6 +292,23 @@ impl<'a> Coordinator<'a> {
             user: user.into(),
             terminals,
         })
+    }
+
+    fn set_all_grants(&self, can_type: bool) -> io::Result<()> {
+        let users = if can_type {
+            self.broker
+                .registry()
+                .people()?
+                .into_iter()
+                .map(|person| person.user_id)
+                .filter(|user| user != &self.owner.user_id)
+                .collect()
+        } else {
+            BTreeSet::new()
+        };
+        self.broker.grants.set_all(&self.owner.user_id, users)?;
+        self.broker.publish_grants()?;
+        self.write(&ServerMsg::GrantsUpdated)
     }
 
     fn set_grant(&self, user: &str, can_type: bool) -> io::Result<()> {

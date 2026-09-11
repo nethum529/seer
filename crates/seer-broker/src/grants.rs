@@ -42,6 +42,13 @@ impl Grants {
         Ok(())
     }
 
+    pub(crate) fn set_all(&self, owner: &str, users: BTreeSet<String>) -> io::Result<()> {
+        let mut owners = self.lock()?;
+        write_json_atomically(&self.directory.join(format!("{owner}.json")), &users)?;
+        owners.insert(owner.to_owned(), users);
+        Ok(())
+    }
+
     pub(crate) fn permits(&self, owner: &str, user: &str) -> io::Result<bool> {
         Ok(self
             .lock()?

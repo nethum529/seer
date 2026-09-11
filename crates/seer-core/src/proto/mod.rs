@@ -101,6 +101,9 @@ pub enum ClientMsg {
         pane: String,
         bytes: Vec<u8>,
     },
+    SetAllGrants {
+        can_type: bool,
+    },
     SetGrant {
         user: String,
         can_type: bool,
@@ -112,6 +115,7 @@ pub enum ClientMsg {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ServerMsg {
+    GrantsUpdated,
     Terminals {
         user: String,
         terminals: Vec<TerminalInfo>,

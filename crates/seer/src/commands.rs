@@ -16,7 +16,7 @@ pub(crate) use exit::exit;
 pub(crate) use selection::{attach_bare, peek, selected_server};
 mod exit;
 mod lifecycle;
-pub(crate) use lifecycle::{leave, stop};
+pub(crate) use lifecycle::{leave, perms, stop};
 mod selection;
 use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);

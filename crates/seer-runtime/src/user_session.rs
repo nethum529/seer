@@ -96,6 +96,7 @@ impl UserSession {
             | ClientMsg::Watch { .. }
             | ClientMsg::Unwatch { .. }
             | ClientMsg::Terminals { .. }
+            | ClientMsg::SetAllGrants { .. }
             | ClientMsg::SetGrant { .. }
             | ClientMsg::TypeInto { .. }
             | ClientMsg::Stop
