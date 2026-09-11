@@ -218,6 +218,15 @@ impl BrokerState {
         self.attachments.clients(user_id, excluded)
     }
 
+    pub(crate) fn leave(&self, user_id: &str, caller: &str) -> io::Result<()> {
+        self.registry.remove_person(user_id)?;
+        self.runtimes.remove(user_id)?;
+        for client in self.attachments.clients(user_id, caller)? {
+            let _ = self.attachments.detach_client(user_id, &client.client_id);
+        }
+        self.publish_people()
+    }
+
     pub(crate) fn detach_client(&self, user_id: &str, client_id: &str) -> io::Result<bool> {
         self.attachments.detach_client(user_id, client_id)
     }

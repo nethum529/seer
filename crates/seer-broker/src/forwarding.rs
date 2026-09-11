@@ -83,6 +83,15 @@ impl<'a> Coordinator<'a> {
     fn run(&mut self) -> io::Result<()> {
         let mut refreshed = std::time::Instant::now();
         loop {
+            if self
+                .broker
+                .registry()
+                .person(&self.owner.user_id)?
+                .is_none()
+            {
+                return Ok(());
+            }
+            self.remove_departed_runtimes()?;
             if refreshed.elapsed() >= std::time::Duration::from_secs(1) {
                 let users: Vec<_> = self
                     .lists
@@ -104,6 +113,13 @@ impl<'a> Coordinator<'a> {
             };
             match event {
                 Event::Client(Ok(ClientMsg::Detach)) | Event::Client(Err(_)) => return Ok(()),
+                Event::Client(Ok(ClientMsg::Leave)) => {
+                    self.broker.leave(&self.owner.user_id, &self.client_id)?;
+                    self.write(&ServerMsg::Bye {
+                        reason: "left room".into(),
+                    })?;
+                    return Ok(());
+                }
                 Event::Client(Ok(message)) => {
                     if let Err(error) = self.handle_client(message) {
                         self.write(&ServerMsg::Refused {
@@ -137,6 +153,25 @@ impl<'a> Coordinator<'a> {
                 }
             }
         }
+    }
+
+    fn remove_departed_runtimes(&mut self) -> io::Result<()> {
+        let users: Vec<_> = self.runtimes.keys().cloned().collect();
+        for user in users {
+            if self.broker.registry().person(&user)?.is_some() {
+                continue;
+            }
+            if let Some(runtime) = self.runtimes.remove(&user) {
+                runtime.close()?;
+            }
+            self.lists.remove(&user);
+            self.watches.retain(|(owner, _), _| owner != &user);
+            self.write(&ServerMsg::Terminals {
+                user,
+                terminals: Vec::new(),
+            })?;
+        }
+        Ok(())
     }
 
     fn handle_client(&mut self, message: ClientMsg) -> io::Result<()> {

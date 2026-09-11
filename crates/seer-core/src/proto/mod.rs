@@ -105,6 +105,7 @@ pub enum ClientMsg {
         user: String,
         can_type: bool,
     },
+    Leave,
     Detach,
 }
 

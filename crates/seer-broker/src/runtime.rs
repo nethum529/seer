@@ -74,6 +74,14 @@ impl RuntimeManager {
         }
     }
 
+    pub(crate) fn remove(&self, user_id: &str) -> io::Result<()> {
+        if let Some(registration) = lock(&self.published)?.remove(user_id) {
+            let _ = lock(&registration.control)?.shutdown(std::net::Shutdown::Both);
+            lock(&registration.pending)?.clear();
+        }
+        Ok(())
+    }
+
     pub(crate) fn is_running(&self, user_id: &str) -> bool {
         self.published
             .lock()

@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use crate::commands::{self, CommandError};
 
-const HELP: &str = "seer opens the interface.\n\nUsage: seer <command>\n\nCommands:\n  start [--restore]   Start the server on this machine\n  stop                Stop the server\n  update              Replace the binaries with the latest release\n  invite [--hours N]  Create a join line for a friend\n  join [capsule]      Join a server with a pasted line\n  list                List saved servers and people\n  attach              Open people and terminals\n  detach              Detach this client\n  exit                Leave Seer from inside a Seer terminal\n  peek <person>       Open with this person selected\n  help                Show this help\n\nMain screen: type into the selected terminal. All keys go to it.\nUse the mouse to select terminals and open Seer controls.\nLeft click the top right control to pick the person you look at.\nRight click the same control for the session actions.\nUse the back row in session to return to the overview.\nSession: j/k select, enter open, esc close, n new, x close, q quit.\nPerson menu: right click a person row. j/k select, enter watch,\nspace grant, esc close.\nFirst run: right click the top right control to copy the invite.\n";
+const HELP: &str = "seer opens the interface.\n\nUsage: seer <command>\n\nCommands:\n  start [--restore]   Start the server on this machine\n  stop                Stop the server\n  update              Replace the binaries with the latest release\n  invite [--hours N]  Create a join line for a friend\n  join [capsule]      Join a server with a pasted line\n  list                List saved servers and people\n  attach              Open people and terminals\n  detach              Detach this client\n  exit                Leave Seer from inside a Seer terminal\n  leave               Remove yourself from the room\n  peek <person>       Open with this person selected\n  help                Show this help\n\nMain screen: type into the selected terminal. All keys go to it.\nUse the mouse to select terminals and open Seer controls.\nLeft click the top right control to pick the person you look at.\nRight click the same control for the session actions.\nUse the back row in session to return to the overview.\nSession: j/k select, enter open, esc close, n new, x close, q quit.\nPerson menu: right click a person row. j/k select, enter watch,\nspace grant, esc close.\nFirst run: right click the top right control to copy the invite.\n";
 
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
@@ -17,6 +17,7 @@ enum Command {
     Attach,
     Detach,
     Exit,
+    Leave,
     Peek(String),
 }
 
@@ -65,6 +66,7 @@ fn execute(command: Command) -> ExitCode {
         Command::Attach => commands::attach(),
         Command::Detach => commands::detach(),
         Command::Exit => commands::exit(),
+        Command::Leave => commands::leave(),
         Command::Peek(person) => commands::peek(&person),
     };
     finish(result)
@@ -103,6 +105,7 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ParseEr
         "attach" => Command::Attach,
         "detach" => Command::Detach,
         "exit" => Command::Exit,
+        "leave" => Command::Leave,
         "peek" => {
             let person = arguments.next().ok_or(ParseError::Usage)?;
             if arguments.next().is_some() {
