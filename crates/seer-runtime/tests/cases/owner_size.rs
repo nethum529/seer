@@ -93,9 +93,6 @@ fn the_active_own_client_controls_the_pane_size() {
     sizes.settles_at(&mut first, FIRST);
 
     send(&mut first, &unwatch(&pane));
-    sizes.settles_at(&mut first, REMOTE);
-
-    send(&mut remote, &unwatch(&pane));
     sizes.settles_at(&mut first, FIRST);
 
     send_input(&mut first, &pane, "stty size\n");

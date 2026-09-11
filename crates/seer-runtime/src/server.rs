@@ -241,7 +241,7 @@ impl SharedSession {
         cols: u16,
         rows: u16,
     ) -> io::Result<Vec<ServerMsg>> {
-        let sizes = Self::visible_sizes(&lock(&self.connections)?);
+        let sizes = size_lease::own_sizes(&lock(&self.connections)?);
         let mut session = lock(&self.session)?;
         match session.record_viewport(workspace, tab, cols, rows, &sizes) {
             Ok(messages) => Ok(messages),
@@ -452,9 +452,9 @@ impl SharedSession {
             let mut session = lock(&self.session)?;
             let mut connections = lock(&self.connections)?;
             let owner_present = connections.iter().any(|connection| connection.size_owner);
-            let sizes = Self::visible_sizes(&connections);
+            let sizes = size_lease::own_sizes(&connections);
             let mut all_messages = messages.to_vec();
-            all_messages.extend(session.apply_visible_sizes(&sizes)?);
+            all_messages.extend(session.apply_claimed_sizes(&sizes)?);
             let encoded = all_messages
                 .iter()
                 .map(writer::encode)

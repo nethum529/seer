@@ -483,4 +483,3 @@ pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
 mod tests;
 
 mod terminals;
-pub(crate) use terminals::VisibleSize;
