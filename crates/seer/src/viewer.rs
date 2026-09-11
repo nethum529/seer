@@ -1,7 +1,7 @@
 use crate::{
     input::key_to_input,
     state::ClientState,
-    terminal_cells::{PaneCells, start_row},
+    terminal_cells::PaneCells,
     tui::{send, send_viewer_input},
 };
 use crossterm::event::KeyEvent;
@@ -37,22 +37,10 @@ impl Viewer {
     }
     pub(crate) fn scroll(&mut self, up: bool) {
         self.offset = if up {
-            (self.offset + 3).min(self.max_offset())
+            (self.offset + 3).min(self.history.len())
         } else {
             self.offset.saturating_sub(3)
         };
-    }
-
-    // A frame taller than this window shows its bottom rows. The rows above
-    // stay hidden until the person scrolls up, like older history.
-    pub(crate) fn hidden_rows(&self) -> usize {
-        self.previous
-            .len()
-            .saturating_sub(usize::from(self.area.height))
-    }
-
-    fn max_offset(&self) -> usize {
-        self.history.len() + self.hidden_rows()
     }
 
     fn note_rows(&mut self, rows: &[Vec<seer_core::Cell>]) {
@@ -72,14 +60,14 @@ impl Viewer {
             self.history.drain(..excess);
         }
         self.previous = rows.to_vec();
-        self.offset = self.offset.min(self.max_offset());
+        self.offset = self.offset.min(self.history.len());
     }
 
     pub(crate) fn visible_rows(&self, height: u16) -> Vec<Vec<seer_core::Cell>> {
         self.history
             .iter()
             .chain(&self.previous)
-            .skip(self.max_offset().saturating_sub(self.offset))
+            .skip(self.history.len().saturating_sub(self.offset))
             .take(usize::from(height))
             .cloned()
             .collect()
@@ -169,18 +157,16 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     }
     if let Some(content) = state.frames.get(&viewer.target()) {
         let rows = viewer.visible_rows(area.height);
-        let start = start_row(&rows, area.height);
         frame.render_widget(PaneCells::new(&rows), area);
         if allowed
             && !state.chrome_owns_input()
             && viewer.offset == 0
             && content.cursor.visible
-            && let Some(row) =
-                usize::from(content.cursor.row).checked_sub(viewer.hidden_rows() + start)
-            && row < usize::from(area.height)
+            && content.cursor.row < area.height
             && content.cursor.column < area.width
         {
-            frame.set_cursor_position((area.x + content.cursor.column, area.y + row as u16));
+            frame
+                .set_cursor_position((area.x + content.cursor.column, area.y + content.cursor.row));
         }
     }
 }

@@ -328,3 +328,34 @@ fn application_colors_keep_the_terminal_palette() {
     assert_eq!(buffer[(2, 0)].fg, Color::Rgb(10, 20, 30));
     assert_eq!(buffer[(2, 0)].bg, Color::Indexed(123));
 }
+
+#[test]
+fn a_remote_screen_keeps_row_zero_in_the_tile_and_open_view() {
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    state.selected = 1;
+    state
+        .terminals
+        .insert("bob".into(), vec![terminal_info("shell")]);
+    let pane = state.selected_terminals()[0].pane.clone();
+    let mut grid = seer_runtime::PaneGrid::new(80, 30);
+    grid.feed(b"\x1b[1;1HTab one   Tab two\x1b[2;1HWorkspace\x1b[30;1HBottom row");
+    state.frames.insert(("bob".into(), pane), grid.snapshot());
+    let tile = draw_text(&mut state, 80, 24);
+    assert!(
+        tile[0].starts_with("Tab one   Tab two"),
+        "row zero must stay visible: {tile:?}"
+    );
+    assert!(tile[1].starts_with("Workspace"));
+    state.open_focused();
+    for height in [24, 30, 34] {
+        let opened = draw_text(&mut state, 80, height);
+        assert!(opened[0].starts_with("Tab one   Tab two"));
+        assert!(opened[1].starts_with("Workspace"));
+        if height < 30 {
+            assert!(!opened.iter().any(|row| row.contains("Bottom row")));
+        } else {
+            assert!(opened[29].starts_with("Bottom row"));
+        }
+    }
+}
