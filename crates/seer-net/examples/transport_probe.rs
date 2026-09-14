@@ -6,6 +6,7 @@ use iroh::{Endpoint, EndpointAddr, RelayUrl, SecretKey};
 use seer_net::{ALPN, Listener, decode_endpoint_id, dial, dial_session};
 use std::env;
 use std::fmt::Display;
+use std::fs;
 use std::io::{self, Read, Write};
 use std::os::unix::net::UnixStream;
 use std::process::ExitCode;
@@ -18,7 +19,7 @@ use tokio::time::timeout;
 const STEP_TIMEOUT: Duration = Duration::from_secs(15);
 const USAGE: &str = "usage: transport_probe serve|listen|dial|session --api iroh|seer \
 [--condition default|loopback|lan|relay|discovery] [--samples N] [--echoes N] \
-[--remote ID] [--relay URL] [--ip ADDR]";
+[--remote ID] [--relay URL] [--ip ADDR] [--payload BYTES] [--counters 1]";
 
 struct Args {
     command: String,
@@ -29,6 +30,8 @@ struct Args {
     remote: Option<String>,
     relay: Option<String>,
     ip: Option<String>,
+    payload: usize,
+    counters: bool,
 }
 
 impl Args {
@@ -40,6 +43,8 @@ impl Args {
 struct Report {
     workload: String,
     condition: String,
+    payload: Vec<u8>,
+    counters: bool,
 }
 
 impl Report {
@@ -49,6 +54,18 @@ impl Report {
             "{},{},{cache},{sample},{boundary},{ms:.3},{status}",
             self.workload, self.condition
         );
+    }
+
+    // A counters line is not a sample line. The driver keeps it apart.
+    fn counters(&self, sample: usize, echoes: usize, before: &[u64; 4]) {
+        let deltas: String = (counters().iter().zip(before))
+            .map(|(after, before)| format!(",{}", after.saturating_sub(*before)))
+            .collect();
+        let threads = fs::read_dir("/proc/self/task").map_or(0, Iterator::count);
+        let (workload, condition, bytes) = (&self.workload, &self.condition, self.payload.len());
+        if self.counters {
+            println!("counters,{workload},{condition},{sample},{echoes},{bytes}{deltas},{threads}");
+        }
     }
 
     fn result<T, E: Display>(
@@ -110,9 +127,16 @@ fn main() -> ExitCode {
             return ExitCode::from(1);
         }
     };
+    let size = if args.payload == 1 {
+        String::new()
+    } else {
+        format!("_p{}", args.payload)
+    };
     let report = Report {
-        workload: format!("{}_{}", args.api, args.command),
+        workload: format!("{}_{}{size}", args.api, args.command),
         condition: args.condition.clone(),
+        payload: vec![b'x'; args.payload],
+        counters: args.counters,
     };
     report_spawn(&report, entered);
     match run(&args, &report) {
@@ -135,6 +159,8 @@ fn parse_args() -> Result<Args, String> {
         remote: None,
         relay: None,
         ip: None,
+        payload: 1,
+        counters: false,
     };
     while let Some(flag) = raw.next() {
         let value = raw.next().ok_or(USAGE)?;
@@ -146,6 +172,8 @@ fn parse_args() -> Result<Args, String> {
             "--remote" => args.remote = Some(value),
             "--relay" => args.relay = Some(value),
             "--ip" => args.ip = Some(value),
+            "--payload" => args.payload = value.parse().map_err(|_| USAGE)?,
+            "--counters" => args.counters = value == "1",
             _ => return Err(USAGE.to_owned()),
         }
     }
@@ -321,24 +349,26 @@ async fn iroh_echoes(report: &Report, sample: usize, connection: &Connection, ec
     else {
         return;
     };
+    let before = counters();
     for _ in 0..echoes {
-        let echo = echo_once(&mut send, &mut recv);
+        let echo = echo_once(&mut send, &mut recv, &report.payload);
         if report.step(sample, "echo_rtt", echo).await.is_none() {
             return;
         }
     }
+    report.counters(sample, echoes, &before);
 }
 
 async fn open_and_echo(connection: &Connection) -> io::Result<(SendStream, RecvStream)> {
     let (mut send, mut recv) = connection.open_bi().await.map_err(io::Error::other)?;
-    echo_once(&mut send, &mut recv).await?;
+    echo_once(&mut send, &mut recv, b"x").await?;
     Ok((send, recv))
 }
 
-async fn echo_once(send: &mut SendStream, recv: &mut RecvStream) -> io::Result<()> {
-    send.write_all(b"x").await.map_err(io::Error::other)?;
-    let mut byte = [0_u8; 1];
-    recv.read_exact(&mut byte).await.map_err(io::Error::other)
+async fn echo_once(send: &mut SendStream, recv: &mut RecvStream, data: &[u8]) -> io::Result<()> {
+    send.write_all(data).await.map_err(io::Error::other)?;
+    let mut back = vec![0_u8; data.len()];
+    recv.read_exact(&mut back).await.map_err(io::Error::other)
 }
 
 fn seer_listen(args: &Args, report: &Report) {
@@ -405,7 +435,7 @@ fn seer_session(args: &Args, report: &Report) -> io::Result<()> {
 
 fn first_echo(mut stream: UnixStream) -> io::Result<UnixStream> {
     stream.set_read_timeout(Some(STEP_TIMEOUT))?;
-    unix_echo(&mut stream)?;
+    unix_echo(&mut stream, b"x")?;
     Ok(stream)
 }
 
@@ -413,18 +443,49 @@ fn unix_echoes(report: &Report, sample: usize, stream: Option<UnixStream>, echoe
     let Some(mut stream) = stream else {
         return;
     };
+    let before = counters();
     for _ in 0..echoes {
         if report
-            .step_blocking(sample, "echo_rtt", || unix_echo(&mut stream))
+            .step_blocking(sample, "echo_rtt", || {
+                unix_echo(&mut stream, &report.payload)
+            })
             .is_none()
         {
             return;
         }
     }
+    report.counters(sample, echoes, &before);
 }
 
-fn unix_echo(stream: &mut UnixStream) -> io::Result<()> {
-    stream.write_all(b"x")?;
-    let mut byte = [0_u8; 1];
-    stream.read_exact(&mut byte)
+// In both apis the dialer writes all bytes, then reads them back.
+fn unix_echo(stream: &mut UnixStream, data: &[u8]) -> io::Result<()> {
+    stream.write_all(data)?;
+    let mut back = vec![0_u8; data.len()];
+    stream.read_exact(&mut back)
+}
+
+// Totals of all live threads: CPU ns, run slices, voluntary and involuntary
+// context switches.
+fn counters() -> [u64; 4] {
+    let mut total = [0_u64; 4];
+    let tasks = fs::read_dir("/proc/self/task").into_iter().flatten();
+    for task in tasks.flatten() {
+        let read = |name| fs::read_to_string(task.path().join(name)).unwrap_or_default();
+        let sched: Vec<u64> = read("schedstat")
+            .split(' ')
+            .map(|v| v.trim().parse().unwrap_or(0))
+            .collect();
+        total[0] += sched.first().unwrap_or(&0);
+        total[1] += sched.get(2).unwrap_or(&0);
+        total[2] += field(&read("status"), "voluntary_ctxt_switches:");
+        total[3] += field(&read("status"), "nonvoluntary_ctxt_switches:");
+    }
+    total
+}
+
+fn field(text: &str, name: &str) -> u64 {
+    text.lines()
+        .find_map(|line| line.strip_prefix(name))
+        .and_then(|value| value.trim().parse().ok())
+        .unwrap_or(0)
 }
