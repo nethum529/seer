@@ -10,10 +10,10 @@ stream and the blocking code in the broker, the runtime, and the client.
 It defines the behaviour that a replacement adapter must keep, and a test
 boundary that a person can run to prove it.
 
-This is phase 1. It uses code reading only. Every count in this document
-comes from the source at commit 8714a51 and from dependency source in
-Cargo.lock (iroh 1.1.0, noq 1.2.0, noq-proto 1.2.0, tokio 1.53.1). No number
-here is a measurement. Phase 2 measures the cost and keeps raw samples under
+Phase 1 used code reading only. Its counts come from the source at commit
+8714a51 and from dependency source in Cargo.lock (iroh 1.1.0, noq 1.2.0,
+noq-proto 1.2.0, tokio 1.53.1). Phase 2 measured the cost. Its numbers are in
+the Measurements section, and its raw samples are in
 docs/research/perf-samples/393/.
 
 ## The adapter today
@@ -70,7 +70,8 @@ directly:
 
 Each chunk also costs one epoll wake of a tokio worker and one task wake.
 The copy tasks can run on any worker, so a chunk can move between threads.
-Phase 2 measures these costs. This section only counts them.
+This section only counts these costs. The Measurements section has the
+measured cost.
 
 ### Adapter crossings per terminal path
 
@@ -199,7 +200,8 @@ Today the bound for one iroh hop, one direction, is the sum of:
 | Receiver Unix pair | Same as the sender Unix pair |
 
 The payload that fits in a Unix pair is less than SO_SNDBUF, because the
-kernel counts buffer overhead. Phase 2 measures it. The connection send
+kernel counts buffer overhead. The Measurements section has the measured
+capacity. The connection send
 window is 10,000,000 bytes (8 times the stream window) and is shared by all
 streams of one connection.
 
@@ -209,8 +211,8 @@ on macOS. This is not verified on this machine.
 
 ### Findings from code reading
 
-These are gaps in the current adapter. Phase 2 must confirm or reject each
-one with a test run. They are not fixed here.
+These are gaps in the current adapter. They are not fixed here. Phase 2 did
+not test F1 to F4 directly. The Measurements section adds finding F5.
 
 - F1. The caller's timeouts do not reach the QUIC side. After the runtime
   writer evicts a viewer and shuts down its end, a copy task that waits on
@@ -275,10 +277,173 @@ and 6. In steps 3 and 5 the eviction and leave times of the new build must
 not be longer. In step 7 the thread counts of the new build must not be
 higher.
 
-## Open questions for phase 2
+## Measurements
 
-- Real payload capacity of a Unix socket pair on this machine.
-- Added latency of one bridge crossing and of a full keystroke round trip,
-  compared to a direct stream.
-- Wakes and thread moves per terminal frame.
-- Whether F1 leaves QUIC streams open after an eviction.
+Date: 2026-09-14. Machine, build, and network are the same as the issue 389
+baseline (docs/research/18-transport-baseline.md): AMD Ryzen 7 7800X3D, 16
+CPUs, Linux 7.1.6, rustc 1.98.0, release profile. Every run held
+/tmp/claude-1000/perf-run.lock. All times are in ms. p95 is the nearest rank.
+
+### Method
+
+- Probe: crates/seer-net/examples/transport_probe.rs from issue 389, with two
+  options from this issue. --payload BYTES sets the echo size. --counters 1
+  prints one line per sample with the change over all echoes of CPU time,
+  run slices, and context switches, taken per thread from /proc/self/task.
+- Driver: scripts/perf/adapter.sh. For each api it starts one serve process
+  on this machine. For each payload it dials with the discovery condition
+  and sends 100 echoes per sample. Each echo writes the full payload, then
+  reads it back.
+- The seer api has a socket pair bridge on both sides. The iroh api has no
+  bridge. So the seer minus iroh delta of one round trip is 4 bridge
+  crossings. The iroh side is an async task, not a blocking caller. It is
+  the floor, not a blocking replacement.
+- The counters cover the dial process only. That is one bridge, in both
+  directions.
+- Payloads come from frame_sizes.csv: 115 bytes is one TerminalInput key
+  frame. 4278, 297822, and 1550274 bytes are Cells frames for a blank 80x24
+  screen, a full 80x24 screen, and a full 200x50 screen. The runtime sends a
+  full Cells frame on every change (crates/seer-runtime/src/user_session.rs:117-135).
+- Run 1, mode warm, revision b5ece85: one process per payload, sample 0 cold,
+  then 10 warm samples. Each warm sample makes a new seer_net::dial.
+- Run 2, mode single, revision fcc97ee: 10 processes per payload, one dial
+  and one sample each.
+- Both runs: 0 failures, empty errors.log.
+
+Commands:
+
+    flock /tmp/claude-1000/perf-run.lock scripts/perf/adapter.sh 10 docs/research/perf-samples/393
+    flock /tmp/claude-1000/perf-run.lock scripts/perf/adapter.sh 10 docs/research/perf-samples/393/single single
+
+The counter rows of the seer api in run 1 are not valid. Each warm dial left
+the old dialer runtime alive (see F5). When one of those threads exited in a
+sample window, its whole CPU total left the sum. The seer CPU at 1550274
+bytes came out lower than iroh, which is not possible. Revision fcc97ee takes
+the delta per thread, and run 2 has no old runtime. Use run 2 for counters.
+The run 1 latency rows are valid. A smoke run showed that /proc/self/io does
+not count socket send and receive on this system, so the probe does not use
+it.
+
+### Baseline rows used (issue 389, revision 367e50c)
+
+From docs/research/perf-samples/389/summary.csv on branch perf/389-measure.
+
+| Workload | Cache | Boundary | n | Median | p95 |
+| --- | --- | --- | --- | --- | --- |
+| iroh_dial discovery | warm | echo_rtt | 400 | 0.032 | 0.056 |
+| seer_dial discovery | warm | echo_rtt | 400 | 0.040 | 0.061 |
+| seer_session discovery | warm | echo_rtt | 400 | 0.042 | 0.057 |
+| iroh_dial discovery | cold | endpoint_bind | 21 | 1.390 | 1.538 |
+| iroh_dial discovery | cold | address_lookup | 21 | 1.649 | 129.475 |
+| iroh_dial discovery | cold | dial_handshake | 21 | 191.470 | 200.193 |
+| seer_dial discovery | cold | seer_dial | 21 | 199.532 | 204.956 |
+| seer_session discovery | warm | stream_open | 20 | 0.135 | 0.149 |
+
+The sum of the three iroh medians is 194.509 ms. The cold seer_dial median is
+5.023 ms higher. A new stream on an existing session opens in 0.135 ms.
+
+### Echo round trip by frame size
+
+Median and p95 of echo_rtt. Run 2 has 1000 echoes per cell (10 processes of
+100). Run 1 warm has 1000 echoes per cell (10 samples of 100).
+
+| Payload bytes | iroh run 2 | seer run 2 | Delta run 2 | iroh run 1 warm | seer run 1 warm | Delta run 1 |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 0.033 / 0.057 | 0.040 / 0.055 | +0.007 | 0.032 / 0.048 | 0.042 / 0.075 | +0.010 |
+| 115 | 0.033 / 0.064 | 0.039 / 0.059 | +0.006 | 0.033 / 0.050 | 0.042 / 0.076 | +0.009 |
+| 4278 | 0.050 / 0.077 | 0.062 / 0.092 | +0.012 | 0.047 / 0.071 | 0.063 / 0.103 | +0.016 |
+| 297822 | 0.571 / 0.795 | 0.749 / 1.001 | +0.178 (+31%) | 0.538 / 0.631 | 0.752 / 0.983 | +0.214 (+40%) |
+| 1550274 | 2.735 / 3.233 | 3.103 / 3.626 | +0.368 (+13%) | 2.583 / 2.910 | 3.114 / 3.496 | +0.531 (+21%) |
+
+### CPU and context switches per echo, dial side (run 2)
+
+Median of 10 samples. Each sample is 100 echoes. The value is per echo.
+
+| Payload bytes | CPU us iroh | CPU us seer | Delta | Switches iroh | Switches seer | Delta |
+| --- | --- | --- | --- | --- | --- | --- |
+| 1 | 38.6 | 34.3 | -4.3 | 5.24 | 5.20 | -0.04 |
+| 115 | 37.4 | 33.9 | -3.6 | 5.14 | 5.13 | -0.01 |
+| 4278 | 51.8 | 49.2 | -2.6 | 5.86 | 5.96 | +0.10 |
+| 297822 | 746.2 | 946.3 | +200.1 (+27%) | 69.18 | 72.70 | +3.52 |
+| 1550274 | 3616.6 | 4519.6 | +903.0 (+25%) | 317.74 | 413.56 | +95.82 |
+
+Up to 4278 bytes the delta is inside the sample spread (CPU per echo: iroh
+32.1 to 53.1 us, seer 32.0 to 56.6 us over these three sizes). At 297822
+and 1550274 bytes the ranges do not overlap: iroh 740.9 to 786.8 against
+seer 934.9 to 952.9, and iroh 3565.1 to 3966.3 against seer 4482.8 to
+4571.6.
+
+### Unix socket pair capacity
+
+Payload bytes that one side of a new AF_UNIX stream pair takes before a
+non-blocking send fails. 10 samples in each run. All 20 samples gave the
+same value for each write size. net.core.wmem_default is 212992.
+
+| Write size bytes | Capacity bytes |
+| --- | --- |
+| 1 | 278 |
+| 115 | 31970 |
+| 4096 | 180224 |
+| 65536 | 233152 |
+
+So B1 depends on the write size, not only on SO_SNDBUF. The runtime writer
+writes one encoded frame per write_all. For a full 80x24 frame, one Unix pair
+holds less than one frame.
+
+### F5. A dropped dial keeps its runtime alive
+
+Measured in run 1. The dial process has 19 threads with one seer_net::dial
+(18 for the iroh api). Each warm sample dials again after it drops the
+stream of the last dial. The thread count at the end of each sample:
+
+| Payload bytes | Threads at samples 1 to 10 |
+| --- | --- |
+| 1 | 37, 55, 73, 91, 109, 127, 145, 145, 145, 163 |
+| 115 | 37, 55, 73, 91, 109, 127, 145, 163, 145, 145 |
+| 4278 | 37, 55, 73, 91, 109, 127, 145, 145, 145, 163 |
+| 297822 | 37, 55, 73, 91, 109, 127, 127, 109, 127, 109 |
+| 1550274 | 37, 37, 37, 37, 37, 37, 37, 37, 37, 37 |
+
+Each seer_net::dial adds 18 threads: the dialer thread, and a runtime with
+one worker per CPU. They stay alive after the caller drops its stream. With
+short samples, up to 8 old runtimes live at the same time. This run did not
+measure how long one old runtime lives. Cause from code, not measured: the
+dialer thread waits in copy_to_quic for stopped, then in endpoint.close
+(crates/seer-net/src/lib.rs:410-413, 459-469).
+
+### What the numbers say for the Ready when line
+
+- Copy cost: material at full frame sizes. At 297822 and 1550274 bytes one
+  bridge adds 25 to 27 percent CPU on the dial side, and 4 crossings add 13
+  to 40 percent to the round trip. The cost grows with frame bytes. The
+  runtime sends a full frame on every change, so a full screen costs this on
+  every update. Paths in Seer cross 2 to 4 bridges in each direction. These
+  runs measured one bridge per side, not a full Seer path.
+- Copy cost at key frame sizes: not material. At 1 to 4278 bytes the CPU
+  delta is inside the spread, and 4 crossings add 6 to 16 us per round trip.
+- Latency: not material against the 5 ms runtime poll interval
+  (crates/seer-runtime/src/server.rs:25) and the 76 ms relay round trip of
+  the baseline. The largest delta is 0.531 ms at 1550274 bytes.
+- Scheduling per echo: not material up to 4278 bytes (+0.10 switches or
+  less). At 1550274 bytes one bridge adds 96 context switches per echo.
+- Scheduling per dial: material. Each seer_net::dial starts 18 threads that
+  outlive the stream (F5). Issue 386 already targets one network thread per
+  process.
+
+Result: the baseline shows material copy and scheduling cost. The copy cost
+shows at full terminal frames, and the scheduling cost is the runtime per
+dial. The socket dependencies, the shared timeout and cross-handle shutdown
+contracts, the bounded buffering, and the compatibility boundary are mapped
+in the sections above.
+
+## Not measured and open items
+
+- A full Seer path end to end (client, broker, runtime, PTY, render), and
+  the 2 to 4 bridge paths as one chain.
+- The serve side counters. The counters cover the dial process only.
+- A blocking caller on a direct QUIC stream. The iroh rows are async.
+- F1 to F4. No run tested them directly.
+- How long an old dialer runtime lives after its stream is dropped (F5).
+- macOS Unix pair capacity. There is no macOS machine here.
+- Out of scope for 393: a full JSON Cells frame on every change is a larger
+  cost than the adapter. A full 80x24 screen is 297822 bytes per update.
