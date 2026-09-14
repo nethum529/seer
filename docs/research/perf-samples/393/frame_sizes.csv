@@ -1,0 +1,8 @@
+message,cols,rows,text_rows,frame_bytes
+TerminalInput_text_a,0,0,0,115
+Cells,80,24,0,4278
+Cells,80,24,12,151050
+Cells,80,24,24,297822
+Cells,200,50,0,8774
+Cells,200,50,25,779524
+Cells,200,50,50,1550274
