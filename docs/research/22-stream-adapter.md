@@ -300,7 +300,9 @@ CPUs, Linux 7.1.6, rustc 1.98.0, release profile. Every run held
   the floor, not a blocking replacement.
 - The counters cover the dial process only. That is one bridge, in both
   directions.
-- Payloads come from frame_sizes.csv: 115 bytes is one TerminalInput key
+- Payloads come from docs/research/perf-samples/393/frame_sizes.csv, the
+  output of crates/seer-core/examples/frame_sizes.rs (cargo run -p seer-core
+  --example frame_sizes): 115 bytes is one TerminalInput key
   frame. 4278, 297822, and 1550274 bytes are Cells frames for a blank 80x24
   screen, a full 80x24 screen, and a full 200x50 screen. The runtime sends a
   full Cells frame on every change (crates/seer-runtime/src/user_session.rs:117-135).

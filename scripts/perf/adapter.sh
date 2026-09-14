@@ -25,7 +25,7 @@ settle_seconds=5
 echoes=100
 # 1 byte is the issue 389 echo. 115 bytes is one TerminalInput key frame.
 # The other sizes are Cells frames: blank 80x24, full 80x24, full 200x50.
-# frame_sizes.csv next to the samples has the source of these sizes.
+# crates/seer-core/examples/frame_sizes.rs prints these sizes.
 payloads="1 115 4278 297822 1550274"
 
 cleanup() {
