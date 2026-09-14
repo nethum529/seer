@@ -18,7 +18,7 @@ use tokio::time::timeout;
 const STEP_TIMEOUT: Duration = Duration::from_secs(15);
 const USAGE: &str = "usage: transport_probe serve|listen|dial|session --api iroh|seer \
 [--condition default|loopback|lan|relay|discovery] [--samples N] [--echoes N] \
-[--remote ID] [--relay URL] [--ip ADDR]";
+[--remote ID] [--relay URL] [--ip ADDR] [--ready online|bind]";
 
 struct Args {
     command: String,
@@ -29,6 +29,7 @@ struct Args {
     remote: Option<String>,
     relay: Option<String>,
     ip: Option<String>,
+    ready: String,
 }
 
 impl Args {
@@ -135,6 +136,7 @@ fn parse_args() -> Result<Args, String> {
         remote: None,
         relay: None,
         ip: None,
+        ready: "online".to_owned(),
     };
     while let Some(flag) = raw.next() {
         let value = raw.next().ok_or(USAGE)?;
@@ -146,6 +148,7 @@ fn parse_args() -> Result<Args, String> {
             "--remote" => args.remote = Some(value),
             "--relay" => args.relay = Some(value),
             "--ip" => args.ip = Some(value),
+            "--ready" => args.ready = value,
             _ => return Err(USAGE.to_owned()),
         }
     }
@@ -237,7 +240,11 @@ async fn iroh_listen(args: &Args, report: &Report) {
 
 async fn iroh_serve(args: &Args) -> io::Result<()> {
     let endpoint = bind(args.relay_only()).await.map_err(io::Error::other)?;
-    endpoint.online().await;
+    // With --ready bind, serve announces before the relay is online, as the
+    // early readiness experiment in issue 386 did.
+    if args.ready != "bind" {
+        endpoint.online().await;
+    }
     let addr = endpoint.addr();
     let relay = addr
         .relay_urls()
