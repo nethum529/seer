@@ -59,9 +59,12 @@ Linux.
   darwin targets.
 - Step 5 signs each of the six binaries with an ad hoc signature:
   codesign --force --sign - for seer, seer-broker, and seer-runtime
-  in both target directories. The linker signature alone is not
-  enough. macOS taskgated kills a binary that carries only that
-  signature (issue 362).
+  in both target directories. This is a guard. In issue 362 the
+  shipped seer-runtime passed codesign --verify but macOS killed it
+  with Code Signature Invalid. That matches a copy over an old
+  binary in place: macOS keeps the signature of a file by inode.
+  install.sh now stages each binary and renames it into place, the
+  same way seer update does.
 - Step 6 runs the seer-runtime of the runner architecture and
   checks that it reaches argument parsing. The step fails when
   macOS kills the runtime before it starts.
@@ -91,9 +94,10 @@ Linux.
 ## Consequences
 
 - Every macOS release signs its binaries with an ad hoc signature
-  before it packages them. A release without this step ships a
-  seer-runtime that macOS kills, which the client then reports as a
-  missing socket (issue 362).
+  before it packages them and checks that the runtime starts. A
+  runtime that macOS kills before it opens its socket is reported
+  by the client with its exit status and the runtime log path
+  (issue 362).
 - A release needs the network and a working GitHub Actions runner.
   The Linux part still works offline; the macOS part does not.
 - The private source repository is exposed to seer-releases through
