@@ -5,6 +5,7 @@ use iroh::endpoint::{Connection, Incoming, RecvStream, SendStream, presets};
 use iroh::{Endpoint, EndpointAddr, RelayUrl, SecretKey};
 use seer_net::{ALPN, Listener, decode_endpoint_id, dial, dial_session};
 use std::env;
+use std::ffi::OsString;
 use std::fmt::Display;
 use std::fs;
 use std::io::{self, Read, Write};
@@ -56,11 +57,17 @@ impl Report {
         );
     }
 
-    // A counters line is not a sample line. The driver keeps it apart.
-    fn counters(&self, sample: usize, echoes: usize, before: &[u64; 4]) {
-        let deltas: String = (counters().iter().zip(before))
-            .map(|(after, before)| format!(",{}", after.saturating_sub(*before)))
-            .collect();
+    // Not a sample line. A thread that exits in the window loses its share.
+    fn counters(&self, sample: usize, echoes: usize, before: &[(OsString, [u64; 4])]) {
+        let mut sum = [0_u64; 4];
+        for (task, after) in counters() {
+            let old = before
+                .iter()
+                .find(|(id, _)| *id == task)
+                .map_or([0; 4], |t| t.1);
+            (0..4).for_each(|i| sum[i] += after[i].saturating_sub(old[i]));
+        }
+        let deltas: String = sum.iter().map(|value| format!(",{value}")).collect();
         let threads = fs::read_dir("/proc/self/task").map_or(0, Iterator::count);
         let (workload, condition, bytes) = (&self.workload, &self.condition, self.payload.len());
         if self.counters {
@@ -464,12 +471,12 @@ fn unix_echo(stream: &mut UnixStream, data: &[u8]) -> io::Result<()> {
     stream.read_exact(&mut back)
 }
 
-// Totals of all live threads: CPU ns, run slices, voluntary and involuntary
-// context switches.
-fn counters() -> [u64; 4] {
-    let mut total = [0_u64; 4];
+// Per live thread: CPU ns, run slices, voluntary and involuntary switches.
+fn counters() -> Vec<(OsString, [u64; 4])> {
+    let mut all = Vec::new();
     let tasks = fs::read_dir("/proc/self/task").into_iter().flatten();
     for task in tasks.flatten() {
+        let mut total = [0_u64; 4];
         let read = |name| fs::read_to_string(task.path().join(name)).unwrap_or_default();
         let sched: Vec<u64> = read("schedstat")
             .split(' ')
@@ -479,8 +486,9 @@ fn counters() -> [u64; 4] {
         total[1] += sched.get(2).unwrap_or(&0);
         total[2] += field(&read("status"), "voluntary_ctxt_switches:");
         total[3] += field(&read("status"), "nonvoluntary_ctxt_switches:");
+        all.push((task.file_name(), total));
     }
-    total
+    all
 }
 
 fn field(text: &str, name: &str) -> u64 {

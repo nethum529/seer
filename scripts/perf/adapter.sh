@@ -2,7 +2,10 @@
 # Measurement driver for issue 393, the seer-net stream adapter. The method
 # is in docs/research/22-stream-adapter.md. It uses the probe from issue 389.
 #
-# Usage: flock /tmp/claude-1000/perf-run.lock scripts/perf/adapter.sh [samples] [output-dir]
+# Usage: flock /tmp/claude-1000/perf-run.lock scripts/perf/adapter.sh [samples] [output-dir] [mode]
+# mode warm (default): one process per payload, sample 0 cold, then warm dials.
+# mode single: one process per sample, one dial each. No old dialer runtime
+# lives in the process while the echoes run, so the counters are clean.
 # Linux only. Needs python3 for the Unix socket pair capacity.
 set -euo pipefail
 
@@ -10,6 +13,7 @@ samples=${1:-10}
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 out=${2:-target/perf/393-$(date -u +%Y%m%dT%H%M%SZ)}
+mode=${3:-warm}
 mkdir -p "$out"
 raw="$out/samples.csv"
 counters="$out/counters.csv"
@@ -44,6 +48,7 @@ fi
     echo "revision: $rev"
     echo "samples_per_workload: $samples"
     echo "echoes_per_sample: $echoes"
+    echo "mode: $mode"
     echo "kernel: $(uname -srm)"
     echo "cpu: $(lscpu | sed -n 's/^Model name: *//p')"
     echo "cpu_count: $(nproc)"
@@ -74,20 +79,29 @@ stop_serve() {
     serve_pid=
 }
 
-# One warm process for each payload: sample 0 is cold, samples 1 to N warm.
+dial_process() {
+    local api=$1 id=$2 payload=$3 count=$4 status=0
+    "$probe" dial --api "$api" --condition discovery --remote "$id" \
+        --samples "$count" --echoes "$echoes" --payload "$payload" \
+        --counters 1 >"$work/probe.out" 2>>"$errors" || status=$?
+    grep -v '^counters,' "$work/probe.out" | sed "s/^/$rev,/" >>"$raw" || true
+    grep '^counters,' "$work/probe.out" | sed "s/^counters,/$rev,/" >>"$counters" || true
+    if ((status != 0)); then
+        echo "$rev,${api}_dial_p$payload,-,cold,0,process_exit,0,fail:exit $status" >>"$raw"
+    fi
+}
+
 measure_api() {
-    local api=$1 id status
+    local api=$1 id
     start_serve --api "$api" --condition default
     id=$(grep '^ready ' "$work/serve.out" | sed -E 's/.* id=([^ ]*).*/\1/')
     for payload in $payloads; do
-        status=0
-        "$probe" dial --api "$api" --condition discovery --remote "$id" \
-            --samples $((samples + 1)) --echoes "$echoes" --payload "$payload" \
-            --counters 1 >"$work/probe.out" 2>>"$errors" || status=$?
-        grep -v '^counters,' "$work/probe.out" | sed "s/^/$rev,/" >>"$raw" || true
-        grep '^counters,' "$work/probe.out" | sed "s/^counters,/$rev,/" >>"$counters" || true
-        if ((status != 0)); then
-            echo "$rev,${api}_dial_p$payload,-,cold,0,process_exit,0,fail:exit $status" >>"$raw"
+        if [[ $mode == single ]]; then
+            for _ in $(seq "$samples"); do
+                dial_process "$api" "$id" "$payload" 1
+            done
+        else
+            dial_process "$api" "$id" "$payload" $((samples + 1))
         fi
     done
     stop_serve
