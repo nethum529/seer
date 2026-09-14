@@ -83,15 +83,16 @@ From the iroh 1.1.0 source:
 
 A friend dials with the endpoint ID only. The capsule has no relay URL and no
 IP address (ADR 0002). So the dialer must resolve the ID through pkarr or
-DNS. If that lookup finds no record with a usable address, connect fails at
-once with "No addressing information available" (ConnectWithOptsError,
-NoAddress). seer-net maps this to "could not connect to endpoint".
+DNS. If that lookup finds no record with a usable address, connect fails
+with "No addressing information available" (ConnectWithOptsError,
+NoAddress). seer-net maps this and every other connect error to "could not
+connect to endpoint".
 
 Conclusion: relay registered is necessary for a friend join, but it is not
 proof. The proof also needs address published. Today Seer treats online() as
-remote ready. The gap between online() and a completed publish is small in
-practice, because the publish starts earlier than the relay handshake ends.
-But it is not zero, and no code checks it.
+remote ready. No code checks the publish. In the issue 392 run, 20 of 20
+dials made at once after online() succeeded, but each took about 124 ms more
+than a dial made 5 s later. See "Measurements".
 
 ## Why the perf/370 attempt was not safe
 
@@ -126,14 +127,17 @@ window failed about one time in three. The source explains the failure:
   after the first net report. This note did not measure how much of the
   roughly 3 seconds comes before relay selected.
 - If the dialer lookup runs before the listener record is published, the
-  lookup ends with no address and connect fails at once with NoAddress.
+  lookup ends with no address and connect fails with NoAddress. In the issue
+  392 run the failed dials ended 2.5 s to 2.9 s after they started, not at
+  once. The seer-net error text does not name the iroh cause, so the run
+  does not prove that each failure was NoAddress.
 - If the lookup runs after the publish, the dial goes to the relay. It can
   succeed if the listener registers before the QUIC handshake gives up.
   This last point is from reading the source and is not verified.
 
 So the result is a race between two background tasks on two endpoints. It is
-not a fixed fault. The one in three rate is from issue 386. The source does
-not predict the rate, and this note did not measure it again.
+not a fixed fault. Issue 386 reports about one in three. The issue 392 run
+measured 5 failures in 20 dials. See "Measurements".
 
 A broker with a stable key (seer start keeps iroh.key) can behave
 differently. An old record from the last run can still be on the DNS server,
@@ -281,8 +285,9 @@ These are facts found in the source. They are not fixed here.
 
 - G1. Owner paths pay the relay wait (breaks R3). The TCP port opens only
   after online(). This is the main start cost from issue 370.
-- G2. online() does not prove address published. The window is small and
-  not measured. The single dial tests are exposed to it.
+- G2. online() does not prove address published. A dial at once after
+  online() took about 124 ms more than a settled dial and did not fail in
+  20 samples. The single dial tests are exposed to it.
 - G3. Outage after start is not reported. remote_endpoint is set once. The
   broker keeps giving out invitations with no check of the relay status
   (breaks R1 after start).
@@ -294,20 +299,122 @@ These are facts found in the source. They are not fixed here.
 
 ## Measurements
 
-Pending. Phase 2 of issue 392 starts when the baseline harness from issue
-389 is ready. The plan:
+Two runs give the numbers. All values are in ms. p95 uses the nearest rank.
+Median and p95 leave out failed samples. The fail column counts them.
 
-- Release build. At least 10 samples for each boundary.
-- Boundaries on the broker: process spawn, endpoint bind returned, relay
-  selected (first entry in home_relay_status), relay registered (online()
-  returned), TCP port accepts.
-- Local bind time is spawn to TCP port accepts, measured with a broker that
-  has remote = false. Relay registration time is endpoint bind returned to
-  relay registered, measured with remote = true.
-- Raw samples go under docs/research/perf-samples/392/, with the command,
-  the source revision, and the network conditions for each run.
-- Address published has no public signal in iroh 1.1.0. If the harness
-  cannot observe it, the results will say so and will not estimate it.
+- Baseline run, issue 389: revision 367e50c, 20 samples for each workload,
+  raw samples in docs/research/perf-samples/389/. The method and the
+  boundaries are in docs/research/18-transport-baseline.md.
+- Issue 392 run: revision 3fd2f4b, the same probe and driver with the
+  readiness parts added. 20 samples for each workload. Raw samples,
+  summary.csv, environment.txt, and errors.log are in
+  docs/research/perf-samples/392/. Command:
+
+      flock /tmp/claude-1000/perf-run.lock scripts/perf/transport.sh 20 \
+          docs/research/perf-samples/392 "local offline readiness"
+
+Both runs: AMD Ryzen 7 7800X3D, Linux 7.1.6-1-cachyos, rustc 1.98.0,
+release profile, iroh 1.1.0 with preset N0, wired link up, DNS through
+systemd-resolved with no cache flush.
+
+New workloads in the issue 392 run:
+
+- broker_ready, local: seer-broker with remote = false. Spawn until the
+  loopback TCP port accepts. This is local bind with no relay work.
+- broker_ready, offline: seer-broker with remote = true in a new network
+  namespace (unshare -rn) with no route out. The relay is never reached.
+  The row is the time until the broker exits.
+- seer_dial, ready_online: a new iroh serve with a new key announces after
+  online(), as seer_net::Listener does today. A seer_net::dial starts as
+  soon as the driver sees the ready line, with no settle time.
+- seer_dial, ready_bind: the same, but serve announces right after endpoint
+  bind, before online(). This repeats the early readiness case of issue 386.
+
+The driver polls for the ready line every 0.1 s, so each dial starts within
+one poll of the announce.
+
+### Local bind and relay registration
+
+| Run | Workload | Condition | Cache | Boundary | n | fail | Median | p95 |
+|---|---|---|---|---|---|---|---|---|
+| 389 | iroh_listen | default | cold | endpoint_bind | 21 | 0 | 1.560 | 1.642 |
+| 389 | iroh_listen | default | cold | relay_online | 21 | 0 | 3118.939 | 3124.925 |
+| 389 | seer_listen | default | cold | seer_listen_ready | 21 | 0 | 3120.110 | 3126.369 |
+| 389 | broker_ready | default | cold | process_ready | 21 | 0 | 3121.365 | 3127.723 |
+| 389 | broker_ready | default | warm | process_ready | 20 | 0 | 3122.147 | 3127.085 |
+| 392 | broker_ready | local | cold | process_ready | 21 | 0 | 0.695 | 0.954 |
+| 392 | broker_ready | local | warm | process_ready | 20 | 0 | 0.643 | 0.735 |
+| 392 | broker_ready | offline | cold | process_ready | 0 | 21 | - | - |
+| 392 | broker_ready | offline | warm | process_ready | 0 | 20 | - | - |
+
+All 41 offline samples have status "fail:broker exited". Their ms values in
+samples.csv are the time until the broker exited: minimum 4002.028, median
+4002.239, maximum 4008.098. errors.log shows the cause for each: "endpoint
+did not become ready within 4 seconds". The broker never opened its TCP
+port.
+
+The local rows measure until the kernel accepts a TCP connection. run()
+binds the TCP port before serve() opens the registry, so the rows do not
+include the first reply from the broker.
+
+### Join success by readiness point
+
+| Run | Workload | Condition | Boundary | n | fail | Median | p95 |
+|---|---|---|---|---|---|---|---|
+| 389 | seer_dial | discovery (5 s settle) | seer_dial | 21 | 0 | 199.532 | 204.956 |
+| 392 | seer_dial | ready_online | seer_dial | 20 | 0 | 323.097 | 333.074 |
+| 392 | seer_dial | ready_online | stream_open | 20 | 0 | 86.153 | 96.120 |
+| 392 | seer_dial | ready_bind | seer_dial | 15 | 5 | 3323.961 | 3780.133 |
+| 392 | seer_dial | ready_bind | stream_open | 15 | 0 | 83.529 | 219.341 |
+
+The 5 failed ready_bind dials have status "fail:could not connect to
+endpoint". They ended 2510.409, 2705.409, 2735.657, 2854.218, and 2874.965 ms
+after they started. The 15 successful ready_bind dials took 3192.393 to
+3780.133 ms.
+
+### What the numbers say
+
+- Local bind and relay registration are separate costs. Local bind for the
+  broker is 0.695 ms (median, cold). Relay registration is 3118.939 ms, and
+  endpoint bind is 1.560 ms. The broker with remote = true is ready after
+  3121.365 ms. So the relay wait is almost all of the start time. Material:
+  every owner path (seer start message, owner client, owner runtime) needs
+  local ready only, and today it waits about 3.1 s more than local bind
+  (gap G1).
+- The issue 222 path works. With no route to the relay, every broker exited
+  at the 4 s ONLINE_TIMEOUT and never opened its port, so seer start cannot
+  report success. Material for gap G4: the exit comes at 4002 ms, inside the
+  5000 ms seer start budget. A relay that is slower than 4 s makes start
+  fail, even when a local user could work.
+- Announcing at bind is not safe and does not make a join faster. 5 of 20
+  dials failed (25 percent), in line with issue 386. The dials that
+  succeeded took a median of 3323.961 ms from the announce, which is later
+  than today's path: relay registration (3118.939 ms) plus a dial at once
+  after online (323.097 ms). Material: an early announce trades failures for
+  no gain at the friend side. A later design must not announce remote ready
+  at bind.
+- Announcing at online is safe in this run. 20 of 20 dials made at once
+  after online succeeded. Each took about 124 ms more than a dial made 5 s
+  later (323.097 against 199.532 ms, median). The run does not show the
+  cause of the extra time. Not material for a person, who needs seconds to
+  paste the line. It is relevant for tests that dial at once (gap G2): 20
+  samples do not prove that the gap never causes a failure.
+- A friend join today is bounded by relay registration at the room, not by
+  the dial. Local work does not need either.
+
+### Not measured
+
+- Relay selected. It needs a boundary inside relay_online. Adding it would
+  change the start point of the existing relay_online boundary, so this pass
+  did not add it.
+- Address published. iroh 1.1.0 has no public signal for it.
+- The iroh cause of each failed ready_bind dial. seer_net::dial hides it.
+- Relay delay between 0 and 4 s, and recovery after an outage at run time.
+  The driver can remove the network only for the whole broker process.
+- A stable room key. Every ready_* sample used a new key, so no old address
+  record existed. seer start keeps its key, so a real restart can differ.
+- The full seer start and seer join commands, as in the baseline.
+- lan and macOS.
 
 ## Sources
 
