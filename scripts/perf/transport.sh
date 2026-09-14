@@ -2,7 +2,9 @@
 # Measurement driver for issue 389. The method is in
 # docs/research/18-transport-baseline.md.
 #
-# Usage: scripts/perf/transport.sh [samples] [output-dir]
+# Usage: scripts/perf/transport.sh [samples] [output-dir] [all|reuse]
+# The reuse set is for issue 390. It measures endpoint reuse against
+# connection reuse on the relay and discovery paths.
 # Needs bash 5 or later for EPOCHREALTIME. Linux only.
 set -euo pipefail
 
@@ -10,6 +12,7 @@ samples=${1:-10}
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 out=${2:-target/perf/389-$(date -u +%Y%m%dT%H%M%SZ)}
+set_name=${3:-all}
 mkdir -p "$out"
 raw="$out/samples.csv"
 errors="$out/errors.log"
@@ -41,6 +44,7 @@ write_environment() {
         echo "date_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "revision: $rev"
         echo "samples_per_workload: $samples"
+        echo "workload_set: $set_name"
         echo "kernel: $(uname -srm)"
         echo "cpu: $(lscpu | sed -n 's/^Model name: *//p')"
         echo "cpu_count: $(nproc)"
@@ -182,6 +186,22 @@ measure_dial() {
     stop_serve
 }
 
+measure_reuse() {
+    start_serve --api iroh --condition relay
+    local id relay
+    id=$(serve_field id)
+    relay=$(serve_field relay)
+    echo "$relay" >"$work/relay.txt"
+    cold_and_warm iroh_dial dial --api iroh --condition relay --remote "$id" --relay "$relay"
+    cold_and_warm iroh_session session --api iroh --condition relay --remote "$id" --relay "$relay"
+    stop_serve
+
+    start_serve --api iroh --condition default
+    id=$(serve_field id)
+    cold_and_warm iroh_session session --api iroh --condition discovery --remote "$id"
+    stop_serve
+}
+
 if { : <>"/dev/tcp/127.0.0.1/$broker_port"; } 2>/dev/null; then
     echo "port $broker_port is in use; stop the process that uses it" >&2
     exit 1
@@ -190,9 +210,18 @@ fi
 write_environment
 echo "rev,workload,condition,cache,sample,boundary,ms,status" >"$raw"
 : >"$errors"
-measure_broker
-measure_listen
-measure_dial
+case $set_name in
+all)
+    measure_broker
+    measure_listen
+    measure_dial
+    ;;
+reuse) measure_reuse ;;
+*)
+    echo "unknown workload set: $set_name" >&2
+    exit 1
+    ;;
+esac
 echo "relay: $(cat "$work/relay.txt")" >>"$out/environment.txt"
 scripts/perf/summarize.sh "$raw" >"$out/summary.csv"
 echo "wrote $out"
