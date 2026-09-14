@@ -182,6 +182,11 @@ measure_dial() {
     stop_serve
 }
 
+# scripts/perf/lookup.sh sources this file for the helpers above.
+if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
+    return 0
+fi
+
 if { : <>"/dev/tcp/127.0.0.1/$broker_port"; } 2>/dev/null; then
     echo "port $broker_port is in use; stop the process that uses it" >&2
     exit 1
