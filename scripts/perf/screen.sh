@@ -5,7 +5,7 @@
 # Usage: flock /tmp/claude-1000/perf-run.lock scripts/perf/screen.sh [repeats] [output-dir] [workloads]
 # workloads is a list from: typing editor pager burst. Default is all four.
 # It starts its own broker on port 47417 and its own runtime in a temp dir.
-# Linux only. Needs bash 5, python3, and sha256sum.
+# Linux only. Needs bash 5 and sha256sum.
 set -euo pipefail
 
 repeats=${1:-3}
@@ -28,6 +28,7 @@ broker_pid=
 runtime_pid=
 settle_seconds=3
 sizes="80x24 200x50"
+burst_copies=1200
 
 cleanup() {
     for pid in $runtime_pid $broker_pid; do
@@ -59,6 +60,7 @@ rate_ms() {
     echo "repeats: $repeats"
     echo "workloads: $workloads"
     echo "sizes: $sizes"
+    echo "burst_copies: $burst_copies"
     for workload in $workloads; do
         echo "$workload: input=$inputs/$workload.txt rate_ms=$(rate_ms "$workload")"
     done
@@ -87,6 +89,7 @@ start_room() {
     # A fixed prompt with no title escape, so every run types into the same shell.
     printf "PS1='\$ '\nPROMPT_COMMAND=()\nunset HISTFILE\n" >"$home/.bashrc"
     cp "$inputs/long.txt" "$home/long.txt"
+    for _ in $(seq "$burst_copies"); do cat "$inputs/long.txt"; done >"$home/burst.txt"
     "$broker" "$work/broker.toml" >"$work/broker.log" 2>&1 &
     broker_pid=$!
     for _ in $(seq 100); do

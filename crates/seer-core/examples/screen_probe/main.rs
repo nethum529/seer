@@ -231,7 +231,7 @@ fn capture(
             continue;
         }
         last_update = Instant::now();
-        let diff = estimate::diff(previous.as_ref(), &frame, &options.host, pane)?;
+        let diff = estimate::diff(previous.as_ref(), &frame, &options.host, pane, bytes)?;
         updates.push(Update {
             seq: updates.len() + 1,
             at: last_update - start,
