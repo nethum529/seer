@@ -1,5 +1,5 @@
 use seer_net::{EndpointId, Listener, SecretKey, decode_endpoint_id, dial, encode_endpoint_id};
-use std::io::{self, BufRead, BufReader};
+use std::io::{self, BufRead, BufReader, Read};
 use std::os::unix::net::UnixStream;
 use std::process::{Command, Stdio};
 use std::sync::mpsc::{self, RecvTimeoutError};
@@ -18,7 +18,7 @@ fn listener_process() {
     }
     let listener = Listener::bind(SecretKey::generate()).expect("listener must bind");
     println!("{ID_MARKER} {}", encode_endpoint_id(listener.id()));
-    thread::sleep(SETUP_TIMEOUT * 2);
+    let _ = io::stdin().read_to_end(&mut Vec::new());
 }
 
 // Stopped state: the listener process published its address and was then
@@ -28,6 +28,7 @@ fn dial_gives_up_on_a_killed_listener_process() {
     let mut child = Command::new(std::env::current_exe().expect("test binary path must be known"))
         .args(["--exact", "listener_process", "--nocapture"])
         .env(CHILD_ENV, "1")
+        .stdin(Stdio::piped())
         .stdout(Stdio::piped())
         .spawn()
         .expect("listener process must start");
