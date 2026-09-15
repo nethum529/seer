@@ -12,4 +12,6 @@ Each file breaks one system into components, then compares.
 - 15-relays-and-rendezvous.md
 - 16-service-only-security.md
 - 17-terminal-sharing-prior-art.md
+- 18-transport-baseline.md
+- 19-connection-reuse.md
 - 20-address-lookup.md

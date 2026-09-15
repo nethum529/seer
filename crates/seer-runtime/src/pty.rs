@@ -1,7 +1,6 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::VecDeque;
 use std::fmt::Display;
-use std::fs;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -82,7 +81,7 @@ impl PtySession {
 
 #[cfg(target_os = "linux")]
 fn process_name(group: i32) -> String {
-    fs::read_to_string(format!("/proc/{group}/comm"))
+    std::fs::read_to_string(format!("/proc/{group}/comm"))
         .map(|name| name.trim().to_owned())
         .unwrap_or_default()
 }

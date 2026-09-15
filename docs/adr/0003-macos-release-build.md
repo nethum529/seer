@@ -57,11 +57,22 @@ Linux.
   so aarch64-apple-darwin is already present.
 - Steps 3 and 4 run cargo build --release --package seer for both
   darwin targets.
-- Step 5 makes seer-darwin-arm64.tar.gz and
+- Step 5 signs each of the six binaries with an ad hoc signature:
+  codesign --force --sign - for seer, seer-broker, and seer-runtime
+  in both target directories. This is a guard. In issue 362 the
+  shipped seer-runtime passed codesign --verify but macOS killed it
+  with Code Signature Invalid. That matches a copy over an old
+  binary in place: macOS keeps the signature of a file by inode.
+  install.sh now stages each binary and renames it into place, the
+  same way seer update does.
+- Step 6 runs the seer-runtime of the runner architecture and
+  checks that it reaches argument parsing. The step fails when
+  macOS kills the runtime before it starts.
+- Step 7 makes seer-darwin-arm64.tar.gz and
   seer-darwin-x86_64.tar.gz from the three binaries seer,
   seer-broker, and seer-runtime. Same asset names and layout as the
   Linux asset.
-- Step 6 uploads both archives with gh release upload --clobber to
+- Step 8 uploads both archives with gh release upload --clobber to
   the tag, using github.token.
 
 ### release.sh
@@ -82,6 +93,11 @@ Linux.
 
 ## Consequences
 
+- Every macOS release signs its binaries with an ad hoc signature
+  before it packages them and checks that the runtime starts. A
+  runtime that macOS kills before it opens its socket is reported
+  by the client with its exit status and the runtime log path
+  (issue 362).
 - A release needs the network and a working GitHub Actions runner.
   The Linux part still works offline; the macOS part does not.
 - The private source repository is exposed to seer-releases through

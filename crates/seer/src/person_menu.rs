@@ -19,13 +19,17 @@ pub(crate) struct PersonMenu {
 }
 
 pub(crate) fn open(state: &mut ClientState, index: usize, row: Rect) {
-    state.select_person(index);
-    if state.user() == state.own_user {
+    let Some(user) = state
+        .people
+        .get(index)
+        .map(|person| person.user_id.clone())
+        .filter(|user| *user != state.own_user)
+    else {
         state.menu = None;
         return;
-    }
+    };
     state.menu = Some(PersonMenu {
-        user: state.user().into(),
+        user,
         anchor: Position::new(row.right().saturating_add(1), row.y + 1),
         selected: 0,
         scroll: 0,
@@ -81,17 +85,21 @@ fn activate(
         toggle(stream, state, &menu.user)?;
         return Ok(false);
     }
-    if let Some(terminal) = state
+    let Some(pane) = state
         .terminals
         .get(&menu.user)
         .and_then(|list| list.get(menu.selected))
-    {
-        state.viewer = Some(Viewer::new(menu.user.clone(), terminal.pane.clone()));
-        state.focus = menu.selected;
-        crate::panels::close(state);
-        return Ok(true);
+        .map(|terminal| terminal.pane.clone())
+    else {
+        return Ok(false);
+    };
+    if let Some(index) = state.people.iter().position(|p| p.user_id == menu.user) {
+        state.select_person(index);
     }
-    Ok(false)
+    state.viewer = Some(Viewer::new(menu.user.clone(), pane));
+    state.focus = menu.selected;
+    crate::panels::close(state);
+    Ok(true)
 }
 
 fn reveal(menu: &mut PersonMenu, count: usize) {
