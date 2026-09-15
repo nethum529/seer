@@ -90,6 +90,10 @@ impl PaneHost {
         self.grid.snapshot()
     }
 
+    pub(crate) fn view(&self, size: seer_core::PaneSize) -> Option<TerminalFrame> {
+        self.grid.view(size.cols, size.rows)
+    }
+
     pub fn foreground(&self) -> String {
         self.session.foreground_name()
     }

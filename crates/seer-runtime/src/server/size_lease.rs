@@ -23,7 +23,9 @@ impl SharedSession {
             let current = session.pane_hosts.get(pane).map(|host| ServerMsg::Cells {
                 user: session.user.clone(),
                 pane: pane.to_owned(),
-                frame: host.frame(),
+                frame: size
+                    .and_then(|size| host.view(size))
+                    .unwrap_or_else(|| host.frame()),
             });
             (valid, current)
         };

@@ -164,8 +164,12 @@ impl Connection {
     ) -> io::Result<bool> {
         match self.projection(session) {
             ConnectionProjection::Full => {
-                for output in encoded {
-                    if !self.send(Arc::clone(output)) {
+                for (message, output) in messages.iter().zip(encoded) {
+                    let output = match self.fitted(session, message) {
+                        Some(fitted) => writer::encode(&fitted)?,
+                        None => Arc::clone(output),
+                    };
+                    if !self.send(output) {
                         return Ok(false);
                     }
                 }
@@ -175,14 +179,16 @@ impl Connection {
                     let Some(message) = project_message(&tree, message) else {
                         continue;
                     };
-                    if !self.send(writer::encode(&message)?) {
+                    let fitted = self.fitted(session, &message);
+                    if !self.send(writer::encode(fitted.as_ref().unwrap_or(&message))?) {
                         return Ok(false);
                     }
                 }
             }
             ConnectionProjection::Catalog(watched) => {
                 for message in messages.iter().filter(|m| catalog_passes(&watched, m)) {
-                    if !self.send(writer::encode(message)?) {
+                    let fitted = self.fitted(session, message);
+                    if !self.send(writer::encode(fitted.as_ref().unwrap_or(message))?) {
                         return Ok(false);
                     }
                 }
@@ -194,6 +200,21 @@ impl Connection {
             }
         }
         Ok(true)
+    }
+
+    // Each watcher gets the screen at its own size. The PTY keeps the
+    // owner's size (issue 406).
+    fn fitted(&self, session: &UserSession, message: &ServerMsg) -> Option<ServerMsg> {
+        let ServerMsg::Cells { user, pane, .. } = message else {
+            return None;
+        };
+        let size = *self.watches.get(pane)?;
+        let frame = session.pane_hosts.get(pane)?.view(size)?;
+        Some(ServerMsg::Cells {
+            user: user.clone(),
+            pane: pane.clone(),
+            frame,
+        })
     }
 
     fn projection(&mut self, session: &UserSession) -> ConnectionProjection {

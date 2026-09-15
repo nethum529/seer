@@ -1,10 +1,67 @@
+use crate::theme::Palette;
 use ratatui::{
+    Frame,
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::Widget,
+    widgets::{Borders, Widget},
 };
 use seer_core::Cell;
+
+/// Draws a screen into `area` and returns the rect the screen took.
+///
+/// A full screen app draws for the owner's PTY size and cannot be redrawn.
+/// When it is smaller than the area it sits in the middle with an edge
+/// around it. Everything else fills the area from the top left corner.
+pub(crate) fn draw_screen(
+    frame: &mut Frame<'_>,
+    rows: &[Vec<Cell>],
+    fixed: bool,
+    area: Rect,
+) -> Rect {
+    let width = rows
+        .first()
+        .map_or(0, Vec::len)
+        .min(usize::from(area.width)) as u16;
+    let height = rows.len().min(usize::from(area.height)) as u16;
+    if !fixed || rows.is_empty() || (width, height) == (area.width, area.height) {
+        frame.render_widget(PaneCells::new(rows), area);
+        return area;
+    }
+    let placed = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    );
+    edge(frame, placed, area);
+    frame.render_widget(PaneCells::new(rows), placed);
+    placed
+}
+
+fn edge(frame: &mut Frame<'_>, placed: Rect, area: Rect) {
+    let mut borders = Borders::NONE;
+    let mut outer = placed;
+    if placed.x > area.x {
+        outer.x -= 1;
+        outer.width += 1;
+        borders |= Borders::LEFT;
+    }
+    if placed.right() < area.right() {
+        outer.width += 1;
+        borders |= Borders::RIGHT;
+    }
+    if placed.y > area.y {
+        outer.y -= 1;
+        outer.height += 1;
+        borders |= Borders::TOP;
+    }
+    if placed.bottom() < area.bottom() {
+        outer.height += 1;
+        borders |= Borders::BOTTOM;
+    }
+    frame.render_widget(Palette::default().block(false).borders(borders), outer);
+}
 
 pub(crate) struct PaneCells<'a> {
     rows: &'a [Vec<Cell>],

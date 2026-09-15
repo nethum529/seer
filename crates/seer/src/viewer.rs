@@ -1,7 +1,7 @@
 use crate::{
     input::key_to_input,
     state::ClientState,
-    terminal_cells::PaneCells,
+    terminal_cells::draw_screen,
     tui::{send, send_viewer_input},
 };
 use crossterm::event::KeyEvent;
@@ -17,6 +17,7 @@ pub(crate) struct Viewer {
     pub(crate) user: String,
     pub(crate) pane: String,
     pub(crate) area: Rect,
+    pub(crate) content: Rect,
     pub(crate) sent_size: Option<Size>,
     history: Vec<Vec<seer_core::Cell>>,
     previous: Vec<Vec<seer_core::Cell>>,
@@ -29,6 +30,7 @@ impl Viewer {
             user,
             pane,
             area: Rect::default(),
+            content: Rect::default(),
             sent_size: None,
             history: Vec::new(),
             previous: Vec::new(),
@@ -155,18 +157,24 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     if area.is_empty() {
         return;
     }
-    if let Some(content) = state.frames.get(&viewer.target()) {
-        let rows = viewer.visible_rows(area.height);
-        frame.render_widget(PaneCells::new(&rows), area);
-        if allowed
-            && !state.chrome_owns_input()
-            && viewer.offset == 0
-            && content.cursor.visible
-            && content.cursor.row < area.height
-            && content.cursor.column < area.width
-        {
-            frame
-                .set_cursor_position((area.x + content.cursor.column, area.y + content.cursor.row));
-        }
+    let Some(screen) = state.frames.get(&viewer.target()) else {
+        return;
+    };
+    let rows = viewer.visible_rows(area.height);
+    let placed = draw_screen(frame, &rows, screen.modes.alt_screen, area);
+    if allowed
+        && !state.chrome_owns_input()
+        && viewer.offset == 0
+        && screen.cursor.visible
+        && screen.cursor.row < placed.height
+        && screen.cursor.column < placed.width
+    {
+        frame.set_cursor_position((
+            placed.x + screen.cursor.column,
+            placed.y + screen.cursor.row,
+        ));
+    }
+    if let Some(viewer) = &mut state.viewer {
+        viewer.content = placed;
     }
 }
