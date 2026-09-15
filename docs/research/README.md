@@ -14,3 +14,4 @@ Each file breaks one system into components, then compares.
 - 17-terminal-sharing-prior-art.md
 - 18-transport-baseline.md
 - 19-connection-reuse.md
+- 20-address-lookup.md
