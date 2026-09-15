@@ -1,5 +1,5 @@
 use iroh::Endpoint;
-use iroh::endpoint::{Incoming, RecvStream, SendStream, presets};
+use iroh::endpoint::{Connection, Incoming, RecvStream, SendStream, presets};
 use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::os::unix::fs::OpenOptionsExt;
@@ -23,6 +23,10 @@ pub use stream::{Socket, Stream};
 
 pub const ALPN: &[u8] = b"seer/1";
 const ONLINE_TIMEOUT: Duration = Duration::from_secs(4);
+// Issue 410: a dial to a peer that published its address and then stopped
+// did not fail within 15 s. A stale address makes a good handshake take about
+// 1.2 s (docs/research/20-address-lookup.md).
+const CONNECT_TIMEOUT: Duration = Duration::from_secs(6);
 
 const PRE_STREAM_CONNECTION_LIMIT: usize = 32;
 const PRE_STREAM_TIMEOUT: Duration = Duration::from_secs(5);
@@ -134,7 +138,7 @@ pub fn dial(secret_key: SecretKey, remote: EndpointId) -> io::Result<UnixStream>
     let (result_tx, result_rx) = mpsc::channel();
     thread::Builder::new()
         .name("seer-net-dialer".to_owned())
-        .spawn(move || dialer_thread(secret_key, remote, result_tx))?;
+        .spawn(move || run_attempt(&result_tx, run_dialer(secret_key, remote, &result_tx)))?;
     result_rx
         .recv()
         .map_err(|_| io::Error::other("dialer thread stopped"))?
@@ -151,69 +155,47 @@ pub fn dial_session(secret_key: SecretKey, remote: EndpointId) -> io::Result<Ses
     let (ready_tx, ready_rx) = mpsc::channel();
     thread::Builder::new()
         .name("seer-net-session".to_owned())
-        .spawn(move || session_thread(secret_key, remote, worker_control, ready_tx, parts))?;
+        .spawn(move || {
+            run_attempt(
+                &ready_tx,
+                run_session(secret_key, remote, worker_control, &ready_tx, parts),
+            );
+        })?;
     ready_rx
         .recv()
         .map_err(|_| io::Error::other("session thread stopped"))??;
     Ok(session)
 }
 
-fn session_thread(
-    secret_key: SecretKey,
-    remote: EndpointId,
-    control: UnixStream,
-    ready: Sender<io::Result<()>>,
-    parts: session::SessionParts,
-) {
-    let runtime = match build_runtime() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            let _ = ready.send(Err(error));
-            return;
-        }
-    };
-    runtime.block_on(run_session(secret_key, remote, control, ready, parts));
+// The error goes back only after the runtime is dropped, so a failed attempt
+// holds no endpoint when the caller retries with the same key.
+fn run_attempt<T>(reply: &Sender<io::Result<T>>, attempt: impl Future<Output = io::Result<()>>) {
+    let outcome = build_runtime().and_then(|runtime| runtime.block_on(attempt));
+    if let Err(error) = outcome {
+        let _ = reply.send(Err(error));
+    }
 }
 
 async fn run_session(
     secret_key: SecretKey,
     remote: EndpointId,
     control: UnixStream,
-    ready: Sender<io::Result<()>>,
+    ready: &Sender<io::Result<()>>,
     parts: session::SessionParts,
-) {
-    let control = match tokio::net::UnixStream::from_std(control) {
-        Ok(control) => control,
-        Err(_) => {
-            let _ = ready.send(Err(io::Error::other("could not open session control")));
-            return;
+) -> io::Result<()> {
+    let control = tokio::net::UnixStream::from_std(control)
+        .map_err(|_| io::Error::other("could not open session control"))?;
+    let endpoint = bind_endpoint(secret_key).await?;
+    let connection = connect(&endpoint, remote).await?;
+    if ready.send(Ok(())).is_ok() {
+        tokio::select! {
+            () = session::serve_connection(connection.clone(), parts) => {}
+            () = session::shutdown_on_control(control) => {}
         }
-    };
-    let endpoint = match bind_endpoint(secret_key).await {
-        Ok(endpoint) => endpoint,
-        Err(error) => {
-            let _ = ready.send(Err(error));
-            return;
-        }
-    };
-    let connection = match endpoint.connect(remote, ALPN).await {
-        Ok(connection) => connection,
-        Err(_) => {
-            let _ = ready.send(Err(io::Error::other("could not connect to endpoint")));
-            endpoint.close().await;
-            return;
-        }
-    };
-    if ready.send(Ok(())).is_err() {
-        endpoint.close().await;
-        return;
+        connection.close(0_u8.into(), b"seer session closed");
     }
-    tokio::select! {
-        () = session::serve_connection(connection.clone(), parts) => {}
-        () = session::shutdown_on_control(control) => {}
-    }
-    connection.close(0_u8.into(), b"seer session closed");
     endpoint.close().await;
+    Ok(())
 }
 
 fn create_secret_key(path: &Path) -> io::Result<SecretKey> {
@@ -322,6 +304,19 @@ async fn bind_endpoint(secret_key: SecretKey) -> io::Result<Endpoint> {
         .map_err(|_| io::Error::other("could not bind endpoint"))
 }
 
+// On failure the caller drops the endpoint instead of closing it. No peer
+// answered, and a close waits about 3 s for the abandoned handshake to drain.
+async fn connect(endpoint: &Endpoint, remote: EndpointId) -> io::Result<Connection> {
+    match timeout(CONNECT_TIMEOUT, endpoint.connect(remote, ALPN)).await {
+        Ok(Ok(connection)) => Ok(connection),
+        Ok(Err(_)) => Err(io::Error::other("could not connect to endpoint")),
+        Err(_) => Err(io::Error::new(
+            io::ErrorKind::TimedOut,
+            "could not connect to endpoint within 6 seconds",
+        )),
+    }
+}
+
 async fn handle_incoming(
     incoming: Incoming,
     accepted: Sender<AcceptedStream>,
@@ -356,61 +351,31 @@ async fn handle_incoming(
     first.abort();
 }
 
-fn dialer_thread(
-    secret_key: SecretKey,
-    remote: EndpointId,
-    result: Sender<io::Result<UnixStream>>,
-) {
-    let runtime = match build_runtime() {
-        Ok(runtime) => runtime,
-        Err(error) => {
-            let _ = result.send(Err(error));
-            return;
-        }
-    };
-    runtime.block_on(run_dialer(secret_key, remote, result));
-}
-
 async fn run_dialer(
     secret_key: SecretKey,
     remote: EndpointId,
-    result: Sender<io::Result<UnixStream>>,
-) {
-    let endpoint = match bind_endpoint(secret_key).await {
-        Ok(endpoint) => endpoint,
-        Err(error) => {
-            let _ = result.send(Err(error));
-            return;
-        }
-    };
-    let connection = match endpoint.connect(remote, ALPN).await {
-        Ok(connection) => connection,
-        Err(_) => {
-            let _ = result.send(Err(io::Error::other("could not connect to endpoint")));
-            endpoint.close().await;
-            return;
-        }
-    };
-    let (send, recv) = match connection.open_bi().await {
-        Ok(streams) => streams,
-        Err(_) => {
-            let _ = result.send(Err(io::Error::other("could not open stream")));
-            endpoint.close().await;
-            return;
-        }
-    };
-    let (caller_stream, bridge_stream) = match stream_pair() {
-        Ok(streams) => streams,
-        Err(error) => {
-            let _ = result.send(Err(error));
-            endpoint.close().await;
-            return;
-        }
-    };
+    result: &Sender<io::Result<UnixStream>>,
+) -> io::Result<()> {
+    let endpoint = bind_endpoint(secret_key).await?;
+    let connection = connect(&endpoint, remote).await?;
+    let bridged = bridge_first_stream(&connection, result).await;
+    endpoint.close().await;
+    bridged
+}
+
+async fn bridge_first_stream(
+    connection: &Connection,
+    result: &Sender<io::Result<UnixStream>>,
+) -> io::Result<()> {
+    let (send, recv) = connection
+        .open_bi()
+        .await
+        .map_err(|_| io::Error::other("could not open stream"))?;
+    let (caller_stream, bridge_stream) = stream_pair()?;
     if result.send(Ok(caller_stream)).is_ok() {
         let _ = bridge(send, recv, bridge_stream).await;
     }
-    endpoint.close().await;
+    Ok(())
 }
 
 fn build_runtime() -> io::Result<tokio::runtime::Runtime> {
