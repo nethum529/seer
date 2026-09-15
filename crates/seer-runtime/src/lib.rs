@@ -11,6 +11,7 @@ mod persistence;
 mod pty;
 mod room;
 mod server;
+mod shell_env;
 mod snapshot;
 mod user_session;
 
