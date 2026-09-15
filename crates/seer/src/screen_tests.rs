@@ -29,7 +29,6 @@ fn person(user: &str, name: &str) -> Person {
 fn the_picker_shows_every_person_and_the_permission_for_the_viewed_one() {
     let mut state = ClientState::new(Tree::new(), "alice".into());
     state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
-    state.server = "127.0.0.1:7321".into();
     state.selected = 1;
     panels::open(&mut state, Panel::Picker);
     state.terminals.insert(
@@ -53,7 +52,6 @@ fn the_picker_shows_every_person_and_the_permission_for_the_viewed_one() {
         "Alice",
         "host",
         "Permissions not granted for Bob",
-        "127.0.0.1:7321",
     ] {
         assert!(
             text.contains(expected),
@@ -153,6 +151,30 @@ fn draw_text(state: &mut ClientState, width: u16, height: u16) -> Vec<String> {
     (0..height)
         .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
         .collect()
+}
+
+#[test]
+fn the_picker_and_session_panel_show_the_server_alias_and_never_the_endpoint() {
+    let key = "5e48802f6b284502a99a5cd31388307e7cc1cb2ca05e5b7a085497a02f8ecab6";
+    let server = crate::store::ServerEntry {
+        endpoint: format!("iroh:{key}"),
+        alias: "alice-laptop".into(),
+        user_id: "alice".into(),
+        name: "Alice".into(),
+        credential: "secret".into(),
+        current: true,
+    };
+    let mut state = ClientState::for_server(Tree::new(), &server);
+    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    for panel in [Panel::Picker, Panel::Session] {
+        panels::open(&mut state, panel);
+        let text = draw_text(&mut state, 200, 35).join("\n");
+        assert!(text.contains("alice-laptop"), "{text}");
+        assert!(
+            !text.contains("iroh") && !text.contains(&key[..8]),
+            "{text}"
+        );
+    }
 }
 
 #[test]

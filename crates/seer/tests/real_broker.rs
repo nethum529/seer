@@ -40,7 +40,7 @@ fn commands_work_with_stream_messages_from_the_real_broker() {
     assert!(join.stderr.is_empty());
     assert_eq!(
         text(&join.stdout),
-        format!("Invitation: Server: {address}\nName: Joined as bob. Attaching...\n")
+        "Invitation: Name: Joined as bob. Attaching...\n"
     );
 
     thread::sleep(Duration::from_millis(100));

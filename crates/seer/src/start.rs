@@ -78,7 +78,7 @@ fn run_linux(restore: bool) -> io::Result<()> {
                 "Server is running. Run seer stop, then seer start --restore.",
             ));
         }
-        println!("Server already running at {}.", config.published_addr);
+        println!("Server already running.");
         return Ok(());
     }
     if !restore {
@@ -289,7 +289,7 @@ fn start_broker(
     }
     wordmark::print(WORDMARK);
     println!();
-    println!("Server started at {}.", config.published_addr);
+    println!("Server started.");
     println!("You are {}.", config.owner_name);
     println!("Ready in {:.2} s.", started.elapsed().as_secs_f64());
     let invite_started = Instant::now();

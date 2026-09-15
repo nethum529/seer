@@ -77,7 +77,6 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
         .rfind(|token| token.starts_with("SEER"))
         .unwrap_or(&invitation);
     let capsule = capsule::parse(invitation).map_err(CommandError::system)?;
-    println!("Server: {}", capsule.endpoint);
     let endpoint = capsule.endpoint.to_string();
 
     let default_name = std::env::var("USER")
@@ -333,10 +332,10 @@ fn welcome_tree(reply: ServerMsg) -> Result<Tree, CommandError> {
 }
 
 fn connect(endpoint: &str) -> Result<Socket, CommandError> {
-    let parsed = capsule::parse_endpoint(endpoint).ok_or_else(|| tcp_failure(endpoint))?;
+    let parsed = capsule::parse_endpoint(endpoint).ok_or_else(tcp_failure)?;
     let stream = match parsed {
         Endpoint::Tcp(address) => {
-            Socket::from(TcpStream::connect(&address).map_err(|_| tcp_failure(endpoint))?)
+            Socket::from(TcpStream::connect(&address).map_err(|_| tcp_failure())?)
         }
         Endpoint::Iroh(id) => connect_iroh(&id)?,
     };
@@ -364,10 +363,10 @@ fn connect_iroh(id: &str) -> Result<Socket, CommandError> {
         })
 }
 
-fn tcp_failure(endpoint: &str) -> CommandError {
-    CommandError::usage(format!(
-        "Cannot reach {endpoint}. Check that the server is running and that you are on the same network."
-    ))
+fn tcp_failure() -> CommandError {
+    CommandError::usage(
+        "Cannot reach the server. Check that the server is running and that you are on the same network.",
+    )
 }
 
 fn send(stream: &mut impl Stream, message: &ClientMsg) -> Result<(), CommandError> {
@@ -441,8 +440,7 @@ fn finish_session(
         crate::tui_link::prepare_room(room).map_err(CommandError::system)?;
     }
     tui::set_peek_person(peek_person);
-    let exit = tui::run(local, room, tree, server.user_id.clone(), server.clone())
-        .map_err(CommandError::system)?;
+    let exit = tui::run(local, room, tree, server.clone()).map_err(CommandError::system)?;
     match exit {
         tui::SessionExit::Detached => print_detached(&server.alias),
         tui::SessionExit::ServerStopped => print_server_stopped(),

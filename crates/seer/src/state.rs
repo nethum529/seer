@@ -49,6 +49,12 @@ impl ClientState {
     pub(crate) fn chrome_owns_input(&self) -> bool {
         self.chrome.panel.is_some() || self.menu.is_some() || self.chrome.context.is_some()
     }
+    pub(crate) fn for_server(tree: Tree, server: &crate::store::ServerEntry) -> Self {
+        let mut state = Self::new(tree, server.user_id.clone());
+        state.server.clone_from(&server.alias);
+        state.own_name.clone_from(&server.name);
+        state
+    }
     pub(crate) fn new(tree: Tree, own_user: String) -> Self {
         let own = Person {
             user_id: own_user.clone(),
