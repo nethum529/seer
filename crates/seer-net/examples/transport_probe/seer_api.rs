@@ -37,8 +37,8 @@ fn echo_stream(mut stream: UnixStream) {
     }
 }
 
-// Warm samples call dial again in the same process with the same key, as a
-// runtime does when it reconnects.
+// Warm samples call dial again in the same process with the same key, as the
+// seer binary does with its device key.
 pub(crate) fn seer_dial(args: &Args, report: &Report) -> io::Result<()> {
     let remote = target(args)?.id;
     let key = SecretKey::generate();

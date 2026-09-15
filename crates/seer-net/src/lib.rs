@@ -159,8 +159,9 @@ pub fn dial_session(secret_key: SecretKey, remote: EndpointId) -> io::Result<Ses
     Ok(session)
 }
 
-// The error goes back only after the runtime is dropped, so a failed attempt
-// holds no endpoint when the caller retries with the same key.
+// dial_session only. The error goes back only after the runtime is dropped,
+// so a failed attempt holds no endpoint when the caller retries with the same
+// key. dial does not use this. It keeps one shared endpoint for each key.
 fn run_attempt<T>(reply: &Sender<io::Result<T>>, attempt: impl Future<Output = io::Result<()>>) {
     let outcome = build_runtime().and_then(|runtime| runtime.block_on(attempt));
     if let Err(error) = outcome {
@@ -177,7 +178,7 @@ async fn run_session(
 ) -> io::Result<()> {
     let control = tokio::net::UnixStream::from_std(control)
         .map_err(|_| io::Error::other("could not open session control"))?;
-    let endpoint = bind_endpoint(secret_key).await?;
+    let endpoint = bind_endpoint(secret_key, vec![ALPN.to_vec()]).await?;
     let connection = connect(&endpoint, remote).await?;
     if ready.send(Ok(())).is_ok() {
         tokio::select! {
@@ -244,7 +245,7 @@ async fn run_listener(
             return;
         }
     };
-    let endpoint = match bind_endpoint(secret_key).await {
+    let endpoint = match bind_endpoint(secret_key, vec![ALPN.to_vec()]).await {
         Ok(endpoint) => endpoint,
         Err(error) => {
             let _ = ready.send(Err(error));
@@ -287,10 +288,10 @@ async fn run_listener(
     endpoint.close().await;
 }
 
-async fn bind_endpoint(secret_key: SecretKey) -> io::Result<Endpoint> {
+async fn bind_endpoint(secret_key: SecretKey, alpns: Vec<Vec<u8>>) -> io::Result<Endpoint> {
     Endpoint::builder(presets::N0)
         .secret_key(secret_key)
-        .alpns(vec![ALPN.to_vec()])
+        .alpns(alpns)
         .bind()
         .await
         .map_err(|_| io::Error::other("could not bind endpoint"))
