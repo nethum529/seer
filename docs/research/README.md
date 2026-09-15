@@ -15,3 +15,4 @@ Each file breaks one system into components, then compares.
 - 18-transport-baseline.md
 - 19-connection-reuse.md
 - 20-address-lookup.md
+- 21-startup-readiness.md
