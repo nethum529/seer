@@ -12,6 +12,9 @@ use seer_net::{Session, Socket, Stream};
 const ENDPOINT_VAR: &str = "SEER_ROOM_ENDPOINT";
 const CREDENTIAL_VAR: &str = "SEER_ROOM_CREDENTIAL";
 const KEY_VAR: &str = "SEER_ROOM_KEY";
+// Issue 366: only the runtime may read the room secrets, so a Seer shell
+// must not inherit them.
+pub(crate) const SECRET_VARS: [&str; 2] = [CREDENTIAL_VAR, KEY_VAR];
 // The client saves an iroh room as iroh:<id>, the capsule form.
 const IROH_PREFIX: &str = "iroh:";
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);

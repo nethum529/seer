@@ -217,6 +217,48 @@ fn joins_commit_person_and_seat_atomically() {
     remove_state_directory(&state_dir);
 }
 
+// Issue 418: a change to the screen update message is safe during an upgrade
+// only because the room refuses a peer from another minor release.
+#[test]
+fn the_room_accepts_another_patch_release_and_refuses_another_minor_release() {
+    let listener = TcpListener::bind("127.0.0.1:0").expect("listener must bind");
+    let address = listener
+        .local_addr()
+        .expect("listener must have an address");
+    let (config, state_dir) = test_config(address);
+    let _server = thread::spawn(move || serve(listener, None, &config));
+    let major = env!("CARGO_PKG_VERSION_MAJOR");
+    let minor: u32 = env!("CARGO_PKG_VERSION_MINOR")
+        .parse()
+        .expect("minor version must be a number");
+    let patch: u32 = env!("CARGO_PKG_VERSION_PATCH")
+        .parse()
+        .expect("patch version must be a number");
+    let other_patch = format!("{major}.{minor}.{}", patch + 1);
+    let other_minor = format!("{major}.{}.{patch}", minor + 1);
+    let hello = |version: &str| ClientMsg::Hello {
+        user_id: "u-alice".into(),
+        credential: "alice-secret".into(),
+        version: version.into(),
+    };
+    let publish = |version: &str| ClientMsg::PublishRuntime {
+        user_id: "u-bob".into(),
+        credential: "bob-secret".into(),
+        version: version.into(),
+        generation: "gen-1".into(),
+    };
+
+    let (_, reply) = exchange(address, &hello(&other_patch));
+    assert!(matches!(reply, ServerMsg::Welcome { .. }), "{reply:?}");
+    let (_, reply) = exchange(address, &hello(&other_minor));
+    assert!(matches!(reply, ServerMsg::Refused { .. }), "{reply:?}");
+    let (_, reply) = exchange(address, &publish(&other_minor));
+    assert!(matches!(reply, ServerMsg::Refused { .. }), "{reply:?}");
+    let (_published, reply) = exchange(address, &publish(&other_patch));
+    assert!(matches!(reply, ServerMsg::Published { .. }), "{reply:?}");
+    remove_state_directory(&state_dir);
+}
+
 fn test_config(listen: SocketAddr) -> (Config, PathBuf) {
     RUNTIME_BINARY.call_once(install_runtime_binary);
     let counter = NEXT_STATE_DIRECTORY.fetch_add(1, Ordering::Relaxed);
