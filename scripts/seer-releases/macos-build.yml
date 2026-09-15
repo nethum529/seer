@@ -26,6 +26,27 @@ jobs:
       - run: rustup target add x86_64-apple-darwin
       - run: cargo build --release --package seer --target aarch64-apple-darwin
       - run: cargo build --release --package seer --target x86_64-apple-darwin
+      - name: Sign the binaries
+        run: |
+          for target in aarch64-apple-darwin x86_64-apple-darwin; do
+            for binary in seer seer-broker seer-runtime; do
+              codesign --force --sign - "target/$target/release/$binary"
+            done
+          done
+      - name: Check that the signed runtime starts
+        run: |
+          case "$(uname -m)" in
+            arm64) target=aarch64-apple-darwin ;;
+            *) target=x86_64-apple-darwin ;;
+          esac
+          output="$(./target/$target/release/seer-runtime 2>&1 || true)"
+          case "$output" in
+            *"usage: seer-runtime"*) ;;
+            *)
+              echo "seer-runtime did not reach argument parsing: $output"
+              exit 1
+              ;;
+          esac
       - name: Create archives
         run: |
           tar -C target/aarch64-apple-darwin/release -czf seer-darwin-arm64.tar.gz seer seer-broker seer-runtime

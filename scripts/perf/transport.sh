@@ -2,7 +2,11 @@
 # Measurement driver for issue 389. The method is in
 # docs/research/18-transport-baseline.md.
 #
-# Usage: scripts/perf/transport.sh [samples] [output-dir]
+# Usage: scripts/perf/transport.sh [samples] [output-dir] [parts]
+# parts is a list of: all broker local offline listen dial reuse readiness.
+# The default is "all", which is "broker listen dial", the baseline set.
+# The reuse part is for issue 390. It measures endpoint reuse against
+# connection reuse on the relay and discovery paths.
 # Needs bash 5 or later for EPOCHREALTIME. Linux only.
 set -euo pipefail
 
@@ -10,6 +14,7 @@ samples=${1:-10}
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 out=${2:-target/perf/389-$(date -u +%Y%m%dT%H%M%SZ)}
+parts=${3:-all}
 mkdir -p "$out"
 raw="$out/samples.csv"
 errors="$out/errors.log"
@@ -41,6 +46,7 @@ write_environment() {
         echo "date_utc: $(date -u +%Y-%m-%dT%H:%M:%SZ)"
         echo "revision: $rev"
         echo "samples_per_workload: $samples"
+        echo "parts: $parts"
         echo "kernel: $(uname -srm)"
         echo "cpu: $(lscpu | sed -n 's/^Model name: *//p')"
         echo "cpu_count: $(nproc)"
@@ -104,18 +110,24 @@ stop_serve() {
 }
 
 # Time from broker spawn until its loopback TCP port accepts. The broker binds
-# the iroh listener before the TCP port, so this includes the relay wait.
+# the iroh listener before the TCP port, so with remote = true this includes
+# the relay wait. The offline condition starts the broker in a new network
+# namespace with no route out, so the relay is never reached.
 broker_sample() {
-    local state=$1 sample=$2 cache=$3 status=ok started pid
+    local state=$1 sample=$2 cache=$3 condition=$4 remote=$5 status=ok started pid
+    local launcher=()
+    if [[ $condition == offline ]]; then
+        launcher=(unshare -rn --)
+    fi
     cat >"$state/broker.toml" <<EOF
 listen = "127.0.0.1:$broker_port"
 published_addr = "127.0.0.1:$broker_port"
-remote = true
+remote = $remote
 state_dir = "$state"
 owner_name = "perf"
 EOF
     started=${EPOCHREALTIME/./}
-    "$broker" "$state/broker.toml" >>"$state/broker.log" 2>&1 &
+    "${launcher[@]}" "$broker" "$state/broker.toml" >>"$state/broker.log" 2>&1 &
     pid=$!
     until { : <>"/dev/tcp/127.0.0.1/$broker_port"; } 2>/dev/null; do
         if ! kill -0 "$pid" 2>/dev/null; then
@@ -128,7 +140,7 @@ EOF
         fi
     done
     local elapsed=$((${EPOCHREALTIME/./} - started))
-    echo "$rev,broker_ready,default,$cache,$sample,process_ready,$(ms "$elapsed"),$status" >>"$raw"
+    echo "$rev,broker_ready,$condition,$cache,$sample,process_ready,$(ms "$elapsed"),$status" >>"$raw"
     kill "$pid" 2>/dev/null || true
     wait "$pid" 2>/dev/null || true
     if [[ $status != ok ]]; then
@@ -137,11 +149,11 @@ EOF
 }
 
 measure_broker() {
-    local warm_state
+    local condition=$1 remote=$2 warm_state
     for _ in $(seq "$samples"); do
         local state
         state=$(mktemp -d -p "$work")
-        broker_sample "$state" 0 cold
+        broker_sample "$state" 0 cold "$condition" "$remote"
     done
     warm_state=$(mktemp -d -p "$work")
     for sample in $(seq 0 "$samples"); do
@@ -149,7 +161,7 @@ measure_broker() {
         if ((sample == 0)); then
             cache=cold
         fi
-        broker_sample "$warm_state" "$sample" "$cache"
+        broker_sample "$warm_state" "$sample" "$cache" "$condition" "$remote"
     done
 }
 
@@ -182,6 +194,43 @@ measure_dial() {
     stop_serve
 }
 
+# Issue 392: a seer dial starts as soon as a new serve prints ready, with no
+# settle time. ready_online announces after the relay is online, as
+# seer_net::Listener does today. ready_bind announces at bind. Each sample has
+# a new serve key, so no old address record exists.
+measure_readiness() {
+    local settle_seconds=0 ready id
+    for ready in online bind; do
+        for _ in $(seq "$samples"); do
+            start_serve --api iroh --condition default --ready "$ready"
+            id=$(serve_field id)
+            run_probe seer_dial dial --api seer --condition "ready_$ready" --remote "$id"
+            stop_serve
+        done
+    done
+}
+
+measure_reuse() {
+    start_serve --api iroh --condition relay
+    local id relay
+    id=$(serve_field id)
+    relay=$(serve_field relay)
+    echo "$relay" >"$work/relay.txt"
+    cold_and_warm iroh_dial dial --api iroh --condition relay --remote "$id" --relay "$relay"
+    cold_and_warm iroh_session session --api iroh --condition relay --remote "$id" --relay "$relay"
+    stop_serve
+
+    start_serve --api iroh --condition default
+    id=$(serve_field id)
+    cold_and_warm iroh_session session --api iroh --condition discovery --remote "$id"
+    stop_serve
+}
+
+# scripts/perf/lookup.sh sources this file for the helpers above.
+if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
+    return 0
+fi
+
 if { : <>"/dev/tcp/127.0.0.1/$broker_port"; } 2>/dev/null; then
     echo "port $broker_port is in use; stop the process that uses it" >&2
     exit 1
@@ -190,9 +239,25 @@ fi
 write_environment
 echo "rev,workload,condition,cache,sample,boundary,ms,status" >"$raw"
 : >"$errors"
-measure_broker
-measure_listen
-measure_dial
-echo "relay: $(cat "$work/relay.txt")" >>"$out/environment.txt"
+for part in $parts; do
+    case $part in
+    all)
+        measure_broker default true
+        measure_listen
+        measure_dial
+        ;;
+    broker) measure_broker default true ;;
+    local) measure_broker local false ;;
+    offline) measure_broker offline true ;;
+    listen) measure_listen ;;
+    dial) measure_dial ;;
+    reuse) measure_reuse ;;
+    readiness) measure_readiness ;;
+    *) echo "unknown part $part" >&2 && exit 1 ;;
+    esac
+done
+if [[ -f $work/relay.txt ]]; then
+    echo "relay: $(cat "$work/relay.txt")" >>"$out/environment.txt"
+fi
 scripts/perf/summarize.sh "$raw" >"$out/summary.csv"
 echo "wrote $out"

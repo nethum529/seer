@@ -6,7 +6,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 use std::os::unix::process::CommandExt;
 use std::path::{Path, PathBuf};
-use std::process::{Command, Stdio};
+use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
@@ -34,9 +34,9 @@ pub(crate) fn attach(server: &ServerEntry) -> io::Result<(Socket, Tree)> {
         return attach_stream(stream);
     }
     let generation = generation();
-    let pid = start(&directory, &socket, server, &generation)?;
-    let stream = connect_until_ready(&socket, &generation)?;
-    write_private(&directory.join("runtime.pid"), &pid.to_string())?;
+    let mut child = start(&directory, &socket, server, &generation)?;
+    let stream = connect_until_ready(&socket, &generation, &mut child, &directory)?;
+    write_private(&directory.join("runtime.pid"), &child.id().to_string())?;
     attach_stream(stream)
 }
 
@@ -113,7 +113,12 @@ pub(crate) fn connect(socket: &Path, generation: Option<&str>) -> io::Result<Uni
     }
 }
 
-fn connect_until_ready(socket: &Path, generation: &str) -> io::Result<UnixStream> {
+fn connect_until_ready(
+    socket: &Path,
+    generation: &str,
+    child: &mut Child,
+    directory: &Path,
+) -> io::Result<UnixStream> {
     let deadline = Instant::now() + START_TIMEOUT;
     let mut last = io::Error::new(io::ErrorKind::TimedOut, "the runtime did not start");
     while Instant::now() < deadline {
@@ -121,9 +126,22 @@ fn connect_until_ready(socket: &Path, generation: &str) -> io::Result<UnixStream
             Ok(stream) => return Ok(stream),
             Err(error) => last = error,
         }
+        if let Some(status) = child.try_wait()? {
+            return Err(runtime_stopped(status, directory));
+        }
         thread::sleep(POLL_INTERVAL);
     }
     Err(last)
+}
+
+// Issue 362: a runtime that stops before it opens its socket must report that
+// failure. The missing socket alone reads as "No such file or directory" and
+// hides the reason.
+fn runtime_stopped(status: ExitStatus, directory: &Path) -> io::Error {
+    io::Error::other(format!(
+        "the runtime stopped before it opened its socket ({status}); see {}",
+        directory.join("runtime.log").display()
+    ))
 }
 
 fn start(
@@ -131,7 +149,7 @@ fn start(
     socket: &Path,
     server: &ServerEntry,
     generation: &str,
-) -> io::Result<u32> {
+) -> io::Result<Child> {
     let binary = find_runtime()?;
     let log = open_log(&directory.join("runtime.log"))?;
     let stderr = log.try_clone()?;
@@ -159,7 +177,7 @@ fn start(
             }
         });
     }
-    command.spawn().map(|child| child.id())
+    command.spawn()
 }
 
 fn write_private(path: &Path, contents: &str) -> io::Result<()> {
