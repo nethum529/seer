@@ -91,9 +91,9 @@ that were too high:
   cell diff was 16196 bytes (39838), 40 percent below today. With real
   text 793 cells change (1741), the frame is 106795 bytes (194684), and a
   cell diff is as large as the frame. The seq burst also ran at 140
-  updates per second, against 71 with real text, because it moved fewer
-  bytes per second through the terminal (38 MB in 1.8 seconds, against
-  103 MB in 1.95 seconds).
+  updates per second at 80x24 (132 at 200x50), against 71 (66) with real
+  text, because it moved fewer bytes per second through the terminal
+  (38.9 MB in 1.8 seconds, against 103 MB in 1.95 seconds).
 
 A reader who wants numbers for another kind of content (prose, logs, wide
 tables) must rerun with that content as input/long.txt.
@@ -157,8 +157,9 @@ change-only design that keeps the Cell encoding pays this per cell.
 Machine, kernel, and build are the issue 389 baseline (AMD Ryzen 7 7800X3D,
 16 CPUs, Linux 7.1.6, rustc 1.98.0, release profile). bash 5.3.15, vim 9.2,
 less 704. Code revision f06bc13. Run 1 ran on a clean tree. Run 2 is
-marked dirty in its environment.txt because the sample files of run 1 were
-in the tree when it started; no source file differed. Both runs held
+marked dirty in its environment.txt because the sample files of run 1
+(the six files under docs/research/perf-samples/417/) and a draft of this
+document were uncommitted when it started. Both runs held
 /tmp/claude-1000/perf-run.lock. Both errors.log files are empty. probe.log
 holds the final screen of every repeat, so a reader can check that each
 script ended at a shell prompt.
@@ -233,21 +234,22 @@ update, so the rate is the cycle rate. The median gap between updates is
 the gap and the 5 ms wait; the probe does not measure the runtime. The
 work is large because about 53 MB of text per second pass through the
 terminal during the burst, so each cycle drains and parses about 700 KB.
-With the seq burst of commit 0517940 (21 MB per second) the gap was 7 ms
-and the rate 140 per second. So the rate depends on the output volume
+With the seq burst of commit 0517940 (22 MB per second) the gap was 7 ms
+and the rate 140 per second at 80x24 (132 at 200x50). So the rate depends on the output volume
 and on the frame cost, and the split between the two is not measured. A
 cheaper frame after R-411 makes the cycle shorter and the rate higher,
 but this document cannot say by how much. The change-only bytes per
 second for the burst below use today's rate, so they may be low.
 
 The burst finished 103 MB of shell output in 1.9 to 2.0 seconds, so a fast
-burst is short, and the guest receives about 150 updates for it. Each
+burst is short, and the guest receives about 135 updates for it. Each
 update replaces the whole screen: 793 of 1920 cells change at 80x24, and
 the rest are mostly cells that were blank before and after. The scroll
-search finds a shift of 23 rows (49 at 200x50) for 90 percent of the
-burst updates. That shift is not a real scroll match. It keeps one row and
-compares the other 23 rows to blanks, so the scroll diff for a burst is a
-list of the non-blank cells of the new screen: 488 cells at 80x24 and 1066
+search finds a shift for 90 percent of the burst updates, most often 23
+rows up or down (49 at 200x50). That shift is not a real scroll match. It
+keeps one row and compares the other 23 rows to blanks, so the scroll
+diff for a burst is a list of the non-blank cells of the new screen: 488
+cells at 80x24 and 1066
 at 200x50. Any change-only design that skips blank cells gets the same
 saving, and no design gets more from a burst without a smaller cell
 encoding.
@@ -296,12 +298,13 @@ diff median, and the three estimate rates in bytes per second.
 
 - Today's bytes per update median: the same or within 1 percent in every
   row.
-- Changed cells median: the same in every row except the burst (789
-  against 793 at 80x24, 1744 against 1741 at 200x50).
+- Changed cells median: the same or within 1 cell outside the burst
+  (1601 against 1602 for the pager at 200x50); 789 against 793 for the
+  burst at 80x24 and 1744 against 1741 at 200x50.
 - Today's bytes per second: within 1 percent in every row except the
   burst, 8.4 percent at 80x24 (5243658 against 4839426) and 2.7 percent
-  at 200x50. Repeat 1 of the 80x24 burst in run 2 gave 199 updates in a
-  2.2 second output part, against 153 to 160 updates in 1.9 to 2.0
+  at 200x50. Repeat 1 of the 80x24 burst in run 2 gave 184 updates in a
+  2.2 second output part, against 138 to 144 updates in 1.9 to 2.0
   seconds for the other five repeats.
 - Scroll diff median: the same or within 1 percent in every row.
 - Estimate rates: within 3 percent in every row except the burst, where
@@ -328,15 +331,19 @@ The 20 percent bound of the ticket holds for every median.
 - Scrolling changes most cells but is one row move. A pager step at 80x24
   changes 731 cells of 1920, so a plain cell diff is larger than today's
   frame and is capped at it, and a row diff saves nothing. After the one
-  row shift only 17 cells differ (the less status row and the cursor
-  column), and the scroll diff is 2977 bytes, 3 percent of today. The same
+  row shift only 17 cells differ (the new line that scrolls in and the ':'
+  of the less status row), and the scroll diff is 2977 bytes, 3 percent
+  of today. The same
   holds at 200x50: 1602 cells, cell diff capped at today, scroll diff 3301
   bytes, 2 percent of today.
-- A fast output burst saves almost nothing with a cell diff. With real
-  text 793 of 1920 cells change per update at 80x24, and the cell diff is
-  as large as the frame. A scroll diff, which here means a list of the
-  non-blank cells, saves 26 percent per update at 80x24 and 11 percent at
-  200x50.
+- A fast output burst saves almost nothing with a cell diff: for the
+  output part alone, 0.7 percent of the bytes at 80x24 and 0 at 200x50.
+  With real text 793 of 1920 cells change per update at 80x24, and the
+  cell diff is as large as the frame. A scroll diff, which here means a
+  list of the non-blank cells, saves 26 percent of the output part at
+  80x24 and 11 percent at 200x50 (run 2: 26 and 10 percent). The whole
+  window saving is higher (32 and 19 percent) because it includes the
+  1.5 seconds of typing the command, where each update is a few cells.
 - A cell costs about 160 bytes today. Every change-only design that keeps
   the JSON Cell encoding pays this per changed cell. It is why the burst
   saves so little: 488 non-blank cells at 80x24 cost 79 KB, against 107 KB
@@ -344,7 +351,8 @@ The 20 percent bound of the ticket holds for every median.
 - The burst runs at the real poll ceiling: one update per cycle, where a
   cycle is the 5 ms wait plus the work, and the work grows with the output
   volume. The measured rate is 71 updates per second at 80x24 and 66 at
-  200x50 with 53 MB of text per second, and was 140 with 21 MB per second.
+  200x50 with 53 MB of text per second, and was 140 at 80x24 (132 at
+  200x50) with 22 MB per second.
 
 ## Checks for the ticket
 
@@ -393,8 +401,9 @@ scrolling, the most common heavy case: a pager step changes 731 of 1920
 cells at 80x24, and the diff is as large as the frame. A change-only
 update that can also say that the rows moved by N turns that step into 17
 cells and 2977 bytes. A fast output burst saves little with any design
-that keeps today's cell encoding: 26 percent per update at 80x24 and 11
-percent at 200x50.
+that keeps today's cell encoding: a cell diff saves 0.7 percent of the
+output bytes at 80x24 and 0 at 200x50, and a scroll diff saves 26 and 11
+percent.
 
 Expected saving in bytes per second at today's update rate, from the run 1
 tables above (today, then scroll diff):
@@ -405,6 +414,10 @@ tables above (today, then scroll diff):
 | editor | 1564245 to 42166 (97 percent) | 2740219 to 65713 (98 percent) |
 | pager | 2764637 to 105402 (96 percent) | 4933325 to 116577 (98 percent) |
 | burst | 4839426 to 3305168 (32 percent) | 8283446 to 6701929 (19 percent) |
+
+The burst row includes 1.5 seconds of typing the command. The output part
+alone saves 26 percent at 80x24 and 11 percent at 200x50. For a burst,
+the scroll diff is a list of the non-blank cells.
 
 Two costs stay. First, about 160 bytes of JSON per changed cell: the Cell
 field names (crates/seer-core/src/cells.rs:11) plus the row and column.
