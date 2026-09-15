@@ -1,7 +1,6 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::collections::VecDeque;
 use std::fmt::Display;
-use std::fs;
 use std::io::{self, Read, Write};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
@@ -54,6 +53,10 @@ impl PtySession {
             .map_err(to_io_error)
     }
 
+    pub fn has_exited(&mut self) -> io::Result<bool> {
+        self.child.try_wait().map(|status| status.is_some())
+    }
+
     pub fn kill(&mut self) -> io::Result<()> {
         self.child.kill()
     }
@@ -78,7 +81,7 @@ impl PtySession {
 
 #[cfg(target_os = "linux")]
 fn process_name(group: i32) -> String {
-    fs::read_to_string(format!("/proc/{group}/comm"))
+    std::fs::read_to_string(format!("/proc/{group}/comm"))
         .map(|name| name.trim().to_owned())
         .unwrap_or_default()
 }

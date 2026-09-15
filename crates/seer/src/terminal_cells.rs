@@ -1,10 +1,67 @@
+use crate::theme::Palette;
 use ratatui::{
+    Frame,
     buffer::Buffer,
     layout::Rect,
     style::{Color, Modifier, Style},
-    widgets::Widget,
+    widgets::{Borders, Widget},
 };
 use seer_core::Cell;
+
+/// Draws a screen into `area` and returns the rect the screen took.
+///
+/// A full screen app draws for the owner's PTY size and cannot be redrawn.
+/// When it is smaller than the area it sits in the middle with an edge
+/// around it. Everything else fills the area from the top left corner.
+pub(crate) fn draw_screen(
+    frame: &mut Frame<'_>,
+    rows: &[Vec<Cell>],
+    fixed: bool,
+    area: Rect,
+) -> Rect {
+    let width = rows
+        .first()
+        .map_or(0, Vec::len)
+        .min(usize::from(area.width)) as u16;
+    let height = rows.len().min(usize::from(area.height)) as u16;
+    if !fixed || rows.is_empty() || (width, height) == (area.width, area.height) {
+        frame.render_widget(PaneCells::new(rows), area);
+        return area;
+    }
+    let placed = Rect::new(
+        area.x + (area.width - width) / 2,
+        area.y + (area.height - height) / 2,
+        width,
+        height,
+    );
+    edge(frame, placed, area);
+    frame.render_widget(PaneCells::new(rows), placed);
+    placed
+}
+
+fn edge(frame: &mut Frame<'_>, placed: Rect, area: Rect) {
+    let mut borders = Borders::NONE;
+    let mut outer = placed;
+    if placed.x > area.x {
+        outer.x -= 1;
+        outer.width += 1;
+        borders |= Borders::LEFT;
+    }
+    if placed.right() < area.right() {
+        outer.width += 1;
+        borders |= Borders::RIGHT;
+    }
+    if placed.y > area.y {
+        outer.y -= 1;
+        outer.height += 1;
+        borders |= Borders::TOP;
+    }
+    if placed.bottom() < area.bottom() {
+        outer.height += 1;
+        borders |= Borders::BOTTOM;
+    }
+    frame.render_widget(Palette::default().block(false).borders(borders), outer);
+}
 
 pub(crate) struct PaneCells<'a> {
     rows: &'a [Vec<Cell>],
@@ -19,14 +76,7 @@ impl<'a> PaneCells<'a> {
 impl Widget for PaneCells<'_> {
     fn render(self, area: Rect, buffer: &mut Buffer) {
         buffer.set_style(area, Style::default().fg(Color::Reset).bg(Color::Reset));
-        let start = start_row(self.rows, area.height);
-        for (row_index, row) in self
-            .rows
-            .iter()
-            .skip(start)
-            .take(area.height as usize)
-            .enumerate()
-        {
+        for (row_index, row) in self.rows.iter().take(area.height as usize).enumerate() {
             let y = area.y.saturating_add(row_index as u16);
             for (column_index, cell) in row.iter().take(area.width as usize).enumerate() {
                 let x = area.x.saturating_add(column_index as u16);
@@ -36,20 +86,6 @@ impl Widget for PaneCells<'_> {
             }
         }
     }
-}
-
-pub(crate) fn start_row(rows: &[Vec<Cell>], height: u16) -> usize {
-    content_rows(rows).saturating_sub(usize::from(height))
-}
-
-fn content_rows(rows: &[Vec<Cell>]) -> usize {
-    rows.iter()
-        .rposition(|row| row.iter().any(is_visible))
-        .map_or(0, |index| index + 1)
-}
-
-fn is_visible(cell: &Cell) -> bool {
-    cell.character != ' ' || cell.bg != seer_core::Color::Default || cell.inverse
 }
 
 fn cell_style(cell: &Cell) -> Style {

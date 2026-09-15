@@ -299,3 +299,92 @@ fn frame_text(frame: &seer_core::TerminalFrame) -> String {
         .collect::<Vec<_>>()
         .join("\n")
 }
+
+#[test]
+fn remote_mouse_is_grant_checked_and_encoded_in_the_destination_mode() {
+    let mut room = Room::start(false);
+    let mut window = room.publish("alice", ALICE_SECRET);
+    let at = first_terminal(&own_tree(&mut window));
+    let mut alice = join_room(room.address, "alice", ALICE_SECRET);
+    let mut bob = join_room(room.address, "bob", BOB_SECRET);
+    wait_for_published(&mut alice, "alice");
+    send(
+        &mut bob,
+        &ClientMsg::Terminals {
+            user: "alice".into(),
+        },
+    );
+    terminals(&mut bob, "alice");
+    send(
+        &mut bob,
+        &ClientMsg::Watch {
+            user: "alice".into(),
+            pane: at.pane.clone(),
+            cols: 80,
+            rows: 24,
+        },
+    );
+    type_locally(
+        &mut window,
+        &at,
+        "stty raw -echo; printf '\\033[?1000h\\033[?1006h'; dd bs=1 count=9 2>/dev/null | od -An -tx1; stty sane\n",
+    );
+    wait_for(&mut bob, |m| {
+        matches!(m, ServerMsg::Cells { frame, .. }
+        if frame.modes.mouse_tracking == seer_core::MouseTracking::Click)
+    });
+    let click = ClientMsg::MouseInto {
+        user: "alice".into(),
+        pane: at.pane.clone(),
+        mouse: seer_core::MouseInput {
+            kind: seer_core::MouseKind::Down,
+            button: Some(seer_core::MouseButton::Left),
+            column: 5,
+            row: 2,
+            modifiers: seer_core::Modifiers::default(),
+        },
+    };
+    send(&mut bob, &click);
+    wait_for(&mut bob, |m| matches!(m, ServerMsg::Refused { .. }));
+    send(
+        &mut alice,
+        &ClientMsg::SetGrant {
+            user: "bob".into(),
+            can_type: true,
+        },
+    );
+    wait_for_grant(&mut bob, true);
+    send(&mut bob, &click);
+    assert!(cells_contain(
+        &mut bob,
+        &at.pane,
+        "1b 5b 3c 30 3b 36 3b 33 4d"
+    ));
+}
+
+#[test]
+fn reconnecting_a_viewer_does_not_report_a_live_terminal_as_empty() {
+    let mut room = Room::start(false);
+    let mut window = room.publish("alice", ALICE_SECRET);
+    let at = first_terminal(&own_tree(&mut window));
+    let mut alice = join_room(room.address, "alice", ALICE_SECRET);
+    wait_for_published(&mut alice, "alice");
+    for _ in 0..4 {
+        let mut viewer = join_room(room.address, "bob", BOB_SECRET);
+        send(
+            &mut viewer,
+            &ClientMsg::Terminals {
+                user: "alice".into(),
+            },
+        );
+        let first = wait_for(
+            &mut viewer,
+            |message| matches!(message, ServerMsg::Terminals { user, .. } if user == "alice"),
+        );
+        assert!(
+            matches!(first, ServerMsg::Terminals { terminals, .. }
+            if terminals.iter().any(|terminal| terminal.pane == at.pane)),
+            "reconnecting must not turn an unread catalog into an empty terminal list"
+        );
+    }
+}

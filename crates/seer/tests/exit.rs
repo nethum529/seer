@@ -16,8 +16,6 @@ const USER: &str = "alice-user-id";
 const WAIT: Duration = Duration::from_secs(10);
 const QUIET: Duration = Duration::from_secs(1);
 
-// Issue 359: the client whose keyboard owns the terminal is the one that
-// leaves. A second client that only watches the same terminal stays.
 #[test]
 fn exit_inside_a_seer_terminal_makes_only_the_typing_client_leave() {
     let root = Root::new("inside");
@@ -60,10 +58,6 @@ fn exit_outside_seer_fails_and_reaches_no_client() {
     let output = run_exit(&root.0, None);
     assert_eq!(output.status.code(), Some(1));
     assert!(output.stdout.is_empty());
-    assert_eq!(
-        String::from_utf8_lossy(&output.stderr),
-        "seer exit works only inside a Seer terminal.\n"
-    );
 
     room.set_nonblocking(true)
         .expect("room listener must become nonblocking");
@@ -71,7 +65,70 @@ fn exit_outside_seer_fails_and_reaches_no_client() {
         matches!(room.accept(), Err(error) if error.kind() == io::ErrorKind::WouldBlock),
         "seer exit must not reach the room"
     );
-    assert!(!root.0.join("state-home/seer/runtimes").exists());
+}
+
+#[test]
+fn nested_exit_without_inherited_markers_detaches_the_only_local_client() {
+    let root = Root::new("nested");
+    write_store(&root.0, "127.0.0.1:1");
+    let directory = root.0.join("state-home/seer/runtimes").join(USER);
+    fs::create_dir_all(&directory).expect("runtime directory must exist");
+    let socket = directory.join("socket");
+    let _runtime = Runtime::start(&socket);
+    let mut client = attach(&socket);
+    let pane = first_pane(&mut client);
+    let output = run_exit(&root.0, None);
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    assert_eq!(wait_for_bye(&mut client), "detached");
+    let mut next = attach(&socket);
+    assert_eq!(first_pane(&mut next), pane);
+}
+
+#[test]
+fn nested_exit_without_markers_refuses_ambiguous_clients() {
+    let root = Root::new("ambiguous");
+    write_store(&root.0, "127.0.0.1:1");
+    let directory = root.0.join("state-home/seer/runtimes").join(USER);
+    fs::create_dir_all(&directory).expect("runtime directory must exist");
+    let socket = directory.join("socket");
+    let _runtime = Runtime::start(&socket);
+    let mut first = attach(&socket);
+    first_pane(&mut first);
+    let mut second = attach(&socket);
+    first_pane(&mut second);
+    assert!(!run_exit(&root.0, None).status.success());
+    assert!(!receives_bye(&mut first));
+    assert!(!receives_bye(&mut second));
+}
+
+// Issue 403: users type exit to leave Seer. Every shell that Seer starts
+// turns exit into seer exit. The shell itself keeps running.
+#[test]
+fn typed_exit_in_a_seer_shell_leaves_seer_and_keeps_the_shell() {
+    for shell in ["fish", "bash", "zsh"] {
+        let Some(binary) = find_shell(shell) else {
+            eprintln!("{shell} is not installed, skipped");
+            continue;
+        };
+        let root = Root::new(&format!("typed-{shell}"));
+        let directory = root.0.join("state-home/seer/runtimes").join(USER);
+        fs::create_dir_all(&directory).expect("runtime directory must exist");
+        let socket = directory.join("socket");
+        let _runtime = Runtime::start_shell(&socket, &binary, &root.0);
+        let mut client = attach(&socket);
+        let pane = first_pane(&mut client);
+        send_text(&mut client, &pane, "exit\n");
+        assert_eq!(wait_for_bye(&mut client), "detached", "{shell}");
+
+        let mut next = attach(&socket);
+        assert_eq!(first_pane(&mut next), pane, "{shell}");
+        send_text(&mut next, &pane, "printf 'still-%s\\n' running\n");
+        wait_for_cells_containing(&mut next, "still-running");
+    }
 }
 
 struct Root(PathBuf);
@@ -110,19 +167,36 @@ struct Runtime(Child);
 
 impl Runtime {
     fn start(socket: &Path) -> Self {
-        let child = Command::new(env!("CARGO_BIN_EXE_seer-runtime"))
+        Self::spawn(Self::command(socket, Path::new("sh")))
+    }
+
+    fn start_shell(socket: &Path, shell: &Path, root: &Path) -> Self {
+        let mut command = Self::command(socket, shell);
+        command
+            .env("HOME", root)
+            .env("XDG_CONFIG_HOME", root)
+            .env("XDG_STATE_HOME", root.join("state-home"))
+            .env("SEER_SNAPSHOT_DIR", root.join("snapshot"));
+        Self::spawn(command)
+    }
+
+    fn command(socket: &Path, shell: &Path) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_seer-runtime"));
+        command
             .args([
                 socket.as_os_str(),
                 USER.as_ref(),
-                "sh".as_ref(),
+                shell.as_os_str(),
                 "1".as_ref(),
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("runtime must start");
-        Self(child)
+            .stderr(Stdio::null());
+        command
+    }
+
+    fn spawn(mut command: Command) -> Self {
+        Self(command.spawn().expect("runtime must start"))
     }
 }
 
@@ -131,6 +205,12 @@ impl Drop for Runtime {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+fn find_shell(name: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 fn attach(socket: &Path) -> UnixStream {

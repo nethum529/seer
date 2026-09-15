@@ -99,7 +99,7 @@ pub(crate) fn raw_bytes(input: &TerminalInput) -> std::io::Result<Option<Vec<u8>
     seer_runtime::PaneGrid::new(1, 1).handle_input(input)
 }
 
-use crate::{state::ClientState, terminal_cells::start_row};
+use crate::state::ClientState;
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::layout::{Position, Rect};
 use std::io;
@@ -222,12 +222,7 @@ fn program_cell(
     if frame.modes.mouse_tracking == MouseTracking::None {
         return None;
     }
-    let start = match &state.viewer {
-        Some(viewer) => start_row(&viewer.visible_rows(area.height), area.height),
-        None => start_row(&frame.rows, area.height),
-    };
-    let row = u16::try_from(usize::from(position.y - area.y) + start).ok()?;
-    Some((open, position.x - area.x, row))
+    Some((open, position.x - area.x, position.y - area.y))
 }
 
 fn program_target(
@@ -235,27 +230,22 @@ fn program_target(
     position: Position,
     state: &ClientState,
 ) -> Option<(Option<usize>, Rect, (String, String))> {
-    // A remote pane is driven by raw bytes, and this client does not know that
-    // pane's mouse mode, so it cannot encode a report for it.
     if let Some(viewer) = &state.viewer {
-        if viewer.user != state.own_user || viewer.offset != 0 || !viewer.area.contains(position) {
+        if !state.may_type(&viewer.user) || viewer.offset != 0 || !viewer.content.contains(position)
+        {
             return None;
         }
-        return Some((None, viewer.area, viewer.target()));
+        return Some((None, viewer.content, viewer.target()));
     }
-    if kind != MouseKind::Down || state.user() != state.own_user {
+    if kind != MouseKind::Down || !state.may_type(state.user()) {
         return None;
     }
     let tile = state
         .box_areas
         .iter()
-        .find(|tile| tile.content.contains(position))?;
+        .find(|tile| tile.placed.contains(position))?;
     let pane = state.selected_terminals().get(tile.index)?.pane.clone();
-    Some((
-        Some(tile.index),
-        tile.content,
-        (state.own_user.clone(), pane),
-    ))
+    Some((Some(tile.index), tile.placed, (state.user().into(), pane)))
 }
 
 fn mouse_kind(kind: MouseEventKind) -> (MouseKind, Option<seer_core::MouseButton>) {

@@ -1,0 +1,12 @@
+date_utc: 2026-09-14T04:27:50Z
+revision: 367e50cb992fba8a2eea5de6d39455c76d82d87b
+samples_per_workload: 20
+kernel: Linux 7.1.6-1-cachyos x86_64
+cpu: AMD Ryzen 7 7800X3D 8-Core Processor
+cpu_count: 16
+rustc: rustc 1.98.0 (88d9e12ae 2026-08-18)
+profile: release (lto fat, codegen-units 1, panic abort)
+iroh: "1.1.0"
+nameservers: 127.0.0.53 
+links: lo=UNKNOWN eno1=UP wlan0=UP tailscale0=UNKNOWN 
+relay: https://use1-1.relay.n0.iroh.link./

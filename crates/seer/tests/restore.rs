@@ -103,4 +103,61 @@ fn restore_recovers_an_owner_credential_that_authenticates() {
     .expect("hello must be sent");
     let reply: ServerMsg = codec::decode(&mut stream).expect("broker must reply");
     assert!(matches!(reply, ServerMsg::Welcome { user_id, .. } if user_id == owner_id));
+    host_stop_ends_runtime(&host, owner_id);
+}
+
+fn host_stop_ends_runtime(host: &Host, owner_id: &str) {
+    let directory = host.root.join("s/seer/runtimes").join(owner_id);
+    fs::create_dir_all(&directory).expect("runtime directory must exist");
+    let socket = directory.join("socket");
+    let child = Command::new(env!("CARGO_BIN_EXE_seer-runtime"))
+        .arg(&socket)
+        .arg(owner_id)
+        .args(["/bin/sh", "stop-test"])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("runtime must start");
+    let mut runtime = Runtime(child);
+    fs::write(directory.join("runtime.pid"), runtime.0.id().to_string())
+        .expect("runtime PID must be saved");
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    loop {
+        if let Ok(mut stream) = std::os::unix::net::UnixStream::connect(&socket) {
+            stream
+                .set_read_timeout(Some(Duration::from_secs(5)))
+                .expect("read timeout");
+            let ready: ServerMsg = codec::decode(&mut stream).expect("runtime must answer");
+            assert!(matches!(ready, ServerMsg::RuntimeReady { .. }));
+            break;
+        }
+        assert!(
+            std::time::Instant::now() < deadline,
+            "runtime must become ready"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+    host.run(&["stop"]);
+    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    while runtime
+        .0
+        .try_wait()
+        .expect("runtime status must be available")
+        .is_none()
+    {
+        assert!(
+            std::time::Instant::now() < deadline,
+            "host stop must end the host runtime"
+        );
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
+struct Runtime(std::process::Child);
+
+impl Drop for Runtime {
+    fn drop(&mut self) {
+        let _ = self.0.kill();
+        let _ = self.0.wait();
+    }
 }

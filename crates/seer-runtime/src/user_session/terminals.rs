@@ -1,15 +1,12 @@
 use super::*;
 
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub(crate) struct VisibleSize {
-    pub(crate) size: PaneSize,
-    pub(crate) own: bool,
-}
-
 impl UserSession {
-    pub(crate) fn apply_visible_sizes(
+    // Only the owner's own windows size a PTY. A read-only watcher crops
+    // the frame on its side, so one small window never shrinks the terminal
+    // for everyone (issue 371).
+    pub(crate) fn apply_claimed_sizes(
         &mut self,
-        sizes: &BTreeMap<String, VisibleSize>,
+        sizes: &BTreeMap<String, PaneSize>,
     ) -> io::Result<Vec<ServerMsg>> {
         let mut changed = false;
         for pane in self
@@ -22,12 +19,21 @@ impl UserSession {
             let Some(host) = self.pane_hosts.get_mut(&pane.id) else {
                 continue;
             };
-            let visible = sizes.get(&pane.id);
-            if let Some(controlling) = visible.filter(|visible| visible.own) {
-                host.remember_owner_size(controlling.size);
+            let claimed = sizes.get(&pane.id).copied();
+            if let Some(size) = claimed {
+                host.remember_owner_size(size);
             }
-            let size = visible.map_or(host.owner_size, |visible| visible.size);
+            let size = claimed.unwrap_or(host.owner_size);
             if pane.size != size {
+                seer_core::debug_log!(
+                    "pty resize pane={} size={}x{} owner_size={}x{} claimed={}",
+                    pane.id,
+                    size.cols,
+                    size.rows,
+                    host.owner_size.cols,
+                    host.owner_size.rows,
+                    claimed.is_some()
+                );
                 host.resize_visible(size.cols, size.rows)?;
                 pane.size = size;
                 changed = true;
@@ -43,16 +49,21 @@ impl UserSession {
         tab: &str,
         cols: u16,
         rows: u16,
-        sizes: &BTreeMap<String, VisibleSize>,
+        sizes: &BTreeMap<String, PaneSize>,
     ) -> io::Result<Vec<ServerMsg>> {
         self.tab(workspace, tab)?;
         self.viewport = PaneSize { cols, rows };
         for (pane, size) in self.pane_rects(workspace, tab, cols, rows) {
+            seer_core::debug_log!(
+                "viewport tab={tab} size={cols}x{rows} pane={pane} owner_size={}x{}",
+                size.cols,
+                size.rows
+            );
             if let Some(host) = self.pane_hosts.get_mut(&pane) {
                 host.remember_owner_size(size);
             }
         }
-        let applied = self.apply_visible_sizes(sizes)?;
+        let applied = self.apply_claimed_sizes(sizes)?;
         persistence::persist(self)?;
         Ok(if applied.is_empty() {
             self.snapshot()
@@ -119,6 +130,25 @@ impl UserSession {
                 }
             })
             .collect()
+    }
+
+    pub(super) fn granted_mouse(
+        &mut self,
+        workspace: &str,
+        tab: &str,
+        pane: &str,
+        mouse: seer_core::MouseInput,
+        sender: String,
+    ) -> io::Result<Vec<ServerMsg>> {
+        self.validate_pane(workspace, tab, pane)?;
+        self.pane_hosts
+            .get_mut(pane)
+            .ok_or_else(|| pane_host_not_found(pane))?
+            .write_granted_mouse(mouse, sender)?;
+        Ok(vec![ServerMsg::Terminals {
+            user: self.user.clone(),
+            terminals: self.terminals(),
+        }])
     }
 
     pub(super) fn granted_input(

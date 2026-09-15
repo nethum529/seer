@@ -12,6 +12,7 @@ pub(crate) struct Tile {
     pub(crate) index: usize,
     pub(crate) area: Rect,
     pub(crate) content: Rect,
+    pub(crate) placed: Rect,
 }
 
 pub(crate) struct ClientState {
@@ -48,6 +49,12 @@ pub(crate) struct ClientState {
 impl ClientState {
     pub(crate) fn chrome_owns_input(&self) -> bool {
         self.chrome.panel.is_some() || self.menu.is_some() || self.chrome.context.is_some()
+    }
+    pub(crate) fn for_server(tree: Tree, server: &crate::store::ServerEntry) -> Self {
+        let mut state = Self::new(tree, server.user_id.clone());
+        state.server.clone_from(&server.alias);
+        state.own_name.clone_from(&server.name);
+        state
     }
     pub(crate) fn new(tree: Tree, own_user: String) -> Self {
         let own = Person {
@@ -237,6 +244,15 @@ impl ClientState {
             self.viewer = Some(Viewer::new(self.own_user.clone(), pane));
             self.pending_new = None;
         }
+    }
+
+    pub(crate) fn note_frame(&mut self, user: String, pane: String, frame: TerminalFrame) {
+        #[cfg(debug_assertions)]
+        seer_core::debug_log::transition(
+            &format!("frame user={user} pane={pane}"),
+            seer_core::debug_log::frame_summary(&frame),
+        );
+        self.frames.insert((user, pane), frame);
     }
 
     pub(crate) fn may_type(&self, user: &str) -> bool {

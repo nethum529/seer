@@ -1,7 +1,7 @@
 use crate::{
     input::key_to_input,
     state::ClientState,
-    terminal_cells::{PaneCells, start_row},
+    terminal_cells::draw_screen,
     tui::{send, send_viewer_input},
 };
 use crossterm::event::KeyEvent;
@@ -17,6 +17,7 @@ pub(crate) struct Viewer {
     pub(crate) user: String,
     pub(crate) pane: String,
     pub(crate) area: Rect,
+    pub(crate) content: Rect,
     pub(crate) sent_size: Option<Size>,
     history: Vec<Vec<seer_core::Cell>>,
     previous: Vec<Vec<seer_core::Cell>>,
@@ -29,6 +30,7 @@ impl Viewer {
             user,
             pane,
             area: Rect::default(),
+            content: Rect::default(),
             sent_size: None,
             history: Vec::new(),
             previous: Vec::new(),
@@ -58,9 +60,9 @@ impl Viewer {
             }
             let excess = self.history.len().saturating_sub(2000);
             self.history.drain(..excess);
-            self.offset = self.offset.min(self.history.len());
         }
         self.previous = rows.to_vec();
+        self.offset = self.offset.min(self.history.len());
     }
 
     pub(crate) fn visible_rows(&self, height: u16) -> Vec<Vec<seer_core::Cell>> {
@@ -95,6 +97,7 @@ pub(crate) fn input_message(
     input: TerminalInput,
 ) -> io::Result<()> {
     if state.chrome_owns_input() {
+        seer_core::debug_log!("input dropped reason=chrome-open");
         return Ok(());
     }
     if state.viewer.is_none()
@@ -108,23 +111,34 @@ pub(crate) fn input_message(
         state.open_focused();
     }
     let Some(viewer) = &state.viewer else {
+        seer_core::debug_log!("input dropped reason=no-viewer");
         return Ok(());
     };
     if viewer.user == state.own_user {
         return send_viewer_input(stream, state, input);
     }
-    if state.you_may_type_into.contains(&viewer.user)
-        && let Some(bytes) = crate::input::raw_bytes(&input)?
-    {
-        send(
-            stream,
-            &ClientMsg::TypeInto {
+    if !state.you_may_type_into.contains(&viewer.user) {
+        seer_core::debug_log!("input dropped reason=no-grant user={}", viewer.user);
+        return Ok(());
+    }
+    let message = match input.event {
+        seer_core::InputEvent::Mouse(mouse) => ClientMsg::MouseInto {
+            user: viewer.user.clone(),
+            pane: viewer.pane.clone(),
+            mouse,
+        },
+        _ => {
+            let Some(bytes) = crate::input::raw_bytes(&input)? else {
+                return Ok(());
+            };
+            ClientMsg::TypeInto {
                 user: viewer.user.clone(),
                 pane: viewer.pane.clone(),
                 bytes,
-            },
-        )?;
-    }
+            }
+        }
+    };
+    send(stream, &message)?;
     Ok(())
 }
 
@@ -143,19 +157,24 @@ pub(crate) fn draw(frame: &mut Frame<'_>, state: &mut ClientState, area: Rect) {
     if area.is_empty() {
         return;
     }
-    if let Some(content) = state.frames.get(&viewer.target()) {
-        let rows = viewer.visible_rows(area.height);
-        let start = start_row(&rows, area.height);
-        frame.render_widget(PaneCells::new(&rows), area);
-        if allowed
-            && !state.chrome_owns_input()
-            && viewer.offset == 0
-            && content.cursor.visible
-            && let Some(row) = usize::from(content.cursor.row).checked_sub(start)
-            && row < usize::from(area.height)
-            && content.cursor.column < area.width
-        {
-            frame.set_cursor_position((area.x + content.cursor.column, area.y + row as u16));
-        }
+    let Some(screen) = state.frames.get(&viewer.target()) else {
+        return;
+    };
+    let rows = viewer.visible_rows(area.height);
+    let placed = draw_screen(frame, &rows, screen.modes.alt_screen, area);
+    if allowed
+        && !state.chrome_owns_input()
+        && viewer.offset == 0
+        && screen.cursor.visible
+        && screen.cursor.row < placed.height
+        && screen.cursor.column < placed.width
+    {
+        frame.set_cursor_position((
+            placed.x + screen.cursor.column,
+            placed.y + screen.cursor.row,
+        ));
+    }
+    if let Some(viewer) = &mut state.viewer {
+        viewer.content = placed;
     }
 }

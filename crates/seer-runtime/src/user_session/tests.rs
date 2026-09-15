@@ -7,6 +7,40 @@ const WAIT_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(10);
 
 #[test]
+fn plain_exit_removes_only_the_callers_shell() {
+    let mut alice = session_with_tab();
+    let mut bob = session_with_tab();
+    alice
+        .apply(ClientMsg::TerminalInput {
+            workspace: "w1".into(),
+            tab: "w1:t1".into(),
+            pane: "w1:p1".into(),
+            input: TerminalInput::new(InputEvent::Text("exit\n".into())),
+        })
+        .expect("exit must reach the shell");
+    let deadline = Instant::now() + WAIT_TIMEOUT;
+    while !alice.tree.workspaces[0].tabs.is_empty() && Instant::now() < deadline {
+        let messages = alice.poll();
+        assert!(
+            !messages
+                .iter()
+                .any(|message| matches!(message, ServerMsg::Bye { .. }))
+        );
+        thread::sleep(POLL_INTERVAL);
+    }
+    assert!(alice.tree.workspaces[0].tabs.is_empty());
+    bob.apply(ClientMsg::TerminalInput {
+        workspace: "w1".into(),
+        tab: "w1:t1".into(),
+        pane: "w1:p1".into(),
+        input: TerminalInput::new(InputEvent::Text("printf still-running\n".into())),
+    })
+    .expect("the other shell must accept input");
+    assert!(wait_for_cells(&mut bob, |text| text.contains("still-running")).is_some());
+    close_all_panes(&mut bob);
+}
+
+#[test]
 fn splits_and_resizes_both_panes() {
     let mut session = session_with_tab();
     session

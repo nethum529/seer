@@ -31,13 +31,15 @@ pub(crate) fn run(
     local: Socket,
     room: Option<Socket>,
     tree: Tree,
-    own_user: String,
     server: crate::store::ServerEntry,
 ) -> io::Result<SessionExit> {
+    seer_core::debug_log!(
+        "session start server={} room={}",
+        server.endpoint,
+        room.is_some()
+    );
     let mut terminal = TerminalSession::start()?;
-    let mut state = ClientState::new(tree, own_user);
-    state.server.clone_from(&server.endpoint);
-    state.own_name.clone_from(&server.name);
+    let mut state = ClientState::for_server(tree, &server);
     let mut start_person = navigation::take_start_person();
     let mut routes = Routes::new(local.clone(), room.clone(), state.own_user.clone());
     subscribe(&mut routes, &state).or_else(ignore_setup_disconnect)?;
@@ -69,6 +71,7 @@ pub(crate) fn run(
     if let Some(reader) = room_reader {
         join_reader(reader)?;
     }
+    seer_core::debug_log!("session end result={result:?}");
     result
 }
 
@@ -201,9 +204,7 @@ fn apply_message(
             state.can_type_here = can_type_here.into_iter().collect();
         }
         ServerMsg::Tree { tree } => state.replace_tree(tree),
-        ServerMsg::Cells { user, pane, frame } => {
-            state.frames.insert((user, pane), frame);
-        }
+        ServerMsg::Cells { user, pane, frame } => state.note_frame(user, pane, frame),
         ServerMsg::Terminals { user, terminals } => {
             if let Some(viewer) = &state.viewer
                 && viewer.user == user

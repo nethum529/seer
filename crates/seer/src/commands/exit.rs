@@ -7,11 +7,11 @@ use super::{CommandError, NETWORK_TIMEOUT, receive, send, unexpected_reply};
 use crate::local;
 
 pub(crate) fn exit() -> Result<(), CommandError> {
-    let (Some(user_id), Some(pane)) = (marker("SEER_USER_ID"), marker("SEER_PANE")) else {
-        return Err(CommandError::usage(
-            "seer exit works only inside a Seer terminal.",
-        ));
+    let user_id = match marker("SEER_USER_ID") {
+        Some(user) => user,
+        None => super::selected_server()?.user_id,
     };
+    let pane = marker("SEER_PANE").unwrap_or_default();
     let socket = local::runtime_directory(&user_id)
         .map_err(CommandError::system)?
         .join("socket");

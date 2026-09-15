@@ -1,4 +1,4 @@
-use crate::{state::ClientState, terminal_cells::start_row, theme::Palette};
+use crate::{state::ClientState, theme::Palette};
 use crossterm::event::{MouseButton, MouseEvent, MouseEventKind};
 use ratatui::{
     buffer::Buffer,
@@ -107,26 +107,20 @@ pub(super) fn mouse(mouse: MouseEvent, state: &mut ClientState) -> io::Result<bo
 
 fn begin(state: &ClientState, position: Position) -> Option<Selection> {
     let (area, rows) = if let Some(viewer) = &state.viewer {
-        let area = viewer.area;
+        let area = viewer.content;
         (area, viewer.visible_rows(area.height))
     } else {
         let tile = state
             .box_areas
             .iter()
-            .find(|tile| tile.content.contains(position))?;
+            .find(|tile| tile.placed.contains(position))?;
         let terminal = state.selected_terminals().get(tile.index)?;
-        let area = tile.content;
+        let area = tile.placed;
         let rows = &state
             .frames
             .get(&(state.user().into(), terminal.pane.clone()))?
             .rows;
-        (
-            area,
-            rows.iter()
-                .skip(start_row(rows, area.height))
-                .cloned()
-                .collect(),
-        )
+        (area, rows.clone())
     };
     if area.is_empty() || !area.contains(position) {
         return None;

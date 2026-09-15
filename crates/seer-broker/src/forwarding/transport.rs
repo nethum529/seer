@@ -38,6 +38,9 @@ impl RuntimeConnection {
         let ServerMsg::Tree { tree } = codec::decode(&mut stream)? else {
             return Err(io::Error::other("expected runtime tree"));
         };
+        let ServerMsg::Terminals { terminals, .. } = codec::decode(&mut stream)? else {
+            return Err(io::Error::other("expected runtime terminals"));
+        };
         stream.set_read_timeout(None)?;
         let identity = Arc::new(());
         let reader = spawn_runtime_reader(
@@ -51,7 +54,7 @@ impl RuntimeConnection {
             identity,
             tree,
             frames: HashMap::new(),
-            terminals: Vec::new(),
+            terminals,
             reader,
         })
     }

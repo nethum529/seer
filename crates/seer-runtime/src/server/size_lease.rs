@@ -7,7 +7,6 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, MouseKind, PaneSize};
 
 use super::{SharedSession, connection::Connection, lock, writer};
-use crate::user_session::VisibleSize;
 
 impl SharedSession {
     pub(super) fn watch_size(
@@ -24,7 +23,9 @@ impl SharedSession {
             let current = session.pane_hosts.get(pane).map(|host| ServerMsg::Cells {
                 user: session.user.clone(),
                 pane: pane.to_owned(),
-                frame: host.frame(),
+                frame: size
+                    .and_then(|size| host.view(size))
+                    .unwrap_or_else(|| host.frame()),
             });
             (valid, current)
         };
@@ -81,34 +82,6 @@ impl SharedSession {
         connection.claimed.insert(pane.into(), Instant::now());
         Ok(own_sizes(&connections) != before)
     }
-
-    pub(super) fn visible_sizes(connections: &[Connection]) -> BTreeMap<String, VisibleSize> {
-        let claimed = own_sizes(connections);
-        let mut sizes: BTreeMap<String, VisibleSize> = BTreeMap::new();
-        for connection in connections.iter().filter(|connection| connection.read_only) {
-            for (pane, size) in &connection.watches {
-                if claimed.contains_key(pane) {
-                    continue;
-                }
-                sizes
-                    .entry(pane.clone())
-                    .and_modify(|smallest| {
-                        smallest.size.cols = smallest.size.cols.min(size.cols);
-                        smallest.size.rows = smallest.size.rows.min(size.rows);
-                    })
-                    .or_insert(VisibleSize {
-                        size: *size,
-                        own: false,
-                    });
-            }
-        }
-        sizes.extend(
-            claimed
-                .into_iter()
-                .map(|(pane, size)| (pane, VisibleSize { size, own: true })),
-        );
-        sizes
-    }
 }
 
 pub(super) fn claimed_pane(message: &ClientMsg) -> Option<&str> {
@@ -116,7 +89,9 @@ pub(super) fn claimed_pane(message: &ClientMsg) -> Option<&str> {
         ClientMsg::TerminalInput { pane, input, .. } => {
             claims_size(&input.event).then_some(pane.as_str())
         }
-        ClientMsg::GrantedInput { pane, .. } | ClientMsg::FocusPane { pane, .. } => Some(pane),
+        ClientMsg::GrantedInput { pane, .. }
+        | ClientMsg::GrantedMouse { pane, .. }
+        | ClientMsg::FocusPane { pane, .. } => Some(pane),
         _ => None,
     }
 }
@@ -131,7 +106,7 @@ fn claims_size(event: &InputEvent) -> bool {
     }
 }
 
-fn own_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize> {
+pub(super) fn own_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize> {
     let mut claimed: BTreeMap<String, (Instant, PaneSize)> = BTreeMap::new();
     for connection in connections
         .iter()
@@ -157,9 +132,8 @@ fn own_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize> {
         .collect()
 }
 
-// seer exit names a terminal, not a client. The client that leaves is the
-// local one that last typed into or started watching that terminal. When no
-// client holds a claim, the only local client leaves.
+// Nested terminal servers may not inherit Seer markers. Without a pane,
+// only a single local client can be selected.
 pub(super) fn handle_exit_client(
     stream: &mut UnixStream,
     shared: &SharedSession,
@@ -171,7 +145,7 @@ pub(super) fn handle_exit_client(
     let reply = match shared.exit_target(pane)? {
         Some(id) if shared.send_to(id, &bye).is_ok() => bye,
         Some(_) => refused("the Seer client has already left"),
-        None => refused("no Seer client is on this terminal"),
+        None => refused("cannot select one Seer client; run seer exit in the outer Seer shell"),
     };
     codec::encode(stream, &reply)
 }
@@ -184,7 +158,7 @@ fn refused(reason: &str) -> ServerMsg {
 
 impl SharedSession {
     fn exit_target(&self, pane: &str) -> io::Result<Option<u64>> {
-        if !lock(&self.session)?.pane_hosts.contains_key(pane) {
+        if !pane.is_empty() && !lock(&self.session)?.pane_hosts.contains_key(pane) {
             return Ok(None);
         }
         let connections = lock(&self.connections)?;

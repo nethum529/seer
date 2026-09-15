@@ -28,18 +28,7 @@ const SIZE_POLL: Duration = Duration::from_millis(25);
 fn the_active_own_client_controls_the_pane_size() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
-    let runtime = runtime_command()
-        .args([
-            socket_path.as_os_str(),
-            "alice".as_ref(),
-            "sh".as_ref(),
-            GENERATION.as_ref(),
-        ])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .spawn()
-        .expect("runtime must start");
-    let mut runtime = RuntimeProcess::new(runtime);
+    let mut runtime = start_runtime(&socket_path);
     let mut first = connect_with_timeout(&socket_path);
     let tree = tree(read_message(&mut first));
     let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();
@@ -93,15 +82,132 @@ fn the_active_own_client_controls_the_pane_size() {
     sizes.settles_at(&mut first, FIRST);
 
     send(&mut first, &unwatch(&pane));
-    sizes.settles_at(&mut first, REMOTE);
-
-    send(&mut remote, &unwatch(&pane));
     sizes.settles_at(&mut first, FIRST);
 
     send_input(&mut first, &pane, "stty size\n");
     wait_for_text(&mut first, "50 190");
     drop(first);
     assert!(runtime.stop().status.success());
+}
+
+const OWNER: PaneSize = PaneSize {
+    cols: 100,
+    rows: 30,
+};
+const SMALL: PaneSize = PaneSize { cols: 60, rows: 20 };
+const LARGE: PaneSize = PaneSize {
+    cols: 140,
+    rows: 40,
+};
+
+#[test]
+fn each_viewer_sees_the_terminal_at_its_own_size() {
+    let temporary = TemporaryDirectory::new();
+    let socket_path = temporary.path.join("runtime.sock");
+    let mut runtime = start_runtime(&socket_path);
+    let mut owner = connect_with_timeout(&socket_path);
+    let tree = tree(read_message(&mut owner));
+    let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();
+    assert!(wait_for_cells(&mut owner));
+    let mut sizes = PaneSizes::new(&pane);
+    send(&mut owner, &watch(&pane, OWNER));
+    sizes.settles_at(&mut owner, OWNER);
+
+    let mut small = connect_observer(&socket_path);
+    send(&mut small, &watch(&pane, SMALL));
+    let mut large = connect_observer(&socket_path);
+    send(&mut large, &watch(&pane, LARGE));
+    sizes.settles_at(&mut owner, OWNER);
+
+    let line = "x".repeat(150);
+    send_input(&mut owner, &pane, &format!("echo {line}\n"));
+    let owner_frame = wait_for_frame(&mut owner, |rows| {
+        rows.windows(2)
+            .any(|pair| pair[0] == "x".repeat(100) && pair[1].trim_end() == "x".repeat(50))
+    });
+    assert_eq!(frame_size(&owner_frame), OWNER);
+    let small_frame = wait_for_frame(&mut small, |rows| {
+        rows.windows(3).any(|group| {
+            group[0] == "x".repeat(60)
+                && group[1] == "x".repeat(60)
+                && group[2].trim_end() == "x".repeat(30)
+        })
+    });
+    assert_eq!(frame_size(&small_frame), SMALL);
+    assert!(!small_frame.modes.alt_screen);
+    let large_frame = wait_for_frame(&mut large, |rows| {
+        rows.windows(2)
+            .any(|pair| pair[0] == "x".repeat(140) && pair[1].trim_end() == "x".repeat(10))
+    });
+    assert_eq!(frame_size(&large_frame), LARGE);
+    sizes.settles_at(&mut owner, OWNER);
+
+    send_input(
+        &mut owner,
+        &pane,
+        "printf '\\033[?1049h\\033[2J\\033[HAPP TOP'\n",
+    );
+    let large_app = wait_for_frame(&mut large, |rows| rows[0].starts_with("APP TOP"));
+    assert_eq!(frame_size(&large_app), OWNER);
+    assert!(large_app.modes.alt_screen);
+    let small_app = wait_for_frame(&mut small, |rows| rows[0].starts_with("APP TOP"));
+    assert_eq!(frame_size(&small_app), OWNER);
+    sizes.settles_at(&mut owner, OWNER);
+
+    send_input(&mut owner, &pane, "printf '\\033[?1049l'; stty size\n");
+    wait_for_text(&mut owner, "30 100");
+    drop(small);
+    drop(large);
+    drop(owner);
+    assert!(runtime.stop().status.success());
+}
+
+fn start_runtime(socket_path: &Path) -> RuntimeProcess {
+    let runtime = runtime_command()
+        .args([
+            socket_path.as_os_str(),
+            "alice".as_ref(),
+            "sh".as_ref(),
+            GENERATION.as_ref(),
+        ])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .spawn()
+        .expect("runtime must start");
+    RuntimeProcess::new(runtime)
+}
+
+fn frame_size(frame: &seer_core::TerminalFrame) -> PaneSize {
+    PaneSize {
+        cols: u16::try_from(frame.rows.first().map_or(0, Vec::len)).expect("width must fit"),
+        rows: u16::try_from(frame.rows.len()).expect("height must fit"),
+    }
+}
+
+fn wait_for_frame(
+    stream: &mut UnixStream,
+    matches: impl Fn(&[String]) -> bool,
+) -> seer_core::TerminalFrame {
+    let deadline = Instant::now() + MESSAGE_TIMEOUT;
+    let mut last = Vec::new();
+    loop {
+        let message = codec::decode::<_, ServerMsg>(stream);
+        assert!(
+            message.is_ok() && Instant::now() < deadline,
+            "cells never matched, last frame: {last:#?}"
+        );
+        if let Ok(ServerMsg::Cells { frame, .. }) = message {
+            let rows: Vec<String> = frame
+                .rows
+                .iter()
+                .map(|row| row.iter().map(|cell| cell.character).collect())
+                .collect();
+            if matches(&rows) {
+                return frame;
+            }
+            last = rows;
+        }
+    }
 }
 
 fn watch(pane: &str, size: PaneSize) -> ClientMsg {

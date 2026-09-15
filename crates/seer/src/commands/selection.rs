@@ -65,6 +65,14 @@ pub(crate) fn selected_server() -> Result<ServerEntry, CommandError> {
     if store.servers.is_empty() {
         return Err(CommandError::usage("run seer join first"));
     }
+    if let Ok(user) = std::env::var("SEER_USER_ID") {
+        return store
+            .servers
+            .iter()
+            .find(|server| server.user_id == user)
+            .cloned()
+            .ok_or_else(|| CommandError::usage("this terminal's room is not saved"));
+    }
     if store.servers.len() == 1 {
         return Ok(store.servers[0].clone());
     }

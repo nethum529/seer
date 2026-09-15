@@ -29,7 +29,6 @@ fn person(user: &str, name: &str) -> Person {
 fn the_picker_shows_every_person_and_the_permission_for_the_viewed_one() {
     let mut state = ClientState::new(Tree::new(), "alice".into());
     state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
-    state.server = "127.0.0.1:7321".into();
     state.selected = 1;
     panels::open(&mut state, Panel::Picker);
     state.terminals.insert(
@@ -53,7 +52,6 @@ fn the_picker_shows_every_person_and_the_permission_for_the_viewed_one() {
         "Alice",
         "host",
         "Permissions not granted for Bob",
-        "127.0.0.1:7321",
     ] {
         assert!(
             text.contains(expected),
@@ -153,6 +151,30 @@ fn draw_text(state: &mut ClientState, width: u16, height: u16) -> Vec<String> {
     (0..height)
         .map(|y| (0..width).map(|x| buffer[(x, y)].symbol()).collect())
         .collect()
+}
+
+#[test]
+fn the_picker_and_session_panel_show_the_server_alias_and_never_the_endpoint() {
+    let key = "5e48802f6b284502a99a5cd31388307e7cc1cb2ca05e5b7a085497a02f8ecab6";
+    let server = crate::store::ServerEntry {
+        endpoint: format!("iroh:{key}"),
+        alias: "alice-laptop".into(),
+        user_id: "alice".into(),
+        name: "Alice".into(),
+        credential: "secret".into(),
+        current: true,
+    };
+    let mut state = ClientState::for_server(Tree::new(), &server);
+    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    for panel in [Panel::Picker, Panel::Session] {
+        panels::open(&mut state, panel);
+        let text = draw_text(&mut state, 200, 35).join("\n");
+        assert!(text.contains("alice-laptop"), "{text}");
+        assert!(
+            !text.contains("iroh") && !text.contains(&key[..8]),
+            "{text}"
+        );
+    }
 }
 
 #[test]
@@ -327,4 +349,69 @@ fn application_colors_keep_the_terminal_palette() {
     assert_eq!(buffer[(1, 0)].bg, Color::Reset);
     assert_eq!(buffer[(2, 0)].fg, Color::Rgb(10, 20, 30));
     assert_eq!(buffer[(2, 0)].bg, Color::Indexed(123));
+}
+
+#[test]
+fn a_remote_screen_keeps_row_zero_in_the_tile_and_open_view() {
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    state.selected = 1;
+    state
+        .terminals
+        .insert("bob".into(), vec![terminal_info("shell")]);
+    let pane = state.selected_terminals()[0].pane.clone();
+    let mut grid = seer_runtime::PaneGrid::new(80, 30);
+    grid.feed(b"\x1b[1;1HTab one   Tab two\x1b[2;1HWorkspace\x1b[30;1HBottom row");
+    state.frames.insert(("bob".into(), pane), grid.snapshot());
+    let tile = draw_text(&mut state, 80, 24);
+    assert!(
+        tile[0].starts_with("Tab one   Tab two"),
+        "row zero must stay visible: {tile:?}"
+    );
+    assert!(tile[1].starts_with("Workspace"));
+    state.open_focused();
+    for height in [24, 30, 34] {
+        let opened = draw_text(&mut state, 80, height);
+        assert!(opened[0].starts_with("Tab one   Tab two"));
+        assert!(opened[1].starts_with("Workspace"));
+        if height < 30 {
+            assert!(!opened.iter().any(|row| row.contains("Bottom row")));
+        } else {
+            assert!(opened[29].starts_with("Bottom row"));
+        }
+    }
+}
+
+#[test]
+fn a_full_screen_app_smaller_than_the_window_is_centered_with_an_edge() {
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    state.selected = 1;
+    state
+        .terminals
+        .insert("bob".into(), vec![terminal_info("herdr")]);
+    let pane = state.selected_terminals()[0].pane.clone();
+    let mut grid = seer_runtime::PaneGrid::new(40, 10);
+    grid.feed(b"\x1b[?1049h\x1b[HAPP TOP\x1b[10;1HAPP BOTTOM");
+    state.frames.insert(("bob".into(), pane), grid.snapshot());
+    state.open_focused();
+    let opened: Vec<Vec<char>> = draw_text(&mut state, 80, 24)
+        .iter()
+        .map(|row| row.chars().collect())
+        .collect();
+    let text = |y: usize, x: usize, len: usize| opened[y][x..x + len].iter().collect::<String>();
+    assert_eq!(text(7, 20, 7), "APP TOP", "{opened:?}");
+    assert_eq!(text(16, 20, 10), "APP BOTTOM");
+    assert_eq!(
+        state.viewer.as_ref().expect("viewer").content,
+        ratatui::layout::Rect::new(20, 7, 40, 10)
+    );
+    for (x, y) in [(19, 7), (60, 7), (20, 6), (20, 17)] {
+        assert_ne!(opened[y][x], ' ', "an edge must show at {x},{y}");
+    }
+    let cropped = draw_text(&mut state, 30, 24);
+    assert!(
+        cropped[7].starts_with("APP TOP"),
+        "a narrower window crops the width and still centers the height: {cropped:?}"
+    );
 }

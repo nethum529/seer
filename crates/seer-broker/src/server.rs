@@ -45,15 +45,17 @@ pub fn serve(
     if let Some(remote_listener) = remote_listener {
         spawn_remote_accept_loop(remote_listener, Arc::clone(&broker));
     }
-    for connection in listener.incoming() {
-        let connection = connection?;
-        let source = ConnectionKey::direct(connection.peer_addr()?);
-        spawn_connection(Socket::from(connection), Arc::clone(&broker), source, None);
+    lifecycle::accept_loop(listener, broker)?;
+    match std::fs::remove_file(config.state_dir.join("broker.pid")) {
+        Err(error) if error.kind() != io::ErrorKind::NotFound => Err(error),
+        _ => Ok(()),
     }
-    Ok(())
 }
 
+mod lifecycle;
+
 pub(crate) struct BrokerState {
+    stopping: std::sync::atomic::AtomicBool,
     registry: Registry,
     pub(crate) grants: crate::grants::Grants,
     runtimes: RuntimeManager,
@@ -72,6 +74,7 @@ impl BrokerState {
         let (registry, owner_identity) = Registry::open(&config.state_dir, &config.owner_name)?;
         Ok((
             Self {
+                stopping: std::sync::atomic::AtomicBool::new(false),
                 grants: crate::grants::Grants::open(&config.state_dir, &registry.people()?)?,
                 registry,
                 runtimes,
@@ -245,7 +248,7 @@ fn lock_statuses(
 
 fn spawn_status_ticker(broker: Arc<BrokerState>) {
     thread::spawn(move || {
-        loop {
+        while !broker.is_stopping() {
             thread::sleep(STATUS_INTERVAL);
             let _ = broker.refresh_statuses();
         }
@@ -423,6 +426,11 @@ fn join<S: Stream>(
         Ok(result) => result,
         Err(error) => return refuse(stream, error.reason()),
     };
+    seer_core::debug_log!(
+        "seat joined user={} name={}",
+        result.person.user_id,
+        result.person.name
+    );
     codec::encode(
         stream,
         &ServerMsg::Joined {
@@ -434,6 +442,7 @@ fn join<S: Stream>(
 }
 
 pub(crate) fn refuse<S: Stream>(stream: &mut S, reason: &str) -> io::Result<()> {
+    seer_core::debug_log!("refused connection reason={reason}");
     eprintln!("refused connection: {reason}");
     codec::encode(
         stream,

@@ -153,6 +153,15 @@ impl Registry {
             .cloned())
     }
 
+    pub(crate) fn remove_person(&self, user_id: &str) -> io::Result<()> {
+        let mut data = self.lock()?;
+        let mut next = data.clone();
+        next.people.retain(|person| person.user_id != user_id);
+        write_json_atomically(&self.state_dir.join(REGISTRY_FILE), &next)?;
+        *data = next;
+        Ok(())
+    }
+
     pub(crate) fn create_seat(&self, lifetime_secs: u64) -> io::Result<String> {
         self.create_seat_at(now_secs()?, lifetime_secs)
     }

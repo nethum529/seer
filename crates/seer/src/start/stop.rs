@@ -6,24 +6,11 @@ use std::time::Instant;
 
 use super::{BrokerConfig, POLL_INTERVAL, START_TIMEOUT, config_dir, live_broker};
 
-pub(super) fn run_broker(endpoint: Option<&str>) -> bool {
-    match stop_local_broker(endpoint) {
-        Ok(stopped) => stopped,
-        Err(error) => {
-            eprintln!("could not stop the room server: {error}");
-            false
-        }
-    }
-}
-
-fn stop_local_broker(endpoint: Option<&str>) -> io::Result<bool> {
+pub(crate) fn stop_hosted_broker() -> io::Result<bool> {
     let config = match read_config()? {
         Some(config) => config,
         None => return Ok(false),
     };
-    if endpoint.is_some_and(|endpoint| config.published_addr != endpoint) {
-        return Ok(false);
-    }
     let pid_path = config.state_dir.join("broker.pid");
     let Some(pid) = live_broker(&config) else {
         remove_pid_file(&pid_path)?;

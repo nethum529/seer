@@ -4,10 +4,11 @@ use std::process::ExitCode;
 #[cfg(target_os = "linux")]
 mod restore;
 #[cfg(target_os = "linux")]
-pub(crate) use restore::restore_owner;
-mod shutdown;
-#[cfg(target_os = "linux")]
 mod stop;
+#[cfg(target_os = "linux")]
+pub(crate) use restore::restore_owner;
+#[cfg(target_os = "linux")]
+pub(crate) use stop::stop_hosted_broker;
 #[cfg(target_os = "linux")]
 mod wordmark;
 #[cfg(target_os = "linux")]
@@ -62,9 +63,6 @@ pub fn run(restore: bool) -> ExitCode {
         }
     }
 }
-pub fn stop() -> ExitCode {
-    shutdown::run()
-}
 
 #[cfg(target_os = "linux")]
 fn run_linux(restore: bool) -> io::Result<()> {
@@ -80,7 +78,7 @@ fn run_linux(restore: bool) -> io::Result<()> {
                 "Server is running. Run seer stop, then seer start --restore.",
             ));
         }
-        println!("Server already running at {}.", config.published_addr);
+        println!("Server already running.");
         return Ok(());
     }
     if !restore {
@@ -291,7 +289,7 @@ fn start_broker(
     }
     wordmark::print(WORDMARK);
     println!();
-    println!("Server started at {}.", config.published_addr);
+    println!("Server started.");
     println!("You are {}.", config.owner_name);
     println!("Ready in {:.2} s.", started.elapsed().as_secs_f64());
     let invite_started = Instant::now();

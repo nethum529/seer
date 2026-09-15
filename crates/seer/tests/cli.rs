@@ -172,11 +172,10 @@ fn join_persists_the_private_store_without_the_seat_token() {
     let output = run(&config, &["join", &capsule], "alice\nbob\n");
 
     assert!(output.status.success() && output.stderr.is_empty());
+    assert!(!text(&output.stdout).contains(&endpoint[..8]));
     assert_eq!(
         text(&output.stdout),
-        format!(
-            "Server: iroh:{endpoint}\nName: That name is in use.\nName: Joined as bob. Attaching...\n"
-        )
+        "Name: That name is in use.\nName: Joined as bob. Attaching...\n"
     );
     let store_path = config.root.join("seer/servers.toml");
     let store = fs::read_to_string(&store_path).expect("store must be readable");

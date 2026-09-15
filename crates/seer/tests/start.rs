@@ -183,7 +183,7 @@ fn prompt_defaults_create_config_and_owner_store() {
             "(_-< / -_)/ -_)| '_|\n",
             "/__/ \\___|\\___||_|\n",
             "\n",
-            "Server started at 127.0.0.1:7321.\nYou are alice.\n"
+            "Server started.\nYou are alice.\n"
         )),
         "{}",
         output.stdout
@@ -265,10 +265,7 @@ fn second_start_uses_the_live_broker() {
     let second = run_start(&executable, &directory, "", &[]);
 
     assert!(second.status.success(), "{}", second.stderr);
-    assert_eq!(
-        second.stdout,
-        format!("Server already running at {address}.\n")
-    );
+    assert_eq!(second.stdout, "Server already running.\n");
     assert_eq!(
         fs::read_to_string(directory.pid_path()).expect("pid must still exist"),
         first_pid

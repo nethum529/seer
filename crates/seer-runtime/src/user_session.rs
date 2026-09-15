@@ -1,6 +1,7 @@
 use crate::PaneHost;
 use crate::persistence::{self, Store};
 use crate::room::SECRET_VARS;
+use crate::{shell_env, shell_exit};
 use portable_pty::CommandBuilder;
 use seer_core::layout::{PaneRect, rects};
 use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, TerminalInfo};
@@ -63,6 +64,13 @@ impl UserSession {
             ClientMsg::TerminalCapabilities { capabilities } => {
                 validate_capabilities(capabilities).map(|()| Vec::new())
             }
+            ClientMsg::GrantedMouse {
+                workspace,
+                tab,
+                pane,
+                mouse,
+                sender,
+            } => self.granted_mouse(&workspace, &tab, &pane, mouse, sender),
             ClientMsg::GrantedInput {
                 workspace,
                 tab,
@@ -97,8 +105,12 @@ impl UserSession {
             | ClientMsg::Watch { .. }
             | ClientMsg::Unwatch { .. }
             | ClientMsg::Terminals { .. }
+            | ClientMsg::SetAllGrants { .. }
             | ClientMsg::SetGrant { .. }
+            | ClientMsg::MouseInto { .. }
             | ClientMsg::TypeInto { .. }
+            | ClientMsg::Stop
+            | ClientMsg::Leave
             | ClientMsg::Detach => Ok(Vec::new()),
         }
     }
@@ -109,20 +121,31 @@ impl UserSession {
             .pane_hosts
             .iter_mut()
             .filter_map(|(pane, host)| {
-                host.poll().then(|| ServerMsg::Cells {
-                    user: self.user.clone(),
-                    pane: pane.clone(),
-                    frame: host.frame(),
+                host.poll().then(|| {
+                    let frame = host.frame();
+                    #[cfg(debug_assertions)]
+                    seer_core::debug_log::transition(
+                        &format!("frame pane={pane}"),
+                        seer_core::debug_log::frame_summary(&frame),
+                    );
+                    ServerMsg::Cells {
+                        user: self.user.clone(),
+                        pane: pane.clone(),
+                        frame,
+                    }
                 })
             })
             .collect();
+        messages.extend(self.reap_shells());
         let terminals = self.terminals();
         if terminals != self.published_terminals {
             self.published_terminals.clone_from(&terminals);
-            messages.push(ServerMsg::Terminals {
+            let message = ServerMsg::Terminals {
                 user: self.user.clone(),
                 terminals,
-            });
+            };
+            seer_core::debug_log!("{}", seer_core::debug_log::server_summary(&message));
+            messages.push(message);
         }
         messages
     }
@@ -271,14 +294,7 @@ impl UserSession {
             self.pane_hosts.insert(pane.to_owned(), host);
             return Err(error);
         }
-        let closed_tab = self.tree.close_pane(pane).map_err(tree_error)?;
-        if closed_tab.panes.is_empty() {
-            self.tree.close_tab(workspace, tab).map_err(tree_error)?;
-        } else {
-            self.resize_tab(workspace, tab)?;
-        }
-        persistence::persist(self)?;
-        Ok(self.tree_message())
+        self.remove_pane(workspace, tab, pane)
     }
 
     fn focus_pane(&mut self, workspace: &str, tab: &str, pane: &str) -> io::Result<Vec<ServerMsg>> {
@@ -332,6 +348,14 @@ impl UserSession {
         };
 
         for pane_rect in &pane_rects {
+            seer_core::debug_log!(
+                "pty resize pane={} size={}x{} viewport={}x{}",
+                pane_rect.pane,
+                pane_rect.cols,
+                pane_rect.rows,
+                self.viewport.cols,
+                self.viewport.rows
+            );
             self.pane_hosts
                 .get_mut(&pane_rect.pane)
                 .ok_or_else(|| pane_host_not_found(&pane_rect.pane))?
@@ -362,6 +386,8 @@ impl UserSession {
 
     pub(crate) fn start_host(&self, pane_rect: &PaneRect) -> io::Result<PaneHost> {
         let mut command = CommandBuilder::new(&self.shell);
+        shell_env::remove_session_vars(&mut command);
+        shell_exit::install(&mut command, &self.shell)?;
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         command.env("SEER_USER_ID", &self.user);
@@ -469,4 +495,5 @@ pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
 mod tests;
 
 mod terminals;
-pub(crate) use terminals::VisibleSize;
+
+mod lifecycle;

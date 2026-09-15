@@ -48,6 +48,21 @@ impl PaneHost {
         Ok(())
     }
 
+    pub(crate) fn write_granted_mouse(
+        &mut self,
+        mouse: seer_core::MouseInput,
+        sender: String,
+    ) -> io::Result<()> {
+        if self.grid.modes().mouse_tracking == seer_core::MouseTracking::None {
+            return Ok(());
+        }
+        let input = TerminalInput::new(seer_core::InputEvent::Mouse(mouse));
+        if let Some(bytes) = self.grid.handle_input(&input)? {
+            self.write_granted(&bytes, sender)?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn last_typist(&self) -> Option<String> {
         self.last_typist
             .as_ref()
@@ -75,8 +90,16 @@ impl PaneHost {
         self.grid.snapshot()
     }
 
+    pub(crate) fn view(&self, size: seer_core::PaneSize) -> Option<TerminalFrame> {
+        self.grid.view(size.cols, size.rows)
+    }
+
     pub fn foreground(&self) -> String {
         self.session.foreground_name()
+    }
+
+    pub(crate) fn has_exited(&mut self) -> io::Result<bool> {
+        self.session.has_exited()
     }
 
     pub fn kill(&mut self) -> io::Result<()> {

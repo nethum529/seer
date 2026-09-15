@@ -18,6 +18,8 @@ use std::time::Instant;
 use crate::input::{encode_key, encode_mouse};
 use crate::pty::lock_mutex;
 
+mod reflow;
+
 const SCROLLBACK_LINES: usize = 1_000;
 
 pub struct PaneGrid {
@@ -69,6 +71,28 @@ impl PaneGrid {
             cursor: self.cursor(display_offset),
             modes: self.modes(),
         }
+    }
+
+    /// The screen as a viewer of another size sees it. `None` means the
+    /// plain snapshot is right: the size matches, or a full screen app
+    /// draws for the one PTY size and cannot be redrawn (issue 406).
+    #[must_use]
+    pub fn view(&self, cols: u16, rows: u16) -> Option<TerminalFrame> {
+        let grid = self.terminal.grid();
+        let mode = self.terminal.mode();
+        if cols == 0
+            || rows == 0
+            || mode.contains(TermMode::ALT_SCREEN)
+            || (usize::from(cols), usize::from(rows)) == (grid.columns(), grid.screen_lines())
+        {
+            return None;
+        }
+        let view = reflow::view(grid, usize::from(cols), usize::from(rows));
+        Some(TerminalFrame {
+            rows: view.rows,
+            cursor: self.cursor_at(view.cursor),
+            modes: self.modes(),
+        })
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
@@ -124,23 +148,29 @@ impl PaneGrid {
     fn cursor(&self, display_offset: i32) -> Cursor {
         let point = self.terminal.grid().cursor.point;
         let row = point.line.0 + display_offset;
+        let on_screen = row >= 0 && row < self.terminal.screen_lines() as i32;
+        self.cursor_at(on_screen.then_some((row as u16, point.column.0 as u16)))
+    }
+
+    fn cursor_at(&self, position: Option<(u16, u16)>) -> Cursor {
         let style = self.terminal.cursor_style();
+        let (row, column) = position.unwrap_or_default();
         Cursor {
-            row: row.max(0) as u16,
-            column: point.column.0 as u16,
+            row,
+            column,
             shape: map_cursor_shape(style.shape),
             blinking: style.blinking,
-            visible: self.terminal.mode().contains(TermMode::SHOW_CURSOR)
-                && row >= 0
-                && row < self.terminal.screen_lines() as i32
+            visible: position.is_some()
+                && self.terminal.mode().contains(TermMode::SHOW_CURSOR)
                 && style.shape != AlacrittyCursorShape::Hidden,
         }
     }
 
-    fn modes(&self) -> TerminalModes {
+    pub(crate) fn modes(&self) -> TerminalModes {
         let mode = self.terminal.mode();
         TerminalModes {
             mouse_tracking: mouse_tracking(*mode),
+            alt_screen: mode.contains(TermMode::ALT_SCREEN),
         }
     }
 
