@@ -1,8 +1,9 @@
-date_utc: 2026-09-15T20:57:23Z
-revision: fc1a1cd2d37a9100a80a496108f693ecebc59e14-dirty
+date_utc: 2026-09-15T21:36:37Z
+revision: f06bc136bd02fe22b6fe88871ee9fd9c525fb653
 repeats: 3
 workloads: typing editor pager burst
 sizes: 80x24 200x50
+burst_copies: 1200
 typing: input=docs/research/perf-samples/417/input/typing.txt rate_ms=100
 editor: input=docs/research/perf-samples/417/input/editor.txt rate_ms=100
 pager: input=docs/research/perf-samples/417/input/pager.txt rate_ms=40
