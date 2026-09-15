@@ -394,3 +394,29 @@ pub(super) fn click_release(
         press_at(state, stream, kind, area);
     }
 }
+
+#[test]
+fn a_right_click_on_a_person_keeps_the_current_view() {
+    let (mut state, _pane) = two_person_state();
+    let mut wires = wires("alice");
+    let mut terminal = Terminal::new(TestBackend::new(100, 30)).expect("backend must open");
+    state.open_focused();
+    draw(&mut terminal, &mut state);
+
+    let chip = state.chrome.chip_area;
+    click(&mut state, &mut wires.routes, chip);
+    draw(&mut terminal, &mut state);
+    let row = row_of(&state, 1);
+    right_click(&mut state, &mut wires.routes, row);
+    assert!(state.menu.is_some(), "a right click opens the person menu");
+    assert_eq!(state.user(), "alice", "a right click must not select bob");
+    assert_eq!(
+        state.viewer.as_ref().map(|viewer| viewer.user.as_str()),
+        Some("alice"),
+        "a right click must keep the open viewer"
+    );
+
+    press(&mut state, &mut wires.routes, CrosstermKeyCode::Enter);
+    assert_eq!(state.user(), "bob", "watch from the menu selects bob");
+    assert_eq!(state.viewer.as_ref().expect("viewer").user, "bob");
+}

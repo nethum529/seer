@@ -11,6 +11,8 @@ mod persistence;
 mod pty;
 mod room;
 mod server;
+mod shell_env;
+mod shell_exit;
 mod snapshot;
 mod user_session;
 
@@ -37,7 +39,7 @@ pub fn run() -> io::Result<()> {
     server::serve_with_generation(listener, session, generation, room::from_environment())
 }
 
-fn snapshot_directory() -> Option<PathBuf> {
+pub(crate) fn snapshot_directory() -> Option<PathBuf> {
     env::var_os(SNAPSHOT_DIRECTORY_VAR)
         .filter(|value| !value.is_empty())
         .map(PathBuf::from)

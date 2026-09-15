@@ -1,0 +1,13 @@
+workload,condition,cache,boundary,n,fail,median_ms,p95_ms
+broker_ready,local,cold,process_ready,21,0,0.695,0.954
+broker_ready,local,warm,process_ready,20,0,0.643,0.735
+broker_ready,offline,cold,process_ready,0,21,-,-
+broker_ready,offline,warm,process_ready,0,20,-,-
+seer_dial,ready_bind,cold,echo_rtt,300,0,0.034,0.136
+seer_dial,ready_bind,cold,process_spawn,20,0,0.629,0.844
+seer_dial,ready_bind,cold,seer_dial,15,5,3323.961,3780.133
+seer_dial,ready_bind,cold,stream_open,15,0,83.529,219.341
+seer_dial,ready_online,cold,echo_rtt,400,0,0.033,0.068
+seer_dial,ready_online,cold,process_spawn,20,0,0.645,0.760
+seer_dial,ready_online,cold,seer_dial,20,0,323.097,333.074
+seer_dial,ready_online,cold,stream_open,20,0,86.153,96.120
