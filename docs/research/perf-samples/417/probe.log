@@ -1,0 +1,841 @@
+typing 80x24 repeat 1: screen: $ printf 'one two three\n'
+typing 80x24 repeat 1: screen: one two three
+typing 80x24 repeat 1: screen: $ true
+typing 80x24 repeat 1: screen: $ echo the quick brown fox jumps over the lazy dog
+typing 80x24 repeat 1: screen: the quick brown fox jumps over the lazy dog
+typing 80x24 repeat 1: screen: $ cd /tmp
+typing 80x24 repeat 1: screen: $ cd -
+typing 80x24 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 80x24 repeat 1: screen: $ echo done with the first block
+typing 80x24 repeat 1: screen: done with the first block
+typing 80x24 repeat 1: screen: $ for i in 1 2 3; do echo "step $i"; done
+typing 80x24 repeat 1: screen: step 1
+typing 80x24 repeat 1: screen: step 2
+typing 80x24 repeat 1: screen: step 3
+typing 80x24 repeat 1: screen: $ printf '%s\n' alpha beta gamma delta
+typing 80x24 repeat 1: screen: alpha
+typing 80x24 repeat 1: screen: beta
+typing 80x24 repeat 1: screen: gamma
+typing 80x24 repeat 1: screen: delta
+typing 80x24 repeat 1: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+typing 80x24 repeat 1: screen: a slightly longer line of text that a person types at a shell prompt
+typing 80x24 repeat 1: screen: $ echo the end
+typing 80x24 repeat 1: screen: the end
+typing 80x24 repeat 1: screen: $
+typing 80x24 repeat 2: screen: $ printf 'one two three\n'
+typing 80x24 repeat 2: screen: one two three
+typing 80x24 repeat 2: screen: $ true
+typing 80x24 repeat 2: screen: $ echo the quick brown fox jumps over the lazy dog
+typing 80x24 repeat 2: screen: the quick brown fox jumps over the lazy dog
+typing 80x24 repeat 2: screen: $ cd /tmp
+typing 80x24 repeat 2: screen: $ cd -
+typing 80x24 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 80x24 repeat 2: screen: $ echo done with the first block
+typing 80x24 repeat 2: screen: done with the first block
+typing 80x24 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+typing 80x24 repeat 2: screen: step 1
+typing 80x24 repeat 2: screen: step 2
+typing 80x24 repeat 2: screen: step 3
+typing 80x24 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+typing 80x24 repeat 2: screen: alpha
+typing 80x24 repeat 2: screen: beta
+typing 80x24 repeat 2: screen: gamma
+typing 80x24 repeat 2: screen: delta
+typing 80x24 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+typing 80x24 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+typing 80x24 repeat 2: screen: $ echo the end
+typing 80x24 repeat 2: screen: the end
+typing 80x24 repeat 2: screen: $
+typing 80x24 repeat 3: screen: $ printf 'one two three\n'
+typing 80x24 repeat 3: screen: one two three
+typing 80x24 repeat 3: screen: $ true
+typing 80x24 repeat 3: screen: $ echo the quick brown fox jumps over the lazy dog
+typing 80x24 repeat 3: screen: the quick brown fox jumps over the lazy dog
+typing 80x24 repeat 3: screen: $ cd /tmp
+typing 80x24 repeat 3: screen: $ cd -
+typing 80x24 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 80x24 repeat 3: screen: $ echo done with the first block
+typing 80x24 repeat 3: screen: done with the first block
+typing 80x24 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+typing 80x24 repeat 3: screen: step 1
+typing 80x24 repeat 3: screen: step 2
+typing 80x24 repeat 3: screen: step 3
+typing 80x24 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+typing 80x24 repeat 3: screen: alpha
+typing 80x24 repeat 3: screen: beta
+typing 80x24 repeat 3: screen: gamma
+typing 80x24 repeat 3: screen: delta
+typing 80x24 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+typing 80x24 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+typing 80x24 repeat 3: screen: $ echo the end
+typing 80x24 repeat 3: screen: the end
+typing 80x24 repeat 3: screen: $
+editor 80x24 repeat 1: screen: one two three
+editor 80x24 repeat 1: screen: $ true
+editor 80x24 repeat 1: screen: $ echo the quick brown fox jumps over the lazy dog
+editor 80x24 repeat 1: screen: the quick brown fox jumps over the lazy dog
+editor 80x24 repeat 1: screen: $ cd /tmp
+editor 80x24 repeat 1: screen: $ cd -
+editor 80x24 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 80x24 repeat 1: screen: $ echo done with the first block
+editor 80x24 repeat 1: screen: done with the first block
+editor 80x24 repeat 1: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 80x24 repeat 1: screen: step 1
+editor 80x24 repeat 1: screen: step 2
+editor 80x24 repeat 1: screen: step 3
+editor 80x24 repeat 1: screen: $ printf '%s\n' alpha beta gamma delta
+editor 80x24 repeat 1: screen: alpha
+editor 80x24 repeat 1: screen: beta
+editor 80x24 repeat 1: screen: gamma
+editor 80x24 repeat 1: screen: delta
+editor 80x24 repeat 1: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 80x24 repeat 1: screen: a slightly longer line of text that a person types at a shell prompt
+editor 80x24 repeat 1: screen: $ echo the end
+editor 80x24 repeat 1: screen: the end
+editor 80x24 repeat 1: screen: $ vim -N -u NONE ~/long.txt
+editor 80x24 repeat 1: screen: $
+editor 80x24 repeat 2: screen: $ true
+editor 80x24 repeat 2: screen: $ echo the quick brown fox jumps over the lazy dog
+editor 80x24 repeat 2: screen: the quick brown fox jumps over the lazy dog
+editor 80x24 repeat 2: screen: $ cd /tmp
+editor 80x24 repeat 2: screen: $ cd -
+editor 80x24 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 80x24 repeat 2: screen: $ echo done with the first block
+editor 80x24 repeat 2: screen: done with the first block
+editor 80x24 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 80x24 repeat 2: screen: step 1
+editor 80x24 repeat 2: screen: step 2
+editor 80x24 repeat 2: screen: step 3
+editor 80x24 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+editor 80x24 repeat 2: screen: alpha
+editor 80x24 repeat 2: screen: beta
+editor 80x24 repeat 2: screen: gamma
+editor 80x24 repeat 2: screen: delta
+editor 80x24 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 80x24 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+editor 80x24 repeat 2: screen: $ echo the end
+editor 80x24 repeat 2: screen: the end
+editor 80x24 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+editor 80x24 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+editor 80x24 repeat 2: screen: $
+editor 80x24 repeat 3: screen: $ echo the quick brown fox jumps over the lazy dog
+editor 80x24 repeat 3: screen: the quick brown fox jumps over the lazy dog
+editor 80x24 repeat 3: screen: $ cd /tmp
+editor 80x24 repeat 3: screen: $ cd -
+editor 80x24 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 80x24 repeat 3: screen: $ echo done with the first block
+editor 80x24 repeat 3: screen: done with the first block
+editor 80x24 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 80x24 repeat 3: screen: step 1
+editor 80x24 repeat 3: screen: step 2
+editor 80x24 repeat 3: screen: step 3
+editor 80x24 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+editor 80x24 repeat 3: screen: alpha
+editor 80x24 repeat 3: screen: beta
+editor 80x24 repeat 3: screen: gamma
+editor 80x24 repeat 3: screen: delta
+editor 80x24 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 80x24 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+editor 80x24 repeat 3: screen: $ echo the end
+editor 80x24 repeat 3: screen: the end
+editor 80x24 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+editor 80x24 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+editor 80x24 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+editor 80x24 repeat 3: screen: $
+pager 80x24 repeat 1: screen: the quick brown fox jumps over the lazy dog
+pager 80x24 repeat 1: screen: $ cd /tmp
+pager 80x24 repeat 1: screen: $ cd -
+pager 80x24 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 80x24 repeat 1: screen: $ echo done with the first block
+pager 80x24 repeat 1: screen: done with the first block
+pager 80x24 repeat 1: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 80x24 repeat 1: screen: step 1
+pager 80x24 repeat 1: screen: step 2
+pager 80x24 repeat 1: screen: step 3
+pager 80x24 repeat 1: screen: $ printf '%s\n' alpha beta gamma delta
+pager 80x24 repeat 1: screen: alpha
+pager 80x24 repeat 1: screen: beta
+pager 80x24 repeat 1: screen: gamma
+pager 80x24 repeat 1: screen: delta
+pager 80x24 repeat 1: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 80x24 repeat 1: screen: a slightly longer line of text that a person types at a shell prompt
+pager 80x24 repeat 1: screen: $ echo the end
+pager 80x24 repeat 1: screen: the end
+pager 80x24 repeat 1: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 1: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 1: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 1: screen: $ less ~/long.txt
+pager 80x24 repeat 1: screen: $
+pager 80x24 repeat 2: screen: $ cd /tmp
+pager 80x24 repeat 2: screen: $ cd -
+pager 80x24 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 80x24 repeat 2: screen: $ echo done with the first block
+pager 80x24 repeat 2: screen: done with the first block
+pager 80x24 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 80x24 repeat 2: screen: step 1
+pager 80x24 repeat 2: screen: step 2
+pager 80x24 repeat 2: screen: step 3
+pager 80x24 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+pager 80x24 repeat 2: screen: alpha
+pager 80x24 repeat 2: screen: beta
+pager 80x24 repeat 2: screen: gamma
+pager 80x24 repeat 2: screen: delta
+pager 80x24 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 80x24 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+pager 80x24 repeat 2: screen: $ echo the end
+pager 80x24 repeat 2: screen: the end
+pager 80x24 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 2: screen: $ less ~/long.txt
+pager 80x24 repeat 2: screen: $ less ~/long.txt
+pager 80x24 repeat 2: screen: $
+pager 80x24 repeat 3: screen: $ cd -
+pager 80x24 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 80x24 repeat 3: screen: $ echo done with the first block
+pager 80x24 repeat 3: screen: done with the first block
+pager 80x24 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 80x24 repeat 3: screen: step 1
+pager 80x24 repeat 3: screen: step 2
+pager 80x24 repeat 3: screen: step 3
+pager 80x24 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+pager 80x24 repeat 3: screen: alpha
+pager 80x24 repeat 3: screen: beta
+pager 80x24 repeat 3: screen: gamma
+pager 80x24 repeat 3: screen: delta
+pager 80x24 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 80x24 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+pager 80x24 repeat 3: screen: $ echo the end
+pager 80x24 repeat 3: screen: the end
+pager 80x24 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+pager 80x24 repeat 3: screen: $ less ~/long.txt
+pager 80x24 repeat 3: screen: $ less ~/long.txt
+pager 80x24 repeat 3: screen: $ less ~/long.txt
+pager 80x24 repeat 3: screen: $
+burst 80x24 repeat 1: screen: fn invalid_input(message: String) -> io::Error {
+burst 80x24 repeat 1: screen:     io::Error::new(io::ErrorKind::InvalidInput, message)
+burst 80x24 repeat 1: screen: }
+burst 80x24 repeat 1: screen: pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
+burst 80x24 repeat 1: screen: esult<()> {
+burst 80x24 repeat 1: screen:     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+burst 80x24 repeat 1: screen:         Ok(())
+burst 80x24 repeat 1: screen:     } else {
+burst 80x24 repeat 1: screen:         Err(io::Error::new(
+burst 80x24 repeat 1: screen:             io::ErrorKind::InvalidInput,
+burst 80x24 repeat 1: screen:             "unsupported terminal capability version",
+burst 80x24 repeat 1: screen:         ))
+burst 80x24 repeat 1: screen:     }
+burst 80x24 repeat 1: screen: }
+burst 80x24 repeat 1: screen: #[cfg(all(test, target_os = "linux"))]
+burst 80x24 repeat 1: screen: mod tests;
+burst 80x24 repeat 1: screen: mod terminals;
+burst 80x24 repeat 1: screen: mod lifecycle;
+burst 80x24 repeat 1: screen: $
+burst 80x24 repeat 2: screen: fn invalid_input(message: String) -> io::Error {
+burst 80x24 repeat 2: screen:     io::Error::new(io::ErrorKind::InvalidInput, message)
+burst 80x24 repeat 2: screen: }
+burst 80x24 repeat 2: screen: pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
+burst 80x24 repeat 2: screen: esult<()> {
+burst 80x24 repeat 2: screen:     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+burst 80x24 repeat 2: screen:         Ok(())
+burst 80x24 repeat 2: screen:     } else {
+burst 80x24 repeat 2: screen:         Err(io::Error::new(
+burst 80x24 repeat 2: screen:             io::ErrorKind::InvalidInput,
+burst 80x24 repeat 2: screen:             "unsupported terminal capability version",
+burst 80x24 repeat 2: screen:         ))
+burst 80x24 repeat 2: screen:     }
+burst 80x24 repeat 2: screen: }
+burst 80x24 repeat 2: screen: #[cfg(all(test, target_os = "linux"))]
+burst 80x24 repeat 2: screen: mod tests;
+burst 80x24 repeat 2: screen: mod terminals;
+burst 80x24 repeat 2: screen: mod lifecycle;
+burst 80x24 repeat 2: screen: $
+burst 80x24 repeat 3: screen: fn invalid_input(message: String) -> io::Error {
+burst 80x24 repeat 3: screen:     io::Error::new(io::ErrorKind::InvalidInput, message)
+burst 80x24 repeat 3: screen: }
+burst 80x24 repeat 3: screen: pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
+burst 80x24 repeat 3: screen: esult<()> {
+burst 80x24 repeat 3: screen:     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+burst 80x24 repeat 3: screen:         Ok(())
+burst 80x24 repeat 3: screen:     } else {
+burst 80x24 repeat 3: screen:         Err(io::Error::new(
+burst 80x24 repeat 3: screen:             io::ErrorKind::InvalidInput,
+burst 80x24 repeat 3: screen:             "unsupported terminal capability version",
+burst 80x24 repeat 3: screen:         ))
+burst 80x24 repeat 3: screen:     }
+burst 80x24 repeat 3: screen: }
+burst 80x24 repeat 3: screen: #[cfg(all(test, target_os = "linux"))]
+burst 80x24 repeat 3: screen: mod tests;
+burst 80x24 repeat 3: screen: mod terminals;
+burst 80x24 repeat 3: screen: mod lifecycle;
+burst 80x24 repeat 3: screen: $
+typing 200x50 repeat 1: screen: fn invalid_input(message: String) -> io::Error {
+typing 200x50 repeat 1: screen:     io::Error::new(io::ErrorKind::InvalidInput, message)
+typing 200x50 repeat 1: screen: }
+typing 200x50 repeat 1: screen: pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
+typing 200x50 repeat 1: screen:     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+typing 200x50 repeat 1: screen:         Ok(())
+typing 200x50 repeat 1: screen:     } else {
+typing 200x50 repeat 1: screen:         Err(io::Error::new(
+typing 200x50 repeat 1: screen:             io::ErrorKind::InvalidInput,
+typing 200x50 repeat 1: screen:             "unsupported terminal capability version",
+typing 200x50 repeat 1: screen:         ))
+typing 200x50 repeat 1: screen:     }
+typing 200x50 repeat 1: screen: }
+typing 200x50 repeat 1: screen: #[cfg(all(test, target_os = "linux"))]
+typing 200x50 repeat 1: screen: mod tests;
+typing 200x50 repeat 1: screen: mod terminals;
+typing 200x50 repeat 1: screen: mod lifecycle;
+typing 200x50 repeat 1: screen: $ echo hello world
+typing 200x50 repeat 1: screen: hello world
+typing 200x50 repeat 1: screen: $ pwd
+typing 200x50 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 200x50 repeat 1: screen: $ printf 'one two three\n'
+typing 200x50 repeat 1: screen: one two three
+typing 200x50 repeat 1: screen: $ true
+typing 200x50 repeat 1: screen: $ echo the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 1: screen: the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 1: screen: $ cd /tmp
+typing 200x50 repeat 1: screen: $ cd -
+typing 200x50 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 200x50 repeat 1: screen: $ echo done with the first block
+typing 200x50 repeat 1: screen: done with the first block
+typing 200x50 repeat 1: screen: $ for i in 1 2 3; do echo "step $i"; done
+typing 200x50 repeat 1: screen: step 1
+typing 200x50 repeat 1: screen: step 2
+typing 200x50 repeat 1: screen: step 3
+typing 200x50 repeat 1: screen: $ printf '%s\n' alpha beta gamma delta
+typing 200x50 repeat 1: screen: alpha
+typing 200x50 repeat 1: screen: beta
+typing 200x50 repeat 1: screen: gamma
+typing 200x50 repeat 1: screen: delta
+typing 200x50 repeat 1: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 1: screen: a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 1: screen: $ echo the end
+typing 200x50 repeat 1: screen: the end
+typing 200x50 repeat 1: screen: $
+typing 200x50 repeat 2: screen: one two three
+typing 200x50 repeat 2: screen: $ true
+typing 200x50 repeat 2: screen: $ echo the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 2: screen: the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 2: screen: $ cd /tmp
+typing 200x50 repeat 2: screen: $ cd -
+typing 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 200x50 repeat 2: screen: $ echo done with the first block
+typing 200x50 repeat 2: screen: done with the first block
+typing 200x50 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+typing 200x50 repeat 2: screen: step 1
+typing 200x50 repeat 2: screen: step 2
+typing 200x50 repeat 2: screen: step 3
+typing 200x50 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+typing 200x50 repeat 2: screen: alpha
+typing 200x50 repeat 2: screen: beta
+typing 200x50 repeat 2: screen: gamma
+typing 200x50 repeat 2: screen: delta
+typing 200x50 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 2: screen: $ echo the end
+typing 200x50 repeat 2: screen: the end
+typing 200x50 repeat 2: screen: $ echo hello world
+typing 200x50 repeat 2: screen: hello world
+typing 200x50 repeat 2: screen: $ pwd
+typing 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 200x50 repeat 2: screen: $ printf 'one two three\n'
+typing 200x50 repeat 2: screen: one two three
+typing 200x50 repeat 2: screen: $ true
+typing 200x50 repeat 2: screen: $ echo the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 2: screen: the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 2: screen: $ cd /tmp
+typing 200x50 repeat 2: screen: $ cd -
+typing 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 200x50 repeat 2: screen: $ echo done with the first block
+typing 200x50 repeat 2: screen: done with the first block
+typing 200x50 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+typing 200x50 repeat 2: screen: step 1
+typing 200x50 repeat 2: screen: step 2
+typing 200x50 repeat 2: screen: step 3
+typing 200x50 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+typing 200x50 repeat 2: screen: alpha
+typing 200x50 repeat 2: screen: beta
+typing 200x50 repeat 2: screen: gamma
+typing 200x50 repeat 2: screen: delta
+typing 200x50 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 2: screen: $ echo the end
+typing 200x50 repeat 2: screen: the end
+typing 200x50 repeat 2: screen: $
+typing 200x50 repeat 3: screen: one two three
+typing 200x50 repeat 3: screen: $ true
+typing 200x50 repeat 3: screen: $ echo the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 3: screen: the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 3: screen: $ cd /tmp
+typing 200x50 repeat 3: screen: $ cd -
+typing 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 200x50 repeat 3: screen: $ echo done with the first block
+typing 200x50 repeat 3: screen: done with the first block
+typing 200x50 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+typing 200x50 repeat 3: screen: step 1
+typing 200x50 repeat 3: screen: step 2
+typing 200x50 repeat 3: screen: step 3
+typing 200x50 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+typing 200x50 repeat 3: screen: alpha
+typing 200x50 repeat 3: screen: beta
+typing 200x50 repeat 3: screen: gamma
+typing 200x50 repeat 3: screen: delta
+typing 200x50 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 3: screen: $ echo the end
+typing 200x50 repeat 3: screen: the end
+typing 200x50 repeat 3: screen: $ echo hello world
+typing 200x50 repeat 3: screen: hello world
+typing 200x50 repeat 3: screen: $ pwd
+typing 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 200x50 repeat 3: screen: $ printf 'one two three\n'
+typing 200x50 repeat 3: screen: one two three
+typing 200x50 repeat 3: screen: $ true
+typing 200x50 repeat 3: screen: $ echo the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 3: screen: the quick brown fox jumps over the lazy dog
+typing 200x50 repeat 3: screen: $ cd /tmp
+typing 200x50 repeat 3: screen: $ cd -
+typing 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+typing 200x50 repeat 3: screen: $ echo done with the first block
+typing 200x50 repeat 3: screen: done with the first block
+typing 200x50 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+typing 200x50 repeat 3: screen: step 1
+typing 200x50 repeat 3: screen: step 2
+typing 200x50 repeat 3: screen: step 3
+typing 200x50 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+typing 200x50 repeat 3: screen: alpha
+typing 200x50 repeat 3: screen: beta
+typing 200x50 repeat 3: screen: gamma
+typing 200x50 repeat 3: screen: delta
+typing 200x50 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+typing 200x50 repeat 3: screen: $ echo the end
+typing 200x50 repeat 3: screen: the end
+typing 200x50 repeat 3: screen: $
+editor 200x50 repeat 1: screen: $ true
+editor 200x50 repeat 1: screen: $ echo the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 1: screen: the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 1: screen: $ cd /tmp
+editor 200x50 repeat 1: screen: $ cd -
+editor 200x50 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 1: screen: $ echo done with the first block
+editor 200x50 repeat 1: screen: done with the first block
+editor 200x50 repeat 1: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 200x50 repeat 1: screen: step 1
+editor 200x50 repeat 1: screen: step 2
+editor 200x50 repeat 1: screen: step 3
+editor 200x50 repeat 1: screen: $ printf '%s\n' alpha beta gamma delta
+editor 200x50 repeat 1: screen: alpha
+editor 200x50 repeat 1: screen: beta
+editor 200x50 repeat 1: screen: gamma
+editor 200x50 repeat 1: screen: delta
+editor 200x50 repeat 1: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 1: screen: a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 1: screen: $ echo the end
+editor 200x50 repeat 1: screen: the end
+editor 200x50 repeat 1: screen: $ echo hello world
+editor 200x50 repeat 1: screen: hello world
+editor 200x50 repeat 1: screen: $ pwd
+editor 200x50 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 1: screen: $ printf 'one two three\n'
+editor 200x50 repeat 1: screen: one two three
+editor 200x50 repeat 1: screen: $ true
+editor 200x50 repeat 1: screen: $ echo the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 1: screen: the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 1: screen: $ cd /tmp
+editor 200x50 repeat 1: screen: $ cd -
+editor 200x50 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 1: screen: $ echo done with the first block
+editor 200x50 repeat 1: screen: done with the first block
+editor 200x50 repeat 1: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 200x50 repeat 1: screen: step 1
+editor 200x50 repeat 1: screen: step 2
+editor 200x50 repeat 1: screen: step 3
+editor 200x50 repeat 1: screen: $ printf '%s\n' alpha beta gamma delta
+editor 200x50 repeat 1: screen: alpha
+editor 200x50 repeat 1: screen: beta
+editor 200x50 repeat 1: screen: gamma
+editor 200x50 repeat 1: screen: delta
+editor 200x50 repeat 1: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 1: screen: a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 1: screen: $ echo the end
+editor 200x50 repeat 1: screen: the end
+editor 200x50 repeat 1: screen: $ vim -N -u NONE ~/long.txt
+editor 200x50 repeat 1: screen: $
+editor 200x50 repeat 2: screen: $ echo the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 2: screen: the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 2: screen: $ cd /tmp
+editor 200x50 repeat 2: screen: $ cd -
+editor 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 2: screen: $ echo done with the first block
+editor 200x50 repeat 2: screen: done with the first block
+editor 200x50 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 200x50 repeat 2: screen: step 1
+editor 200x50 repeat 2: screen: step 2
+editor 200x50 repeat 2: screen: step 3
+editor 200x50 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+editor 200x50 repeat 2: screen: alpha
+editor 200x50 repeat 2: screen: beta
+editor 200x50 repeat 2: screen: gamma
+editor 200x50 repeat 2: screen: delta
+editor 200x50 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 2: screen: $ echo the end
+editor 200x50 repeat 2: screen: the end
+editor 200x50 repeat 2: screen: $ echo hello world
+editor 200x50 repeat 2: screen: hello world
+editor 200x50 repeat 2: screen: $ pwd
+editor 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 2: screen: $ printf 'one two three\n'
+editor 200x50 repeat 2: screen: one two three
+editor 200x50 repeat 2: screen: $ true
+editor 200x50 repeat 2: screen: $ echo the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 2: screen: the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 2: screen: $ cd /tmp
+editor 200x50 repeat 2: screen: $ cd -
+editor 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 2: screen: $ echo done with the first block
+editor 200x50 repeat 2: screen: done with the first block
+editor 200x50 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 200x50 repeat 2: screen: step 1
+editor 200x50 repeat 2: screen: step 2
+editor 200x50 repeat 2: screen: step 3
+editor 200x50 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+editor 200x50 repeat 2: screen: alpha
+editor 200x50 repeat 2: screen: beta
+editor 200x50 repeat 2: screen: gamma
+editor 200x50 repeat 2: screen: delta
+editor 200x50 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 2: screen: $ echo the end
+editor 200x50 repeat 2: screen: the end
+editor 200x50 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+editor 200x50 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+editor 200x50 repeat 2: screen: $
+editor 200x50 repeat 3: screen: the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 3: screen: $ cd /tmp
+editor 200x50 repeat 3: screen: $ cd -
+editor 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 3: screen: $ echo done with the first block
+editor 200x50 repeat 3: screen: done with the first block
+editor 200x50 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 200x50 repeat 3: screen: step 1
+editor 200x50 repeat 3: screen: step 2
+editor 200x50 repeat 3: screen: step 3
+editor 200x50 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+editor 200x50 repeat 3: screen: alpha
+editor 200x50 repeat 3: screen: beta
+editor 200x50 repeat 3: screen: gamma
+editor 200x50 repeat 3: screen: delta
+editor 200x50 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 3: screen: $ echo the end
+editor 200x50 repeat 3: screen: the end
+editor 200x50 repeat 3: screen: $ echo hello world
+editor 200x50 repeat 3: screen: hello world
+editor 200x50 repeat 3: screen: $ pwd
+editor 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 3: screen: $ printf 'one two three\n'
+editor 200x50 repeat 3: screen: one two three
+editor 200x50 repeat 3: screen: $ true
+editor 200x50 repeat 3: screen: $ echo the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 3: screen: the quick brown fox jumps over the lazy dog
+editor 200x50 repeat 3: screen: $ cd /tmp
+editor 200x50 repeat 3: screen: $ cd -
+editor 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+editor 200x50 repeat 3: screen: $ echo done with the first block
+editor 200x50 repeat 3: screen: done with the first block
+editor 200x50 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+editor 200x50 repeat 3: screen: step 1
+editor 200x50 repeat 3: screen: step 2
+editor 200x50 repeat 3: screen: step 3
+editor 200x50 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+editor 200x50 repeat 3: screen: alpha
+editor 200x50 repeat 3: screen: beta
+editor 200x50 repeat 3: screen: gamma
+editor 200x50 repeat 3: screen: delta
+editor 200x50 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+editor 200x50 repeat 3: screen: $ echo the end
+editor 200x50 repeat 3: screen: the end
+editor 200x50 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+editor 200x50 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+editor 200x50 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+editor 200x50 repeat 3: screen: $
+pager 200x50 repeat 1: screen: $ cd /tmp
+pager 200x50 repeat 1: screen: $ cd -
+pager 200x50 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 1: screen: $ echo done with the first block
+pager 200x50 repeat 1: screen: done with the first block
+pager 200x50 repeat 1: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 200x50 repeat 1: screen: step 1
+pager 200x50 repeat 1: screen: step 2
+pager 200x50 repeat 1: screen: step 3
+pager 200x50 repeat 1: screen: $ printf '%s\n' alpha beta gamma delta
+pager 200x50 repeat 1: screen: alpha
+pager 200x50 repeat 1: screen: beta
+pager 200x50 repeat 1: screen: gamma
+pager 200x50 repeat 1: screen: delta
+pager 200x50 repeat 1: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 1: screen: a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 1: screen: $ echo the end
+pager 200x50 repeat 1: screen: the end
+pager 200x50 repeat 1: screen: $ echo hello world
+pager 200x50 repeat 1: screen: hello world
+pager 200x50 repeat 1: screen: $ pwd
+pager 200x50 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 1: screen: $ printf 'one two three\n'
+pager 200x50 repeat 1: screen: one two three
+pager 200x50 repeat 1: screen: $ true
+pager 200x50 repeat 1: screen: $ echo the quick brown fox jumps over the lazy dog
+pager 200x50 repeat 1: screen: the quick brown fox jumps over the lazy dog
+pager 200x50 repeat 1: screen: $ cd /tmp
+pager 200x50 repeat 1: screen: $ cd -
+pager 200x50 repeat 1: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 1: screen: $ echo done with the first block
+pager 200x50 repeat 1: screen: done with the first block
+pager 200x50 repeat 1: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 200x50 repeat 1: screen: step 1
+pager 200x50 repeat 1: screen: step 2
+pager 200x50 repeat 1: screen: step 3
+pager 200x50 repeat 1: screen: $ printf '%s\n' alpha beta gamma delta
+pager 200x50 repeat 1: screen: alpha
+pager 200x50 repeat 1: screen: beta
+pager 200x50 repeat 1: screen: gamma
+pager 200x50 repeat 1: screen: delta
+pager 200x50 repeat 1: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 1: screen: a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 1: screen: $ echo the end
+pager 200x50 repeat 1: screen: the end
+pager 200x50 repeat 1: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 1: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 1: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 1: screen: $ less ~/long.txt
+pager 200x50 repeat 1: screen: $
+pager 200x50 repeat 2: screen: $ cd -
+pager 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 2: screen: $ echo done with the first block
+pager 200x50 repeat 2: screen: done with the first block
+pager 200x50 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 200x50 repeat 2: screen: step 1
+pager 200x50 repeat 2: screen: step 2
+pager 200x50 repeat 2: screen: step 3
+pager 200x50 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+pager 200x50 repeat 2: screen: alpha
+pager 200x50 repeat 2: screen: beta
+pager 200x50 repeat 2: screen: gamma
+pager 200x50 repeat 2: screen: delta
+pager 200x50 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 2: screen: $ echo the end
+pager 200x50 repeat 2: screen: the end
+pager 200x50 repeat 2: screen: $ echo hello world
+pager 200x50 repeat 2: screen: hello world
+pager 200x50 repeat 2: screen: $ pwd
+pager 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 2: screen: $ printf 'one two three\n'
+pager 200x50 repeat 2: screen: one two three
+pager 200x50 repeat 2: screen: $ true
+pager 200x50 repeat 2: screen: $ echo the quick brown fox jumps over the lazy dog
+pager 200x50 repeat 2: screen: the quick brown fox jumps over the lazy dog
+pager 200x50 repeat 2: screen: $ cd /tmp
+pager 200x50 repeat 2: screen: $ cd -
+pager 200x50 repeat 2: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 2: screen: $ echo done with the first block
+pager 200x50 repeat 2: screen: done with the first block
+pager 200x50 repeat 2: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 200x50 repeat 2: screen: step 1
+pager 200x50 repeat 2: screen: step 2
+pager 200x50 repeat 2: screen: step 3
+pager 200x50 repeat 2: screen: $ printf '%s\n' alpha beta gamma delta
+pager 200x50 repeat 2: screen: alpha
+pager 200x50 repeat 2: screen: beta
+pager 200x50 repeat 2: screen: gamma
+pager 200x50 repeat 2: screen: delta
+pager 200x50 repeat 2: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 2: screen: a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 2: screen: $ echo the end
+pager 200x50 repeat 2: screen: the end
+pager 200x50 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 2: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 2: screen: $ less ~/long.txt
+pager 200x50 repeat 2: screen: $ less ~/long.txt
+pager 200x50 repeat 2: screen: $
+pager 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 3: screen: $ echo done with the first block
+pager 200x50 repeat 3: screen: done with the first block
+pager 200x50 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 200x50 repeat 3: screen: step 1
+pager 200x50 repeat 3: screen: step 2
+pager 200x50 repeat 3: screen: step 3
+pager 200x50 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+pager 200x50 repeat 3: screen: alpha
+pager 200x50 repeat 3: screen: beta
+pager 200x50 repeat 3: screen: gamma
+pager 200x50 repeat 3: screen: delta
+pager 200x50 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 3: screen: $ echo the end
+pager 200x50 repeat 3: screen: the end
+pager 200x50 repeat 3: screen: $ echo hello world
+pager 200x50 repeat 3: screen: hello world
+pager 200x50 repeat 3: screen: $ pwd
+pager 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 3: screen: $ printf 'one two three\n'
+pager 200x50 repeat 3: screen: one two three
+pager 200x50 repeat 3: screen: $ true
+pager 200x50 repeat 3: screen: $ echo the quick brown fox jumps over the lazy dog
+pager 200x50 repeat 3: screen: the quick brown fox jumps over the lazy dog
+pager 200x50 repeat 3: screen: $ cd /tmp
+pager 200x50 repeat 3: screen: $ cd -
+pager 200x50 repeat 3: screen: /tmp/tmp.NJnbIWGBtb/home
+pager 200x50 repeat 3: screen: $ echo done with the first block
+pager 200x50 repeat 3: screen: done with the first block
+pager 200x50 repeat 3: screen: $ for i in 1 2 3; do echo "step $i"; done
+pager 200x50 repeat 3: screen: step 1
+pager 200x50 repeat 3: screen: step 2
+pager 200x50 repeat 3: screen: step 3
+pager 200x50 repeat 3: screen: $ printf '%s\n' alpha beta gamma delta
+pager 200x50 repeat 3: screen: alpha
+pager 200x50 repeat 3: screen: beta
+pager 200x50 repeat 3: screen: gamma
+pager 200x50 repeat 3: screen: delta
+pager 200x50 repeat 3: screen: $ echo a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 3: screen: a slightly longer line of text that a person types at a shell prompt
+pager 200x50 repeat 3: screen: $ echo the end
+pager 200x50 repeat 3: screen: the end
+pager 200x50 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 3: screen: $ vim -N -u NONE ~/long.txt
+pager 200x50 repeat 3: screen: $ less ~/long.txt
+pager 200x50 repeat 3: screen: $ less ~/long.txt
+pager 200x50 repeat 3: screen: $ less ~/long.txt
+pager 200x50 repeat 3: screen: $
+burst 200x50 repeat 1: screen:         vec![ServerMsg::Tree {
+burst 200x50 repeat 1: screen:             tree: self.tree.clone(),
+burst 200x50 repeat 1: screen:         }]
+burst 200x50 repeat 1: screen:     }
+burst 200x50 repeat 1: screen: }
+burst 200x50 repeat 1: screen: fn find_rect(tab: &Tab, viewport: PaneSize, pane: &str) -> io::Result<PaneRect> {
+burst 200x50 repeat 1: screen:     rects(tab, viewport.cols, viewport.rows)
+burst 200x50 repeat 1: screen:         .into_iter()
+burst 200x50 repeat 1: screen:         .find(|pane_rect| pane_rect.pane == pane)
+burst 200x50 repeat 1: screen:         .ok_or_else(|| invalid_data("pane is missing from its layout"))
+burst 200x50 repeat 1: screen: }
+burst 200x50 repeat 1: screen: fn tree_error(error: TreeError) -> io::Error {
+burst 200x50 repeat 1: screen:     io::Error::new(io::ErrorKind::InvalidInput, error)
+burst 200x50 repeat 1: screen: }
+burst 200x50 repeat 1: screen: fn pane_host_not_found(pane: &str) -> io::Error {
+burst 200x50 repeat 1: screen:     io::Error::new(
+burst 200x50 repeat 1: screen:         io::ErrorKind::NotFound,
+burst 200x50 repeat 1: screen:         format!("pane host not found: {pane}"),
+burst 200x50 repeat 1: screen:     )
+burst 200x50 repeat 1: screen: }
+burst 200x50 repeat 1: screen: fn invalid_data(message: &'static str) -> io::Error {
+burst 200x50 repeat 1: screen:     io::Error::new(io::ErrorKind::InvalidData, message)
+burst 200x50 repeat 1: screen: }
+burst 200x50 repeat 1: screen: fn invalid_input(message: String) -> io::Error {
+burst 200x50 repeat 1: screen:     io::Error::new(io::ErrorKind::InvalidInput, message)
+burst 200x50 repeat 1: screen: }
+burst 200x50 repeat 1: screen: pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
+burst 200x50 repeat 1: screen:     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+burst 200x50 repeat 1: screen:         Ok(())
+burst 200x50 repeat 1: screen:     } else {
+burst 200x50 repeat 1: screen:         Err(io::Error::new(
+burst 200x50 repeat 1: screen:             io::ErrorKind::InvalidInput,
+burst 200x50 repeat 1: screen:             "unsupported terminal capability version",
+burst 200x50 repeat 1: screen:         ))
+burst 200x50 repeat 1: screen:     }
+burst 200x50 repeat 1: screen: }
+burst 200x50 repeat 1: screen: #[cfg(all(test, target_os = "linux"))]
+burst 200x50 repeat 1: screen: mod tests;
+burst 200x50 repeat 1: screen: mod terminals;
+burst 200x50 repeat 1: screen: mod lifecycle;
+burst 200x50 repeat 1: screen: $
+burst 200x50 repeat 2: screen:         vec![ServerMsg::Tree {
+burst 200x50 repeat 2: screen:             tree: self.tree.clone(),
+burst 200x50 repeat 2: screen:         }]
+burst 200x50 repeat 2: screen:     }
+burst 200x50 repeat 2: screen: }
+burst 200x50 repeat 2: screen: fn find_rect(tab: &Tab, viewport: PaneSize, pane: &str) -> io::Result<PaneRect> {
+burst 200x50 repeat 2: screen:     rects(tab, viewport.cols, viewport.rows)
+burst 200x50 repeat 2: screen:         .into_iter()
+burst 200x50 repeat 2: screen:         .find(|pane_rect| pane_rect.pane == pane)
+burst 200x50 repeat 2: screen:         .ok_or_else(|| invalid_data("pane is missing from its layout"))
+burst 200x50 repeat 2: screen: }
+burst 200x50 repeat 2: screen: fn tree_error(error: TreeError) -> io::Error {
+burst 200x50 repeat 2: screen:     io::Error::new(io::ErrorKind::InvalidInput, error)
+burst 200x50 repeat 2: screen: }
+burst 200x50 repeat 2: screen: fn pane_host_not_found(pane: &str) -> io::Error {
+burst 200x50 repeat 2: screen:     io::Error::new(
+burst 200x50 repeat 2: screen:         io::ErrorKind::NotFound,
+burst 200x50 repeat 2: screen:         format!("pane host not found: {pane}"),
+burst 200x50 repeat 2: screen:     )
+burst 200x50 repeat 2: screen: }
+burst 200x50 repeat 2: screen: fn invalid_data(message: &'static str) -> io::Error {
+burst 200x50 repeat 2: screen:     io::Error::new(io::ErrorKind::InvalidData, message)
+burst 200x50 repeat 2: screen: }
+burst 200x50 repeat 2: screen: fn invalid_input(message: String) -> io::Error {
+burst 200x50 repeat 2: screen:     io::Error::new(io::ErrorKind::InvalidInput, message)
+burst 200x50 repeat 2: screen: }
+burst 200x50 repeat 2: screen: pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
+burst 200x50 repeat 2: screen:     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+burst 200x50 repeat 2: screen:         Ok(())
+burst 200x50 repeat 2: screen:     } else {
+burst 200x50 repeat 2: screen:         Err(io::Error::new(
+burst 200x50 repeat 2: screen:             io::ErrorKind::InvalidInput,
+burst 200x50 repeat 2: screen:             "unsupported terminal capability version",
+burst 200x50 repeat 2: screen:         ))
+burst 200x50 repeat 2: screen:     }
+burst 200x50 repeat 2: screen: }
+burst 200x50 repeat 2: screen: #[cfg(all(test, target_os = "linux"))]
+burst 200x50 repeat 2: screen: mod tests;
+burst 200x50 repeat 2: screen: mod terminals;
+burst 200x50 repeat 2: screen: mod lifecycle;
+burst 200x50 repeat 2: screen: $
+burst 200x50 repeat 3: screen:         vec![ServerMsg::Tree {
+burst 200x50 repeat 3: screen:             tree: self.tree.clone(),
+burst 200x50 repeat 3: screen:         }]
+burst 200x50 repeat 3: screen:     }
+burst 200x50 repeat 3: screen: }
+burst 200x50 repeat 3: screen: fn find_rect(tab: &Tab, viewport: PaneSize, pane: &str) -> io::Result<PaneRect> {
+burst 200x50 repeat 3: screen:     rects(tab, viewport.cols, viewport.rows)
+burst 200x50 repeat 3: screen:         .into_iter()
+burst 200x50 repeat 3: screen:         .find(|pane_rect| pane_rect.pane == pane)
+burst 200x50 repeat 3: screen:         .ok_or_else(|| invalid_data("pane is missing from its layout"))
+burst 200x50 repeat 3: screen: }
+burst 200x50 repeat 3: screen: fn tree_error(error: TreeError) -> io::Error {
+burst 200x50 repeat 3: screen:     io::Error::new(io::ErrorKind::InvalidInput, error)
+burst 200x50 repeat 3: screen: }
+burst 200x50 repeat 3: screen: fn pane_host_not_found(pane: &str) -> io::Error {
+burst 200x50 repeat 3: screen:     io::Error::new(
+burst 200x50 repeat 3: screen:         io::ErrorKind::NotFound,
+burst 200x50 repeat 3: screen:         format!("pane host not found: {pane}"),
+burst 200x50 repeat 3: screen:     )
+burst 200x50 repeat 3: screen: }
+burst 200x50 repeat 3: screen: fn invalid_data(message: &'static str) -> io::Error {
+burst 200x50 repeat 3: screen:     io::Error::new(io::ErrorKind::InvalidData, message)
+burst 200x50 repeat 3: screen: }
+burst 200x50 repeat 3: screen: fn invalid_input(message: String) -> io::Error {
+burst 200x50 repeat 3: screen:     io::Error::new(io::ErrorKind::InvalidInput, message)
+burst 200x50 repeat 3: screen: }
+burst 200x50 repeat 3: screen: pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
+burst 200x50 repeat 3: screen:     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+burst 200x50 repeat 3: screen:         Ok(())
+burst 200x50 repeat 3: screen:     } else {
+burst 200x50 repeat 3: screen:         Err(io::Error::new(
+burst 200x50 repeat 3: screen:             io::ErrorKind::InvalidInput,
+burst 200x50 repeat 3: screen:             "unsupported terminal capability version",
+burst 200x50 repeat 3: screen:         ))
+burst 200x50 repeat 3: screen:     }
+burst 200x50 repeat 3: screen: }
+burst 200x50 repeat 3: screen: #[cfg(all(test, target_os = "linux"))]
+burst 200x50 repeat 3: screen: mod tests;
+burst 200x50 repeat 3: screen: mod terminals;
+burst 200x50 repeat 3: screen: mod lifecycle;
+burst 200x50 repeat 3: screen: $

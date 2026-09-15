@@ -1,0 +1,12 @@
+echo hello world
+pwd
+printf 'one two three\\n'
+true
+echo the quick brown fox jumps over the lazy dog
+cd /tmp
+cd -
+echo done with the first block
+for i in 1 2 3; do echo "step $i"; done
+printf '%s\\n' alpha beta gamma delta
+echo a slightly longer line of text that a person types at a shell prompt
+echo the end

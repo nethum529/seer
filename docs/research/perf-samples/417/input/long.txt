@@ -1,0 +1,2676 @@
+use alacritty_terminal::term::TermMode;
+use seer_core::{KeyCode, KeyInput, Modifiers, MouseButton, MouseInput, MouseKind};
+
+pub(crate) fn encode_key(key: KeyInput, mode: TermMode) -> Vec<u8> {
+    let bytes = match key.code {
+        KeyCode::Char(character) => encode_character(character, key.modifiers),
+        KeyCode::Backspace => modified_control(127, key.modifiers),
+        KeyCode::Enter => modified_control(13, key.modifiers),
+        KeyCode::Tab => modified_control(9, key.modifiers),
+        KeyCode::Escape => modified_control(27, key.modifiers),
+        KeyCode::BackTab => back_tab(key.modifiers),
+        KeyCode::Up => modified_csi('A', key.modifiers, mode.contains(TermMode::APP_CURSOR)),
+        KeyCode::Down => modified_csi('B', key.modifiers, mode.contains(TermMode::APP_CURSOR)),
+        KeyCode::Right => modified_csi('C', key.modifiers, mode.contains(TermMode::APP_CURSOR)),
+        KeyCode::Left => modified_csi('D', key.modifiers, mode.contains(TermMode::APP_CURSOR)),
+        KeyCode::Home => modified_csi('H', key.modifiers, mode.contains(TermMode::APP_CURSOR)),
+        KeyCode::End => modified_csi('F', key.modifiers, mode.contains(TermMode::APP_CURSOR)),
+        KeyCode::Begin => modified_csi('E', key.modifiers, false),
+        KeyCode::Insert => tilde_key(2, key.modifiers),
+        KeyCode::Delete => tilde_key(3, key.modifiers),
+        KeyCode::PageUp => tilde_key(5, key.modifiers),
+        KeyCode::PageDown => tilde_key(6, key.modifiers),
+        KeyCode::Function(number) => function_key(number, key.modifiers),
+    };
+    add_alt_prefix(bytes, key.modifiers)
+}
+
+fn encode_character(character: char, modifiers: Modifiers) -> Vec<u8> {
+    if modifiers.super_key || modifiers.hyper || modifiers.meta {
+        return format!(
+            "\x1b[{};{}u",
+            character as u32,
+            modifier_parameter(modifiers)
+        )
+        .into_bytes();
+    }
+    if modifiers.control
+        && let Some(control) = control_character(character)
+    {
+        return vec![control];
+    }
+    let mut encoded = [0; 4];
+    character.encode_utf8(&mut encoded).as_bytes().to_vec()
+}
+
+fn control_character(character: char) -> Option<u8> {
+    match character {
+        ' ' | '@' | '`' | '2' => Some(0),
+        'a'..='z' => Some(character as u8 - b'a' + 1),
+        'A'..='Z' => Some(character as u8 - b'A' + 1),
+        '[' | '3' => Some(27),
+        '\\' | '4' => Some(28),
+        ']' | '5' => Some(29),
+        '^' | '6' => Some(30),
+        '_' | '7' | '/' => Some(31),
+        '?' | '8' => Some(127),
+        _ => None,
+    }
+}
+
+fn modified_control(codepoint: u8, modifiers: Modifiers) -> Vec<u8> {
+    if has_non_alt_modifier(modifiers) {
+        format!("\x1b[{codepoint};{}u", modifier_parameter(modifiers)).into_bytes()
+    } else {
+        vec![codepoint]
+    }
+}
+
+fn back_tab(modifiers: Modifiers) -> Vec<u8> {
+    let only_shift = modifiers.shift
+        && !modifiers.alt
+        && !modifiers.control
+        && !modifiers.super_key
+        && !modifiers.hyper
+        && !modifiers.meta;
+    if only_shift {
+        b"\x1b[Z".to_vec()
+    } else {
+        modified_csi('Z', modifiers, false)
+    }
+}
+
+fn modified_csi(final_byte: char, modifiers: Modifiers, application: bool) -> Vec<u8> {
+    if has_modifiers(modifiers) {
+        format!("\x1b[1;{}{final_byte}", modifier_parameter(modifiers)).into_bytes()
+    } else if application {
+        format!("\x1bO{final_byte}").into_bytes()
+    } else {
+        format!("\x1b[{final_byte}").into_bytes()
+    }
+}
+
+fn tilde_key(code: u8, modifiers: Modifiers) -> Vec<u8> {
+    if has_modifiers(modifiers) {
+        format!("\x1b[{code};{}~", modifier_parameter(modifiers)).into_bytes()
+    } else {
+        format!("\x1b[{code}~").into_bytes()
+    }
+}
+
+fn function_key(number: u8, modifiers: Modifiers) -> Vec<u8> {
+    match number {
+        1..=4 => function_key_ss3(number, modifiers),
+        _ => function_key_tilde(number, modifiers),
+    }
+}
+
+fn function_key_ss3(number: u8, modifiers: Modifiers) -> Vec<u8> {
+    let final_byte = char::from(b'P' + number - 1);
+    if has_modifiers(modifiers) {
+        format!("\x1b[1;{}{final_byte}", modifier_parameter(modifiers)).into_bytes()
+    } else {
+        format!("\x1bO{final_byte}").into_bytes()
+    }
+}
+
+fn function_key_tilde(number: u8, modifiers: Modifiers) -> Vec<u8> {
+    let code = match number {
+        5 => 15,
+        6 => 17,
+        7 => 18,
+        8 => 19,
+        9 => 20,
+        10 => 21,
+        11 => 23,
+        12 => 24,
+        13 => 25,
+        14 => 26,
+        15 => 28,
+        16 => 29,
+        17 => 31,
+        18 => 32,
+        19 => 33,
+        20 => 34,
+        _ => return Vec::new(),
+    };
+    tilde_key(code, modifiers)
+}
+
+fn add_alt_prefix(mut bytes: Vec<u8>, modifiers: Modifiers) -> Vec<u8> {
+    if modifiers.alt && !bytes.starts_with(b"\x1b[") && !bytes.starts_with(b"\x1bO") {
+        bytes.insert(0, 0x1b);
+    }
+    bytes
+}
+
+fn has_non_alt_modifier(modifiers: Modifiers) -> bool {
+    modifiers.shift || modifiers.control || modifiers.super_key || modifiers.hyper || modifiers.meta
+}
+
+fn has_modifiers(modifiers: Modifiers) -> bool {
+    has_non_alt_modifier(modifiers) || modifiers.alt
+}
+
+fn modifier_parameter(modifiers: Modifiers) -> u8 {
+    1 + u8::from(modifiers.shift)
+        + 2 * u8::from(modifiers.alt)
+        + 4 * u8::from(modifiers.control)
+        + 8 * u8::from(modifiers.super_key || modifiers.hyper || modifiers.meta)
+}
+
+pub(crate) fn encode_mouse(mouse: MouseInput, mode: TermMode) -> Option<Vec<u8>> {
+    if !reports_mouse(mouse.kind, mode) {
+        return None;
+    }
+    let code = if mouse.kind == MouseKind::Up && !mode.contains(TermMode::SGR_MOUSE) {
+        3
+    } else {
+        mouse_code(mouse)
+    } + mouse_modifier_code(mouse.modifiers);
+    if mode.contains(TermMode::SGR_MOUSE) {
+        let suffix = if mouse.kind == MouseKind::Up {
+            'm'
+        } else {
+            'M'
+        };
+        Some(
+            format!(
+                "\x1b[<{code};{};{}{suffix}",
+                mouse.column.saturating_add(1),
+                mouse.row.saturating_add(1)
+            )
+            .into_bytes(),
+        )
+    } else {
+        encode_legacy_mouse(code, mouse.column, mouse.row, mode)
+    }
+}
+
+fn reports_mouse(kind: MouseKind, mode: TermMode) -> bool {
+    match kind {
+        MouseKind::Moved => mode.contains(TermMode::MOUSE_MOTION),
+        MouseKind::Drag => mode.intersects(TermMode::MOUSE_DRAG | TermMode::MOUSE_MOTION),
+        _ => mode.intersects(TermMode::MOUSE_MODE),
+    }
+}
+
+fn mouse_code(mouse: MouseInput) -> u8 {
+    let button = match mouse.button {
+        Some(MouseButton::Left) => 0,
+        Some(MouseButton::Middle) => 1,
+        Some(MouseButton::Right) => 2,
+        None => 3,
+    };
+    match mouse.kind {
+        MouseKind::Down => button,
+        MouseKind::Up => button,
+        MouseKind::Drag => button + 32,
+        MouseKind::Moved => 35,
+        MouseKind::ScrollUp => 64,
+        MouseKind::ScrollDown => 65,
+        MouseKind::ScrollLeft => 66,
+        MouseKind::ScrollRight => 67,
+    }
+}
+
+fn mouse_modifier_code(modifiers: Modifiers) -> u8 {
+    4 * u8::from(modifiers.shift) + 8 * u8::from(modifiers.alt) + 16 * u8::from(modifiers.control)
+}
+
+fn encode_legacy_mouse(code: u8, column: u16, row: u16, mode: TermMode) -> Option<Vec<u8>> {
+    let codepoint = u32::from(code) + 32;
+    let column = u32::from(column) + 33;
+    let row = u32::from(row) + 33;
+    if mode.contains(TermMode::UTF8_MOUSE) {
+        let payload: String = [codepoint, column, row]
+            .into_iter()
+            .map(char::from_u32)
+            .collect::<Option<_>>()?;
+        Some([b"\x1b[M".as_slice(), payload.as_bytes()].concat())
+    } else {
+        Some(vec![
+            0x1b,
+            b'[',
+            b'M',
+            u8::try_from(codepoint).ok()?,
+            u8::try_from(column).ok()?,
+            u8::try_from(row).ok()?,
+        ])
+    }
+}
+use std::env;
+use std::ffi::{CString, c_char, c_int};
+use std::io;
+use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicPtr, Ordering};
+
+mod input;
+pub mod pane_grid;
+mod pane_host;
+mod persistence;
+mod pty;
+mod room;
+mod server;
+mod shell_env;
+mod shell_exit;
+mod snapshot;
+mod user_session;
+
+pub use pane_grid::{Cell, Color, PaneGrid};
+pub use pane_host::PaneHost;
+pub use pty::PtySession;
+pub use server::{bind, serve};
+pub use user_session::UserSession;
+
+const USAGE: &str = "usage: seer-runtime <socket-path> <user> <shell> <generation>";
+const SNAPSHOT_DIRECTORY_VAR: &str = "SEER_SNAPSHOT_DIR";
+
+pub fn run() -> io::Result<()> {
+    let (socket_path, user, shell, generation) = arguments()?;
+    let snapshot_dir = snapshot_directory();
+    #[cfg(debug_assertions)]
+    if let Some(directory) = &snapshot_dir {
+        seer_core::debug_log::open(directory, "runtime", &user);
+    }
+    seer_core::debug_log!("runtime start shell={shell} generation={generation}");
+    let session = persistence::load_session(user, shell, snapshot_dir.as_deref())?;
+    let listener = bind(Path::new(&socket_path))?;
+    install_sigterm_cleanup(&socket_path);
+    server::serve_with_generation(listener, session, generation, room::from_environment())
+}
+
+pub(crate) fn snapshot_directory() -> Option<PathBuf> {
+    env::var_os(SNAPSHOT_DIRECTORY_VAR)
+        .filter(|value| !value.is_empty())
+        .map(PathBuf::from)
+}
+
+fn arguments() -> io::Result<(String, String, String, String)> {
+    let mut values = env::args().skip(1);
+    let socket_path = values.next().ok_or_else(usage_error)?;
+    let user = values.next().ok_or_else(usage_error)?;
+    let shell = values.next().ok_or_else(usage_error)?;
+    let generation = values.next().ok_or_else(usage_error)?;
+
+    if values.next().is_some() {
+        return Err(usage_error());
+    }
+
+    Ok((socket_path, user, shell, generation))
+}
+
+fn usage_error() -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, USAGE)
+}
+
+static SOCKET_PATH: AtomicPtr<c_char> = AtomicPtr::new(std::ptr::null_mut());
+
+fn install_sigterm_cleanup(socket_path: &str) {
+    let Ok(path) = CString::new(socket_path) else {
+        return;
+    };
+    SOCKET_PATH.store(path.into_raw(), Ordering::SeqCst);
+    // SAFETY: the handler is a valid extern "C" function and the path is stored first.
+    unsafe {
+        libc::signal(
+            libc::SIGTERM,
+            remove_socket_and_exit as *const () as libc::sighandler_t,
+        );
+    }
+}
+
+extern "C" fn remove_socket_and_exit(_signal: c_int) {
+    let path = SOCKET_PATH.load(Ordering::SeqCst);
+    if !path.is_null() {
+        // SAFETY: unlink is async signal safe and the pointer is a leaked C string.
+        unsafe {
+            libc::unlink(path);
+        }
+    }
+    // SAFETY: _exit is async signal safe and ends the process without cleanup.
+    unsafe {
+        libc::_exit(0);
+    }
+}
+use alacritty_terminal::event::{Event, EventListener};
+use alacritty_terminal::grid::{Dimensions, Scroll};
+use alacritty_terminal::index::{Column, Line};
+use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
+use alacritty_terminal::term::{Config, Term, TermMode};
+use alacritty_terminal::vte::ansi::{
+    Color as AlacrittyColor, CursorShape as AlacrittyCursorShape, NamedColor, Processor,
+};
+pub use seer_core::{Cell, Color};
+use seer_core::{
+    Cursor, CursorShape, InputEvent, KeyCode, KeyInput, Modifiers, MouseKind, MouseTracking,
+    TERMINAL_PROTOCOL_VERSION, TerminalFrame, TerminalInput, TerminalModes,
+};
+use std::io;
+use std::sync::{Arc, Mutex};
+use std::time::Instant;
+
+use crate::input::{encode_key, encode_mouse};
+use crate::pty::lock_mutex;
+
+mod reflow;
+
+const SCROLLBACK_LINES: usize = 1_000;
+
+pub struct PaneGrid {
+    terminal: Term<TerminalReplies>,
+    parser: Processor,
+    replies: TerminalReplies,
+    input_changed: bool,
+}
+
+impl PaneGrid {
+    pub fn new(cols: u16, rows: u16) -> Self {
+        let dimensions = GridSize::new(cols, rows);
+        let config = Config {
+            scrolling_history: SCROLLBACK_LINES,
+            ..Config::default()
+        };
+        let replies = TerminalReplies::default();
+
+        Self {
+            terminal: Term::new(config, &dimensions, replies.clone()),
+            parser: Processor::new(),
+            replies,
+            input_changed: false,
+        }
+    }
+
+    pub fn feed(&mut self, bytes: &[u8]) -> bool {
+        if bytes.is_empty() {
+            return self.finish_expired_sync();
+        }
+        self.parser.advance(&mut self.terminal, bytes);
+        self.parser.sync_bytes_count() == 0
+    }
+
+    #[must_use]
+    pub fn snapshot(&self) -> TerminalFrame {
+        let grid = self.terminal.grid();
+        let display_offset = grid.display_offset() as i32;
+        let rows = (0..grid.screen_lines())
+            .map(|row| {
+                let line = Line(row as i32 - display_offset);
+                (0..grid.columns())
+                    .map(|column| map_cell(&grid[line][Column(column)]))
+                    .collect()
+            })
+            .collect();
+        TerminalFrame {
+            rows,
+            cursor: self.cursor(display_offset),
+            modes: self.modes(),
+        }
+    }
+
+    /// The screen as a viewer of another size sees it. `None` means the
+    /// plain snapshot is right: the size matches, or a full screen app
+    /// draws for the one PTY size and cannot be redrawn (issue 406).
+    #[must_use]
+    pub fn view(&self, cols: u16, rows: u16) -> Option<TerminalFrame> {
+        let grid = self.terminal.grid();
+        let mode = self.terminal.mode();
+        if cols == 0
+            || rows == 0
+            || mode.contains(TermMode::ALT_SCREEN)
+            || (usize::from(cols), usize::from(rows)) == (grid.columns(), grid.screen_lines())
+        {
+            return None;
+        }
+        let view = reflow::view(grid, usize::from(cols), usize::from(rows));
+        Some(TerminalFrame {
+            rows: view.rows,
+            cursor: self.cursor_at(view.cursor),
+            modes: self.modes(),
+        })
+    }
+
+    pub fn resize(&mut self, cols: u16, rows: u16) {
+        self.terminal.resize(GridSize::new(cols, rows));
+    }
+
+    /// Bytes the terminal asked to write back to the pty master.
+    ///
+    /// A shell can query terminal capabilities. Alacritty answers
+    /// those queries by emitting a PtyWrite event. The pane host
+    /// sends the captured bytes back into the pty.
+    pub(crate) fn take_replies(&self) -> Vec<u8> {
+        self.replies.take()
+    }
+
+    pub fn handle_input(&mut self, input: &TerminalInput) -> io::Result<Option<Vec<u8>>> {
+        if input.protocol_version != TERMINAL_PROTOCOL_VERSION {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "unsupported terminal input version",
+            ));
+        }
+        let mode = *self.terminal.mode();
+        match &input.event {
+            InputEvent::Key(key) => Ok(Some(encode_key(*key, mode))),
+            InputEvent::Text(text) => Ok(Some(text.as_bytes().to_vec())),
+            InputEvent::Paste(text) => Ok(Some(encode_paste(text, mode))),
+            InputEvent::Mouse(mouse) => Ok(self.handle_mouse(*mouse, mode)),
+            InputEvent::Focus(focused) => Ok(focus_bytes(*focused, mode)),
+            InputEvent::Scrollback { lines } => {
+                self.scroll(*lines, mode);
+                Ok(None)
+            }
+        }
+    }
+
+    pub(crate) fn take_input_changed(&mut self) -> bool {
+        std::mem::take(&mut self.input_changed)
+    }
+
+    fn finish_expired_sync(&mut self) -> bool {
+        let expired = self
+            .parser
+            .sync_timeout()
+            .sync_timeout()
+            .is_some_and(|timeout| timeout <= Instant::now());
+        if expired {
+            self.parser.stop_sync(&mut self.terminal);
+        }
+        expired
+    }
+
+    fn cursor(&self, display_offset: i32) -> Cursor {
+        let point = self.terminal.grid().cursor.point;
+        let row = point.line.0 + display_offset;
+        let on_screen = row >= 0 && row < self.terminal.screen_lines() as i32;
+        self.cursor_at(on_screen.then_some((row as u16, point.column.0 as u16)))
+    }
+
+    fn cursor_at(&self, position: Option<(u16, u16)>) -> Cursor {
+        let style = self.terminal.cursor_style();
+        let (row, column) = position.unwrap_or_default();
+        Cursor {
+            row,
+            column,
+            shape: map_cursor_shape(style.shape),
+            blinking: style.blinking,
+            visible: position.is_some()
+                && self.terminal.mode().contains(TermMode::SHOW_CURSOR)
+                && style.shape != AlacrittyCursorShape::Hidden,
+        }
+    }
+
+    pub(crate) fn modes(&self) -> TerminalModes {
+        let mode = self.terminal.mode();
+        TerminalModes {
+            mouse_tracking: mouse_tracking(*mode),
+            alt_screen: mode.contains(TermMode::ALT_SCREEN),
+        }
+    }
+
+    fn handle_mouse(&mut self, mouse: seer_core::MouseInput, mode: TermMode) -> Option<Vec<u8>> {
+        if mode.intersects(TermMode::MOUSE_MODE) {
+            return encode_mouse(mouse, mode);
+        }
+        match mouse.kind {
+            MouseKind::ScrollUp => self.scroll_or_arrow(3, mode),
+            MouseKind::ScrollDown => self.scroll_or_arrow(-3, mode),
+            MouseKind::Down
+            | MouseKind::Up
+            | MouseKind::Drag
+            | MouseKind::Moved
+            | MouseKind::ScrollLeft
+            | MouseKind::ScrollRight => None,
+        }
+    }
+
+    fn scroll_or_arrow(&mut self, lines: i32, mode: TermMode) -> Option<Vec<u8>> {
+        if mode.contains(TermMode::ALT_SCREEN) {
+            let code = if lines > 0 {
+                KeyCode::Up
+            } else {
+                KeyCode::Down
+            };
+            Some(encode_key(
+                KeyInput {
+                    code,
+                    modifiers: Modifiers::default(),
+                },
+                mode,
+            ))
+        } else {
+            self.scroll(lines, mode);
+            None
+        }
+    }
+
+    fn scroll(&mut self, lines: i32, mode: TermMode) {
+        if lines != 0 && !mode.contains(TermMode::ALT_SCREEN) {
+            let before = self.terminal.grid().display_offset();
+            self.terminal.scroll_display(Scroll::Delta(lines));
+            self.input_changed = before != self.terminal.grid().display_offset();
+        }
+    }
+}
+
+/// Captures terminal reply events that must go back to the pty master.
+#[derive(Clone, Default)]
+struct TerminalReplies {
+    bytes: Arc<Mutex<Vec<u8>>>,
+}
+
+impl TerminalReplies {
+    fn take(&self) -> Vec<u8> {
+        std::mem::take(&mut *lock_mutex(&self.bytes))
+    }
+}
+
+impl EventListener for TerminalReplies {
+    fn send_event(&self, event: Event) {
+        if let Event::PtyWrite(reply) = event {
+            lock_mutex(&self.bytes).extend(reply.into_bytes());
+        }
+    }
+}
+
+fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
+    if mode.contains(TermMode::BRACKETED_PASTE) {
+        [b"\x1b[200~".as_slice(), text.as_bytes(), b"\x1b[201~"].concat()
+    } else {
+        text.as_bytes().to_vec()
+    }
+}
+
+fn focus_bytes(focused: bool, mode: TermMode) -> Option<Vec<u8>> {
+    mode.contains(TermMode::FOCUS_IN_OUT)
+        .then(|| if focused { b"\x1b[I" } else { b"\x1b[O" }.to_vec())
+}
+
+fn mouse_tracking(mode: TermMode) -> MouseTracking {
+    if mode.contains(TermMode::MOUSE_MOTION) {
+        MouseTracking::AnyMotion
+    } else if mode.contains(TermMode::MOUSE_DRAG) {
+        MouseTracking::ButtonMotion
+    } else if mode.contains(TermMode::MOUSE_REPORT_CLICK) {
+        MouseTracking::Click
+    } else {
+        MouseTracking::None
+    }
+}
+
+fn map_cursor_shape(shape: AlacrittyCursorShape) -> CursorShape {
+    match shape {
+        AlacrittyCursorShape::Block | AlacrittyCursorShape::Hidden => CursorShape::Block,
+        AlacrittyCursorShape::Underline => CursorShape::Underline,
+        AlacrittyCursorShape::Beam => CursorShape::Beam,
+        AlacrittyCursorShape::HollowBlock => CursorShape::HollowBlock,
+    }
+}
+
+fn map_cell(cell: &AlacrittyCell) -> Cell {
+    Cell {
+        character: cell.c,
+        fg: map_color(cell.fg),
+        bg: map_color(cell.bg),
+        bold: cell.flags.contains(Flags::BOLD),
+        italic: cell.flags.contains(Flags::ITALIC),
+        underline: cell.flags.intersects(Flags::ALL_UNDERLINES),
+        dim: cell.flags.contains(Flags::DIM),
+        inverse: cell.flags.contains(Flags::INVERSE),
+        hidden: cell.flags.contains(Flags::HIDDEN),
+        strikeout: cell.flags.contains(Flags::STRIKEOUT),
+    }
+}
+
+fn map_color(color: AlacrittyColor) -> Color {
+    match color {
+        AlacrittyColor::Spec(rgb) => Color::Rgb {
+            red: rgb.r,
+            green: rgb.g,
+            blue: rgb.b,
+        },
+        AlacrittyColor::Indexed(index) => Color::Indexed(index),
+        AlacrittyColor::Named(name) if name <= NamedColor::BrightWhite => {
+            Color::Indexed(name as u8)
+        }
+        AlacrittyColor::Named(_) => Color::Default,
+    }
+}
+
+#[derive(Clone, Copy)]
+struct GridSize {
+    cols: usize,
+    rows: usize,
+}
+
+impl GridSize {
+    fn new(cols: u16, rows: u16) -> Self {
+        Self {
+            cols: usize::from(cols),
+            rows: usize::from(rows),
+        }
+    }
+}
+
+impl Dimensions for GridSize {
+    fn total_lines(&self) -> usize {
+        self.rows
+    }
+
+    fn screen_lines(&self) -> usize {
+        self.rows
+    }
+
+    fn columns(&self) -> usize {
+        self.cols
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn captures_terminal_replies_until_taken() {
+        let replies = TerminalReplies::default();
+
+        replies.send_event(Event::PtyWrite("first".to_owned()));
+        replies.send_event(Event::PtyWrite("second".to_owned()));
+
+        assert_eq!(replies.take(), b"firstsecond".to_vec());
+        assert!(replies.take().is_empty());
+    }
+
+    #[test]
+    fn feeds_sgr_colors_and_flags() {
+        let mut plain_grid = PaneGrid::new(5, 2);
+        plain_grid.feed(b"hello");
+        let plain = plain_grid.snapshot();
+        let first_row: String = plain.rows[0].iter().map(|cell| cell.character).collect();
+        assert_eq!(first_row, "hello");
+        assert_eq!(plain.rows[1][0].character, ' ');
+        assert_eq!(
+            plain.rows[0][0],
+            Cell {
+                character: 'h',
+                fg: Color::Default,
+                bg: Color::Default,
+                bold: false,
+                italic: false,
+                underline: false,
+                dim: false,
+                inverse: false,
+                hidden: false,
+                strikeout: false,
+            }
+        );
+
+        let mut grid = PaneGrid::new(3, 1);
+
+        grid.feed(b"\x1b[1;2;3;4;7;8;9;31;48;5;123mX\x1b[0;38;2;10;20;30mY");
+
+        let snapshot = grid.snapshot();
+        let styled = &snapshot.rows[0][0];
+        assert_eq!(styled.fg, Color::Indexed(1));
+        assert_eq!(styled.bg, Color::Indexed(123));
+        assert!(styled.bold);
+        assert!(styled.italic);
+        assert!(styled.underline);
+        assert!(styled.dim);
+        assert!(styled.inverse);
+        assert!(styled.hidden);
+        assert!(styled.strikeout);
+        assert_eq!(
+            snapshot.rows[0][1].fg,
+            Color::Rgb {
+                red: 10,
+                green: 20,
+                blue: 30,
+            }
+        );
+    }
+}
+use crate::{PaneGrid, PtySession};
+use portable_pty::CommandBuilder;
+use seer_core::{TerminalFrame, TerminalInput};
+use std::io;
+use std::time::{Duration, Instant};
+
+pub struct PaneHost {
+    session: PtySession,
+    grid: PaneGrid,
+    pub(crate) owner_size: seer_core::PaneSize,
+    last_typist: Option<(String, Instant)>,
+}
+
+impl PaneHost {
+    pub fn start(command: CommandBuilder, cols: u16, rows: u16) -> io::Result<Self> {
+        Ok(Self {
+            session: PtySession::start(command, cols, rows)?,
+            grid: PaneGrid::new(cols, rows),
+            owner_size: seer_core::PaneSize { cols, rows },
+            last_typist: None,
+        })
+    }
+
+    pub fn poll(&mut self) -> bool {
+        let output = self.session.drain_output();
+        let changed = self.grid.feed(&output);
+        let replies = self.grid.take_replies();
+        if !replies.is_empty()
+            && let Err(error) = self.session.write_input(&replies)
+        {
+            eprintln!("pane reply write failed: {error}");
+        }
+        changed
+    }
+
+    pub fn handle_input(&mut self, input: &TerminalInput) -> io::Result<bool> {
+        if let Some(bytes) = self.grid.handle_input(input)? {
+            self.session.write_input(&bytes)?;
+        }
+        Ok(self.grid.take_input_changed())
+    }
+
+    pub(crate) fn write_granted(&mut self, bytes: &[u8], sender: String) -> io::Result<()> {
+        self.session.write_input(bytes)?;
+        if !bytes.is_empty() {
+            self.last_typist = Some((sender, Instant::now()));
+        }
+        Ok(())
+    }
+
+    pub(crate) fn write_granted_mouse(
+        &mut self,
+        mouse: seer_core::MouseInput,
+        sender: String,
+    ) -> io::Result<()> {
+        if self.grid.modes().mouse_tracking == seer_core::MouseTracking::None {
+            return Ok(());
+        }
+        let input = TerminalInput::new(seer_core::InputEvent::Mouse(mouse));
+        if let Some(bytes) = self.grid.handle_input(&input)? {
+            self.write_granted(&bytes, sender)?;
+        }
+        Ok(())
+    }
+
+    pub(crate) fn last_typist(&self) -> Option<String> {
+        self.last_typist
+            .as_ref()
+            .filter(|(_, at)| at.elapsed() < Duration::from_secs(5))
+            .map(|(name, _)| name.clone())
+    }
+
+    pub fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
+        self.resize_visible(cols, rows)?;
+        self.owner_size = seer_core::PaneSize { cols, rows };
+        Ok(())
+    }
+
+    pub(crate) fn remember_owner_size(&mut self, size: seer_core::PaneSize) {
+        self.owner_size = size;
+    }
+
+    pub(crate) fn resize_visible(&mut self, cols: u16, rows: u16) -> io::Result<()> {
+        self.session.resize(cols, rows)?;
+        self.grid.resize(cols, rows);
+        Ok(())
+    }
+
+    pub fn frame(&self) -> TerminalFrame {
+        self.grid.snapshot()
+    }
+
+    pub(crate) fn view(&self, size: seer_core::PaneSize) -> Option<TerminalFrame> {
+        self.grid.view(size.cols, size.rows)
+    }
+
+    pub fn foreground(&self) -> String {
+        self.session.foreground_name()
+    }
+
+    pub(crate) fn has_exited(&mut self) -> io::Result<bool> {
+        self.session.has_exited()
+    }
+
+    pub fn kill(&mut self) -> io::Result<()> {
+        self.session.kill()
+    }
+}
+use crate::snapshot::{self, Snapshot};
+use crate::user_session::UserSession;
+use seer_core::PaneSize;
+use seer_core::layout::PaneRect;
+use std::collections::BTreeMap;
+use std::error::Error;
+use std::fmt;
+use std::fs;
+use std::io;
+use std::path::Path;
+
+pub(crate) struct Store {
+    path: std::path::PathBuf,
+    revision: u64,
+}
+
+pub(crate) fn load_session(
+    user: String,
+    shell: String,
+    directory: Option<&Path>,
+) -> io::Result<UserSession> {
+    let Some(directory) = directory else {
+        return Ok(UserSession::new(user, shell));
+    };
+    fs::create_dir_all(directory)?;
+    let path = snapshot::snapshot_path(directory);
+    match snapshot::load(&path, &user)? {
+        Some(snapshot) => restore_session(user, shell, path, snapshot),
+        None => Ok(empty_session(user, shell, path)),
+    }
+}
+
+fn empty_session(user: String, shell: String, path: std::path::PathBuf) -> UserSession {
+    let mut session = UserSession::new(user, shell);
+    session.store = Some(Store { path, revision: 0 });
+    session
+}
+
+fn restore_session(
+    user: String,
+    shell: String,
+    path: std::path::PathBuf,
+    snapshot: Snapshot,
+) -> io::Result<UserSession> {
+    let mut session = UserSession {
+        published_terminals: Vec::new(),
+        user,
+        tree: snapshot.tree,
+        shell,
+        viewport: snapshot.viewport,
+        pane_hosts: BTreeMap::new(),
+        store: Some(Store {
+            path,
+            revision: snapshot.revision,
+        }),
+    };
+    for (pane, size) in pane_launches(&session) {
+        let pane_rect = PaneRect {
+            pane: pane.clone(),
+            cols: size.cols,
+            rows: size.rows,
+            x: 0,
+            y: 0,
+        };
+        let host = session.start_host(&pane_rect)?;
+        session.pane_hosts.insert(pane, host);
+    }
+    Ok(session)
+}
+
+fn pane_launches(session: &UserSession) -> Vec<(String, PaneSize)> {
+    session
+        .tree
+        .workspaces
+        .iter()
+        .flat_map(|workspace| &workspace.tabs)
+        .flat_map(|tab| &tab.panes)
+        .map(|pane| (pane.id.clone(), pane.size))
+        .collect()
+}
+
+pub(crate) fn persist(session: &mut UserSession) -> io::Result<()> {
+    let Some(store) = session.store.as_mut() else {
+        return Ok(());
+    };
+    store.revision = store.revision.saturating_add(1);
+    let snapshot = Snapshot::capture(
+        store.revision,
+        &session.user,
+        session.viewport,
+        &session.tree,
+    );
+    snapshot::store(&store.path, &snapshot).map_err(mark_fatal)
+}
+
+#[derive(Debug)]
+struct SaveFailed(io::Error);
+
+impl fmt::Display for SaveFailed {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "session snapshot save failed: {}", self.0)
+    }
+}
+
+impl Error for SaveFailed {
+    fn source(&self) -> Option<&(dyn Error + 'static)> {
+        Some(&self.0)
+    }
+}
+
+fn mark_fatal(error: io::Error) -> io::Error {
+    io::Error::other(SaveFailed(error))
+}
+
+pub(crate) fn is_fatal(error: &io::Error) -> bool {
+    error
+        .get_ref()
+        .is_some_and(|source| source.is::<SaveFailed>())
+}
+use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
+use std::collections::VecDeque;
+use std::fmt::Display;
+use std::io::{self, Read, Write};
+use std::sync::{Arc, Mutex, MutexGuard};
+use std::thread;
+
+const OUTPUT_LIMIT: usize = 1024 * 1024;
+const READ_BUFFER_SIZE: usize = 8 * 1024;
+
+pub struct PtySession {
+    master: Box<dyn MasterPty + Send>,
+    child: Box<dyn Child + Send + Sync>,
+    writer: Box<dyn Write + Send>,
+    output: Arc<Mutex<OutputBuffers>>,
+}
+
+#[derive(Default)]
+struct OutputBuffers {
+    pending: VecDeque<u8>,
+}
+
+impl PtySession {
+    pub fn start(command: CommandBuilder, cols: u16, rows: u16) -> io::Result<Self> {
+        let pair = native_pty_system()
+            .openpty(pty_size(cols, rows))
+            .map_err(to_io_error)?;
+        let reader = pair.master.try_clone_reader().map_err(to_io_error)?;
+        let writer = pair.master.take_writer().map_err(to_io_error)?;
+        let output = Arc::new(Mutex::new(OutputBuffers::default()));
+        let reader_output = Arc::clone(&output);
+
+        let _reader_task = thread::Builder::new()
+            .name("pty-output-reader".to_owned())
+            .spawn(move || read_output(reader, &reader_output))?;
+        let child = pair.slave.spawn_command(command).map_err(to_io_error)?;
+
+        Ok(Self {
+            master: pair.master,
+            child,
+            writer,
+            output,
+        })
+    }
+
+    pub fn write_input(&mut self, bytes: &[u8]) -> io::Result<()> {
+        self.writer.write_all(bytes)
+    }
+
+    pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
+        self.master
+            .resize(pty_size(cols, rows))
+            .map_err(to_io_error)
+    }
+
+    pub fn has_exited(&mut self) -> io::Result<bool> {
+        self.child.try_wait().map(|status| status.is_some())
+    }
+
+    pub fn kill(&mut self) -> io::Result<()> {
+        self.child.kill()
+    }
+
+    pub fn foreground_name(&self) -> String {
+        let Some(descriptor) = self.master.as_raw_fd() else {
+            return String::new();
+        };
+        // SAFETY: the descriptor belongs to this session master PTY and stays open for the call.
+        let group = unsafe { libc::tcgetpgrp(descriptor) };
+        if group <= 0 {
+            return String::new();
+        }
+        process_name(group)
+    }
+
+    pub fn drain_output(&self) -> Vec<u8> {
+        let mut output = lock_mutex(&self.output);
+        output.pending.drain(..).collect()
+    }
+}
+
+#[cfg(target_os = "linux")]
+fn process_name(group: i32) -> String {
+    std::fs::read_to_string(format!("/proc/{group}/comm"))
+        .map(|name| name.trim().to_owned())
+        .unwrap_or_default()
+}
+
+#[cfg(not(target_os = "linux"))]
+fn process_name(_group: i32) -> String {
+    String::new()
+}
+
+fn pty_size(cols: u16, rows: u16) -> PtySize {
+    PtySize {
+        rows,
+        cols,
+        pixel_width: 0,
+        pixel_height: 0,
+    }
+}
+
+fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<OutputBuffers>) {
+    let mut bytes = [0; READ_BUFFER_SIZE];
+
+    loop {
+        match reader.read(&mut bytes) {
+            Ok(0) => return,
+            Ok(count) => append_output(output, &bytes[..count]),
+            Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
+            Err(_) => return,
+        }
+    }
+}
+
+fn append_output(output: &Mutex<OutputBuffers>, bytes: &[u8]) {
+    let mut output = lock_mutex(output);
+    append_bounded(&mut output.pending, bytes);
+}
+
+// Discard the oldest bytes so detached output stays bounded and keeps the latest state.
+fn append_bounded(output: &mut VecDeque<u8>, bytes: &[u8]) {
+    output.extend(bytes);
+    let excess = output.len().saturating_sub(OUTPUT_LIMIT);
+    output.drain(..excess);
+}
+
+pub(crate) fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
+    match mutex.lock() {
+        Ok(value) => value,
+        Err(poisoned) => poisoned.into_inner(),
+    }
+}
+
+fn to_io_error(error: impl Display) -> io::Error {
+    io::Error::other(error.to_string())
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn output_buffers_keep_last_mebibyte_while_not_drained() {
+        let output = Mutex::new(OutputBuffers::default());
+        let bytes: Vec<u8> = (0..=OUTPUT_LIMIT)
+            .map(|index| (index % usize::from(u8::MAX)) as u8)
+            .collect();
+        append_output(&output, &bytes);
+
+        let output = output.into_inner().expect("output lock must be valid");
+        assert_eq!(output.pending.len(), OUTPUT_LIMIT);
+        assert!(
+            output
+                .pending
+                .iter()
+                .copied()
+                .eq(bytes[1..].iter().copied())
+        );
+    }
+}
+use std::env;
+use std::io;
+use std::net::{TcpStream, ToSocketAddrs};
+use std::os::unix::net::UnixStream;
+use std::path::PathBuf;
+use std::thread;
+use std::time::Duration;
+
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_net::{Session, Socket, Stream};
+
+const ENDPOINT_VAR: &str = "SEER_ROOM_ENDPOINT";
+const CREDENTIAL_VAR: &str = "SEER_ROOM_CREDENTIAL";
+const KEY_VAR: &str = "SEER_ROOM_KEY";
+// The client saves an iroh room as iroh:<id>, the capsule form.
+const IROH_PREFIX: &str = "iroh:";
+const FIRST_BACKOFF: Duration = Duration::from_secs(1);
+const MAX_BACKOFF: Duration = Duration::from_secs(30);
+
+pub(crate) struct RoomConfig {
+    endpoint: String,
+    credential: String,
+    key_path: PathBuf,
+}
+
+pub(crate) fn from_environment() -> Option<RoomConfig> {
+    let endpoint = non_empty(ENDPOINT_VAR)?;
+    let credential = non_empty(CREDENTIAL_VAR)?;
+    let key_path = PathBuf::from(non_empty(KEY_VAR)?);
+    Some(RoomConfig {
+        endpoint,
+        credential,
+        key_path,
+    })
+}
+
+fn non_empty(name: &str) -> Option<String> {
+    env::var(name).ok().filter(|value| !value.is_empty())
+}
+
+pub(crate) fn spawn(
+    config: RoomConfig,
+    user_id: String,
+    generation: String,
+    serve: impl Fn(UnixStream) + Send + 'static,
+) -> io::Result<()> {
+    thread::Builder::new()
+        .name("runtime-room".into())
+        .spawn(move || publish_loop(&config, &user_id, &generation, &serve))?;
+    Ok(())
+}
+
+fn publish_loop(config: &RoomConfig, user_id: &str, generation: &str, serve: &impl Fn(UnixStream)) {
+    let mut backoff = FIRST_BACKOFF;
+    loop {
+        match publish_once(config, user_id, generation, serve) {
+            Ok(()) => backoff = FIRST_BACKOFF,
+            Err(error) => {
+                seer_core::debug_log!("room connection ended error={error}");
+                eprintln!("runtime room connection ended: {error}");
+            }
+        }
+        thread::sleep(backoff);
+        backoff = (backoff * 2).min(MAX_BACKOFF);
+    }
+}
+
+fn publish_once(
+    config: &RoomConfig,
+    user_id: &str,
+    generation: &str,
+    serve: &impl Fn(UnixStream),
+) -> io::Result<()> {
+    let link = Link::connect(config)?;
+    let mut control = link.open_socket()?;
+    codec::encode(
+        &mut control,
+        &ClientMsg::PublishRuntime {
+            user_id: user_id.to_owned(),
+            credential: config.credential.clone(),
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+            generation: generation.to_owned(),
+        },
+    )?;
+    match codec::decode(&mut control)? {
+        ServerMsg::Published { .. } => {}
+        ServerMsg::Refused { reason } => {
+            return Err(io::Error::other(format!(
+                "room refused this runtime: {reason}"
+            )));
+        }
+        _ => return Err(io::Error::other("room did not confirm the runtime")),
+    }
+    serve_requests(&link, config, user_id, &mut control, serve)
+}
+
+fn serve_requests(
+    link: &Link,
+    config: &RoomConfig,
+    user_id: &str,
+    control: &mut Socket,
+    serve: &impl Fn(UnixStream),
+) -> io::Result<()> {
+    loop {
+        let ServerMsg::OpenStream { token } = codec::decode(control)? else {
+            continue;
+        };
+        // The runtime opens every shared stream. iroh gives a stream to the far
+        // side only after the opener writes, so the opener must send first.
+        let mut stream = link.open_socket()?;
+        codec::encode(
+            &mut stream,
+            &ClientMsg::RuntimeStream {
+                user_id: user_id.to_owned(),
+                credential: config.credential.clone(),
+                token,
+            },
+        )?;
+        serve(into_unix(stream)?);
+    }
+}
+
+enum Link {
+    Iroh(Session),
+    Tcp(std::net::SocketAddr),
+}
+
+impl Link {
+    fn connect(config: &RoomConfig) -> io::Result<Self> {
+        if let Some(id) = config.endpoint.strip_prefix(IROH_PREFIX) {
+            return Self::iroh(id, config);
+        }
+        if let Some(address) = tcp_address(&config.endpoint) {
+            return Ok(Self::Tcp(address));
+        }
+        Self::iroh(&config.endpoint, config)
+    }
+
+    fn iroh(id: &str, config: &RoomConfig) -> io::Result<Self> {
+        let id = seer_net::decode_endpoint_id(id)?;
+        let key = seer_net::load_or_create_secret_key(&config.key_path)?;
+        Ok(Self::Iroh(seer_net::dial_session(key, id)?))
+    }
+
+    fn open_socket(&self) -> io::Result<Socket> {
+        match self {
+            Self::Iroh(session) => session.open().map(Socket::from),
+            Self::Tcp(address) => TcpStream::connect(address).map(Socket::from),
+        }
+    }
+}
+
+fn tcp_address(endpoint: &str) -> Option<std::net::SocketAddr> {
+    if !endpoint.contains(':') {
+        return None;
+    }
+    endpoint.to_socket_addrs().ok()?.next()
+}
+
+// The runtime serves every connection as a Unix stream, so a TCP stream is
+// copied onto one.
+fn into_unix(socket: Socket) -> io::Result<UnixStream> {
+    if let Socket::Iroh(stream) = &socket {
+        return stream.try_clone();
+    }
+    let (caller, bridge) = UnixStream::pair()?;
+    let mut reader = socket.clone();
+    let mut writer = bridge.try_clone()?;
+    thread::Builder::new()
+        .name("runtime-room-read".into())
+        .spawn(move || {
+            let _ = io::copy(&mut reader, &mut writer);
+            let _ = writer.shutdown(std::net::Shutdown::Write);
+        })?;
+    let mut sink = socket;
+    let mut source = bridge;
+    thread::Builder::new()
+        .name("runtime-room-write".into())
+        .spawn(move || {
+            let _ = io::copy(&mut source, &mut sink);
+            let _ = sink.shutdown(std::net::Shutdown::Write);
+        })?;
+    Ok(caller)
+}
+use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use std::io;
+use std::os::unix::net::{UnixListener, UnixStream};
+use std::path::Path;
+use std::sync::atomic::AtomicU64;
+use std::sync::{Arc, Condvar, Mutex};
+use std::thread;
+use std::time::{Duration, Instant};
+
+use crate::UserSession;
+
+mod connection;
+mod room_link;
+mod size_lease;
+mod status;
+mod util;
+mod writer;
+
+use connection::{
+    Connection, ReportedViewport, evict_connection, grant_next_owner, reported_viewport,
+};
+use room_link::{spawn_connection, start_room};
+use util::{connection_closed, lock, remove_stale_socket, stop_after_snapshot_failure};
+
+const POLL_INTERVAL: Duration = Duration::from_millis(5);
+const DETACHED_POLL_INTERVAL: Duration = Duration::from_millis(100);
+const SIZE_LEASE_TIMEOUT: Duration = Duration::from_secs(30);
+
+pub fn bind(path: &Path) -> io::Result<UnixListener> {
+    remove_stale_socket(path)?;
+    UnixListener::bind(path)
+}
+
+pub fn serve(listener: UnixListener, session: UserSession) -> io::Result<()> {
+    serve_with_generation(listener, session, String::new(), None)
+}
+
+pub(crate) fn serve_with_generation(
+    listener: UnixListener,
+    session: UserSession,
+    generation: String,
+    room: Option<crate::room::RoomConfig>,
+) -> io::Result<()> {
+    let shared = Arc::new(SharedSession::new(session));
+    start_poll_driver(Arc::clone(&shared))?;
+    let ids = Arc::new(AtomicU64::new(0));
+    if let Some(room) = room {
+        start_room(room, &generation, &shared, &ids)?;
+    }
+    loop {
+        let (stream, _) = listener.accept()?;
+        spawn_connection(stream, &shared, &ids, &generation, false)?;
+    }
+}
+
+fn connection_loop(
+    stream: &mut UnixStream,
+    shared: &SharedSession,
+    connection_id: u64,
+) -> io::Result<()> {
+    loop {
+        let Ok(message) = codec::decode(stream) else {
+            return Ok(());
+        };
+        if handle_message(shared, connection_id, message)? {
+            return Ok(());
+        }
+    }
+}
+
+fn handle_message(
+    shared: &SharedSession,
+    connection_id: u64,
+    message: ClientMsg,
+) -> io::Result<bool> {
+    seer_core::debug_log!(
+        "recv conn={connection_id} {}",
+        seer_core::debug_log::client_summary(&message)
+    );
+    match message {
+        ClientMsg::Detach => Ok(true),
+        ClientMsg::Watch {
+            pane, cols, rows, ..
+        } => shared.watch_size(
+            connection_id,
+            &pane,
+            Some(seer_core::PaneSize { cols, rows }),
+        ),
+        ClientMsg::Unwatch { pane, .. } => shared.watch_size(connection_id, &pane, None),
+        ClientMsg::Resize {
+            workspace,
+            tab,
+            cols,
+            rows,
+        } => shared.client_resize(connection_id, &workspace, &tab, cols, rows),
+        ClientMsg::TerminalCapabilities { capabilities } => {
+            shared.record_capabilities(connection_id, capabilities)
+        }
+        message
+            if message.is_mutating()
+                || matches!(
+                    message,
+                    ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
+                ) =>
+        {
+            shared.record_input(&message);
+            shared.dispatch_input(connection_id, message)
+        }
+        _ => Ok(false),
+    }
+}
+
+fn start_poll_driver(shared: Arc<SharedSession>) -> io::Result<()> {
+    thread::Builder::new()
+        .name("runtime-poll".into())
+        .spawn(move || poll_driver(&shared))?;
+    Ok(())
+}
+
+fn poll_driver(shared: &SharedSession) {
+    loop {
+        if let Err(error) = shared
+            .poll_and_broadcast()
+            .and_then(|_| shared.wait_for_poll())
+        {
+            eprintln!("runtime poll error: {error}");
+            return;
+        }
+    }
+}
+
+struct SharedSession {
+    session: Mutex<UserSession>,
+    poll_wake: Condvar,
+    connections: Mutex<Vec<Connection>>,
+    lease: Mutex<()>,
+    last_input: Mutex<Instant>,
+}
+
+impl SharedSession {
+    fn new(session: UserSession) -> Self {
+        Self {
+            session: Mutex::new(session),
+            poll_wake: Condvar::new(),
+            connections: Mutex::new(Vec::new()),
+            lease: Mutex::new(()),
+            last_input: Mutex::new(Instant::now()),
+        }
+    }
+
+    fn add_connection(&self, id: u64, stream: UnixStream) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
+        let messages = {
+            let mut session = lock(&self.session)?;
+            match session.ensure_first_shell() {
+                Ok(()) => session.snapshot(),
+                Err(error) if crate::persistence::is_fatal(&error) => {
+                    stop_after_snapshot_failure(&error)
+                }
+                Err(error) => return Err(error),
+            }
+        };
+        let mut connection = Connection::new(id, stream)?;
+        if !connection.send_messages(&messages)? {
+            return Err(connection_closed());
+        }
+        let mut connections = lock(&self.connections)?;
+        let owner_stale = connections
+            .iter()
+            .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
+        if owner_stale {
+            for owner in connections.iter_mut() {
+                owner.size_owner = false;
+            }
+            connection.size_owner = true;
+        } else {
+            connection.size_owner = !connections.iter().any(|c| c.size_owner);
+        }
+        seer_core::debug_log!(
+            "attach conn={id} size_owner={} connections={}",
+            connection.size_owner,
+            connections.len() + 1
+        );
+        connections.push(connection);
+        self.poll_wake.notify_one();
+        Ok(())
+    }
+
+    fn remove_connection(&self, id: u64) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
+        let owner_removed = {
+            let mut connections = lock(&self.connections)?;
+            let removed_owner = connections.iter().any(|c| c.id == id && c.size_owner);
+            connections.retain(|connection| connection.id != id);
+            seer_core::debug_log!(
+                "detach conn={id} was_size_owner={removed_owner} connections={}",
+                connections.len()
+            );
+            removed_owner
+        };
+        if owner_removed {
+            self.recover_locked()?;
+        }
+        self.flush_messages(&[])
+    }
+
+    fn recover(&self) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
+        self.recover_locked()
+    }
+
+    fn recover_locked(&self) -> io::Result<()> {
+        let adopt = {
+            let mut connections = lock(&self.connections)?;
+            if connections.iter().any(|connection| connection.size_owner) {
+                None
+            } else {
+                grant_next_owner(&mut connections)
+            }
+        };
+        if let Some(viewport) = adopt {
+            self.adopt_locked(viewport)?;
+        }
+        Ok(())
+    }
+
+    fn adopt_locked(&self, viewport: ReportedViewport) -> io::Result<()> {
+        let messages = match self.record_viewport(
+            &viewport.workspace,
+            &viewport.tab,
+            viewport.cols,
+            viewport.rows,
+        ) {
+            Ok(messages) => messages,
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => return Ok(()),
+            Err(error) => return Err(error),
+        };
+        self.flush_messages(&messages)
+    }
+
+    fn record_viewport(
+        &self,
+        workspace: &str,
+        tab: &str,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<Vec<ServerMsg>> {
+        let sizes = size_lease::own_sizes(&lock(&self.connections)?);
+        let mut session = lock(&self.session)?;
+        match session.record_viewport(workspace, tab, cols, rows, &sizes) {
+            Ok(messages) => Ok(messages),
+            Err(error) if crate::persistence::is_fatal(&error) => {
+                stop_after_snapshot_failure(&error)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn refresh_read_only(&self, id: u64) -> io::Result<Option<bool>> {
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections.iter_mut().find(|c| c.id == id) else {
+            return Ok(None);
+        };
+        connection.last_active = Instant::now();
+        Ok(Some(connection.read_only))
+    }
+
+    fn dispatch_input(&self, connection_id: u64, message: ClientMsg) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        let Some(read_only) = self.refresh_read_only(connection_id)? else {
+            return Ok(true);
+        };
+        if read_only
+            && !matches!(
+                message,
+                ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
+            )
+        {
+            seer_core::debug_log!("input dropped conn={connection_id} reason=read-only");
+            eprintln!("runtime dropped read-only message: {message:?}");
+            return Ok(false);
+        }
+        // Arbitrate before the input reaches the PTY so the first keystroke or click sees the right viewport.
+        if let Some(pane) = size_lease::claimed_pane(&message)
+            && self.claim_pane(connection_id, pane)?
+        {
+            self.flush_messages(&[])?;
+        }
+        let applied = self.apply(message);
+        match applied {
+            Ok(messages) => {
+                seer_core::debug_log!("input forwarded conn={connection_id}");
+                self.flush_messages(&messages)?;
+                Ok(false)
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                seer_core::debug_log!("input refused conn={connection_id} reason={error}");
+                drop(_lease);
+                self.send_refused(connection_id, error.to_string())?;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn client_resize(
+        &self,
+        id: u64,
+        workspace: &str,
+        tab: &str,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        let pane_rects = lock(&self.session)?.pane_rects(workspace, tab, cols, rows);
+        {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections.iter().position(|c| c.id == id) else {
+                return Ok(false);
+            };
+            if connections[position].read_only {
+                return Ok(false);
+            }
+            connections[position].last_active = Instant::now();
+            let now = Instant::now();
+            // Watch carries the real content geometry, so a resize only reclaims the panes it already watches.
+            for (pane, _) in &pane_rects {
+                if connections[position].watches.contains_key(pane) {
+                    connections[position].claimed.insert(pane.clone(), now);
+                }
+            }
+            let lease_vacant = !connections.iter().any(|c| c.size_owner);
+            let owner_stale = connections
+                .iter()
+                .any(|c| c.size_owner && c.last_active + SIZE_LEASE_TIMEOUT <= Instant::now());
+            if !connections[position].size_owner && !lease_vacant && !owner_stale {
+                seer_core::debug_log!("resize conn={id} size={cols}x{rows} deferred=not-owner");
+                connections[position].viewport =
+                    Some(reported_viewport(workspace, tab, cols, rows));
+                drop(connections);
+                self.flush_messages(&[])?;
+                return Ok(false);
+            }
+        }
+        seer_core::debug_log!("resize conn={id} size={cols}x{rows} applied=owner");
+        let applied = self.record_viewport(workspace, tab, cols, rows);
+        match applied {
+            Ok(messages) => {
+                let mut connections = lock(&self.connections)?;
+                for connection in connections.iter_mut() {
+                    connection.size_owner = connection.id == id;
+                }
+                if let Some(connection) = connections.iter_mut().find(|c| c.id == id) {
+                    connection.viewport = Some(reported_viewport(workspace, tab, cols, rows));
+                }
+                drop(connections);
+                self.flush_messages(&messages)?;
+                Ok(false)
+            }
+            Err(error) if error.kind() == io::ErrorKind::InvalidInput => {
+                drop(_lease);
+                self.send_refused(id, error.to_string())?;
+                Ok(false)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn send_refused(&self, id: u64, reason: String) -> io::Result<()> {
+        self.send_to(id, &ServerMsg::Refused { reason })
+    }
+
+    fn send_to(&self, id: u64, message: &ServerMsg) -> io::Result<()> {
+        let output = writer::encode(message)?;
+        let owner_lost = {
+            let mut connections = lock(&self.connections)?;
+            let Some(position) = connections
+                .iter()
+                .position(|connection| connection.id == id)
+            else {
+                return Err(connection_closed());
+            };
+            if connections[position].send(output) {
+                return Ok(());
+            }
+            evict_connection(&mut connections, position)
+        };
+        if owner_lost {
+            self.recover()?;
+        }
+        Err(connection_closed())
+    }
+
+    #[cfg(test)]
+    fn apply_and_broadcast(&self, message: ClientMsg) -> io::Result<()> {
+        let messages = self.apply(message)?;
+        self.broadcast(&messages)
+    }
+
+    fn apply(&self, message: ClientMsg) -> io::Result<Vec<ServerMsg>> {
+        let mut session = lock(&self.session)?;
+        match session.apply(message) {
+            Ok(messages) => Ok(messages),
+            Err(error) if crate::persistence::is_fatal(&error) => {
+                stop_after_snapshot_failure(&error)
+            }
+            Err(error) => Err(error),
+        }
+    }
+
+    fn wait_for_poll(&self) -> io::Result<()> {
+        let connections = lock(&self.connections)?;
+        let interval = if connections.is_empty() {
+            DETACHED_POLL_INTERVAL
+        } else {
+            POLL_INTERVAL
+        };
+        let _wait = self
+            .poll_wake
+            .wait_timeout(connections, interval)
+            .map_err(|_| io::Error::other("runtime poll lock is poisoned"))?;
+        Ok(())
+    }
+
+    fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {
+        let _lease = lock(&self.lease)?;
+        let messages = lock(&self.session)?.poll();
+        let has_connections = !lock(&self.connections)?.is_empty();
+        if has_connections {
+            self.flush_messages(&messages)?;
+        }
+        Ok((messages, has_connections))
+    }
+
+    #[cfg(test)]
+    fn broadcast(&self, messages: &[ServerMsg]) -> io::Result<()> {
+        let _lease = lock(&self.lease)?;
+        self.flush_messages(messages)
+    }
+
+    fn flush_messages(&self, messages: &[ServerMsg]) -> io::Result<()> {
+        let adopt = {
+            let mut session = lock(&self.session)?;
+            let mut connections = lock(&self.connections)?;
+            let owner_present = connections.iter().any(|connection| connection.size_owner);
+            let sizes = size_lease::own_sizes(&connections);
+            let mut all_messages = messages.to_vec();
+            all_messages.extend(session.apply_claimed_sizes(&sizes)?);
+            let encoded = all_messages
+                .iter()
+                .map(writer::encode)
+                .collect::<io::Result<Vec<_>>>()?;
+            let bye = writer::encode(&ServerMsg::Bye {
+                reason: "peek target closed".into(),
+            })?;
+            let mut position = 0;
+            while position < connections.len() {
+                if connections[position].send_projection(&session, &all_messages, &encoded, &bye)? {
+                    position += 1;
+                } else {
+                    evict_connection(&mut connections, position);
+                }
+            }
+            if owner_present && !connections.iter().any(|connection| connection.size_owner) {
+                grant_next_owner(&mut connections)
+            } else {
+                None
+            }
+        };
+        if let Some(viewport) = adopt {
+            self.adopt_locked(viewport)?;
+        }
+        Ok(())
+    }
+
+    #[cfg(test)]
+    fn connection_count(&self) -> usize {
+        self.connections.lock().map(|c| c.len()).unwrap_or(0)
+    }
+}
+
+#[cfg(test)]
+mod tests;
+use portable_pty::CommandBuilder;
+use std::env;
+
+// Issue 402: the runtime outlives the terminal that started it, so these
+// markers of that terminal would reach every later Seer shell.
+const SESSION_PREFIXES: [&str; 7] = [
+    "HERDR_",
+    "TMUX",
+    "ZELLIJ",
+    "KITTY_",
+    "WEZTERM_",
+    "ITERM_",
+    "ALACRITTY_",
+];
+const SESSION_NAMES: [&str; 6] = [
+    "STY",
+    "WINDOW",
+    "TERM_PROGRAM",
+    "TERM_PROGRAM_VERSION",
+    "TERM_SESSION_ID",
+    "__CFBundleIdentifier",
+];
+
+pub(crate) fn remove_session_vars(command: &mut CommandBuilder) {
+    for (name, _) in env::vars_os() {
+        let Some(name) = name.to_str() else {
+            continue;
+        };
+        let is_session = SESSION_NAMES.contains(&name)
+            || SESSION_PREFIXES
+                .iter()
+                .any(|prefix| name.starts_with(prefix));
+        if is_session {
+            command.env_remove(name);
+        }
+    }
+}
+use portable_pty::CommandBuilder;
+use std::env;
+use std::fs::{self, DirBuilder};
+use std::io;
+use std::os::unix::fs::DirBuilderExt;
+use std::path::{Path, PathBuf};
+
+// Issue 403: a function named exit shadows the builtin in fish, bash and
+// zsh. Only the interactive shell that Seer starts gets the function.
+// Scripts and child shells keep the normal exit.
+pub(crate) fn install(command: &mut CommandBuilder, shell: &str) -> io::Result<()> {
+    let seer = seer_binary();
+    let files = files_directory();
+    match Path::new(shell).file_name().and_then(|name| name.to_str()) {
+        Some("fish") => {
+            let function = format!("function exit; {} exit; end", fish_quote(&seer));
+            command.args(["-C", &function]);
+        }
+        Some("bash") => {
+            let rc = files.join("bashrc");
+            let body = format!(
+                "[ -f \"$HOME/.bashrc\" ] && . \"$HOME/.bashrc\"\nexit() {{ {} exit; }}\n",
+                posix_quote(&seer)
+            );
+            write_private(&files, &rc, &body)?;
+            command.arg("--rcfile");
+            command.arg(rc);
+        }
+        Some("zsh") => install_zsh(command, &files.join("zsh"), &seer)?,
+        _ => {}
+    }
+    Ok(())
+}
+
+// zsh has no rcfile option. ZDOTDIR points at Seer's files, which load the
+// user's own files and then restore ZDOTDIR for child shells.
+fn install_zsh(command: &mut CommandBuilder, directory: &Path, seer: &Path) -> io::Result<()> {
+    let user_home = "${SEER_ZDOTDIR:-$HOME}";
+    let zshenv = format!("[ -f \"{user_home}/.zshenv\" ] && . \"{user_home}/.zshenv\"\n");
+    let zshrc = format!(
+        "if [ -n \"$SEER_ZDOTDIR\" ]; then ZDOTDIR=\"$SEER_ZDOTDIR\"; else unset ZDOTDIR; fi\n\
+         unset SEER_ZDOTDIR\n\
+         [ -f \"${{ZDOTDIR:-$HOME}}/.zshrc\" ] && . \"${{ZDOTDIR:-$HOME}}/.zshrc\"\n\
+         exit() {{ {} exit; }}\n",
+        posix_quote(seer)
+    );
+    write_private(directory, &directory.join(".zshenv"), &zshenv)?;
+    write_private(directory, &directory.join(".zshrc"), &zshrc)?;
+    if let Some(original) = env::var_os("ZDOTDIR") {
+        command.env("SEER_ZDOTDIR", original);
+    }
+    command.env("ZDOTDIR", directory);
+    Ok(())
+}
+
+fn files_directory() -> PathBuf {
+    crate::snapshot_directory()
+        .map(|directory| directory.join("shell"))
+        .unwrap_or_else(|| env::temp_dir().join(format!("seer-shell-{}", std::process::id())))
+}
+
+fn write_private(directory: &Path, path: &Path, body: &str) -> io::Result<()> {
+    DirBuilder::new()
+        .recursive(true)
+        .mode(0o700)
+        .create(directory)?;
+    fs::write(path, body)
+}
+
+fn seer_binary() -> PathBuf {
+    env::current_exe()
+        .ok()
+        .and_then(|runtime| runtime.parent().map(|parent| parent.join("seer")))
+        .filter(|candidate| candidate.is_file())
+        .unwrap_or_else(|| PathBuf::from("seer"))
+}
+
+fn posix_quote(path: &Path) -> String {
+    format!("'{}'", path.to_string_lossy().replace('\'', "'\\''"))
+}
+
+fn fish_quote(path: &Path) -> String {
+    format!(
+        "'{}'",
+        path.to_string_lossy()
+            .replace('\\', "\\\\")
+            .replace('\'', "\\'")
+    )
+}
+use seer_core::{LayoutNode, PaneSize, Tree};
+use serde::{Deserialize, Serialize};
+use std::collections::HashSet;
+use std::fs::{self, File};
+use std::io::{self, BufReader, BufWriter, Write};
+use std::path::{Path, PathBuf};
+use std::time::{SystemTime, UNIX_EPOCH};
+
+const CURRENT_VERSION: u32 = 1;
+const MAX_SNAPSHOT_BYTES: u64 = 4 * 1024 * 1024;
+const SNAPSHOT_FILE: &str = "session.json";
+
+#[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
+pub(crate) struct Snapshot {
+    version: u32,
+    pub(crate) revision: u64,
+    saved_at: u64,
+    user: String,
+    pub(crate) viewport: PaneSize,
+    pub(crate) tree: Tree,
+}
+
+impl Snapshot {
+    #[must_use]
+    pub(crate) fn capture(revision: u64, user: &str, viewport: PaneSize, tree: &Tree) -> Self {
+        Self {
+            version: CURRENT_VERSION,
+            revision,
+            saved_at: unix_seconds(),
+            user: user.to_owned(),
+            viewport,
+            tree: tree.clone(),
+        }
+    }
+
+    fn validate(&self, expected_user: &str) -> Result<(), String> {
+        if self.version != CURRENT_VERSION {
+            return Err(format!("unsupported snapshot version {}", self.version));
+        }
+        if self.user != expected_user {
+            return Err("snapshot belongs to another user".into());
+        }
+        if self.viewport.cols == 0 || self.viewport.rows == 0 {
+            return Err("snapshot viewport is empty".into());
+        }
+        validate_tree(&self.tree)
+    }
+}
+
+#[must_use]
+pub(crate) fn snapshot_path(directory: &Path) -> PathBuf {
+    directory.join(SNAPSHOT_FILE)
+}
+pub(crate) fn load(path: &Path, expected_user: &str) -> io::Result<Option<Snapshot>> {
+    let file = match File::open(path) {
+        Ok(file) => file,
+        Err(error) if error.kind() == io::ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(error),
+    };
+    let size = file.metadata()?.len();
+    if size > MAX_SNAPSHOT_BYTES {
+        eprintln!("runtime discarded an oversized session snapshot ({size} bytes)");
+        return Ok(None);
+    }
+    let snapshot: Snapshot = match serde_json::from_reader(BufReader::new(file)) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            eprintln!("runtime discarded a corrupt session snapshot: {error}");
+            return Ok(None);
+        }
+    };
+    match snapshot.validate(expected_user) {
+        Ok(()) => Ok(Some(snapshot)),
+        Err(reason) => {
+            eprintln!("runtime discarded an invalid session snapshot: {reason}");
+            Ok(None)
+        }
+    }
+}
+pub(crate) fn store(path: &Path, snapshot: &Snapshot) -> io::Result<()> {
+    let bytes = serde_json::to_vec(snapshot).map_err(json_error)?;
+    if bytes.len() as u64 > MAX_SNAPSHOT_BYTES {
+        return Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            format!("snapshot exceeds the {} byte limit", MAX_SNAPSHOT_BYTES),
+        ));
+    }
+    let file_name = path
+        .file_name()
+        .ok_or_else(|| io::Error::new(io::ErrorKind::InvalidInput, "snapshot has no file name"))?;
+    let temporary = path.with_file_name(format!(".{}.tmp", file_name.to_string_lossy()));
+    let result =
+        write_snapshot_file(&temporary, &bytes).and_then(|()| fs::rename(&temporary, path));
+    if let Err(error) = result {
+        let _ = fs::remove_file(&temporary);
+        return Err(error);
+    }
+    sync_parent_directory(path)
+}
+
+fn write_snapshot_file(path: &Path, bytes: &[u8]) -> io::Result<()> {
+    let file = File::create(path)?;
+    let mut writer = BufWriter::new(file);
+    writer.write_all(bytes)?;
+    writer.write_all(b"\n")?;
+    writer.flush()?;
+    writer.get_ref().sync_all()
+}
+
+fn sync_parent_directory(path: &Path) -> io::Result<()> {
+    let parent = path.parent().ok_or_else(|| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "snapshot has no parent directory",
+        )
+    })?;
+    File::open(parent)?.sync_all()
+}
+
+fn json_error(error: serde_json::Error) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, error)
+}
+
+fn unix_seconds() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
+#[derive(Default)]
+struct WorkspaceCounters {
+    largest_tab: u64,
+    largest_pane: u64,
+}
+
+fn validate_tree(tree: &Tree) -> Result<(), String> {
+    let mut workspace_ids = HashSet::new();
+    let mut tab_ids = HashSet::new();
+    let mut pane_ids = HashSet::new();
+    let mut largest_workspace = 0;
+
+    for workspace in &tree.workspaces {
+        if workspace.id.is_empty() || !workspace_ids.insert(workspace.id.as_str()) {
+            return Err(format!(
+                "workspace id is empty or repeated: {}",
+                workspace.id
+            ));
+        }
+        largest_workspace = largest_workspace.max(id_number(&workspace.id, "w")?);
+        let mut counters = WorkspaceCounters::default();
+        for tab in &workspace.tabs {
+            if tab.id.is_empty() || !tab_ids.insert(tab.id.as_str()) {
+                return Err(format!("tab id is empty or repeated: {}", tab.id));
+            }
+            validate_tab(tab, &mut pane_ids, &mut counters)?;
+        }
+        if workspace.next_tab_id() <= counters.largest_tab {
+            return Err(format!("workspace {} reuses a tab id", workspace.id));
+        }
+        if workspace.next_pane_id() <= counters.largest_pane {
+            return Err(format!("workspace {} reuses a pane id", workspace.id));
+        }
+    }
+    if tree.next_workspace_id() <= largest_workspace {
+        return Err("tree reuses a workspace id".into());
+    }
+    Ok(())
+}
+
+fn validate_tab<'a>(
+    tab: &'a seer_core::Tab,
+    pane_ids: &mut HashSet<&'a str>,
+    counters: &mut WorkspaceCounters,
+) -> Result<(), String> {
+    if tab.panes.is_empty() {
+        return Err(format!("tab has no panes: {}", tab.id));
+    }
+    counters.largest_tab = counters.largest_tab.max(id_number(&tab.id, "t")?);
+    for pane in &tab.panes {
+        if pane.id.is_empty() {
+            return Err("pane id is empty".into());
+        }
+        counters.largest_pane = counters.largest_pane.max(id_number(&pane.id, "p")?);
+        if pane.size.cols == 0 || pane.size.rows == 0 {
+            return Err(format!("pane has an empty size: {}", pane.id));
+        }
+        if !pane_ids.insert(pane.id.as_str()) {
+            return Err(format!("pane id is repeated: {}", pane.id));
+        }
+    }
+
+    let mut leaves = Vec::new();
+    if let Some(root) = tab.layout.root.as_ref() {
+        collect_leaves(root, &mut leaves);
+    }
+    if leaves.len() != tab.panes.len() {
+        return Err(format!("tab layout does not match its panes: {}", tab.id));
+    }
+    let pane_set = tab
+        .panes
+        .iter()
+        .map(|pane| pane.id.as_str())
+        .collect::<HashSet<_>>();
+    let leaf_set = leaves.iter().copied().collect::<HashSet<_>>();
+    if leaf_set != pane_set {
+        return Err(format!("tab layout does not match its panes: {}", tab.id));
+    }
+
+    match tab.layout.focused.as_deref() {
+        Some(pane) if pane_set.contains(pane) => Ok(()),
+        Some(pane) => Err(format!("tab focus is missing from the layout: {pane}")),
+        None => Err(format!("tab has panes but no focus: {}", tab.id)),
+    }
+}
+
+fn id_number(id: &str, marker: &str) -> Result<u64, String> {
+    let position = id
+        .rfind(marker)
+        .ok_or_else(|| format!("id has no {marker} number: {id}"))?;
+    id[position + marker.len()..]
+        .parse()
+        .map_err(|_| format!("id has a non-numeric {marker} number: {id}"))
+}
+
+fn collect_leaves<'a>(node: &'a LayoutNode, leaves: &mut Vec<&'a str>) {
+    match node {
+        LayoutNode::Pane { pane } => leaves.push(pane),
+        LayoutNode::Split { first, second, .. } => {
+            collect_leaves(first, leaves);
+            collect_leaves(second, leaves);
+        }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn store_rejects_an_oversized_snapshot_without_writing_a_file() {
+        let timestamp = unix_seconds();
+        let directory = std::env::temp_dir().join(format!(
+            "seer-snapshot-limit-{}-{timestamp}",
+            std::process::id()
+        ));
+        fs::create_dir(&directory).expect("temporary directory must be created");
+        let path = directory.join(SNAPSHOT_FILE);
+
+        let mut tree = Tree::new();
+        tree.create_workspace("main")
+            .expect("workspace creation must succeed");
+        for _ in 0..60_000 {
+            tree.create_tab("w1", "shell", PaneSize { cols: 80, rows: 24 })
+                .expect("tab creation must succeed");
+        }
+        let snapshot = Snapshot::capture(1, "alice", PaneSize { cols: 80, rows: 24 }, &tree);
+
+        let error = store(&path, &snapshot).expect_err("oversized snapshot must be rejected");
+        assert_eq!(error.kind(), io::ErrorKind::InvalidData);
+        assert!(!path.exists(), "snapshot file must not be written");
+        let temporary = path.with_file_name(format!(".{}.tmp", SNAPSHOT_FILE));
+        assert!(!temporary.exists(), "temporary file must not remain behind");
+
+        fs::remove_dir_all(&directory).expect("temporary directory must be removed");
+    }
+}
+use crate::PaneHost;
+use crate::persistence::{self, Store};
+use crate::{shell_env, shell_exit};
+use portable_pty::CommandBuilder;
+use seer_core::layout::{PaneRect, rects};
+use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, TerminalInfo};
+use seer_core::{
+    PaneSize, TERMINAL_PROTOCOL_VERSION, Tab, TerminalCapabilities, TerminalInput, Tree, TreeError,
+};
+use std::collections::BTreeMap;
+use std::io;
+
+const DEFAULT_COLS: u16 = 80;
+const DEFAULT_ROWS: u16 = 24;
+const DEFAULT_WORKSPACE: &str = "main";
+const DEFAULT_TAB_TITLE: &str = "shell";
+
+pub struct UserSession {
+    pub user: String,
+    pub(crate) published_terminals: Vec<TerminalInfo>,
+    pub tree: Tree,
+    pub(crate) shell: String,
+    pub(crate) viewport: PaneSize,
+    pub(crate) pane_hosts: BTreeMap<String, PaneHost>,
+    pub(crate) store: Option<Store>,
+}
+
+impl UserSession {
+    #[must_use]
+    pub fn new(user: impl Into<String>, shell: impl Into<String>) -> Self {
+        Self {
+            user: user.into(),
+            published_terminals: Vec::new(),
+            tree: Tree::new(),
+            shell: shell.into(),
+            viewport: PaneSize {
+                cols: DEFAULT_COLS,
+                rows: DEFAULT_ROWS,
+            },
+            pane_hosts: BTreeMap::new(),
+            store: None,
+        }
+    }
+
+    pub fn apply(&mut self, msg: ClientMsg) -> io::Result<Vec<ServerMsg>> {
+        match msg {
+            ClientMsg::CreateTab { workspace } => self.create_tab(&workspace),
+            ClientMsg::SplitPane {
+                workspace,
+                tab,
+                direction,
+            } => self.split_pane(&workspace, &tab, direction),
+            ClientMsg::ClosePane {
+                workspace,
+                tab,
+                pane,
+            } => self.close_pane(&workspace, &tab, &pane),
+            ClientMsg::FocusPane {
+                workspace,
+                tab,
+                pane,
+            } => self.focus_pane(&workspace, &tab, &pane),
+            ClientMsg::TerminalCapabilities { capabilities } => {
+                validate_capabilities(capabilities).map(|()| Vec::new())
+            }
+            ClientMsg::GrantedMouse {
+                workspace,
+                tab,
+                pane,
+                mouse,
+                sender,
+            } => self.granted_mouse(&workspace, &tab, &pane, mouse, sender),
+            ClientMsg::GrantedInput {
+                workspace,
+                tab,
+                pane,
+                bytes,
+                sender,
+            } => self.granted_input(&workspace, &tab, &pane, &bytes, sender),
+            ClientMsg::TerminalInput {
+                workspace,
+                tab,
+                pane,
+                input,
+            } => self.terminal_input(&workspace, &tab, &pane, &input),
+            ClientMsg::Resize {
+                workspace,
+                tab,
+                cols,
+                rows,
+            } => self.resize(&workspace, &tab, cols, rows),
+            ClientMsg::Hello { .. }
+            | ClientMsg::Join { .. }
+            | ClientMsg::Invite { .. }
+            | ClientMsg::ListPeople
+            | ClientMsg::QueryStatus
+            | ClientMsg::DetachClient { .. }
+            | ClientMsg::ExitClient { .. }
+            | ClientMsg::AttachRuntime
+            | ClientMsg::ObserveRuntime
+            | ClientMsg::PublishRuntime { .. }
+            | ClientMsg::RuntimeStream { .. }
+            | ClientMsg::QueryTargets { .. }
+            | ClientMsg::Watch { .. }
+            | ClientMsg::Unwatch { .. }
+            | ClientMsg::Terminals { .. }
+            | ClientMsg::SetAllGrants { .. }
+            | ClientMsg::SetGrant { .. }
+            | ClientMsg::MouseInto { .. }
+            | ClientMsg::TypeInto { .. }
+            | ClientMsg::Stop
+            | ClientMsg::Leave
+            | ClientMsg::Detach => Ok(Vec::new()),
+        }
+    }
+
+    #[must_use]
+    pub fn poll(&mut self) -> Vec<ServerMsg> {
+        let mut messages: Vec<_> = self
+            .pane_hosts
+            .iter_mut()
+            .filter_map(|(pane, host)| {
+                host.poll().then(|| {
+                    let frame = host.frame();
+                    #[cfg(debug_assertions)]
+                    seer_core::debug_log::transition(
+                        &format!("frame pane={pane}"),
+                        seer_core::debug_log::frame_summary(&frame),
+                    );
+                    ServerMsg::Cells {
+                        user: self.user.clone(),
+                        pane: pane.clone(),
+                        frame,
+                    }
+                })
+            })
+            .collect();
+        messages.extend(self.reap_shells());
+        let terminals = self.terminals();
+        if terminals != self.published_terminals {
+            self.published_terminals.clone_from(&terminals);
+            let message = ServerMsg::Terminals {
+                user: self.user.clone(),
+                terminals,
+            };
+            seer_core::debug_log!("{}", seer_core::debug_log::server_summary(&message));
+            messages.push(message);
+        }
+        messages
+    }
+
+    #[must_use]
+    pub(crate) fn tab_count(&self) -> u32 {
+        let tabs: usize = self
+            .tree
+            .workspaces
+            .iter()
+            .map(|workspace| workspace.tabs.len())
+            .sum();
+        u32::try_from(tabs).unwrap_or(u32::MAX)
+    }
+
+    #[must_use]
+    pub(crate) fn foreground(&self, workspace: &str, tab: &str) -> String {
+        self.focused_pane(workspace, tab)
+            .ok()
+            .and_then(|pane| self.pane_hosts.get(pane))
+            .map(PaneHost::foreground)
+            .unwrap_or_default()
+    }
+
+    #[must_use]
+    pub(crate) fn snapshot(&self) -> Vec<ServerMsg> {
+        self.snapshot_for(self.tree.clone())
+    }
+
+    #[must_use]
+    pub(crate) fn snapshot_for(&self, tree: Tree) -> Vec<ServerMsg> {
+        let cells = tree
+            .workspaces
+            .iter()
+            .flat_map(|workspace| &workspace.tabs)
+            .flat_map(|tab| &tab.panes)
+            .filter_map(|pane| {
+                self.pane_hosts.get(&pane.id).map(|host| ServerMsg::Cells {
+                    user: self.user.clone(),
+                    pane: pane.id.clone(),
+                    frame: host.frame(),
+                })
+            })
+            .collect::<Vec<_>>();
+        let mut messages = vec![ServerMsg::Tree { tree }];
+        messages.extend(cells);
+        messages.push(ServerMsg::Terminals {
+            user: self.user.clone(),
+            terminals: self.terminals(),
+        });
+        messages
+    }
+
+    #[must_use]
+    pub(crate) fn targets(&self, active: Option<(&str, &str)>) -> Vec<PeekTarget> {
+        self.tree
+            .workspaces
+            .iter()
+            .flat_map(|workspace| {
+                workspace.tabs.iter().map(|tab| PeekTarget {
+                    workspace: workspace.id.clone(),
+                    workspace_name: workspace.name.clone(),
+                    tab: tab.id.clone(),
+                    tab_title: tab.title.clone(),
+                    active: active == Some((workspace.id.as_str(), tab.id.as_str())),
+                })
+            })
+            .collect()
+    }
+
+    pub(crate) fn ensure_first_shell(&mut self) -> io::Result<()> {
+        if self
+            .tree
+            .workspaces
+            .iter()
+            .any(|workspace| !workspace.tabs.is_empty())
+        {
+            return Ok(());
+        }
+        let workspace = self.ensure_workspace()?;
+        self.create_tab(&workspace).map(|_| ())
+    }
+
+    fn create_tab(&mut self, workspace: &str) -> io::Result<Vec<ServerMsg>> {
+        let tab = self
+            .tree
+            .create_tab(workspace, DEFAULT_TAB_TITLE, self.viewport)
+            .map_err(tree_error)?;
+        let pane = tab
+            .layout
+            .focused
+            .as_deref()
+            .ok_or_else(|| invalid_data("new tab has no focused pane"))?;
+        let pane_rect = find_rect(&tab, self.viewport, pane)?;
+        let host = self.start_host(&pane_rect)?;
+
+        self.pane_hosts.insert(pane.to_owned(), host);
+        persistence::persist(self)?;
+        Ok(self.tree_message())
+    }
+
+    fn ensure_workspace(&mut self) -> io::Result<String> {
+        if self.tree.workspaces.is_empty() {
+            self.tree
+                .create_workspace(DEFAULT_WORKSPACE)
+                .map_err(tree_error)?;
+        }
+        self.tree
+            .workspaces
+            .first()
+            .map(|workspace| workspace.id.clone())
+            .ok_or_else(|| invalid_data("session has no workspace"))
+    }
+
+    fn split_pane(
+        &mut self,
+        workspace: &str,
+        tab: &str,
+        direction: seer_core::SplitDirection,
+    ) -> io::Result<Vec<ServerMsg>> {
+        let focused = self.focused_pane(workspace, tab)?.to_owned();
+        let tab = self
+            .tree
+            .split_pane(&focused, direction)
+            .map_err(tree_error)?;
+        let new_pane = tab
+            .layout
+            .focused
+            .as_deref()
+            .ok_or_else(|| invalid_data("split tab has no focused pane"))?;
+        let pane_rect = find_rect(&tab, self.viewport, new_pane)?;
+        let host = self.start_host(&pane_rect)?;
+        self.pane_hosts.insert(new_pane.to_owned(), host);
+        self.resize_tab(workspace, &tab.id)?;
+        persistence::persist(self)?;
+        Ok(self.tree_message())
+    }
+
+    fn close_pane(&mut self, workspace: &str, tab: &str, pane: &str) -> io::Result<Vec<ServerMsg>> {
+        self.validate_pane(workspace, tab, pane)?;
+        let mut host = self
+            .pane_hosts
+            .remove(pane)
+            .ok_or_else(|| pane_host_not_found(pane))?;
+        if let Err(error) = host.kill() {
+            self.pane_hosts.insert(pane.to_owned(), host);
+            return Err(error);
+        }
+        self.remove_pane(workspace, tab, pane)
+    }
+
+    fn focus_pane(&mut self, workspace: &str, tab: &str, pane: &str) -> io::Result<Vec<ServerMsg>> {
+        self.validate_pane(workspace, tab, pane)?;
+        self.tree.focus_pane(pane).map_err(tree_error)?;
+        persistence::persist(self)?;
+        Ok(self.tree_message())
+    }
+
+    fn terminal_input(
+        &mut self,
+        workspace: &str,
+        tab: &str,
+        pane: &str,
+        input: &TerminalInput,
+    ) -> io::Result<Vec<ServerMsg>> {
+        self.validate_pane(workspace, tab, pane)?;
+        let host = self
+            .pane_hosts
+            .get_mut(pane)
+            .ok_or_else(|| pane_host_not_found(pane))?;
+        let changed = host.handle_input(input)?;
+        Ok(changed
+            .then(|| ServerMsg::Cells {
+                user: self.user.clone(),
+                pane: pane.to_owned(),
+                frame: host.frame(),
+            })
+            .into_iter()
+            .collect())
+    }
+
+    fn resize(
+        &mut self,
+        workspace: &str,
+        tab: &str,
+        cols: u16,
+        rows: u16,
+    ) -> io::Result<Vec<ServerMsg>> {
+        self.tab(workspace, tab)?;
+        self.viewport = PaneSize { cols, rows };
+        self.resize_tab(workspace, tab)?;
+        persistence::persist(self)?;
+        Ok(self.tree_message())
+    }
+
+    fn resize_tab(&mut self, workspace: &str, tab: &str) -> io::Result<()> {
+        let pane_rects = {
+            let tab = self.tab(workspace, tab)?;
+            rects(tab, self.viewport.cols, self.viewport.rows)
+        };
+
+        for pane_rect in &pane_rects {
+            seer_core::debug_log!(
+                "pty resize pane={} size={}x{} viewport={}x{}",
+                pane_rect.pane,
+                pane_rect.cols,
+                pane_rect.rows,
+                self.viewport.cols,
+                self.viewport.rows
+            );
+            self.pane_hosts
+                .get_mut(&pane_rect.pane)
+                .ok_or_else(|| pane_host_not_found(&pane_rect.pane))?
+                .resize(pane_rect.cols, pane_rect.rows)?;
+        }
+        self.store_pane_sizes(workspace, tab, &pane_rects)
+    }
+
+    fn store_pane_sizes(
+        &mut self,
+        workspace: &str,
+        tab: &str,
+        pane_rects: &[PaneRect],
+    ) -> io::Result<()> {
+        let tab = self.tab_mut(workspace, tab)?;
+        for pane in &mut tab.panes {
+            let pane_rect = pane_rects
+                .iter()
+                .find(|pane_rect| pane_rect.pane == pane.id)
+                .ok_or_else(|| invalid_data("pane is missing from its layout"))?;
+            pane.size = PaneSize {
+                cols: pane_rect.cols,
+                rows: pane_rect.rows,
+            };
+        }
+        Ok(())
+    }
+
+    pub(crate) fn start_host(&self, pane_rect: &PaneRect) -> io::Result<PaneHost> {
+        let mut command = CommandBuilder::new(&self.shell);
+        shell_env::remove_session_vars(&mut command);
+        shell_exit::install(&mut command, &self.shell)?;
+        command.env("TERM", "xterm-256color");
+        command.env("COLORTERM", "truecolor");
+        command.env("SEER_USER_ID", &self.user);
+        command.env("SEER_PANE", &pane_rect.pane);
+        PaneHost::start(command, pane_rect.cols, pane_rect.rows)
+    }
+
+    fn focused_pane(&self, workspace: &str, tab: &str) -> io::Result<&str> {
+        self.tab(workspace, tab)?
+            .layout
+            .focused
+            .as_deref()
+            .ok_or_else(|| invalid_data("focused tab has no focused pane"))
+    }
+
+    fn tab(&self, workspace: &str, tab: &str) -> io::Result<&Tab> {
+        let workspace = self
+            .tree
+            .workspaces
+            .iter()
+            .find(|candidate| candidate.id == workspace)
+            .ok_or_else(|| tree_error(TreeError::WorkspaceNotFound(workspace.to_owned())))?;
+        workspace
+            .tabs
+            .iter()
+            .find(|candidate| candidate.id == tab)
+            .ok_or_else(|| invalid_input(format!("tab not found: {tab}")))
+    }
+
+    fn tab_mut(&mut self, workspace: &str, tab: &str) -> io::Result<&mut Tab> {
+        let workspace = self
+            .tree
+            .workspaces
+            .iter_mut()
+            .find(|candidate| candidate.id == workspace)
+            .ok_or_else(|| tree_error(TreeError::WorkspaceNotFound(workspace.to_owned())))?;
+        workspace
+            .tabs
+            .iter_mut()
+            .find(|candidate| candidate.id == tab)
+            .ok_or_else(|| invalid_input(format!("tab not found: {tab}")))
+    }
+
+    fn validate_pane(&self, workspace: &str, tab: &str, pane: &str) -> io::Result<()> {
+        if self
+            .tab(workspace, tab)?
+            .panes
+            .iter()
+            .any(|candidate| candidate.id == pane)
+        {
+            Ok(())
+        } else {
+            Err(tree_error(TreeError::PaneNotFound(pane.to_owned())))
+        }
+    }
+
+    fn tree_message(&self) -> Vec<ServerMsg> {
+        vec![ServerMsg::Tree {
+            tree: self.tree.clone(),
+        }]
+    }
+}
+
+fn find_rect(tab: &Tab, viewport: PaneSize, pane: &str) -> io::Result<PaneRect> {
+    rects(tab, viewport.cols, viewport.rows)
+        .into_iter()
+        .find(|pane_rect| pane_rect.pane == pane)
+        .ok_or_else(|| invalid_data("pane is missing from its layout"))
+}
+
+fn tree_error(error: TreeError) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, error)
+}
+
+fn pane_host_not_found(pane: &str) -> io::Error {
+    io::Error::new(
+        io::ErrorKind::NotFound,
+        format!("pane host not found: {pane}"),
+    )
+}
+
+fn invalid_data(message: &'static str) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidData, message)
+}
+
+fn invalid_input(message: String) -> io::Error {
+    io::Error::new(io::ErrorKind::InvalidInput, message)
+}
+
+pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::Result<()> {
+    if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
+        Ok(())
+    } else {
+        Err(io::Error::new(
+            io::ErrorKind::InvalidInput,
+            "unsupported terminal capability version",
+        ))
+    }
+}
+
+#[cfg(all(test, target_os = "linux"))]
+mod tests;
+
+mod terminals;
+
+mod lifecycle;
