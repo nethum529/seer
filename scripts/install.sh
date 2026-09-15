@@ -37,10 +37,15 @@ mkdir "$temp_dir/unpack" 2>/dev/null || fail "Cannot prepare the install. Run th
 curl -fsSL "${base_url%/}/$asset" -o "$archive" 2>/dev/null || fail "Cannot download seer. Check the internet connection and run the install command again."
 tar -xzf "$archive" -C "$temp_dir/unpack" 2>/dev/null || fail "Cannot unpack seer. Run the install command again."
 
+# macOS keeps the code signature of a binary by inode. A copy over the old
+# file keeps the inode, and macOS then kills the new binary (issue 362). A
+# rename gives a new inode. It also works while the old binary still runs.
 for binary in seer seer-broker seer-runtime; do
     [ -f "$temp_dir/unpack/$binary" ] || fail "The release is incomplete. Ask the owner to publish all seer binaries."
-    cp "$temp_dir/unpack/$binary" "$install_dir/$binary" 2>/dev/null || fail "Cannot install seer in $install_dir. Check its permissions and run the install command again."
-    chmod 755 "$install_dir/$binary" 2>/dev/null || fail "Cannot make seer executable. Check $install_dir permissions and run the install command again."
+    staged="$install_dir/.$binary.install.$$"
+    cp "$temp_dir/unpack/$binary" "$staged" 2>/dev/null || fail "Cannot install seer in $install_dir. Check its permissions and run the install command again."
+    chmod 755 "$staged" 2>/dev/null || fail "Cannot make seer executable. Check $install_dir permissions and run the install command again."
+    mv -f "$staged" "$install_dir/$binary" 2>/dev/null || fail "Cannot install seer in $install_dir. Check its permissions and run the install command again."
 done
 
 cleanup

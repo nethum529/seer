@@ -180,7 +180,7 @@ fn run(args: &Args, report: &Report) -> io::Result<()> {
         }
         ("dial", "seer") => seer_dial(args, report),
         ("session", "seer") => seer_session(args, report),
-        ("serve" | "listen" | "dial", "iroh") => {
+        ("serve" | "listen" | "dial" | "session", "iroh") => {
             let runtime = report
                 .step_blocking(0, "runtime_start", build_runtime)
                 .ok_or_else(|| io::Error::other("could not start runtime"))?;
@@ -204,6 +204,7 @@ async fn run_iroh(args: &Args, report: &Report) -> io::Result<()> {
             iroh_listen(args, report).await;
             Ok(())
         }
+        "session" => iroh_session(args, report).await,
         _ => iroh_dial(args, report).await,
     }
 }
@@ -315,6 +316,29 @@ async fn iroh_dial(args: &Args, report: &Report) -> io::Result<()> {
             continue;
         };
         iroh_echoes(report, sample, &connection, args.echoes).await;
+        connection.close(0_u8.into(), b"probe done");
+    }
+    endpoint.close().await;
+    Ok(())
+}
+
+// Sample 0 pays for the connection. Warm samples open a new stream on it, so
+// the relay condition shows what connection reuse saves over endpoint reuse.
+async fn iroh_session(args: &Args, report: &Report) -> io::Result<()> {
+    let target = target(args)?;
+    let Some(endpoint) = report
+        .step(0, "endpoint_bind", bind(args.relay_only()))
+        .await
+    else {
+        return Ok(());
+    };
+    let connect = endpoint.connect_with_opts(target, ALPN, Default::default());
+    if let Some(connecting) = report.step(0, "address_lookup", connect).await
+        && let Some(connection) = report.step(0, "dial_handshake", connecting).await
+    {
+        for sample in 0..args.samples {
+            iroh_echoes(report, sample, &connection, args.echoes).await;
+        }
         connection.close(0_u8.into(), b"probe done");
     }
     endpoint.close().await;

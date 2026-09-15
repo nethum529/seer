@@ -3,8 +3,10 @@
 # docs/research/18-transport-baseline.md.
 #
 # Usage: scripts/perf/transport.sh [samples] [output-dir] [parts]
-# parts is a list of: broker local offline listen dial readiness. The default
-# is "broker listen dial", the baseline set.
+# parts is a list of: all broker local offline listen dial reuse readiness.
+# The default is "all", which is "broker listen dial", the baseline set.
+# The reuse part is for issue 390. It measures endpoint reuse against
+# connection reuse on the relay and discovery paths.
 # Needs bash 5 or later for EPOCHREALTIME. Linux only.
 set -euo pipefail
 
@@ -12,7 +14,7 @@ samples=${1:-10}
 root=$(git rev-parse --show-toplevel)
 cd "$root"
 out=${2:-target/perf/389-$(date -u +%Y%m%dT%H%M%SZ)}
-parts=${3:-broker listen dial}
+parts=${3:-all}
 mkdir -p "$out"
 raw="$out/samples.csv"
 errors="$out/errors.log"
@@ -208,6 +210,27 @@ measure_readiness() {
     done
 }
 
+measure_reuse() {
+    start_serve --api iroh --condition relay
+    local id relay
+    id=$(serve_field id)
+    relay=$(serve_field relay)
+    echo "$relay" >"$work/relay.txt"
+    cold_and_warm iroh_dial dial --api iroh --condition relay --remote "$id" --relay "$relay"
+    cold_and_warm iroh_session session --api iroh --condition relay --remote "$id" --relay "$relay"
+    stop_serve
+
+    start_serve --api iroh --condition default
+    id=$(serve_field id)
+    cold_and_warm iroh_session session --api iroh --condition discovery --remote "$id"
+    stop_serve
+}
+
+# scripts/perf/lookup.sh sources this file for the helpers above.
+if [[ ${BASH_SOURCE[0]} != "$0" ]]; then
+    return 0
+fi
+
 if { : <>"/dev/tcp/127.0.0.1/$broker_port"; } 2>/dev/null; then
     echo "port $broker_port is in use; stop the process that uses it" >&2
     exit 1
@@ -218,11 +241,17 @@ echo "rev,workload,condition,cache,sample,boundary,ms,status" >"$raw"
 : >"$errors"
 for part in $parts; do
     case $part in
+    all)
+        measure_broker default true
+        measure_listen
+        measure_dial
+        ;;
     broker) measure_broker default true ;;
     local) measure_broker local false ;;
     offline) measure_broker offline true ;;
     listen) measure_listen ;;
     dial) measure_dial ;;
+    reuse) measure_reuse ;;
     readiness) measure_readiness ;;
     *) echo "unknown part $part" >&2 && exit 1 ;;
     esac

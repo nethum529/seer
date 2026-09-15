@@ -105,6 +105,32 @@ fn nested_exit_without_markers_refuses_ambiguous_clients() {
     assert!(!receives_bye(&mut second));
 }
 
+// Issue 403: users type exit to leave Seer. Every shell that Seer starts
+// turns exit into seer exit. The shell itself keeps running.
+#[test]
+fn typed_exit_in_a_seer_shell_leaves_seer_and_keeps_the_shell() {
+    for shell in ["fish", "bash", "zsh"] {
+        let Some(binary) = find_shell(shell) else {
+            eprintln!("{shell} is not installed, skipped");
+            continue;
+        };
+        let root = Root::new(&format!("typed-{shell}"));
+        let directory = root.0.join("state-home/seer/runtimes").join(USER);
+        fs::create_dir_all(&directory).expect("runtime directory must exist");
+        let socket = directory.join("socket");
+        let _runtime = Runtime::start_shell(&socket, &binary, &root.0);
+        let mut client = attach(&socket);
+        let pane = first_pane(&mut client);
+        send_text(&mut client, &pane, "exit\n");
+        assert_eq!(wait_for_bye(&mut client), "detached", "{shell}");
+
+        let mut next = attach(&socket);
+        assert_eq!(first_pane(&mut next), pane, "{shell}");
+        send_text(&mut next, &pane, "printf 'still-%s\\n' running\n");
+        wait_for_cells_containing(&mut next, "still-running");
+    }
+}
+
 struct Root(PathBuf);
 
 impl Root {
@@ -141,19 +167,36 @@ struct Runtime(Child);
 
 impl Runtime {
     fn start(socket: &Path) -> Self {
-        let child = Command::new(env!("CARGO_BIN_EXE_seer-runtime"))
+        Self::spawn(Self::command(socket, Path::new("sh")))
+    }
+
+    fn start_shell(socket: &Path, shell: &Path, root: &Path) -> Self {
+        let mut command = Self::command(socket, shell);
+        command
+            .env("HOME", root)
+            .env("XDG_CONFIG_HOME", root)
+            .env("XDG_STATE_HOME", root.join("state-home"))
+            .env("SEER_SNAPSHOT_DIR", root.join("snapshot"));
+        Self::spawn(command)
+    }
+
+    fn command(socket: &Path, shell: &Path) -> Command {
+        let mut command = Command::new(env!("CARGO_BIN_EXE_seer-runtime"));
+        command
             .args([
                 socket.as_os_str(),
                 USER.as_ref(),
-                "sh".as_ref(),
+                shell.as_os_str(),
                 "1".as_ref(),
             ])
             .stdin(Stdio::null())
             .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .spawn()
-            .expect("runtime must start");
-        Self(child)
+            .stderr(Stdio::null());
+        command
+    }
+
+    fn spawn(mut command: Command) -> Self {
+        Self(command.spawn().expect("runtime must start"))
     }
 }
 
@@ -162,6 +205,12 @@ impl Drop for Runtime {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+fn find_shell(name: &str) -> Option<PathBuf> {
+    std::env::split_paths(&std::env::var_os("PATH")?)
+        .map(|directory| directory.join(name))
+        .find(|candidate| candidate.is_file())
 }
 
 fn attach(socket: &Path) -> UnixStream {
