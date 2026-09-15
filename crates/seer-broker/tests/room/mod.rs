@@ -111,6 +111,16 @@ impl Room {
     }
 
     pub(crate) fn publish(&mut self, user: &str, credential: &str) -> UnixStream {
+        let endpoint = self.endpoint.clone();
+        self.publish_to(&endpoint, user, credential)
+    }
+
+    pub(crate) fn publish_to(
+        &mut self,
+        endpoint: &str,
+        user: &str,
+        credential: &str,
+    ) -> UnixStream {
         let directory = self.root.join(user);
         fs::create_dir_all(&directory).expect("runtime directory must be created");
         let socket = directory.join("socket");
@@ -120,7 +130,7 @@ impl Room {
             .arg("sh")
             .arg(format!("gen-{user}"))
             .env("SEER_SNAPSHOT_DIR", &directory)
-            .env("SEER_ROOM_ENDPOINT", &self.endpoint)
+            .env("SEER_ROOM_ENDPOINT", endpoint)
             .env("SEER_ROOM_CREDENTIAL", credential)
             .env("SEER_ROOM_KEY", directory.join("runtime.key"))
             .current_dir(&directory)

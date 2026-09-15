@@ -343,6 +343,9 @@ pub(crate) fn send(stream: &mut Routes, message: &ClientMsg) -> io::Result<()> {
 }
 
 #[cfg(test)]
+mod skew_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use seer_core::proto::codec;
