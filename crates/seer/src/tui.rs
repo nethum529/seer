@@ -31,7 +31,6 @@ pub(crate) fn run(
     local: Socket,
     room: Option<Socket>,
     tree: Tree,
-    own_user: String,
     server: crate::store::ServerEntry,
 ) -> io::Result<SessionExit> {
     seer_core::debug_log!(
@@ -40,9 +39,7 @@ pub(crate) fn run(
         room.is_some()
     );
     let mut terminal = TerminalSession::start()?;
-    let mut state = ClientState::new(tree, own_user);
-    state.server.clone_from(&server.endpoint);
-    state.own_name.clone_from(&server.name);
+    let mut state = ClientState::for_server(tree, &server);
     let mut start_person = navigation::take_start_person();
     let mut routes = Routes::new(local.clone(), room.clone(), state.own_user.clone());
     subscribe(&mut routes, &state).or_else(ignore_setup_disconnect)?;
