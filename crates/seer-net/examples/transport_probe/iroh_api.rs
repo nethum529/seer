@@ -90,8 +90,7 @@ async fn iroh_echo_connection(incoming: Incoming) {
     }
 }
 
-// Warm samples reuse the endpoint. Seer does not do this today, so the warm
-// rows show what endpoint reuse would save.
+// Warm samples reuse the endpoint, as seer_net::dial does since issue 414.
 async fn iroh_dial(args: &Args, report: &Report) -> io::Result<()> {
     let target = target(args)?;
     let Some(endpoint) = report

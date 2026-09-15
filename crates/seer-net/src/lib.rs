@@ -14,9 +14,11 @@ use std::time::Duration;
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
 use tokio::time::timeout;
 
+mod dialer;
 mod session;
 mod stream;
 
+pub use dialer::dial;
 pub use iroh::{EndpointId, SecretKey};
 pub use session::Session;
 pub use stream::{Socket, Stream};
@@ -134,16 +136,6 @@ impl Drop for Listener {
     }
 }
 
-pub fn dial(secret_key: SecretKey, remote: EndpointId) -> io::Result<UnixStream> {
-    let (result_tx, result_rx) = mpsc::channel();
-    thread::Builder::new()
-        .name("seer-net-dialer".to_owned())
-        .spawn(move || run_attempt(&result_tx, run_dialer(secret_key, remote, &result_tx)))?;
-    result_rx
-        .recv()
-        .map_err(|_| io::Error::other("dialer thread stopped"))?
-}
-
 /// Opens one persistent connection that both sides can add streams to.
 ///
 /// The runtime uses this to reach the broker. Dropping the session closes the
@@ -167,8 +159,9 @@ pub fn dial_session(secret_key: SecretKey, remote: EndpointId) -> io::Result<Ses
     Ok(session)
 }
 
-// The error goes back only after the runtime is dropped, so a failed attempt
-// holds no endpoint when the caller retries with the same key.
+// dial_session only. The error goes back only after the runtime is dropped,
+// so a failed attempt holds no endpoint when the caller retries with the same
+// key. dial does not use this. It keeps one shared endpoint for each key.
 fn run_attempt<T>(reply: &Sender<io::Result<T>>, attempt: impl Future<Output = io::Result<()>>) {
     let outcome = build_runtime().and_then(|runtime| runtime.block_on(attempt));
     if let Err(error) = outcome {
@@ -185,7 +178,7 @@ async fn run_session(
 ) -> io::Result<()> {
     let control = tokio::net::UnixStream::from_std(control)
         .map_err(|_| io::Error::other("could not open session control"))?;
-    let endpoint = bind_endpoint(secret_key).await?;
+    let endpoint = bind_endpoint(secret_key, vec![ALPN.to_vec()]).await?;
     let connection = connect(&endpoint, remote).await?;
     if ready.send(Ok(())).is_ok() {
         tokio::select! {
@@ -252,7 +245,7 @@ async fn run_listener(
             return;
         }
     };
-    let endpoint = match bind_endpoint(secret_key).await {
+    let endpoint = match bind_endpoint(secret_key, vec![ALPN.to_vec()]).await {
         Ok(endpoint) => endpoint,
         Err(error) => {
             let _ = ready.send(Err(error));
@@ -295,16 +288,16 @@ async fn run_listener(
     endpoint.close().await;
 }
 
-async fn bind_endpoint(secret_key: SecretKey) -> io::Result<Endpoint> {
+async fn bind_endpoint(secret_key: SecretKey, alpns: Vec<Vec<u8>>) -> io::Result<Endpoint> {
     Endpoint::builder(presets::N0)
         .secret_key(secret_key)
-        .alpns(vec![ALPN.to_vec()])
+        .alpns(alpns)
         .bind()
         .await
         .map_err(|_| io::Error::other("could not bind endpoint"))
 }
 
-// On failure the caller drops the endpoint instead of closing it. No peer
+// On failure dial_session drops its endpoint instead of closing it. No peer
 // answered, and a close waits about 3 s for the abandoned handshake to drain.
 async fn connect(endpoint: &Endpoint, remote: EndpointId) -> io::Result<Connection> {
     match timeout(CONNECT_TIMEOUT, endpoint.connect(remote, ALPN)).await {
@@ -349,33 +342,6 @@ async fn handle_incoming(
     });
     session::serve_connection(connection, parts).await;
     first.abort();
-}
-
-async fn run_dialer(
-    secret_key: SecretKey,
-    remote: EndpointId,
-    result: &Sender<io::Result<UnixStream>>,
-) -> io::Result<()> {
-    let endpoint = bind_endpoint(secret_key).await?;
-    let connection = connect(&endpoint, remote).await?;
-    let bridged = bridge_first_stream(&connection, result).await;
-    endpoint.close().await;
-    bridged
-}
-
-async fn bridge_first_stream(
-    connection: &Connection,
-    result: &Sender<io::Result<UnixStream>>,
-) -> io::Result<()> {
-    let (send, recv) = connection
-        .open_bi()
-        .await
-        .map_err(|_| io::Error::other("could not open stream"))?;
-    let (caller_stream, bridge_stream) = stream_pair()?;
-    if result.send(Ok(caller_stream)).is_ok() {
-        let _ = bridge(send, recv, bridge_stream).await;
-    }
-    Ok(())
 }
 
 fn build_runtime() -> io::Result<tokio::runtime::Runtime> {
