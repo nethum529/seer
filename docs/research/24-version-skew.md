@@ -55,6 +55,8 @@ same way:
 | Unknown message kind | Error (InvalidData) |
 | Unknown field in a known message | Field is ignored |
 | Missing field | Error, unless the field has serde(default) or is an Option |
+| Unknown value in a known enum field | Error for the whole message. Examples: a new MouseTracking value (crates/seer-core/src/terminal.rs:120-127), a new CursorShape, or a new Color in a Cell (crates/seer-core/src/cells.rs:3-8) |
+| Same shape, new meaning | Decodes with no error. The receiver uses the old meaning. See the section Same shape, new meaning |
 
 Fields with serde(default) today: the Person fields
 (proto/mod.rs:236-250), TerminalInfo.last_typist (proto/mod.rs:262), and
@@ -62,7 +64,26 @@ TerminalModes.alt_screen (crates/seer-core/src/terminal.rs:115).
 
 The rows of a TerminalFrame use an untagged enum with two forms, runs or a
 plain cell list (crates/seer-core/src/proto/frame_rows.rs:38-43). A row in
-a third form is a decode error for the whole message.
+a third form is a decode error for the whole message. But a row object that
+has "runs" and also new keys is not a third form: the untagged enum accepts
+it as Runs and ignores the new keys.
+
+### Same shape, new meaning
+
+A message that keeps its shape but changes its meaning decodes with no
+error on an old receiver. The old receiver shows a wrong screen and logs
+nothing. Examples for R-411:
+
+- A Cells message that carries only the changed rows, with a new flag that
+  says so. An old receiver ignores the flag and takes the rows as the full
+  screen. The client replaces the whole pane with them
+  (crates/seer/src/state.rs:249-256), and the broker keeps them as the frame
+  for the next watcher (crates/seer-broker/src/forwarding.rs:362-371).
+- A row object with "runs" plus new keys, for example a start column. An
+  old receiver decodes it as a normal Runs row that starts at column 0.
+
+No test and no version check finds this fault. Only the rule at the end of
+this document prevents it.
 
 What differs between receivers is the action after a decode error. The
 pair sections record that action.
@@ -74,13 +95,20 @@ pair sections record that action.
 | Hello, client to broker | crates/seer-broker/src/server.rs:353-361, 384-398 | major.minor of CARGO_PKG_VERSION, as strings | Refused "version mismatch: server X, client Y. Run: seer update", connection ends |
 | PublishRuntime, runtime to broker | crates/seer-broker/src/server.rs:362-370, 384-398 | Same | Same |
 | TerminalCapabilities, client to runtime | crates/seer-runtime/src/user_session.rs:483-492, server/status.rs:21-37 | protocol_version == 1 | Refused "unsupported terminal capability version", connection stays |
-| TerminalInput, client to runtime | crates/seer-runtime/src/pane_grid.rs:111-117 | protocol_version == 1 on every input | That input is refused |
+| TerminalInput, client to runtime | crates/seer-runtime/src/pane_grid.rs:111-117 | protocol_version == 1 on every input | That input is not applied. The runtime sends Refused "unsupported terminal input version" (server.rs:296-300), and the client shows it as a notice (tui.rs:253-254) |
 
 The broker checks the version one time, when the connection opens. It
 never checks an open connection again. The runtime stream messages
 (RuntimeStream) and Join carry no version. TERMINAL_PROTOCOL_VERSION is 1
 (crates/seer-core/src/terminal.rs:5). The client sends it at
 crates/seer/src/tui.rs:79-89 and in each TerminalInput.
+
+Join has no version check (crates/seer-broker/src/server.rs:376-378). On a
+minor mismatch, seer join uses the seat, and the client saves the server
+entry, before the Hello that follows gets the refusal
+(crates/seer/src/commands.rs:91-110, 130-133). The person sees "refused:
+version mismatch ...", but the seat is gone and the saved entry points at a
+room that refuses this client.
 
 Result of the broker check:
 
@@ -124,7 +152,18 @@ runs:
   requires, the window closes and prints "Server stopped."
 - When a new client raises TERMINAL_PROTOCOL_VERSION, the old runtime shows
   "unsupported terminal capability version" and refuses every key the
-  person types.
+  person types. Each key also shows the notice "unsupported terminal input
+  version".
+- Two messages are decoded before the window opens, not on the Cells path
+  (crates/seer/src/local.rs:26-40, 65-73, 99-114):
+  - When the first Tree does not decode, seer attach fails with an error
+    and no window opens.
+  - When RuntimeReady does not decode, the client takes the socket as not
+    live and starts a second runtime. That runtime finds the live socket
+    and stops with "runtime socket is already in use"
+    (crates/seer-runtime/src/server/util.rs:7-18), and seer attach reports
+    that the runtime stopped before it opened its socket.
+  A change to Cells does not touch these two messages.
 - The old runtime also publishes to the room with its old version. When the
   broker was restarted with another minor version, the broker refuses the
   runtime. runtime.log gets "runtime room connection ended: room refused
@@ -135,8 +174,10 @@ runs:
 
 ## Pair 2: runtime and broker
 
-TCP over loopback for the host runtime, an iroh session for a guest
-runtime (crates/seer-runtime/src/room.rs:126-154). The runtime keeps one
+The runtime uses TCP when its saved room endpoint is a TCP address, and an
+iroh session when the endpoint is an iroh id (crates/seer-runtime/src/room.rs:132-140).
+So a host runtime can use either one, and a guest runtime of a remote room
+uses iroh. The version rules are the same on both. The runtime keeps one
 control link (PublishRuntime, then OpenStream requests). For each viewer
 the broker asks for a stream, and the runtime opens it. The runtime sends
 Tree, Cells, and Terminals on that stream. The broker sends Watch, Unwatch,
@@ -243,31 +284,51 @@ These are problems this document found. They are not fixed here.
    and the stream opens and fails again in a loop.
 5. An old runtime that a new broker refuses tries again without end and the
    person gets no notice. Only runtime.log shows it.
+6. Join has no version check. On a minor mismatch seer join uses the seat
+   and saves the server entry, and only then the Hello gets the refusal
+   (crates/seer-broker/src/server.rs:376-378,
+   crates/seer/src/commands.rs:91-110, 130-133). The person must ask the
+   owner for a new seat after the update.
 
 ## Rule for a change to the screen update message
 
 A change to ServerMsg::Cells, TerminalFrame, or the row encoding is safe
 during an upgrade only when it follows all of these rules:
 
-1. Release it in a new minor version, never in a patch release. The broker
+1. A changes-only update must be a new message kind, or it must be
+   undecodable by an old receiver in some other way. Never send the same
+   Cells shape with a new meaning. An old receiver decodes it with no error
+   and shows a wrong screen (section Same shape, new meaning). An unknown
+   kind at least ends the link, which a person can see and report.
+2. Release it in a new minor version, never in a patch release. The broker
    refuses a client or a runtime of another minor version when it connects.
    So on every room path (runtime, broker, watching client) the three
    processes run the same minor version. A connection that is open was
    checked when it opened, and a running process never changes version.
    This part needs no new version check.
-2. On the local link nothing compares versions, so:
+3. On the local link nothing compares versions, so:
    - The new client must still decode the old full frame, because it can
      attach to a runtime that started before seer update.
    - The new runtime must send the new form on the local link only to a
-     window that said it can read it. With the code of today, the only
-     safe way to say so is a new field with serde(default) in
-     TerminalCapabilities. An old runtime ignores the unknown field
-     (confirmed by test), and a new runtime reads a missing field as an old
-     client. This field is a capability check, so in effect it is a new
-     version check for the local link. Without it, no safe rule exists for
-     the local link.
+     window that said it can read it. With the code of today, a window can
+     say so with a new field with serde(default) in a message that the
+     client sends to its own runtime: TerminalCapabilities, Resize, or a
+     Watch of an own pane (crates/seer/src/routes.rs:66-79).
+     TerminalCapabilities is the natural place, because the client sends it
+     one time at attach. An old runtime ignores the unknown field (confirmed
+     by test), and a new runtime reads a missing field as an old client.
+     This field is a capability check, so in effect it is a new version
+     check for the local link. Without it, no safe rule exists for the
+     local link.
+   - The requirement above matters only when an old client can reach a new
+     runtime. Today that needs two installs of different versions for one
+     account. Both use the same socket path (state dir, runtimes, user id,
+     socket; crates/seer/src/local.rs:83-97), so an old client from the
+     second install attaches to a runtime that the new install started. An
+     old window that is open during seer update cannot meet a new runtime:
+     it closes when its own runtime ends and never connects again.
    - Do not raise TERMINAL_PROTOCOL_VERSION. An old runtime then refuses
      every key of a new client.
-3. In a patch release, add only fields that have serde(default) and that no
+4. In a patch release, add only fields that have serde(default) and that no
    receiver needs. An old broker in the middle drops every field it does
    not know, and a missing required field ends the stream.
