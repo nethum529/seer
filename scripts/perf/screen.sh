@@ -126,6 +126,7 @@ run_probe() {
 echo "rev,repeat,workload,cols,rows,seq,t_ms,bytes,frame_cols,frame_rows,changed_cells,changed_rows,row_diff_bytes,cell_diff_bytes,shift,scroll_cells,scroll_diff_bytes" >"$raw"
 echo "rev,repeat,workload,cols,rows,keys,last_key_ms,window_ms,updates,bytes" >"$windows"
 : >"$errors"
+: >"$out/probe.log"
 start_room
 for size in $sizes; do
     for workload in $workloads; do
