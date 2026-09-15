@@ -7,13 +7,18 @@ pub(crate) struct Diff {
     pub(crate) changed_rows: usize,
     pub(crate) row_diff_bytes: usize,
     pub(crate) cell_diff_bytes: usize,
+    pub(crate) shift: i32,
+    pub(crate) scroll_cells: usize,
+    pub(crate) scroll_diff_bytes: usize,
 }
 
-// Two estimates of a change-only update, both built with the same JSON codec
-// as today's frames. Row diff: only the rows with a changed cell, each row
-// run-length encoded like today, plus a list of row indexes. Cell diff: one
-// (row, column, cell) triple per changed cell. Both carry the same header as
-// today (user, pane, cursor, modes).
+// Three estimates of a change-only update, all built with the same JSON
+// codec as today's frames. Row diff: only the rows with a changed cell, each
+// row run-length encoded like today, plus a list of row indexes. Cell diff:
+// one (row, column, cell) triple per changed cell. Scroll diff: the cell
+// diff after the previous frame is moved by the number of rows that gives
+// the fewest changed cells, plus a moved-by field. All carry the same header
+// as today (user, pane, cursor, modes).
 pub(crate) fn diff(
     previous: Option<&TerminalFrame>,
     current: &TerminalFrame,
@@ -21,40 +26,76 @@ pub(crate) fn diff(
     pane: &str,
 ) -> io::Result<Diff> {
     let same_shape = previous.is_some_and(|last| same_shape(last, current));
-    let mut changed_cells = 0;
-    let mut changed_rows = Vec::new();
-    let mut cells: Vec<(u16, u16, &Cell)> = Vec::new();
-    for (row_index, row) in current.rows.iter().enumerate() {
-        let last_row = previous
-            .filter(|_| same_shape)
-            .map(|last| &last.rows[row_index]);
-        let mut row_changed = false;
-        for (column, cell) in row.iter().enumerate() {
-            if last_row.is_some_and(|last| last[column] == *cell) {
-                continue;
-            }
-            row_changed = true;
-            changed_cells += 1;
-            cells.push((as_u16(row_index), as_u16(column), cell));
-        }
-        if row_changed {
-            changed_rows.push(as_u16(row_index));
-        }
-    }
+    let cells = shifted_changes(previous.filter(|_| same_shape), current, 0);
+    let changed_cells = cells.len();
+    let mut changed_rows: Vec<u16> = cells.iter().map(|(row, _, _)| *row).collect();
+    changed_rows.dedup();
     let rows = changed_rows
         .iter()
         .map(|index| current.rows[usize::from(*index)].clone())
         .collect();
     let row_message = message(user, pane, current, rows);
     let row_diff_bytes = encoded_len(&row_message)? + json_len(&changed_rows)?;
-    let header = message(user, pane, current, Vec::new());
-    let cell_diff_bytes = encoded_len(&header)? + json_len(&cells)?;
+    let header = encoded_len(&message(user, pane, current, Vec::new()))?;
+    let cell_diff_bytes = header + json_len(&cells)?;
+    let (shift, scroll_cells) = previous
+        .filter(|_| same_shape)
+        .map_or((0, changed_cells), |last| {
+            best_shift(last, current, changed_cells)
+        });
+    let scroll_diff_bytes = if shift == 0 {
+        cell_diff_bytes
+    } else {
+        let moved: Vec<(u16, u16, &Cell)> = shifted_changes(previous, current, shift);
+        header + json_len(&Moved { moved: shift })? + json_len(&moved)?
+    };
     Ok(Diff {
         changed_cells,
         changed_rows: changed_rows.len(),
         row_diff_bytes,
         cell_diff_bytes,
+        shift,
+        scroll_cells,
+        scroll_diff_bytes,
     })
+}
+
+#[derive(serde::Serialize)]
+struct Moved {
+    moved: i32,
+}
+
+// A positive shift means the screen scrolled up: current row r was previous
+// row r + shift. Row 0 of the search is the unshifted cell diff.
+fn best_shift(last: &TerminalFrame, current: &TerminalFrame, unshifted: usize) -> (i32, usize) {
+    let rows = i32::try_from(current.rows.len()).unwrap_or(0);
+    let mut best = (0, unshifted);
+    for shift in (1 - rows..rows).filter(|shift| *shift != 0) {
+        let count = shifted_changes(Some(last), current, shift).len();
+        if count < best.1 {
+            best = (shift, count);
+        }
+    }
+    best
+}
+
+fn shifted_changes<'a>(
+    previous: Option<&TerminalFrame>,
+    current: &'a TerminalFrame,
+    shift: i32,
+) -> Vec<(u16, u16, &'a Cell)> {
+    let mut cells = Vec::new();
+    for (row_index, row) in current.rows.iter().enumerate() {
+        let source = usize::try_from(i32::try_from(row_index).unwrap_or(0) + shift).ok();
+        let last_row = previous.and_then(|last| source.and_then(|index| last.rows.get(index)));
+        for (column, cell) in row.iter().enumerate() {
+            if last_row.is_some_and(|last| last[column] == *cell) {
+                continue;
+            }
+            cells.push((as_u16(row_index), as_u16(column), cell));
+        }
+    }
+    cells
 }
 
 fn same_shape(last: &TerminalFrame, current: &TerminalFrame) -> bool {

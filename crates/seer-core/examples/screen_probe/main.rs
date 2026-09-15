@@ -6,7 +6,8 @@
 //
 // Output, one line per screen update after the first key:
 //   update,<label>,<cols>,<rows>,<seq>,<t_ms>,<bytes>,<frame_cols>,<frame_rows>,
-//          <changed_cells>,<changed_rows>,<row_diff_bytes>,<cell_diff_bytes>
+//          <changed_cells>,<changed_rows>,<row_diff_bytes>,<cell_diff_bytes>,
+//          <shift>,<scroll_cells>,<scroll_diff_bytes>
 // and one closing line:
 //   window,<label>,<cols>,<rows>,<keys>,<last_key_ms>,<window_ms>,<updates>,<bytes>
 // The window runs from the first key to the last update. last_key_ms is
@@ -260,7 +261,7 @@ fn report(options: &Options, updates: &[Update], summary: &Summary) -> io::Resul
     for update in updates {
         writeln!(
             out,
-            "update,{label},{},{},{},{},{},{},{},{},{}",
+            "update,{label},{},{},{},{},{},{},{},{},{},{},{},{}",
             update.seq,
             update.at.as_millis(),
             update.bytes,
@@ -270,6 +271,9 @@ fn report(options: &Options, updates: &[Update], summary: &Summary) -> io::Resul
             update.diff.changed_rows,
             update.diff.row_diff_bytes,
             update.diff.cell_diff_bytes,
+            update.diff.shift,
+            update.diff.scroll_cells,
+            update.diff.scroll_diff_bytes,
         )?;
     }
     let window_ms = updates.last().map_or(0, |update| update.at.as_millis());

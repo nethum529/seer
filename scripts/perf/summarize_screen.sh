@@ -9,7 +9,7 @@ set -euo pipefail
 
 windows=${1:?usage: scripts/perf/summarize_screen.sh windows.csv samples.csv}
 samples=${2:?usage: scripts/perf/summarize_screen.sh windows.csv samples.csv}
-echo "workload,cols,rows,repeats,keys,window_s,updates,updates_per_s,bytes_per_s,bytes_median,bytes_p95,bytes_max,cells_median,cells_p95,rows_median,row_diff_median,row_diff_p95,row_diff_per_s,cell_diff_median,cell_diff_p95,cell_diff_per_s,after_keys_updates_per_s,after_keys_bytes_per_s"
+echo "workload,cols,rows,repeats,keys,window_s,updates,updates_per_s,bytes_per_s,bytes_median,bytes_p95,bytes_max,cells_median,cells_p95,rows_median,row_diff_median,row_diff_p95,row_diff_per_s,cell_diff_median,cell_diff_p95,cell_diff_per_s,scrolled_share,scroll_cells_median,scroll_diff_median,scroll_diff_p95,scroll_diff_per_s,after_keys_updates_per_s,after_keys_bytes_per_s"
 awk -F, -v OFS=, '
 function pct(values, n, p,   rank) {
     rank = int(p * n)
@@ -42,7 +42,8 @@ FILENAME == ARGV[1] {
 {
     k = $3 "," $4 "," $5
     n[k]++
-    for (c = 8; c <= 14; c++) value[k, c, n[k]] = $c
+    for (c = 8; c <= 17; c++) value[k, c, n[k]] = $c
+    if ($15 != 0) scrolled[k]++
     if ($7 > lastkey[$1, $2, k]) {
         tail_updates[k]++
         tail_bytes[k] += $8
@@ -55,16 +56,18 @@ END {
         s = window[k] / 1000
         tail_ms = 0
         for (key in tail_span) if (index(key, SUBSEP k) > 0) tail_ms += tail_span[key]
-        if (n[k] == 0) { print k, reps[k], keys[k], s, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0; continue }
+        if (n[k] == 0) { print k, reps[k], keys[k], s, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0; continue }
         sorted(k, 8, n[k], b); sorted(k, 11, n[k], cells); sorted(k, 12, n[k], rows)
         sorted(k, 13, n[k], rd); sorted(k, 14, n[k], cd)
-        rdsum = 0; cdsum = 0
-        for (i = 1; i <= n[k]; i++) { rdsum += rd[i]; cdsum += cd[i] }
-        printf "%s,%d,%d,%.1f,%d,%.1f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.1f,%.0f\n", k, reps[k], keys[k], s, n[k],
+        sorted(k, 16, n[k], sc); sorted(k, 17, n[k], sd)
+        rdsum = 0; cdsum = 0; sdsum = 0
+        for (i = 1; i <= n[k]; i++) { rdsum += rd[i]; cdsum += cd[i]; sdsum += sd[i] }
+        printf "%s,%d,%d,%.1f,%d,%.1f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.0f,%.2f,%.0f,%.0f,%.0f,%.0f,%.1f,%.0f\n", k, reps[k], keys[k], s, n[k],
             n[k] / s, bytes[k] / s, median(b, n[k]), pct(b, n[k], 0.95), b[n[k]],
             median(cells, n[k]), pct(cells, n[k], 0.95), median(rows, n[k]),
             median(rd, n[k]), pct(rd, n[k], 0.95), rdsum / s,
             median(cd, n[k]), pct(cd, n[k], 0.95), cdsum / s,
+            scrolled[k] / n[k], median(sc, n[k]), median(sd, n[k]), pct(sd, n[k], 0.95), sdsum / s,
             rate(tail_updates[k], tail_ms), rate(tail_bytes[k], tail_ms)
     }
 }' "$windows" "$samples" | LC_ALL=C sort -t, -k2,2n -k1,1

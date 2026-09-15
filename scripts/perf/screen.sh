@@ -86,7 +86,7 @@ start_room() {
         "$address" "$address" "$state" >"$work/broker.toml"
     # A fixed prompt with no title escape, so every run types into the same shell.
     printf "PS1='\$ '\nPROMPT_COMMAND=()\nunset HISTFILE\n" >"$home/.bashrc"
-    awk 'BEGIN { for (i = 1; i <= 5000; i++) printf "line %5d: the quick brown fox jumps over the lazy dog %d times\n", i, i % 97 }' >"$home/long.txt"
+    cp "$inputs/long.txt" "$home/long.txt"
     "$broker" "$work/broker.toml" >"$work/broker.log" 2>&1 &
     broker_pid=$!
     for _ in $(seq 100); do
@@ -120,7 +120,7 @@ run_probe() {
     fi
 }
 
-echo "rev,repeat,workload,cols,rows,seq,t_ms,bytes,frame_cols,frame_rows,changed_cells,changed_rows,row_diff_bytes,cell_diff_bytes" >"$raw"
+echo "rev,repeat,workload,cols,rows,seq,t_ms,bytes,frame_cols,frame_rows,changed_cells,changed_rows,row_diff_bytes,cell_diff_bytes,shift,scroll_cells,scroll_diff_bytes" >"$raw"
 echo "rev,repeat,workload,cols,rows,keys,last_key_ms,window_ms,updates,bytes" >"$windows"
 : >"$errors"
 start_room
