@@ -1,0 +1,2 @@
+vim -N -u NONE ~/long.txt
+\w\wjjjjjjjjjjjjjjjjjjjjjjjjjjjjjjGkkkkkkkkkkgg20joA new line typed into the editor by the probe.\eianother sentence goes here \euujjjjjjjjjjjjjjjjjjjjddddddAthe end of this line\ejjjjjjjjjjjjjjjjjjjjjjjjjjjjjj:q!
