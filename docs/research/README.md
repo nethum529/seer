@@ -16,3 +16,4 @@ Each file breaks one system into components, then compares.
 - 19-connection-reuse.md
 - 20-address-lookup.md
 - 21-startup-readiness.md
+- 22-stream-adapter.md
