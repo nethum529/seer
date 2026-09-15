@@ -14,6 +14,7 @@ fn seer_shells_do_not_receive_the_room_secrets() {
     let temporary = TemporaryDirectory::new();
     let socket_path = temporary.path.join("runtime.sock");
     let runtime = runtime_command()
+        .env_remove("SEER_ROOM_ENDPOINT")
         .env("SEER_ROOM_CREDENTIAL", CREDENTIAL)
         .env("SEER_ROOM_KEY", KEY)
         .args([
