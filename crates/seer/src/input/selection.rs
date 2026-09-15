@@ -107,15 +107,15 @@ pub(super) fn mouse(mouse: MouseEvent, state: &mut ClientState) -> io::Result<bo
 
 fn begin(state: &ClientState, position: Position) -> Option<Selection> {
     let (area, rows) = if let Some(viewer) = &state.viewer {
-        let area = viewer.area;
+        let area = viewer.content;
         (area, viewer.visible_rows(area.height))
     } else {
         let tile = state
             .box_areas
             .iter()
-            .find(|tile| tile.content.contains(position))?;
+            .find(|tile| tile.placed.contains(position))?;
         let terminal = state.selected_terminals().get(tile.index)?;
-        let area = tile.content;
+        let area = tile.placed;
         let rows = &state
             .frames
             .get(&(state.user().into(), terminal.pane.clone()))?

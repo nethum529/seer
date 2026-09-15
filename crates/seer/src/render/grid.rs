@@ -1,6 +1,6 @@
 use crate::{
     state::{ClientState, Tile},
-    terminal_cells::PaneCells,
+    terminal_cells::draw_screen,
     theme::Palette,
 };
 use ratatui::{
@@ -98,15 +98,18 @@ fn tile(
     if content.is_empty() {
         return;
     }
-    let rows = state
+    let placed = match state
         .frames
         .get(&(state.user().into(), terminal.pane.clone()))
-        .map_or(&[][..], |f| f.rows.as_slice());
-    frame.render_widget(PaneCells::new(rows), content);
+    {
+        Some(screen) => draw_screen(frame, &screen.rows, screen.modes.alt_screen, content),
+        None => draw_screen(frame, &[], false, content),
+    };
     state.box_areas.push(Tile {
         index,
         area: rect,
         content,
+        placed,
     });
 }
 

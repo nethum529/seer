@@ -60,13 +60,14 @@ pub fn transition(key: &str, value: String) {
 #[must_use]
 pub fn frame_summary(frame: &TerminalFrame) -> String {
     format!(
-        "{}x{} cursor={},{} visible={} mouse={:?}",
+        "{}x{} cursor={},{} visible={} mouse={:?} alt={}",
         frame.rows.first().map_or(0, Vec::len),
         frame.rows.len(),
         frame.cursor.column,
         frame.cursor.row,
         frame.cursor.visible,
-        frame.modes.mouse_tracking
+        frame.modes.mouse_tracking,
+        frame.modes.alt_screen
     )
 }
 

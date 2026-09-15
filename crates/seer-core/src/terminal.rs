@@ -112,6 +112,8 @@ pub struct TerminalFrame {
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalModes {
     pub mouse_tracking: MouseTracking,
+    #[serde(default)]
+    pub alt_screen: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]

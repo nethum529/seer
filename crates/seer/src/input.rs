@@ -231,10 +231,11 @@ fn program_target(
     state: &ClientState,
 ) -> Option<(Option<usize>, Rect, (String, String))> {
     if let Some(viewer) = &state.viewer {
-        if !state.may_type(&viewer.user) || viewer.offset != 0 || !viewer.area.contains(position) {
+        if !state.may_type(&viewer.user) || viewer.offset != 0 || !viewer.content.contains(position)
+        {
             return None;
         }
-        return Some((None, viewer.area, viewer.target()));
+        return Some((None, viewer.content, viewer.target()));
     }
     if kind != MouseKind::Down || !state.may_type(state.user()) {
         return None;
@@ -242,9 +243,9 @@ fn program_target(
     let tile = state
         .box_areas
         .iter()
-        .find(|tile| tile.content.contains(position))?;
+        .find(|tile| tile.placed.contains(position))?;
     let pane = state.selected_terminals().get(tile.index)?.pane.clone();
-    Some((Some(tile.index), tile.content, (state.user().into(), pane)))
+    Some((Some(tile.index), tile.placed, (state.user().into(), pane)))
 }
 
 fn mouse_kind(kind: MouseEventKind) -> (MouseKind, Option<seer_core::MouseButton>) {

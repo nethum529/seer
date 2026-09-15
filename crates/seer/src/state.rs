@@ -12,6 +12,7 @@ pub(crate) struct Tile {
     pub(crate) index: usize,
     pub(crate) area: Rect,
     pub(crate) content: Rect,
+    pub(crate) placed: Rect,
 }
 
 pub(crate) struct ClientState {

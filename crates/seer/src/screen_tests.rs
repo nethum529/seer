@@ -359,3 +359,37 @@ fn a_remote_screen_keeps_row_zero_in_the_tile_and_open_view() {
         }
     }
 }
+
+#[test]
+fn a_full_screen_app_smaller_than_the_window_is_centered_with_an_edge() {
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    state.note_people(&[person("alice", "Alice"), person("bob", "Bob")]);
+    state.selected = 1;
+    state
+        .terminals
+        .insert("bob".into(), vec![terminal_info("herdr")]);
+    let pane = state.selected_terminals()[0].pane.clone();
+    let mut grid = seer_runtime::PaneGrid::new(40, 10);
+    grid.feed(b"\x1b[?1049h\x1b[HAPP TOP\x1b[10;1HAPP BOTTOM");
+    state.frames.insert(("bob".into(), pane), grid.snapshot());
+    state.open_focused();
+    let opened: Vec<Vec<char>> = draw_text(&mut state, 80, 24)
+        .iter()
+        .map(|row| row.chars().collect())
+        .collect();
+    let text = |y: usize, x: usize, len: usize| opened[y][x..x + len].iter().collect::<String>();
+    assert_eq!(text(7, 20, 7), "APP TOP", "{opened:?}");
+    assert_eq!(text(16, 20, 10), "APP BOTTOM");
+    assert_eq!(
+        state.viewer.as_ref().expect("viewer").content,
+        ratatui::layout::Rect::new(20, 7, 40, 10)
+    );
+    for (x, y) in [(19, 7), (60, 7), (20, 6), (20, 17)] {
+        assert_ne!(opened[y][x], ' ', "an edge must show at {x},{y}");
+    }
+    let cropped = draw_text(&mut state, 30, 24);
+    assert!(
+        cropped[7].starts_with("APP TOP"),
+        "a narrower window crops the width and still centers the height: {cropped:?}"
+    );
+}
