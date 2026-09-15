@@ -17,3 +17,4 @@ Each file breaks one system into components, then compares.
 - 20-address-lookup.md
 - 21-startup-readiness.md
 - 22-stream-adapter.md
+- 23-screen-data.md

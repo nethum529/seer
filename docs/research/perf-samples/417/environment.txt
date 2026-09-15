@@ -1,0 +1,17 @@
+date_utc: 2026-09-15T20:21:19Z
+revision: f89348209050e22a7f85a2815a20945d0e646ed3
+repeats: 3
+workloads: typing editor pager burst
+sizes: 80x24 200x50
+typing: input=docs/research/perf-samples/417/input/typing.txt rate_ms=100
+editor: input=docs/research/perf-samples/417/input/editor.txt rate_ms=100
+pager: input=docs/research/perf-samples/417/input/pager.txt rate_ms=40
+burst: input=docs/research/perf-samples/417/input/burst.txt rate_ms=100
+shell: bash 5.3.15(1)-release (x86_64-pc-linux-gnu)
+vim: VIM - Vi IMproved 9.2 (2026 Feb 14, compiled Jul 24 2026 21:05:38)
+less: less 704 (PCRE2 regular expressions)
+kernel: Linux 7.1.6-1-cachyos x86_64
+cpu: AMD Ryzen 7 7800X3D 8-Core Processor
+cpu_count: 16
+rustc: rustc 1.98.0 (88d9e12ae 2026-08-18)
+profile: release (lto fat, codegen-units 1, panic abort)
