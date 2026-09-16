@@ -26,7 +26,8 @@ The room server runs on Linux only.
     seer start
 
 The command prints a join line. Send it to a friend. A join line works
-one time and expires in 1 hour.
+one time and expires in 1 hour. The line is the credential for the
+room, so send it the way you send a password.
 
 Make a new line, with a life of 1 to 168 hours:
 
@@ -69,6 +70,12 @@ idle time, and terminals. Use j and k to select, Enter to watch, and
 Space to give or remove your "can type here" grant. The box changes
 when the room server confirms it.
 
+A grant is for one person and for one direction. It permits that
+person to type and to use the mouse in your terminals. It permits
+nothing more. No person in the room can open, close, select, or
+resize your terminals. Remove a grant with Space, or remove every
+grant at one time with `seer perms --off`.
+
 Right click the top right control for the session panel. Use it to
 open, close, or select a terminal, copy the join line, go back, and
 quit Seer.
@@ -90,6 +97,9 @@ quit Seer.
   this computer. The room stays open for the others.
 - `seer stop` stops the room server. Only the host can do this. Other
   people keep their terminals.
+- `seer ps` shows your Seer processes on this computer. `seer ps
+  --clean` stops the windows that have no terminal. `seer ps --stop
+  <pid>` stops one runtime with its shells.
 - `seer update` installs the latest release.
 - `seer exit` leaves Seer from inside a Seer terminal.
 
@@ -102,7 +112,9 @@ quit Seer.
 - One computer at a time can publish the terminals of one person.
 - All persons must use the same major and minor version. A different
   version prints a message that tells you to run `seer update`.
-- Remote connections are encrypted. See
+- Remote connections are encrypted from end to end. A join line gives
+  access to the room and to nothing else on the host computer: not
+  ssh, not the other ports, not the other services. See
   [ADR 0002](docs/adr/0002-builtin-connect.md).
 - The host is trusted. The host computer moves the data of the room.
 - Seer controls use Catppuccin Mocha colors when COLORTERM is
@@ -113,10 +125,8 @@ quit Seer.
 
 ## Known faults
 
-- A watched terminal does not fill the window when a full screen
-  program runs in it. See issue 433.
-- A Seer window can stay behind after a session and use one CPU core.
-  See issue 429.
+- `seer stop` fails with a buffer error and the room server continues.
+  Stop the server process by hand. See issue 436.
 
 ## Build from source
 
