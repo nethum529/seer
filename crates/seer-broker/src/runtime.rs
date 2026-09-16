@@ -116,7 +116,7 @@ impl RuntimeManager {
         sender.send(stream).is_ok()
     }
 
-    fn registration(&self, user_id: &str) -> io::Result<Arc<Registration>> {
+    pub(crate) fn registration(&self, user_id: &str) -> io::Result<Arc<Registration>> {
         lock(&self.published)?
             .get(user_id)
             .map(Arc::clone)
