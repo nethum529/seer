@@ -64,15 +64,7 @@ fn the_active_own_client_controls_the_pane_size() {
     send(&mut second, &watch(&pane, SECOND));
     sizes.settles_at(&mut first, FIRST);
 
-    send(
-        &mut second,
-        &ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: SECOND.cols,
-            rows: SECOND.rows,
-        },
-    );
+    send(&mut second, &resize(SECOND));
     sizes.settles_at(&mut first, SECOND);
 
     send_input(&mut first, &pane, "");
@@ -181,14 +173,64 @@ fn each_viewer_sees_the_terminal_at_its_own_size() {
     assert!(runtime.stop().status.success());
 }
 
+#[test]
+fn a_restart_returns_a_grown_pane_to_the_owner_size() {
+    let temporary = TemporaryDirectory::new();
+    let state = temporary.path.join("state");
+    std::fs::create_dir(&state).expect("state directory must be created");
+    let socket_path = temporary.path.join("runtime.sock");
+    let mut runtime = start_runtime_with_state(&socket_path, Some(&state));
+    let mut owner = connect_with_timeout(&socket_path);
+    let tree = tree(read_message(&mut owner));
+    let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();
+    assert!(wait_for_cells(&mut owner));
+    let mut sizes = PaneSizes::new(&pane);
+    send(&mut owner, &resize(OWNER));
+    send(&mut owner, &watch(&pane, OWNER));
+    sizes.settles_at(&mut owner, OWNER);
+
+    send_input(&mut owner, &pane, "printf '\\033[?1049h'; read wait\n");
+    let mut large = connect_observer(&socket_path);
+    send(&mut large, &watch(&pane, LARGE));
+    sizes.settles_at(&mut owner, LARGE);
+    send(&mut owner, &resize(OWNER));
+    sizes.settles_at(&mut owner, LARGE);
+    drop(large);
+    drop(owner);
+    assert!(runtime.stop().status.success());
+
+    let mut runtime = start_runtime_with_state(&socket_path, Some(&state));
+    let mut owner = connect_with_timeout(&socket_path);
+    sizes.settles_at(&mut owner, OWNER);
+    drop(owner);
+    assert!(runtime.stop().status.success());
+}
+
+fn resize(size: PaneSize) -> ClientMsg {
+    ClientMsg::Resize {
+        workspace: "w1".into(),
+        tab: "w1:t1".into(),
+        cols: size.cols,
+        rows: size.rows,
+    }
+}
+
 fn start_runtime(socket_path: &Path) -> RuntimeProcess {
-    let runtime = runtime_command()
-        .args([
-            socket_path.as_os_str(),
-            "alice".as_ref(),
-            "sh".as_ref(),
-            GENERATION.as_ref(),
-        ])
+    start_runtime_with_state(socket_path, None)
+}
+
+fn start_runtime_with_state(socket_path: &Path, state: Option<&Path>) -> RuntimeProcess {
+    let mut command = runtime_command();
+    command.args([
+        socket_path.as_os_str(),
+        "alice".as_ref(),
+        "sh".as_ref(),
+        GENERATION.as_ref(),
+    ]);
+    if let Some(state) = state {
+        command.env("SEER_SNAPSHOT_DIR", state);
+    }
+    let runtime = command
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()

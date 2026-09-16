@@ -6,16 +6,11 @@ pub(crate) struct SizeClaims {
 }
 
 impl UserSession {
-    // Only the owner's own windows can make a PTY smaller, so one small
-    // watcher never shrinks the terminal for everyone (issue 371). A
-    // watcher gets the screen wrapped to its own window (issue 406). A
-    // full screen app draws for one size and cannot be wrapped, so while
-    // the pane is in the alt screen the PTY grows on each axis to the
-    // largest full viewer watch (issue 433). The owner keeps every row and
-    // column of their own window and sees the top left part of a larger
-    // terminal. The size goes back when the app leaves the alt screen or
-    // the last viewer stops, so an app that enters and leaves the alt
-    // screen changes the size each time.
+    // A watcher never shrinks a PTY (issue 371) and gets a wrapped screen
+    // (issue 406). A full screen app cannot be wrapped, so in the alt screen
+    // the PTY grows on each axis to the largest full viewer watch and goes
+    // back when the app leaves the alt screen or the last viewer stops
+    // (issue 433). The owner then sees the top left part of the terminal.
     pub(crate) fn apply_claimed_sizes(
         &mut self,
         claims: &SizeClaims,
@@ -38,7 +33,7 @@ impl UserSession {
             let own = claimed.unwrap_or(host.owner_size);
             let size = match claims.watched.get(&pane.id) {
                 Some(watched) if host.alt_screen() => own.largest(*watched),
-                None | Some(_) => own,
+                _ => own,
             };
             if pane.size != size {
                 seer_core::debug_log!(

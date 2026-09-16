@@ -49,10 +49,17 @@ impl SharedSession {
                     let reported = connection.watches.insert(pane.into(), size);
                     connection.watch_started = true;
                     connection.watch_ended = false;
-                    if connection.read_only && !viewer {
-                        connection.claimed.remove(pane);
-                    } else if reported != Some(size) || !connection.claimed.contains_key(pane) {
-                        connection.claimed.insert(pane.into(), Instant::now());
+                    match (connection.read_only, viewer) {
+                        (true, false) => {
+                            connection.claimed.remove(pane);
+                        }
+                        (true, true) => {
+                            connection.claimed.insert(pane.into(), Instant::now());
+                        }
+                        (false, _) if reported != Some(size) => {
+                            connection.claimed.insert(pane.into(), Instant::now());
+                        }
+                        (false, _) => {}
                     }
                     // A new watcher must see the screen as it stands. A quiet
                     // terminal produces nothing to poll, so send it here.
