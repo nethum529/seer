@@ -1,12 +1,18 @@
 use super::*;
 
+pub(crate) struct SizeClaims {
+    pub(crate) own: BTreeMap<String, PaneSize>,
+    pub(crate) watched: BTreeMap<String, PaneSize>,
+}
+
 impl UserSession {
-    // Only the owner's own windows size a PTY. A read-only watcher crops
-    // the frame on its side, so one small window never shrinks the terminal
-    // for everyone (issue 371).
+    // The owner's own windows size a PTY and a watcher gets the screen
+    // wrapped to its own window (issues 371 and 406). A full screen app
+    // draws for one size and cannot be wrapped, so while a watcher watches
+    // it the PTY takes the size of the latest watcher (issue 433).
     pub(crate) fn apply_claimed_sizes(
         &mut self,
-        sizes: &BTreeMap<String, PaneSize>,
+        claims: &SizeClaims,
     ) -> io::Result<Vec<ServerMsg>> {
         let mut changed = false;
         for pane in self
@@ -19,11 +25,14 @@ impl UserSession {
             let Some(host) = self.pane_hosts.get_mut(&pane.id) else {
                 continue;
             };
-            let claimed = sizes.get(&pane.id).copied();
+            let claimed = claims.own.get(&pane.id).copied();
             if let Some(size) = claimed {
                 host.remember_owner_size(size);
             }
-            let size = claimed.unwrap_or(host.owner_size);
+            let size = match claims.watched.get(&pane.id) {
+                Some(watched) if host.alt_screen() => *watched,
+                _ => claimed.unwrap_or(host.owner_size),
+            };
             if pane.size != size {
                 seer_core::debug_log!(
                     "pty resize pane={} size={}x{} owner_size={}x{} claimed={}",
@@ -49,7 +58,7 @@ impl UserSession {
         tab: &str,
         cols: u16,
         rows: u16,
-        sizes: &BTreeMap<String, PaneSize>,
+        claims: &SizeClaims,
     ) -> io::Result<Vec<ServerMsg>> {
         self.tab(workspace, tab)?;
         self.viewport = PaneSize { cols, rows };
@@ -63,7 +72,7 @@ impl UserSession {
                 host.remember_owner_size(size);
             }
         }
-        let applied = self.apply_claimed_sizes(sizes)?;
+        let applied = self.apply_claimed_sizes(claims)?;
         persistence::persist(self)?;
         Ok(if applied.is_empty() {
             self.snapshot()

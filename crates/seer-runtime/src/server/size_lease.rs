@@ -7,6 +7,7 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, MouseKind, PaneSize};
 
 use super::{SharedSession, connection::Connection, lock, writer};
+use crate::user_session::terminals::SizeClaims;
 
 impl SharedSession {
     pub(super) fn watch_size(
@@ -72,7 +73,7 @@ impl SharedSession {
 
     pub(super) fn claim_pane(&self, id: u64, pane: &str) -> io::Result<bool> {
         let mut connections = lock(&self.connections)?;
-        let before = own_sizes(&connections);
+        let before = size_claims(&connections).own;
         let Some(connection) = connections
             .iter_mut()
             .find(|connection| connection.id == id && !connection.read_only)
@@ -80,7 +81,7 @@ impl SharedSession {
             return Ok(false);
         };
         connection.claimed.insert(pane.into(), Instant::now());
-        Ok(own_sizes(&connections) != before)
+        Ok(size_claims(&connections).own != before)
     }
 }
 
@@ -106,11 +107,18 @@ fn claims_size(event: &InputEvent) -> bool {
     }
 }
 
-pub(super) fn own_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize> {
+pub(super) fn size_claims(connections: &[Connection]) -> SizeClaims {
+    SizeClaims {
+        own: latest_claims(connections, false),
+        watched: latest_claims(connections, true),
+    }
+}
+
+fn latest_claims(connections: &[Connection], read_only: bool) -> BTreeMap<String, PaneSize> {
     let mut claimed: BTreeMap<String, (Instant, PaneSize)> = BTreeMap::new();
     for connection in connections
         .iter()
-        .filter(|connection| !connection.read_only)
+        .filter(|connection| connection.read_only == read_only)
     {
         for (pane, size) in &connection.watches {
             let Some(at) = connection.claimed.get(pane).copied() else {

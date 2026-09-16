@@ -202,8 +202,9 @@ impl Connection {
         Ok(true)
     }
 
-    // Each watcher gets the screen at its own size. The PTY keeps the
-    // owner's size (issue 406).
+    // Each watcher gets the screen wrapped to its own size (issue 406). A
+    // full screen app comes at the PTY size, which follows the latest
+    // watcher (issue 433).
     fn fitted(&self, session: &UserSession, message: &ServerMsg) -> Option<ServerMsg> {
         let ServerMsg::Cells { user, pane, .. } = message else {
             return None;

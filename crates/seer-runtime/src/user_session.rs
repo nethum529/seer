@@ -494,6 +494,6 @@ pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
 #[cfg(all(test, target_os = "linux"))]
 mod tests;
 
-mod terminals;
+pub(crate) mod terminals;
 
 mod lifecycle;

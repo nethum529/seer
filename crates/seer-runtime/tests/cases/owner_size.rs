@@ -142,22 +142,29 @@ fn each_viewer_sees_the_terminal_at_its_own_size() {
     assert_eq!(frame_size(&large_frame), LARGE);
     sizes.settles_at(&mut owner, OWNER);
 
+    // The shell must not redraw its prompt over the app text on a resize.
     send_input(
         &mut owner,
         &pane,
-        "printf '\\033[?1049h\\033[2J\\033[HAPP TOP'\n",
+        "printf '\\033[?1049h\\033[2J\\033[HAPP TOP'; read wait\n",
     );
-    let large_app = wait_for_frame(&mut large, |rows| rows[0].starts_with("APP TOP"));
-    assert_eq!(frame_size(&large_app), OWNER);
+    let large_app = wait_for_frame(&mut large, |rows| shows_app(rows, LARGE));
+    assert_eq!(frame_size(&large_app), LARGE);
     assert!(large_app.modes.alt_screen);
-    let small_app = wait_for_frame(&mut small, |rows| rows[0].starts_with("APP TOP"));
-    assert_eq!(frame_size(&small_app), OWNER);
-    sizes.settles_at(&mut owner, OWNER);
+    let small_app = wait_for_frame(&mut small, |rows| shows_app(rows, LARGE));
+    assert_eq!(frame_size(&small_app), LARGE);
+    sizes.settles_at(&mut owner, LARGE);
 
+    drop(large);
+    sizes.settles_at(&mut owner, SMALL);
+    let small_app = wait_for_frame(&mut small, |rows| shows_app(rows, SMALL));
+    assert_eq!(frame_size(&small_app), SMALL);
+
+    drop(small);
+    sizes.settles_at(&mut owner, OWNER);
+    send_input(&mut owner, &pane, "\n");
     send_input(&mut owner, &pane, "printf '\\033[?1049l'; stty size\n");
     wait_for_text(&mut owner, "30 100");
-    drop(small);
-    drop(large);
     drop(owner);
     assert!(runtime.stop().status.success());
 }
@@ -175,6 +182,13 @@ fn start_runtime(socket_path: &Path) -> RuntimeProcess {
         .spawn()
         .expect("runtime must start");
     RuntimeProcess::new(runtime)
+}
+
+fn shows_app(rows: &[String], size: PaneSize) -> bool {
+    rows.len() == usize::from(size.rows)
+        && rows
+            .iter()
+            .any(|row| row.len() == usize::from(size.cols) && row.starts_with("APP TOP"))
 }
 
 fn frame_size(frame: &seer_core::TerminalFrame) -> PaneSize {

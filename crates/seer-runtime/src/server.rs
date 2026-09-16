@@ -245,9 +245,9 @@ impl SharedSession {
         cols: u16,
         rows: u16,
     ) -> io::Result<Vec<ServerMsg>> {
-        let sizes = size_lease::own_sizes(&lock(&self.connections)?);
+        let claims = size_lease::size_claims(&lock(&self.connections)?);
         let mut session = lock(&self.session)?;
-        match session.record_viewport(workspace, tab, cols, rows, &sizes) {
+        match session.record_viewport(workspace, tab, cols, rows, &claims) {
             Ok(messages) => Ok(messages),
             Err(error) if crate::persistence::is_fatal(&error) => {
                 stop_after_snapshot_failure(&error)
@@ -443,9 +443,9 @@ impl SharedSession {
             let mut session = lock(&self.session)?;
             let mut connections = lock(&self.connections)?;
             let owner_present = connections.iter().any(|connection| connection.size_owner);
-            let sizes = size_lease::own_sizes(&connections);
+            let claims = size_lease::size_claims(&connections);
             let mut all_messages = messages.to_vec();
-            all_messages.extend(session.apply_claimed_sizes(&sizes)?);
+            all_messages.extend(session.apply_claimed_sizes(&claims)?);
             let encoded = all_messages
                 .iter()
                 .map(writer::encode)

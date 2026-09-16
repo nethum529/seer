@@ -10,7 +10,7 @@ use seer_core::Cell;
 
 /// Draws a screen into `area` and returns the rect the screen took.
 ///
-/// A full screen app draws for the owner's PTY size and cannot be redrawn.
+/// A full screen app draws for the one PTY size and cannot be wrapped.
 /// When it is smaller than the area it sits in the middle with an edge
 /// around it. Everything else fills the area from the top left corner.
 pub(crate) fn draw_screen(

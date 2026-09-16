@@ -75,7 +75,7 @@ impl PaneGrid {
 
     /// The screen as a viewer of another size sees it. `None` means the
     /// plain snapshot is right: the size matches, or a full screen app
-    /// draws for the one PTY size and cannot be redrawn (issue 406).
+    /// draws for the one PTY size and cannot be wrapped (issue 406).
     #[must_use]
     pub fn view(&self, cols: u16, rows: u16) -> Option<TerminalFrame> {
         let grid = self.terminal.grid();
