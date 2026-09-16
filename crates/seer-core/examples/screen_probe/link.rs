@@ -139,6 +139,16 @@ impl Guest {
         )
     }
 
+    pub(crate) fn resync(&mut self, host: &str, pane: &str) -> io::Result<()> {
+        codec::encode(
+            &mut self.stream,
+            &ClientMsg::Resync {
+                user: host.into(),
+                pane: pane.into(),
+            },
+        )
+    }
+
     pub(crate) fn wait_for(
         &mut self,
         matches: impl Fn(&ServerMsg) -> bool,

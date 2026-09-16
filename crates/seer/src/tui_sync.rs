@@ -58,18 +58,21 @@ pub(crate) fn sync_watches(
             (!area.is_empty()).then_some((target, (area.as_size(), viewer)))
         })
         .collect();
-    for (user, pane) in state
+    let gone: Vec<(String, String)> = state
         .watches
         .keys()
         .filter(|target| !wanted.contains_key(*target))
-    {
+        .cloned()
+        .collect();
+    for key in gone {
         send(
             stream,
             &ClientMsg::Unwatch {
-                user: user.clone(),
-                pane: pane.clone(),
+                user: key.0.clone(),
+                pane: key.1.clone(),
             },
         )?;
+        state.forget_sync(&key);
     }
     for ((user, pane), watch) in &wanted {
         if state.watches.get(&(user.clone(), pane.clone())) != Some(watch) {

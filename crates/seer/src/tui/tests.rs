@@ -145,3 +145,110 @@ fn room_input_is_dropped_while_the_room_is_gone() {
         "remote input must never reach the local runtime"
     );
 }
+
+fn screen(text: &str) -> seer_core::TerminalFrame {
+    let cell = |character| seer_core::Cell {
+        character,
+        fg: seer_core::Color::Default,
+        bg: seer_core::Color::Default,
+        bold: false,
+        italic: false,
+        underline: false,
+        dim: false,
+        inverse: false,
+        hidden: false,
+        strikeout: false,
+    };
+    seer_core::TerminalFrame {
+        rows: vec![text.chars().map(cell).collect()],
+        cursor: seer_core::Cursor::default(),
+        modes: seer_core::TerminalModes::default(),
+    }
+}
+
+fn from_room(routes: &mut Routes, state: &mut ClientState, message: ServerMsg) {
+    drain(
+        Envelope {
+            source: Source::Room,
+            message: Ok(message),
+        },
+        routes,
+        state,
+        &mut None,
+    )
+    .expect("a room screen message must be handled");
+}
+
+fn diff_message(from: &str, to: &str, seq: u64) -> ServerMsg {
+    ServerMsg::CellsDiff {
+        user: "bob".into(),
+        pane: "p".into(),
+        seq,
+        diff: seer_core::frame_diff::diff(&screen(from), &screen(to)).expect("same shape"),
+    }
+}
+
+fn cells_message(text: &str, seq: u64) -> ServerMsg {
+    ServerMsg::Cells {
+        user: "bob".into(),
+        pane: "p".into(),
+        frame: screen(text),
+        seq,
+    }
+}
+
+fn no_message(peer: &mut UnixStream) -> bool {
+    let mut byte = [0];
+    std::io::Read::read(peer, &mut byte).is_err()
+}
+
+// R-411: a diff that does not follow the held screen leaves it as it is
+// and asks the room once for the whole screen. The next whole screen puts
+// the viewer back in step, and the diff after it applies.
+#[test]
+fn a_diff_out_of_step_asks_once_and_the_next_whole_screen_recovers() {
+    let (mut routes, _local, mut room) = wires("alice");
+    room.set_read_timeout(Some(Duration::from_millis(50)))
+        .expect("timeout must apply");
+    let mut state = ClientState::new(Tree::new(), "alice".into());
+    let key = ("bob".to_owned(), "p".to_owned());
+    state
+        .watches
+        .insert(key.clone(), (ratatui::layout::Size::new(2, 1), true));
+
+    from_room(&mut routes, &mut state, cells_message("ab", 5));
+    from_room(&mut routes, &mut state, diff_message("ab", "xb", 7));
+    assert_eq!(
+        state.frames[&key],
+        screen("ab"),
+        "a diff out of step must not apply"
+    );
+    assert_eq!(
+        codec::decode::<_, ClientMsg>(&mut room).expect("the viewer must ask again"),
+        ClientMsg::Resync {
+            user: "bob".into(),
+            pane: "p".into()
+        }
+    );
+
+    from_room(&mut routes, &mut state, diff_message("ab", "xb", 8));
+    assert_eq!(state.frames[&key], screen("ab"));
+    assert!(
+        no_message(&mut room),
+        "the viewer asks once until the whole screen comes"
+    );
+
+    from_room(&mut routes, &mut state, cells_message("cd", 9));
+    assert_eq!(
+        state.frames[&key],
+        screen("cd"),
+        "a whole screen always replaces the held one"
+    );
+    from_room(&mut routes, &mut state, diff_message("cd", "ce", 10));
+    assert_eq!(
+        state.frames[&key],
+        screen("ce"),
+        "the diff after the whole screen applies"
+    );
+    assert!(no_message(&mut room));
+}

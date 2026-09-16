@@ -12,6 +12,7 @@ use crate::UserSession;
 mod connection;
 mod peer;
 mod room_link;
+mod screen;
 mod size_lease;
 mod status;
 mod util;
@@ -93,6 +94,7 @@ fn handle_message(
             viewer,
         ),
         ClientMsg::Unwatch { pane, .. } => shared.watch_size(connection_id, &pane, None, false),
+        ClientMsg::Resync { pane, .. } => shared.resend(connection_id, &pane),
         ClientMsg::Resize {
             workspace,
             tab,

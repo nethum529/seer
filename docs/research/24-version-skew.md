@@ -189,7 +189,7 @@ refusal and tries again with backoff without end.
 
 | Receiver | Unknown kind | Unknown field | Missing field |
 | --- | --- | --- | --- |
-| Broker, on a runtime stream | Ends that runtime stream (forwarding/transport.rs:114-148, forwarding.rs:145-167, 193-198) | Dropped. The broker decodes into its own types and encodes again, so the watcher never gets the field (forwarding.rs:344-405) | Ends that runtime stream |
+| Broker, on a runtime stream | Ends that runtime stream (forwarding/transport.rs:114-148, forwarding.rs:145-167, 193-198) | Dropped. The broker decodes into its own types and encodes again, so the watcher never gets the field (forwarding.rs:356-447) | Ends that runtime stream |
 | Runtime, on a room stream | Closes the stream with no reply (same code as pair 1, remote true, server/room_link.rs:11-26) | Ignored, the message is applied | Closes the stream with no reply |
 | Runtime, on the control link | Ends the link, publishes again after backoff (room.rs:100-124) | Ignored | Ends the link, publishes again after backoff |
 
@@ -200,8 +200,8 @@ More behaviour of the broker:
   next list refresh (every 1 s, and only when the watcher listed that
   person) or on the next Watch (forwarding.rs:96-107, 256-275). The runtime
   then sends the same bad message again, so the stream ends again.
-- The broker forwards only Tree, Cells, Terminals, and Refused from a
-  runtime. It ignores every other known kind (forwarding.rs:344-405).
+- The broker forwards only Tree, Cells, CellsDiff, Terminals, and Refused
+  from a runtime. It ignores every other known kind (forwarding.rs:356-447).
 - When it opens a runtime stream, the broker requires the exact order
   RuntimeReady, Tree, Terminals (forwarding/transport.rs:26-60).
 

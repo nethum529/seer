@@ -7,7 +7,7 @@ person runs their own terminals on their own computer.
 - Everyone in the room can watch the terminals of everyone else.
 - One grant, "can type here", lets another person type into your
   terminals.
-- Linux and macOS. Version 0.5.7.
+- Linux and macOS. Version 0.6.0.
 
 ![A macOS terminal watched from a Linux computer, with the people picker open at the top right](docs/images/watch-macos-from-linux.png)
 

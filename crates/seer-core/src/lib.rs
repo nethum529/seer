@@ -1,6 +1,7 @@
 mod cells;
 #[cfg(debug_assertions)]
 pub mod debug_log;
+pub mod frame_diff;
 pub mod layout;
 pub mod proto;
 mod terminal;

@@ -1,24 +1,34 @@
-// Measurement probe for issue 417. It attaches one host window to a local
-// runtime, joins the room as a guest that watches the host's first pane,
-// types a script into the host window at a fixed rate, and records every
-// screen update that arrives at the guest socket. The method is in
-// docs/research/23-screen-data.md.
+// Measurement probe for issues 417 and 411. It attaches one host window to
+// a local runtime, joins the room as a guest that watches the host's first
+// pane, types a script into the host window at a fixed rate, and records
+// every screen update that arrives at the guest socket. For each update it
+// also runs the scroll diff of seer_core::frame_diff against the previous
+// frame, sizes it as a message, and checks that the diff applies back to
+// the current frame. The method is in docs/research/23-screen-data.md.
 //
 // Output, one line per screen update after the first key:
 //   update,<label>,<cols>,<rows>,<seq>,<t_ms>,<bytes>,<frame_cols>,<frame_rows>,
-//          <changed_cells>,<changed_rows>,<row_diff_bytes>,<cell_diff_bytes>,
-//          <shift>,<scroll_cells>,<scroll_diff_bytes>
-// and one closing line:
-//   window,<label>,<cols>,<rows>,<keys>,<last_key_ms>,<window_ms>,<updates>,<bytes>
+//          <changed_cells>,<shift>,<diff_cells>,<diff_bytes>,<sent_bytes>,
+//          <kind>,<apply_ok>,<full_bytes>,<floor_ok>
+// kind is full for a Cells and diff for a CellsDiff on the wire; bytes and
+// sent_bytes are the wire bytes of that message. For a Cells the diff
+// columns show what a diff would have cost. apply_ok is 1 when the diff
+// applied gives the current frame. full_bytes is the size of a Cells with
+// the current frame, and floor_ok is 1 when cells_floor is not above it.
+// One closing line:
+//   window,<label>,<cols>,<rows>,<keys>,<last_key_ms>,<window_ms>,<updates>,<bytes>,
+//          <final_match>
 // The window runs from the first key to the last update. last_key_ms is
 // when the last key was sent, so a run can be split into a typing part and
-// an output part.
-mod estimate;
+// an output part. final_match is 1 when the whole screen that a Resync
+// returns after the run equals the screen built from the diffs.
 mod link;
+mod measure;
 mod script;
 
 use script::Step;
 use seer_core::TerminalFrame;
+use seer_core::frame_diff::apply_next;
 use seer_core::proto::ServerMsg;
 use std::io::{self, Write};
 use std::net::SocketAddr;
@@ -29,7 +39,11 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 const SETTLE: Duration = Duration::from_millis(1500);
+const TRUTH_WAIT: Duration = Duration::from_secs(5);
 const READ_TIMEOUT: Duration = Duration::from_millis(100);
+
+// The screen a viewer holds and its number.
+type Held = (TerminalFrame, u64);
 
 struct Options {
     socket: PathBuf,
@@ -103,7 +117,7 @@ struct Update {
     bytes: usize,
     frame_cols: usize,
     frame_rows: usize,
-    diff: estimate::Diff,
+    measure: measure::Measure,
 }
 
 fn main() -> io::Result<()> {
@@ -123,12 +137,15 @@ fn main() -> io::Result<()> {
         if let Ok((
             _,
             ServerMsg::Cells {
-                frame, pane: shown, ..
+                frame,
+                pane: shown,
+                seq,
+                ..
             },
         )) = guest.read_frame()
             && shown == pane
         {
-            previous = Some(frame);
+            previous = Some((frame, seq));
         }
     }
     let done = Arc::new(AtomicBool::new(false));
@@ -147,10 +164,11 @@ fn main() -> io::Result<()> {
     feeder
         .join()
         .map_err(|_| io::Error::other("feeder panicked"))??;
-    print_last_rows(last.as_ref());
+    print_last_rows(last.as_ref().map(|(frame, _)| frame));
     let summary = Summary {
         keys: key_count,
         last_key_ms: last_key.load(Ordering::SeqCst),
+        final_match: truth_check(&mut guest, &options.host, &pane, last)?,
     };
     report(&options, &updates, &summary)
 }
@@ -158,6 +176,46 @@ fn main() -> io::Result<()> {
 struct Summary {
     keys: usize,
     last_key_ms: u64,
+    final_match: bool,
+}
+
+// The screen built from the diffs must equal the whole screen the runtime
+// sends for a Resync. A diff still in flight is applied first.
+fn truth_check(
+    guest: &mut link::Guest,
+    host: &str,
+    pane: &str,
+    mut held: Option<Held>,
+) -> io::Result<bool> {
+    guest.resync(host, pane)?;
+    let deadline = Instant::now() + TRUTH_WAIT;
+    while Instant::now() < deadline {
+        let message = match guest.read_frame() {
+            Ok((_, message)) => message,
+            Err(error) if is_timeout(&error) => continue,
+            Err(error) => return Err(error),
+        };
+        match message {
+            ServerMsg::Cells {
+                frame, pane: shown, ..
+            } if shown == pane => return Ok(held.map(|(held, _)| held).as_ref() == Some(&frame)),
+            ServerMsg::CellsDiff {
+                pane: shown,
+                seq,
+                diff,
+                ..
+            } if shown == pane => {
+                held = held
+                    .and_then(|(held, held_seq)| apply_next(&held, held_seq, seq, &diff))
+                    .map(|frame| (frame, seq));
+            }
+            _ => {}
+        }
+    }
+    Err(io::Error::new(
+        io::ErrorKind::TimedOut,
+        "the whole screen never came after the run",
+    ))
 }
 
 // The final screen, so a person can check that each script left the shell at
@@ -203,10 +261,10 @@ fn capture(
     guest: &mut link::Guest,
     options: &Options,
     pane: &str,
-    mut previous: Option<TerminalFrame>,
+    mut previous: Option<Held>,
     done: &AtomicBool,
     start: Instant,
-) -> io::Result<(Vec<Update>, Option<TerminalFrame>)> {
+) -> io::Result<(Vec<Update>, Option<Held>)> {
     let quiet = Duration::from_millis(options.quiet_ms);
     let hold = Duration::from_millis(options.hold_ms);
     let mut updates = Vec::new();
@@ -221,27 +279,53 @@ fn capture(
             Err(error) if is_timeout(&error) => continue,
             Err(error) => return Err(error),
         };
-        let ServerMsg::Cells {
-            frame, pane: shown, ..
-        } = message
-        else {
-            continue;
+        let header = |seq| measure::Header {
+            user: &options.host,
+            pane,
+            seq,
         };
-        if shown != pane {
-            continue;
-        }
+        let (measure, next) = match message {
+            ServerMsg::Cells {
+                frame,
+                pane: shown,
+                seq,
+                ..
+            } if shown == pane => (
+                measure::whole(held_frame(previous.as_ref()), &frame, &header(seq), bytes)?,
+                Some((frame, seq)),
+            ),
+            ServerMsg::CellsDiff {
+                pane: shown,
+                seq,
+                diff,
+                ..
+            } if shown == pane => {
+                let held = previous
+                    .as_ref()
+                    .map(|(frame, held_seq)| (frame, *held_seq));
+                let (measure, frame) = measure::applied(held, &diff, &header(seq), bytes)?;
+                (measure, frame.map(|frame| (frame, seq)))
+            }
+            _ => continue,
+        };
         last_update = Instant::now();
-        let diff = estimate::diff(previous.as_ref(), &frame, &options.host, pane, bytes)?;
+        previous = next.or(previous);
+        let held = held_frame(previous.as_ref());
         updates.push(Update {
             seq: updates.len() + 1,
             at: last_update - start,
             bytes,
-            frame_cols: frame.rows.first().map_or(0, Vec::len),
-            frame_rows: frame.rows.len(),
-            diff,
+            frame_cols: held
+                .and_then(|frame| frame.rows.first())
+                .map_or(0, Vec::len),
+            frame_rows: held.map_or(0, |frame| frame.rows.len()),
+            measure,
         });
-        previous = Some(frame);
     }
+}
+
+fn held_frame(held: Option<&Held>) -> Option<&TerminalFrame> {
+    held.map(|(frame, _)| frame)
 }
 
 fn millis(duration: Duration) -> u64 {
@@ -261,28 +345,31 @@ fn report(options: &Options, updates: &[Update], summary: &Summary) -> io::Resul
     for update in updates {
         writeln!(
             out,
-            "update,{label},{},{},{},{},{},{},{},{},{},{},{},{}",
+            "update,{label},{},{},{},{},{},{},{},{},{},{},{},{},{},{}",
             update.seq,
             update.at.as_millis(),
             update.bytes,
             update.frame_cols,
             update.frame_rows,
-            update.diff.changed_cells,
-            update.diff.changed_rows,
-            update.diff.row_diff_bytes,
-            update.diff.cell_diff_bytes,
-            update.diff.shift,
-            update.diff.scroll_cells,
-            update.diff.scroll_diff_bytes,
+            update.measure.changed_cells,
+            update.measure.shift,
+            update.measure.diff_cells,
+            update.measure.diff_bytes,
+            update.measure.sent_bytes,
+            if update.measure.full { "full" } else { "diff" },
+            u8::from(update.measure.apply_ok),
+            update.measure.full_bytes,
+            u8::from(update.measure.floor_ok),
         )?;
     }
     let window_ms = updates.last().map_or(0, |update| update.at.as_millis());
     let bytes: usize = updates.iter().map(|update| update.bytes).sum();
     writeln!(
         out,
-        "window,{label},{},{},{window_ms},{},{bytes}",
+        "window,{label},{},{},{window_ms},{},{bytes},{}",
         summary.keys,
         summary.last_key_ms,
-        updates.len()
+        updates.len(),
+        u8::from(summary.final_match)
     )
 }

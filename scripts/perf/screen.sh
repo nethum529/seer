@@ -1,6 +1,7 @@
 #!/usr/bin/env bash
-# Measurement driver for issue 417, the screen data a guest receives. The
-# method is in docs/research/23-screen-data.md.
+# Measurement driver for issues 417 and 411, the screen data a guest
+# receives today and with the scroll diff. The method is in
+# docs/research/23-screen-data.md.
 #
 # Usage: flock /tmp/claude-1000/perf-run.lock scripts/perf/screen.sh [repeats] [output-dir] [workloads]
 # workloads is a list from: typing editor pager burst. Default is all four.
@@ -123,8 +124,8 @@ run_probe() {
     fi
 }
 
-echo "rev,repeat,workload,cols,rows,seq,t_ms,bytes,frame_cols,frame_rows,changed_cells,changed_rows,row_diff_bytes,cell_diff_bytes,shift,scroll_cells,scroll_diff_bytes" >"$raw"
-echo "rev,repeat,workload,cols,rows,keys,last_key_ms,window_ms,updates,bytes" >"$windows"
+echo "rev,repeat,workload,cols,rows,seq,t_ms,bytes,frame_cols,frame_rows,changed_cells,shift,diff_cells,diff_bytes,sent_bytes,kind,apply_ok,full_bytes,floor_ok" >"$raw"
+echo "rev,repeat,workload,cols,rows,keys,last_key_ms,window_ms,updates,bytes,final_match" >"$windows"
 : >"$errors"
 : >"$out/probe.log"
 start_room

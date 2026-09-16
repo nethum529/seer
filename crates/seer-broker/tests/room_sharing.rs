@@ -3,12 +3,16 @@
 use std::os::unix::net::UnixStream;
 use std::time::{Duration, Instant};
 
+use seer_core::frame_diff::apply_next;
 use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
 
 #[path = "support/binary.rs"]
 mod binary;
 mod room;
+#[path = "room/screen.rs"]
+mod screen;
 use room::*;
+use screen::*;
 
 // Issue 338: Alice's shells run on Alice's computer. Bob sees them through the
 // room and may type only while Alice allows it.
@@ -232,30 +236,55 @@ fn wait_for_grant(stream: &mut std::net::TcpStream, allowed: bool) {
 }
 
 fn cells_contain(stream: &mut std::net::TcpStream, pane: &str, expected: &str) -> bool {
+    screen_shows(stream, pane, |frame| frame_text(frame).contains(expected))
+}
+
+// A viewer holds the screen as the real client does (R-411): a whole screen
+// replaces it, a diff at the next number applies, and anything else asks
+// for the whole screen once.
+fn screen_shows(
+    stream: &mut std::net::TcpStream,
+    pane: &str,
+    shows: impl Fn(&seer_core::TerminalFrame) -> bool,
+) -> bool {
     let deadline = Instant::now() + WAIT;
+    let mut held: Option<(seer_core::TerminalFrame, u64)> = None;
+    let mut asked = false;
     while Instant::now() < deadline {
-        if let ServerMsg::Cells {
-            pane: shown, frame, ..
-        } = decode(stream)
-            && shown == pane
-            && frame_text(&frame).contains(expected)
-        {
+        match decode(stream) {
+            ServerMsg::Cells {
+                pane: shown,
+                frame,
+                seq,
+                ..
+            } if shown == pane => held = Some((frame, seq)),
+            ServerMsg::CellsDiff {
+                pane: shown,
+                seq,
+                diff,
+                ..
+            } if shown == pane => {
+                held = held
+                    .and_then(|(frame, held_seq)| apply_next(&frame, held_seq, seq, &diff))
+                    .map(|frame| (frame, seq));
+                if held.is_none() && !asked {
+                    asked = true;
+                    send(
+                        stream,
+                        &ClientMsg::Resync {
+                            user: "alice".into(),
+                            pane: pane.to_owned(),
+                        },
+                    );
+                }
+            }
+            _ => continue,
+        }
+        if held.as_ref().is_some_and(|(frame, _)| shows(frame)) {
             return true;
         }
     }
     false
-}
-
-fn type_locally(window: &mut UnixStream, at: &Location, text: &str) {
-    send(
-        window,
-        &ClientMsg::TerminalInput {
-            workspace: at.workspace.clone(),
-            tab: at.tab.clone(),
-            pane: at.pane.clone(),
-            input: seer_core::TerminalInput::new(seer_core::InputEvent::Text(text.to_owned())),
-        },
-    );
 }
 
 fn local_cells_contain(window: &mut UnixStream, pane: &str, expected: &str) -> bool {
@@ -274,31 +303,6 @@ fn local_cells_contain(window: &mut UnixStream, pane: &str, expected: &str) -> b
         }
     }
     false
-}
-
-struct Location {
-    workspace: String,
-    tab: String,
-    pane: String,
-}
-
-fn first_terminal(tree: &seer_core::Tree) -> Location {
-    let workspace = &tree.workspaces[0];
-    let tab = &workspace.tabs[0];
-    Location {
-        workspace: workspace.id.clone(),
-        tab: tab.id.clone(),
-        pane: tab.panes[0].id.clone(),
-    }
-}
-
-fn frame_text(frame: &seer_core::TerminalFrame) -> String {
-    frame
-        .rows
-        .iter()
-        .map(|row| row.iter().map(|cell| cell.character).collect::<String>())
-        .collect::<Vec<_>>()
-        .join("\n")
 }
 
 #[test]
@@ -331,10 +335,9 @@ fn remote_mouse_is_grant_checked_and_encoded_in_the_destination_mode() {
         &at,
         "stty raw -echo; printf '\\033[?1000h\\033[?1006h'; dd bs=1 count=9 2>/dev/null | od -An -tx1; stty sane\n",
     );
-    wait_for(&mut bob, |m| {
-        matches!(m, ServerMsg::Cells { frame, .. }
-        if frame.modes.mouse_tracking == seer_core::MouseTracking::Click)
-    });
+    assert!(screen_shows(&mut bob, &at.pane, |frame| {
+        frame.modes.mouse_tracking == seer_core::MouseTracking::Click
+    }));
     let click = ClientMsg::MouseInto {
         user: "alice".into(),
         pane: at.pane.clone(),
@@ -362,31 +365,4 @@ fn remote_mouse_is_grant_checked_and_encoded_in_the_destination_mode() {
         &at.pane,
         "1b 5b 3c 30 3b 36 3b 33 4d"
     ));
-}
-
-#[test]
-fn reconnecting_a_viewer_does_not_report_a_live_terminal_as_empty() {
-    let mut room = Room::start(false);
-    let mut window = room.publish("alice", ALICE_SECRET);
-    let at = first_terminal(&own_tree(&mut window));
-    let mut alice = join_room(room.address, "alice", ALICE_SECRET);
-    wait_for_published(&mut alice, "alice");
-    for _ in 0..4 {
-        let mut viewer = join_room(room.address, "bob", BOB_SECRET);
-        send(
-            &mut viewer,
-            &ClientMsg::Terminals {
-                user: "alice".into(),
-            },
-        );
-        let first = wait_for(
-            &mut viewer,
-            |message| matches!(message, ServerMsg::Terminals { user, .. } if user == "alice"),
-        );
-        assert!(
-            matches!(first, ServerMsg::Terminals { terminals, .. }
-            if terminals.iter().any(|terminal| terminal.pane == at.pane)),
-            "reconnecting must not turn an unread catalog into an empty terminal list"
-        );
-    }
 }

@@ -167,6 +167,7 @@ fn the_broker_drops_unknown_fields_from_a_runtime_and_ends_its_stream_on_other_c
             cursor: Cursor::default(),
             modes: TerminalModes::default(),
         },
+        seq: 0,
     };
     send_raw(&mut stream, &with_future_field(&cells, "Cells"));
     let forwarded = next_raw(&mut alice, "{\"Cells\"");

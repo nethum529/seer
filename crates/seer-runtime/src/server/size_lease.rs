@@ -6,7 +6,7 @@ use std::time::Instant;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, MouseKind, PaneSize};
 
-use super::{SharedSession, connection::Connection, lock, writer};
+use super::{SharedSession, connection::Connection, lock};
 use crate::user_session::terminals::SizeClaims;
 
 impl SharedSession {
@@ -18,25 +18,16 @@ impl SharedSession {
         viewer: bool,
     ) -> io::Result<bool> {
         let lease = lock(&self.lease)?;
-        let (valid, current) = {
+        {
             let session = lock(&self.session)?;
             let valid = session.pane_hosts.contains_key(pane)
                 && size.is_none_or(|size| size.cols > 0 && size.rows > 0);
-            let current = session.pane_hosts.get(pane).map(|host| ServerMsg::Cells {
-                user: session.user.clone(),
-                pane: pane.to_owned(),
-                frame: size
-                    .and_then(|size| host.view(size))
-                    .unwrap_or_else(|| host.frame()),
-            });
-            (valid, current)
-        };
-        if !valid {
-            drop(lease);
-            self.send_refused(id, "terminal or size is invalid".into())?;
-            return Ok(false);
-        }
-        {
+            if !valid {
+                drop(session);
+                drop(lease);
+                self.send_refused(id, "terminal or size is invalid".into())?;
+                return Ok(false);
+            }
             let mut connections = lock(&self.connections)?;
             let Some(connection) = connections
                 .iter_mut()
@@ -63,12 +54,14 @@ impl SharedSession {
                     }
                     // A new watcher must see the screen as it stands. A quiet
                     // terminal produces nothing to poll, so send it here.
-                    if let Some(current) = &current {
-                        connection.send(writer::encode(current)?);
+                    if !send_screen(connection, &session, pane)? {
+                        return Ok(true);
                     }
                 }
                 None => {
                     connection.watches.remove(pane);
+                    connection.seqs.remove(pane);
+                    connection.baselines.remove(pane);
                     connection.claimed.remove(pane);
                     if connection.watches.is_empty() {
                         connection.watch_started = false;
@@ -79,6 +72,22 @@ impl SharedSession {
         }
         self.flush_messages(&[])?;
         Ok(false)
+    }
+
+    pub(super) fn resend(&self, id: u64, pane: &str) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        let session = lock(&self.session)?;
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections
+            .iter_mut()
+            .find(|connection| connection.id == id)
+        else {
+            return Ok(true);
+        };
+        if connection.read_only && !connection.watches.contains_key(pane) {
+            return Ok(false);
+        }
+        Ok(!send_screen(connection, &session, pane)?)
     }
 
     pub(super) fn claim_pane(&self, id: u64, pane: &str) -> io::Result<bool> {
@@ -93,6 +102,26 @@ impl SharedSession {
         connection.claimed.insert(pane.into(), Instant::now());
         Ok(own_sizes(&connections) != before)
     }
+}
+
+// A whole screen that does not fit the output queue never reaches the
+// viewer, and a diff on top of it would never apply. So the link ends, the
+// broker opens a new one, and the count starts again. False means the link
+// must end.
+fn send_screen(
+    connection: &mut Connection,
+    session: &crate::UserSession,
+    pane: &str,
+) -> io::Result<bool> {
+    let Some(output) = connection.whole(session, pane)? else {
+        return Ok(true);
+    };
+    if connection.send(output) {
+        return Ok(true);
+    }
+    connection.baselines.remove(pane);
+    connection.seqs.remove(pane);
+    Ok(false)
 }
 
 pub(super) fn claimed_pane(message: &ClientMsg) -> Option<&str> {

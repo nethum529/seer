@@ -104,6 +104,7 @@ impl UserSession {
             | ClientMsg::QueryTargets { .. }
             | ClientMsg::Watch { .. }
             | ClientMsg::Unwatch { .. }
+            | ClientMsg::Resync { .. }
             | ClientMsg::Terminals { .. }
             | ClientMsg::SetAllGrants { .. }
             | ClientMsg::SetGrant { .. }
@@ -128,11 +129,7 @@ impl UserSession {
                         &format!("frame pane={pane}"),
                         seer_core::debug_log::frame_summary(&frame),
                     );
-                    ServerMsg::Cells {
-                        user: self.user.clone(),
-                        pane: pane.clone(),
-                        frame,
-                    }
+                    cells(&self.user, pane, frame)
                 })
             })
             .collect();
@@ -183,11 +180,9 @@ impl UserSession {
             .flat_map(|workspace| &workspace.tabs)
             .flat_map(|tab| &tab.panes)
             .filter_map(|pane| {
-                self.pane_hosts.get(&pane.id).map(|host| ServerMsg::Cells {
-                    user: self.user.clone(),
-                    pane: pane.id.clone(),
-                    frame: host.frame(),
-                })
+                self.pane_hosts
+                    .get(&pane.id)
+                    .map(|host| cells(&self.user, &pane.id, host.frame()))
             })
             .collect::<Vec<_>>();
         let mut messages = vec![ServerMsg::Tree { tree }];
@@ -316,13 +311,9 @@ impl UserSession {
             .pane_hosts
             .get_mut(pane)
             .ok_or_else(|| pane_host_not_found(pane))?;
-        let changed = host.handle_input(input)?;
-        Ok(changed
-            .then(|| ServerMsg::Cells {
-                user: self.user.clone(),
-                pane: pane.to_owned(),
-                frame: host.frame(),
-            })
+        let frame = host.handle_input(input)?.then(|| host.frame());
+        Ok(frame
+            .map(|frame| cells(&self.user, pane, frame))
             .into_iter()
             .collect())
     }
@@ -451,6 +442,15 @@ impl UserSession {
         vec![ServerMsg::Tree {
             tree: self.tree.clone(),
         }]
+    }
+}
+
+fn cells(user: &str, pane: &str, frame: seer_core::TerminalFrame) -> ServerMsg {
+    ServerMsg::Cells {
+        user: user.to_owned(),
+        pane: pane.to_owned(),
+        frame,
+        seq: 0,
     }
 }
 

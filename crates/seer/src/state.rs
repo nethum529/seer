@@ -26,6 +26,8 @@ pub(crate) struct ClientState {
     pub(crate) chrome: crate::render::Chrome,
     pub(crate) terminals: HashMap<String, Vec<TerminalInfo>>,
     pub(crate) frames: HashMap<(String, String), TerminalFrame>,
+    pub(crate) seqs: HashMap<(String, String), u64>,
+    pub(crate) resyncing: BTreeSet<(String, String)>,
     pub(crate) viewer: Option<Viewer>,
     pub(crate) selection: Option<crate::input::Selection>,
     pub(crate) program_pressed: bool,
@@ -80,6 +82,8 @@ impl ClientState {
             chrome: crate::render::Chrome::default(),
             terminals: HashMap::new(),
             frames: HashMap::new(),
+            seqs: HashMap::new(),
+            resyncing: BTreeSet::new(),
             viewer: None,
             selection: None,
             program_pressed: false,
@@ -246,13 +250,60 @@ impl ClientState {
         }
     }
 
-    pub(crate) fn note_frame(&mut self, user: String, pane: String, frame: TerminalFrame) {
+    pub(crate) fn note_frame(
+        &mut self,
+        user: String,
+        pane: String,
+        frame: TerminalFrame,
+        seq: u64,
+    ) {
         #[cfg(debug_assertions)]
         seer_core::debug_log::transition(
             &format!("frame user={user} pane={pane}"),
             seer_core::debug_log::frame_summary(&frame),
         );
-        self.frames.insert((user, pane), frame);
+        let key = (user, pane);
+        self.frames.insert(key.clone(), frame);
+        self.seqs.insert(key.clone(), seq);
+        self.resyncing.remove(&key);
+    }
+
+    // True when the room must be asked for the whole screen. One request
+    // per gap: later diffs are dropped until a whole screen arrives.
+    pub(crate) fn note_diff(
+        &mut self,
+        user: String,
+        pane: String,
+        seq: u64,
+        diff: &seer_core::frame_diff::FrameDiff,
+    ) -> bool {
+        let key = (user, pane);
+        if !self.watches.contains_key(&key) || self.resyncing.contains(&key) {
+            return false;
+        }
+        let applied =
+            self.frames
+                .get(&key)
+                .zip(self.seqs.get(&key))
+                .and_then(|(held, held_seq)| {
+                    seer_core::frame_diff::apply_next(held, *held_seq, seq, diff)
+                });
+        match applied {
+            Some(frame) => {
+                self.frames.insert(key.clone(), frame);
+                self.seqs.insert(key, seq);
+                false
+            }
+            None => {
+                self.resyncing.insert(key);
+                true
+            }
+        }
+    }
+
+    pub(crate) fn forget_sync(&mut self, key: &(String, String)) {
+        self.seqs.remove(key);
+        self.resyncing.remove(key);
     }
 
     pub(crate) fn may_type(&self, user: &str) -> bool {
