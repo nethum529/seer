@@ -1,3 +1,4 @@
+use crossterm::event::{self, Event};
 use seer_core::proto::{ServerMsg, codec};
 use seer_net::Socket;
 use std::io;
@@ -66,6 +67,19 @@ fn log_received(source: Source, message: &io::Result<ServerMsg>) {
 
 #[cfg(not(debug_assertions))]
 fn log_received(_source: Source, _message: &io::Result<ServerMsg>) {}
+
+// Issue 429: crossterm reads the tty in a loop that never returns once the
+// tty is hung up and every read gives end of file. That loop must not hold
+// the window loop, so the tty has its own thread that ends with the process.
+pub(crate) fn spawn_terminal_reader() -> Receiver<Event> {
+    let (sender, receiver) = mpsc::sync_channel(64);
+    thread::spawn(move || {
+        while let Ok(event) = event::read()
+            && sender.send(event).is_ok()
+        {}
+    });
+    receiver
+}
 
 pub(crate) fn join_reader(reader: JoinHandle<()>) -> io::Result<()> {
     reader

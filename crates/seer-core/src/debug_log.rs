@@ -195,6 +195,7 @@ pub fn server_summary(message: &ServerMsg) -> String {
             tabs,
             foreground,
             idle_secs,
+            ..
         } => format!("Status tabs={tabs} foreground={foreground} idle={idle_secs}"),
         ServerMsg::Clients { clients } => format!("Clients count={}", clients.len()),
         ServerMsg::Targets { targets } => format!("Targets count={}", targets.len()),

@@ -55,6 +55,11 @@ impl SharedSession {
             .find(|target| target.active)
             .map(|target| (target.workspace, target.tab));
         let idle_secs = lock(&self.last_input)?.elapsed().as_secs();
+        let windows = lock(&self.connections)?
+            .iter()
+            .filter(|connection| !connection.read_only)
+            .filter_map(|connection| connection.pid)
+            .collect();
         let session = lock(&self.session)?;
         let foreground = active.map_or_else(String::new, |(workspace, tab)| {
             session.foreground(&workspace, &tab)
@@ -63,6 +68,8 @@ impl SharedSession {
             tabs: session.tab_count(),
             foreground,
             idle_secs,
+            windows: Some(windows),
+            shells: Some(u32::try_from(session.pane_hosts.len()).unwrap_or(u32::MAX)),
         })
     }
 }

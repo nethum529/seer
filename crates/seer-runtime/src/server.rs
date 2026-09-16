@@ -10,6 +10,7 @@ use std::time::{Duration, Instant};
 use crate::UserSession;
 
 mod connection;
+mod peer;
 mod room_link;
 mod size_lease;
 mod status;

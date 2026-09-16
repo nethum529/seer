@@ -3,7 +3,7 @@
 use std::fs;
 use std::net::TcpListener;
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
@@ -11,7 +11,11 @@ use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
+#[path = "support/runtimes.rs"]
+mod runtimes;
+
 const WAIT: Duration = Duration::from_secs(20);
+const EXIT_WAIT: Duration = Duration::from_secs(5);
 const USER: &str = "alice-user-id";
 
 // Issue 338: several windows on one computer share that person's runtime, and
@@ -84,21 +88,21 @@ struct Windows {
 impl Drop for Windows {
     fn drop(&mut self) {
         for child in &mut self.children {
-            // SAFETY: each child starts a private process group owned by this test.
-            unsafe {
-                libc::kill(-(child.id() as i32), libc::SIGKILL);
-            }
-            let _ = child.wait();
+            kill_terminal(child);
         }
-        let _ = Command::new(env!("CARGO_BIN_EXE_seer"))
-            .arg("stop")
-            .env("XDG_CONFIG_HOME", &self.root)
-            .env("XDG_STATE_HOME", self.root.join("state-home"))
-            .stdout(Stdio::null())
-            .stderr(Stdio::null())
-            .status();
+        runtimes::stop_runtimes(&self.root);
         let _ = fs::remove_dir_all(&self.root);
     }
+}
+
+// script owns the pty. Killing it closes the master, so the window's
+// terminal hangs up while the window itself is not signalled.
+fn kill_terminal(child: &mut Child) {
+    // SAFETY: each child starts a private process group owned by this test.
+    unsafe {
+        libc::kill(-(child.id() as i32), libc::SIGKILL);
+    }
+    let _ = child.wait();
 }
 
 fn test_root(name: &str) -> PathBuf {
@@ -135,6 +139,75 @@ fn wait_for_pid(directory: &Path) -> i32 {
 // A window needs a real terminal, which is what starts the local runtime.
 fn open_window(root: &Path) -> std::process::Child {
     window_command(root).spawn().expect("a window must start")
+}
+
+// nohup and the background shells of coding agents pass an ignored SIGHUP
+// down to the window.
+fn open_window_ignoring_hangup(root: &Path) -> std::process::Child {
+    let mut command = window_command(root);
+    // SAFETY: signal only changes a signal disposition before exec.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGHUP, libc::SIG_IGN);
+            Ok(())
+        });
+    }
+    command.spawn().expect("a window must start")
+}
+
+fn seer(root: &Path, arguments: &[&str]) -> String {
+    let output = Command::new(env!("CARGO_BIN_EXE_seer"))
+        .args(arguments)
+        .env("XDG_CONFIG_HOME", root)
+        .env("XDG_STATE_HOME", root.join("state-home"))
+        .output()
+        .expect("seer must run");
+    assert!(
+        output.status.success(),
+        "{}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    String::from_utf8_lossy(&output.stdout).into_owned()
+}
+
+fn attached_windows(socket: &Path) -> Option<usize> {
+    let mut stream = UnixStream::connect(socket).ok()?;
+    stream.set_read_timeout(Some(WAIT)).ok()?;
+    let ServerMsg::RuntimeReady { .. } = codec::decode(&mut stream).ok()? else {
+        return None;
+    };
+    codec::encode(&mut stream, &ClientMsg::QueryStatus).ok()?;
+    match codec::decode(&mut stream).ok()? {
+        ServerMsg::Status { windows, .. } => Some(windows?.len()),
+        _ => None,
+    }
+}
+
+fn wait_for_windows(socket: &Path, count: usize, wait: Duration) {
+    let deadline = Instant::now() + wait;
+    while attached_windows(socket) != Some(count) {
+        assert!(
+            Instant::now() < deadline,
+            "the runtime must report {count} attached windows"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+// Linux lists children per thread, and the runtime starts shells from a
+// worker thread.
+fn children_of(pid: i32) -> Vec<i32> {
+    fs::read_dir(format!("/proc/{pid}/task"))
+        .expect("the runtime's threads must be listed")
+        .flatten()
+        .filter_map(|task| fs::read_to_string(task.path().join("children")).ok())
+        .flat_map(|children| {
+            children
+                .split_whitespace()
+                .filter_map(|child| child.parse().ok())
+                .collect::<Vec<i32>>()
+        })
+        .collect()
 }
 
 fn run_window_to_end(root: &Path) -> Output {
@@ -250,4 +323,115 @@ fn a_room_that_never_answers_does_not_hold_up_this_computer() {
 
     wait_for_pid(&runtime_directory(&root));
     drop(held);
+}
+
+// Issue 429: a window that does not get SIGHUP, or ignores it, must still end
+// when its terminal goes away. Its runtime stays for the next window.
+#[test]
+fn a_window_whose_terminal_goes_away_ends_and_leaves_its_runtime() {
+    let root = test_root("seer-hangup");
+    write_store(&root);
+    let mut windows = Windows {
+        root: root.clone(),
+        children: vec![open_window_ignoring_hangup(&root)],
+    };
+    let socket = socket_path(&root);
+    read_tree(&socket);
+    let pid = wait_for_pid(&runtime_directory(&root));
+    wait_for_windows(&socket, 1, WAIT);
+
+    let mut terminal = windows.children.remove(0);
+    kill_terminal(&mut terminal);
+
+    wait_for_windows(&socket, 0, EXIT_WAIT);
+    assert!(
+        Path::new(&format!("/proc/{pid}")).exists(),
+        "the runtime must outlive its window"
+    );
+    windows.children.push(open_window(&root));
+    wait_for_windows(&socket, 1, WAIT);
+}
+
+// Issue 429: one command shows every Seer process of this person on this
+// computer, and one command stops a named runtime with its shells.
+#[test]
+fn seer_ps_lists_the_processes_and_stops_a_named_runtime() {
+    let root = test_root("seer-ps");
+    write_store(&root);
+    let _windows = Windows {
+        root: root.clone(),
+        children: vec![open_window(&root)],
+    };
+    let socket = socket_path(&root);
+    read_tree(&socket);
+    let pid = wait_for_pid(&runtime_directory(&root));
+    wait_for_windows(&socket, 1, WAIT);
+    let shells = children_of(pid);
+    assert!(!shells.is_empty(), "the runtime must hold a shell");
+
+    let listing = seer(&root, &["ps"]);
+    let home = root.join("state-home").display().to_string();
+    let runtime_row = listing
+        .lines()
+        .find(|line| line.starts_with(&format!("{pid} ")))
+        .expect("the runtime must be listed");
+    assert!(runtime_row.contains("runtime"), "{runtime_row}");
+    assert!(runtime_row.contains("1 window, 1 shell"), "{runtime_row}");
+    assert!(runtime_row.contains(&home), "{runtime_row}");
+    assert!(
+        listing.lines().any(|line| {
+            line.contains("window") && line.contains("terminal pts/") && line.contains(&home)
+        }),
+        "the window must be listed with its terminal and state home:\n{listing}"
+    );
+
+    let stopped = seer(&root, &["ps", "--stop", &pid.to_string()]);
+    assert!(
+        stopped.contains(&format!("Runtime {pid} stopped with 1 shell")),
+        "{stopped}"
+    );
+    let deadline = Instant::now() + EXIT_WAIT;
+    while std::iter::once(&pid)
+        .chain(&shells)
+        .any(|process| Path::new(&format!("/proc/{process}")).exists())
+    {
+        assert!(
+            Instant::now() < deadline,
+            "the runtime and its shells must stop"
+        );
+        thread::sleep(Duration::from_millis(25));
+    }
+}
+
+// Issue 429: the command exists for wedged processes. A runtime with no
+// socket that ignores SIGTERM must still be killed, and the success line
+// must come only after it is gone.
+#[test]
+fn seer_ps_stop_kills_a_runtime_that_ignores_sigterm() {
+    let root = test_root("seer-ps-kill");
+    let _cleanup = CleanOnDrop(root.clone());
+    let mut command = Command::new("sleep");
+    command.arg0("seer-runtime").arg("1000");
+    // SAFETY: signal only changes a signal disposition before exec.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGTERM, libc::SIG_IGN);
+            Ok(())
+        });
+    }
+    let mut child = command.spawn().expect("the fake runtime must start");
+    let pid = child.id();
+    let reaper = thread::spawn(move || child.wait());
+
+    let stopped = seer(&root, &["ps", "--stop", &pid.to_string()]);
+
+    assert!(
+        stopped.contains(&format!("Runtime {pid} stopped")),
+        "{stopped}"
+    );
+    let status = reaper
+        .join()
+        .expect("the reaper must finish")
+        .expect("the fake runtime must be waited on");
+    assert_eq!(status.signal(), Some(libc::SIGKILL));
 }
