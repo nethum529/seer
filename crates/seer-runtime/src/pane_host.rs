@@ -94,6 +94,10 @@ impl PaneHost {
         self.grid.view(size.cols, size.rows)
     }
 
+    pub(crate) fn alt_screen(&self) -> bool {
+        self.grid.modes().alt_screen
+    }
+
     pub fn foreground(&self) -> String {
         self.session.foreground_name()
     }

@@ -35,11 +35,15 @@ pub(super) fn handle_connection(
             shared.add_view_connection(connection_id, stream.try_clone()?, None, true)?
         }
         ClientMsg::Watch {
-            pane, cols, rows, ..
+            pane,
+            cols,
+            rows,
+            viewer,
+            ..
         } => {
             shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane), false)?;
             if let Err(error) =
-                shared.watch_size(connection_id, &pane, Some(PaneSize { cols, rows }))
+                shared.watch_size(connection_id, &pane, Some(PaneSize { cols, rows }), viewer)
             {
                 shared.remove_connection(connection_id)?;
                 return Err(error);
@@ -204,8 +208,9 @@ impl Connection {
         Ok(true)
     }
 
-    // Each watcher gets the screen at its own size. The PTY keeps the
-    // owner's size (issue 406).
+    // Each watcher gets the screen wrapped to its own size (issue 406). A
+    // full screen app comes at the PTY size, which grows to the largest
+    // full viewer watch (issue 433).
     fn fitted(&self, session: &UserSession, message: &ServerMsg) -> Option<ServerMsg> {
         let ServerMsg::Cells { user, pane, .. } = message else {
             return None;
@@ -414,6 +419,7 @@ impl SharedSession {
         if !connection.send_messages(&messages)? {
             return Err(super::connection_closed());
         }
+        // A read only connection is not one of the owner's own windows, so it has no size lease.
         connection.read_only = true;
         connection.catalog = catalog;
         seer_core::debug_log!("attach conn={id} read_only=true catalog={catalog} pane={pane:?}");

@@ -37,6 +37,17 @@ pub struct PaneSize {
     pub rows: u16,
 }
 
+impl PaneSize {
+    /// The largest value on each axis.
+    #[must_use]
+    pub fn largest(self, other: Self) -> Self {
+        Self {
+            cols: self.cols.max(other.cols),
+            rows: self.rows.max(other.rows),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Layout {
     pub root: Option<LayoutNode>,

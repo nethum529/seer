@@ -64,15 +64,7 @@ fn the_active_own_client_controls_the_pane_size() {
     send(&mut second, &watch(&pane, SECOND));
     sizes.settles_at(&mut first, FIRST);
 
-    send(
-        &mut second,
-        &ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: SECOND.cols,
-            rows: SECOND.rows,
-        },
-    );
+    send(&mut second, &resize(SECOND));
     sizes.settles_at(&mut first, SECOND);
 
     send_input(&mut first, &pane, "");
@@ -99,6 +91,14 @@ const LARGE: PaneSize = PaneSize {
     cols: 140,
     rows: 40,
 };
+const WIDE: PaneSize = PaneSize {
+    cols: 160,
+    rows: 20,
+};
+const TILE: PaneSize = PaneSize {
+    cols: 200,
+    rows: 60,
+};
 
 #[test]
 fn each_viewer_sees_the_terminal_at_its_own_size() {
@@ -121,13 +121,14 @@ fn each_viewer_sees_the_terminal_at_its_own_size() {
 
     let line = "x".repeat(150);
     send_input(&mut owner, &pane, &format!("echo {line}\n"));
-    let owner_frame = wait_for_frame(&mut owner, |rows| {
-        rows.windows(2)
+    let owner_frame = wait_for_frame(&mut owner, |frame| {
+        text_rows(frame)
+            .windows(2)
             .any(|pair| pair[0] == "x".repeat(100) && pair[1].trim_end() == "x".repeat(50))
     });
     assert_eq!(frame_size(&owner_frame), OWNER);
-    let small_frame = wait_for_frame(&mut small, |rows| {
-        rows.windows(3).any(|group| {
+    let small_frame = wait_for_frame(&mut small, |frame| {
+        text_rows(frame).windows(3).any(|group| {
             group[0] == "x".repeat(60)
                 && group[1] == "x".repeat(60)
                 && group[2].trim_end() == "x".repeat(30)
@@ -135,46 +136,118 @@ fn each_viewer_sees_the_terminal_at_its_own_size() {
     });
     assert_eq!(frame_size(&small_frame), SMALL);
     assert!(!small_frame.modes.alt_screen);
-    let large_frame = wait_for_frame(&mut large, |rows| {
-        rows.windows(2)
+    let large_frame = wait_for_frame(&mut large, |frame| {
+        text_rows(frame)
+            .windows(2)
             .any(|pair| pair[0] == "x".repeat(140) && pair[1].trim_end() == "x".repeat(10))
     });
     assert_eq!(frame_size(&large_frame), LARGE);
     sizes.settles_at(&mut owner, OWNER);
 
-    send_input(
-        &mut owner,
-        &pane,
-        "printf '\\033[?1049h\\033[2J\\033[HAPP TOP'\n",
-    );
-    let large_app = wait_for_frame(&mut large, |rows| rows[0].starts_with("APP TOP"));
-    assert_eq!(frame_size(&large_app), OWNER);
-    assert!(large_app.modes.alt_screen);
-    let small_app = wait_for_frame(&mut small, |rows| rows[0].starts_with("APP TOP"));
-    assert_eq!(frame_size(&small_app), OWNER);
+    // The shell must not redraw its prompt over the app text on a resize.
+    send_input(&mut owner, &pane, "printf '\\033[?1049h'; read wait\n");
+    wait_for_frame(&mut large, |frame| app_at(frame, LARGE));
+    wait_for_frame(&mut small, |frame| app_at(frame, LARGE));
+    sizes.settles_at(&mut owner, LARGE);
+
+    drop(large);
+    sizes.settles_at(&mut owner, OWNER);
+    wait_for_frame(&mut small, |frame| app_at(frame, OWNER));
+
+    let mut tile = connect_observer(&socket_path);
+    send(&mut tile, &watch_tile(&pane, TILE));
     sizes.settles_at(&mut owner, OWNER);
 
+    let mut wide = connect_observer(&socket_path);
+    send(&mut wide, &watch(&pane, WIDE));
+    sizes.settles_at(&mut owner, WIDE.largest(OWNER));
+
+    drop(wide);
+    drop(tile);
+    drop(small);
+    sizes.settles_at(&mut owner, OWNER);
+    send_input(&mut owner, &pane, "\n");
     send_input(&mut owner, &pane, "printf '\\033[?1049l'; stty size\n");
     wait_for_text(&mut owner, "30 100");
-    drop(small);
-    drop(large);
     drop(owner);
     assert!(runtime.stop().status.success());
 }
 
+#[test]
+fn a_restart_returns_a_grown_pane_to_the_owner_size() {
+    let temporary = TemporaryDirectory::new();
+    let state = temporary.path.join("state");
+    std::fs::create_dir(&state).expect("state directory must be created");
+    let socket_path = temporary.path.join("runtime.sock");
+    let mut runtime = start_runtime_with_state(&socket_path, Some(&state));
+    let mut owner = connect_with_timeout(&socket_path);
+    let tree = tree(read_message(&mut owner));
+    let pane = tree.workspaces[0].tabs[0].panes[0].id.clone();
+    assert!(wait_for_cells(&mut owner));
+    let mut sizes = PaneSizes::new(&pane);
+    send(&mut owner, &resize(OWNER));
+    send(&mut owner, &watch(&pane, OWNER));
+    sizes.settles_at(&mut owner, OWNER);
+
+    send_input(&mut owner, &pane, "printf '\\033[?1049h'; read wait\n");
+    let mut large = connect_observer(&socket_path);
+    send(&mut large, &watch(&pane, LARGE));
+    sizes.settles_at(&mut owner, LARGE);
+    send(&mut owner, &resize(OWNER));
+    sizes.settles_at(&mut owner, LARGE);
+    drop(large);
+    drop(owner);
+    assert!(runtime.stop().status.success());
+
+    let mut runtime = start_runtime_with_state(&socket_path, Some(&state));
+    let mut owner = connect_with_timeout(&socket_path);
+    sizes.settles_at(&mut owner, OWNER);
+    drop(owner);
+    assert!(runtime.stop().status.success());
+}
+
+fn resize(size: PaneSize) -> ClientMsg {
+    ClientMsg::Resize {
+        workspace: "w1".into(),
+        tab: "w1:t1".into(),
+        cols: size.cols,
+        rows: size.rows,
+    }
+}
+
 fn start_runtime(socket_path: &Path) -> RuntimeProcess {
-    let runtime = runtime_command()
-        .args([
-            socket_path.as_os_str(),
-            "alice".as_ref(),
-            "sh".as_ref(),
-            GENERATION.as_ref(),
-        ])
+    start_runtime_with_state(socket_path, None)
+}
+
+fn start_runtime_with_state(socket_path: &Path, state: Option<&Path>) -> RuntimeProcess {
+    let mut command = runtime_command();
+    command.args([
+        socket_path.as_os_str(),
+        "alice".as_ref(),
+        "sh".as_ref(),
+        GENERATION.as_ref(),
+    ]);
+    if let Some(state) = state {
+        command.env("SEER_SNAPSHOT_DIR", state);
+    }
+    let runtime = command
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .spawn()
         .expect("runtime must start");
     RuntimeProcess::new(runtime)
+}
+
+fn app_at(frame: &seer_core::TerminalFrame, size: PaneSize) -> bool {
+    frame.modes.alt_screen && frame_size(frame) == size
+}
+
+fn text_rows(frame: &seer_core::TerminalFrame) -> Vec<String> {
+    frame
+        .rows
+        .iter()
+        .map(|row| row.iter().map(|cell| cell.character).collect())
+        .collect()
 }
 
 fn frame_size(frame: &seer_core::TerminalFrame) -> PaneSize {
@@ -186,26 +259,21 @@ fn frame_size(frame: &seer_core::TerminalFrame) -> PaneSize {
 
 fn wait_for_frame(
     stream: &mut UnixStream,
-    matches: impl Fn(&[String]) -> bool,
+    matches: impl Fn(&seer_core::TerminalFrame) -> bool,
 ) -> seer_core::TerminalFrame {
     let deadline = Instant::now() + MESSAGE_TIMEOUT;
-    let mut last = Vec::new();
+    let mut last = None;
     loop {
         let message = codec::decode::<_, ServerMsg>(stream);
         assert!(
             message.is_ok() && Instant::now() < deadline,
-            "cells never matched, last frame: {last:#?}"
+            "cells never matched, last frame: {last:?}"
         );
         if let Ok(ServerMsg::Cells { frame, .. }) = message {
-            let rows: Vec<String> = frame
-                .rows
-                .iter()
-                .map(|row| row.iter().map(|cell| cell.character).collect())
-                .collect();
-            if matches(&rows) {
+            if matches(&frame) {
                 return frame;
             }
-            last = rows;
+            last = Some((frame_size(&frame), frame.modes.alt_screen));
         }
     }
 }
@@ -216,6 +284,17 @@ fn watch(pane: &str, size: PaneSize) -> ClientMsg {
         pane: pane.into(),
         cols: size.cols,
         rows: size.rows,
+        viewer: true,
+    }
+}
+
+fn watch_tile(pane: &str, size: PaneSize) -> ClientMsg {
+    ClientMsg::Watch {
+        user: "alice".into(),
+        pane: pane.into(),
+        cols: size.cols,
+        rows: size.rows,
+        viewer: false,
     }
 }
 

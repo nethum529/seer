@@ -1,7 +1,7 @@
 use crate::snapshot::{self, Snapshot};
 use crate::user_session::UserSession;
-use seer_core::PaneSize;
 use seer_core::layout::PaneRect;
+use seer_core::{PaneSize, Tree};
 use std::collections::BTreeMap;
 use std::error::Error;
 use std::fmt;
@@ -80,17 +80,30 @@ fn pane_launches(session: &UserSession) -> Vec<(String, PaneSize)> {
 }
 
 pub(crate) fn persist(session: &mut UserSession) -> io::Result<()> {
+    let tree = owner_tree(session);
     let Some(store) = session.store.as_mut() else {
         return Ok(());
     };
     store.revision = store.revision.saturating_add(1);
-    let snapshot = Snapshot::capture(
-        store.revision,
-        &session.user,
-        session.viewport,
-        &session.tree,
-    );
+    let snapshot = Snapshot::capture(store.revision, &session.user, session.viewport, &tree);
     snapshot::store(&store.path, &snapshot).map_err(mark_fatal)
+}
+
+// A viewer can grow a PTY while it looks (issue 433). The saved size is
+// the owner's own size, so a restart does not keep the grown size.
+fn owner_tree(session: &UserSession) -> Tree {
+    let mut tree = session.tree.clone();
+    for pane in tree
+        .workspaces
+        .iter_mut()
+        .flat_map(|workspace| &mut workspace.tabs)
+        .flat_map(|tab| &mut tab.panes)
+    {
+        if let Some(host) = session.pane_hosts.get(&pane.id) {
+            pane.size = host.owner_size;
+        }
+    }
+    tree
 }
 
 #[derive(Debug)]

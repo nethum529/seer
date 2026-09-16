@@ -122,7 +122,8 @@ pub fn client_summary(message: &ClientMsg) -> String {
             pane,
             cols,
             rows,
-        } => format!("Watch user={user} pane={pane} size={cols}x{rows}"),
+            viewer,
+        } => format!("Watch user={user} pane={pane} size={cols}x{rows} viewer={viewer}"),
         ClientMsg::Unwatch { user, pane } => format!("Unwatch user={user} pane={pane}"),
         ClientMsg::TypeInto { user, pane, bytes } => {
             format!("TypeInto user={user} pane={pane} bytes={}", bytes.len())

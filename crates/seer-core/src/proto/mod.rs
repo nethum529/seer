@@ -95,6 +95,10 @@ pub enum ClientMsg {
         pane: String,
         cols: u16,
         rows: u16,
+        /// True when the watcher shows the terminal in its full viewer.
+        /// A grid tile watch gives no size claim.
+        #[serde(default)]
+        viewer: bool,
     },
     Unwatch {
         user: String,

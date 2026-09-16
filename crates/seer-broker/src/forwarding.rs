@@ -35,7 +35,7 @@ struct Coordinator<'a> {
     event_sender: SyncSender<Event>,
     events: Receiver<Event>,
     runtimes: HashMap<String, RuntimeConnection>,
-    watches: HashMap<(String, String), PaneSize>,
+    watches: HashMap<(String, String), (PaneSize, bool)>,
     lists: BTreeSet<String>,
 }
 
@@ -221,7 +221,8 @@ impl<'a> Coordinator<'a> {
                 pane,
                 cols,
                 rows,
-            } => self.watch(&user, &pane, cols, rows),
+                viewer,
+            } => self.watch(&user, &pane, PaneSize { cols, rows }, viewer),
             ClientMsg::Unwatch { user, pane } => {
                 self.watches.remove(&(user.clone(), pane.clone()));
                 if let Some(runtime) = self.runtimes.get_mut(&user) {
@@ -257,13 +258,14 @@ impl<'a> Coordinator<'a> {
         if !self.runtimes.contains_key(user) {
             let person = self.person(user)?;
             let mut runtime = RuntimeConnection::connect(self.broker, &person, &self.event_sender)?;
-            for ((target, pane), size) in &self.watches {
+            for ((target, pane), (size, viewer)) in &self.watches {
                 if target == user {
                     runtime.send(&ClientMsg::Watch {
                         user: user.into(),
                         pane: pane.clone(),
                         cols: size.cols,
                         rows: size.rows,
+                        viewer: *viewer,
                     })?;
                 }
             }
@@ -281,8 +283,8 @@ impl<'a> Coordinator<'a> {
             .ok_or_else(|| io::Error::other("person not found"))
     }
 
-    fn watch(&mut self, user: &str, pane: &str, cols: u16, rows: u16) -> io::Result<()> {
-        if cols == 0 || rows == 0 {
+    fn watch(&mut self, user: &str, pane: &str, size: PaneSize, viewer: bool) -> io::Result<()> {
+        if size.cols == 0 || size.rows == 0 {
             return Err(io::Error::other("terminal size must be positive"));
         }
         let runtime = self.runtime(user)?;
@@ -291,11 +293,12 @@ impl<'a> Coordinator<'a> {
         runtime.send(&ClientMsg::Watch {
             user: user.into(),
             pane: pane.into(),
-            cols,
-            rows,
+            cols: size.cols,
+            rows: size.rows,
+            viewer,
         })?;
         self.watches
-            .insert((user.to_owned(), pane.to_owned()), PaneSize { cols, rows });
+            .insert((user.to_owned(), pane.to_owned()), (size, viewer));
         if let Some(frame) = frame {
             self.write(&ServerMsg::Cells {
                 user: user.into(),
