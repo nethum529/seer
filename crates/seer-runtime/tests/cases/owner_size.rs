@@ -99,6 +99,14 @@ const LARGE: PaneSize = PaneSize {
     cols: 140,
     rows: 40,
 };
+const WIDE: PaneSize = PaneSize {
+    cols: 160,
+    rows: 20,
+};
+const TILE: PaneSize = PaneSize {
+    cols: 200,
+    rows: 60,
+};
 
 #[test]
 fn each_viewer_sees_the_terminal_at_its_own_size() {
@@ -121,13 +129,14 @@ fn each_viewer_sees_the_terminal_at_its_own_size() {
 
     let line = "x".repeat(150);
     send_input(&mut owner, &pane, &format!("echo {line}\n"));
-    let owner_frame = wait_for_frame(&mut owner, |rows| {
-        rows.windows(2)
+    let owner_frame = wait_for_frame(&mut owner, |frame| {
+        text_rows(frame)
+            .windows(2)
             .any(|pair| pair[0] == "x".repeat(100) && pair[1].trim_end() == "x".repeat(50))
     });
     assert_eq!(frame_size(&owner_frame), OWNER);
-    let small_frame = wait_for_frame(&mut small, |rows| {
-        rows.windows(3).any(|group| {
+    let small_frame = wait_for_frame(&mut small, |frame| {
+        text_rows(frame).windows(3).any(|group| {
             group[0] == "x".repeat(60)
                 && group[1] == "x".repeat(60)
                 && group[2].trim_end() == "x".repeat(30)
@@ -135,31 +144,34 @@ fn each_viewer_sees_the_terminal_at_its_own_size() {
     });
     assert_eq!(frame_size(&small_frame), SMALL);
     assert!(!small_frame.modes.alt_screen);
-    let large_frame = wait_for_frame(&mut large, |rows| {
-        rows.windows(2)
+    let large_frame = wait_for_frame(&mut large, |frame| {
+        text_rows(frame)
+            .windows(2)
             .any(|pair| pair[0] == "x".repeat(140) && pair[1].trim_end() == "x".repeat(10))
     });
     assert_eq!(frame_size(&large_frame), LARGE);
     sizes.settles_at(&mut owner, OWNER);
 
     // The shell must not redraw its prompt over the app text on a resize.
-    send_input(
-        &mut owner,
-        &pane,
-        "printf '\\033[?1049h\\033[2J\\033[HAPP TOP'; read wait\n",
-    );
-    let large_app = wait_for_frame(&mut large, |rows| shows_app(rows, LARGE));
-    assert_eq!(frame_size(&large_app), LARGE);
-    assert!(large_app.modes.alt_screen);
-    let small_app = wait_for_frame(&mut small, |rows| shows_app(rows, LARGE));
-    assert_eq!(frame_size(&small_app), LARGE);
+    send_input(&mut owner, &pane, "printf '\\033[?1049h'; read wait\n");
+    wait_for_frame(&mut large, |frame| app_at(frame, LARGE));
+    wait_for_frame(&mut small, |frame| app_at(frame, LARGE));
     sizes.settles_at(&mut owner, LARGE);
 
     drop(large);
-    sizes.settles_at(&mut owner, SMALL);
-    let small_app = wait_for_frame(&mut small, |rows| shows_app(rows, SMALL));
-    assert_eq!(frame_size(&small_app), SMALL);
+    sizes.settles_at(&mut owner, OWNER);
+    wait_for_frame(&mut small, |frame| app_at(frame, OWNER));
 
+    let mut tile = connect_observer(&socket_path);
+    send(&mut tile, &watch_tile(&pane, TILE));
+    sizes.settles_at(&mut owner, OWNER);
+
+    let mut wide = connect_observer(&socket_path);
+    send(&mut wide, &watch(&pane, WIDE));
+    sizes.settles_at(&mut owner, WIDE.largest(OWNER));
+
+    drop(wide);
+    drop(tile);
     drop(small);
     sizes.settles_at(&mut owner, OWNER);
     send_input(&mut owner, &pane, "\n");
@@ -184,11 +196,16 @@ fn start_runtime(socket_path: &Path) -> RuntimeProcess {
     RuntimeProcess::new(runtime)
 }
 
-fn shows_app(rows: &[String], size: PaneSize) -> bool {
-    rows.len() == usize::from(size.rows)
-        && rows
-            .iter()
-            .any(|row| row.len() == usize::from(size.cols) && row.starts_with("APP TOP"))
+fn app_at(frame: &seer_core::TerminalFrame, size: PaneSize) -> bool {
+    frame.modes.alt_screen && frame_size(frame) == size
+}
+
+fn text_rows(frame: &seer_core::TerminalFrame) -> Vec<String> {
+    frame
+        .rows
+        .iter()
+        .map(|row| row.iter().map(|cell| cell.character).collect())
+        .collect()
 }
 
 fn frame_size(frame: &seer_core::TerminalFrame) -> PaneSize {
@@ -200,26 +217,21 @@ fn frame_size(frame: &seer_core::TerminalFrame) -> PaneSize {
 
 fn wait_for_frame(
     stream: &mut UnixStream,
-    matches: impl Fn(&[String]) -> bool,
+    matches: impl Fn(&seer_core::TerminalFrame) -> bool,
 ) -> seer_core::TerminalFrame {
     let deadline = Instant::now() + MESSAGE_TIMEOUT;
-    let mut last = Vec::new();
+    let mut last = None;
     loop {
         let message = codec::decode::<_, ServerMsg>(stream);
         assert!(
             message.is_ok() && Instant::now() < deadline,
-            "cells never matched, last frame: {last:#?}"
+            "cells never matched, last frame: {last:?}"
         );
         if let Ok(ServerMsg::Cells { frame, .. }) = message {
-            let rows: Vec<String> = frame
-                .rows
-                .iter()
-                .map(|row| row.iter().map(|cell| cell.character).collect())
-                .collect();
-            if matches(&rows) {
+            if matches(&frame) {
                 return frame;
             }
-            last = rows;
+            last = Some((frame_size(&frame), frame.modes.alt_screen));
         }
     }
 }
@@ -230,6 +242,17 @@ fn watch(pane: &str, size: PaneSize) -> ClientMsg {
         pane: pane.into(),
         cols: size.cols,
         rows: size.rows,
+        viewer: true,
+    }
+}
+
+fn watch_tile(pane: &str, size: PaneSize) -> ClientMsg {
+    ClientMsg::Watch {
+        user: "alice".into(),
+        pane: pane.into(),
+        cols: size.cols,
+        rows: size.rows,
+        viewer: false,
     }
 }
 

@@ -134,6 +134,7 @@ impl Guest {
                 pane: pane.into(),
                 cols,
                 rows,
+                viewer: true,
             },
         )
     }

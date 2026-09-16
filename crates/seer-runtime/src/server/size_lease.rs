@@ -15,6 +15,7 @@ impl SharedSession {
         id: u64,
         pane: &str,
         size: Option<PaneSize>,
+        viewer: bool,
     ) -> io::Result<bool> {
         let lease = lock(&self.lease)?;
         let (valid, current) = {
@@ -48,7 +49,9 @@ impl SharedSession {
                     let reported = connection.watches.insert(pane.into(), size);
                     connection.watch_started = true;
                     connection.watch_ended = false;
-                    if reported != Some(size) {
+                    if connection.read_only && !viewer {
+                        connection.claimed.remove(pane);
+                    } else if reported != Some(size) || !connection.claimed.contains_key(pane) {
                         connection.claimed.insert(pane.into(), Instant::now());
                     }
                     // A new watcher must see the screen as it stands. A quiet
@@ -73,7 +76,7 @@ impl SharedSession {
 
     pub(super) fn claim_pane(&self, id: u64, pane: &str) -> io::Result<bool> {
         let mut connections = lock(&self.connections)?;
-        let before = size_claims(&connections).own;
+        let before = own_sizes(&connections);
         let Some(connection) = connections
             .iter_mut()
             .find(|connection| connection.id == id && !connection.read_only)
@@ -81,7 +84,7 @@ impl SharedSession {
             return Ok(false);
         };
         connection.claimed.insert(pane.into(), Instant::now());
-        Ok(size_claims(&connections).own != before)
+        Ok(own_sizes(&connections) != before)
     }
 }
 
@@ -109,16 +112,34 @@ fn claims_size(event: &InputEvent) -> bool {
 
 pub(super) fn size_claims(connections: &[Connection]) -> SizeClaims {
     SizeClaims {
-        own: latest_claims(connections, false),
-        watched: latest_claims(connections, true),
+        own: own_sizes(connections),
+        watched: watched_sizes(connections),
     }
 }
 
-fn latest_claims(connections: &[Connection], read_only: bool) -> BTreeMap<String, PaneSize> {
+// The largest full viewer watch on each axis. The order of the watchers
+// does not matter, so the size cannot swing between two watchers.
+fn watched_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize> {
+    let mut largest: BTreeMap<String, PaneSize> = BTreeMap::new();
+    for connection in connections.iter().filter(|connection| connection.read_only) {
+        for (pane, size) in &connection.watches {
+            if !connection.claimed.contains_key(pane) {
+                continue;
+            }
+            largest
+                .entry(pane.clone())
+                .and_modify(|current| *current = current.largest(*size))
+                .or_insert(*size);
+        }
+    }
+    largest
+}
+
+fn own_sizes(connections: &[Connection]) -> BTreeMap<String, PaneSize> {
     let mut claimed: BTreeMap<String, (Instant, PaneSize)> = BTreeMap::new();
     for connection in connections
         .iter()
-        .filter(|connection| connection.read_only == read_only)
+        .filter(|connection| !connection.read_only)
     {
         for (pane, size) in &connection.watches {
             let Some(at) = connection.claimed.get(pane).copied() else {

@@ -42,7 +42,7 @@ pub(crate) struct ClientState {
     pub(crate) invite_pending: bool,
     pub(crate) notice: String,
     pub(crate) room_was_lost: bool,
-    pub(crate) watches: BTreeMap<(String, String), Size>,
+    pub(crate) watches: BTreeMap<(String, String), (Size, bool)>,
     pub(crate) pending_new: Option<BTreeSet<String>>,
 }
 

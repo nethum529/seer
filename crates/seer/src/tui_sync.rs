@@ -51,9 +51,12 @@ pub(crate) fn sync_watches(
             })
             .collect()
     };
+    let viewer = state.viewer.is_some();
     let wanted: std::collections::BTreeMap<_, _> = visible
         .into_iter()
-        .filter_map(|(target, area)| (!area.is_empty()).then_some((target, area.as_size())))
+        .filter_map(|(target, area)| {
+            (!area.is_empty()).then_some((target, (area.as_size(), viewer)))
+        })
         .collect();
     for (user, pane) in state
         .watches
@@ -68,8 +71,9 @@ pub(crate) fn sync_watches(
             },
         )?;
     }
-    for ((user, pane), size) in &wanted {
-        if state.watches.get(&(user.clone(), pane.clone())) != Some(size) {
+    for ((user, pane), watch) in &wanted {
+        if state.watches.get(&(user.clone(), pane.clone())) != Some(watch) {
+            let (size, viewer) = *watch;
             send(
                 stream,
                 &ClientMsg::Watch {
@@ -77,6 +81,7 @@ pub(crate) fn sync_watches(
                     pane: pane.clone(),
                     cols: size.width,
                     rows: size.height,
+                    viewer,
                 },
             )?;
         }
@@ -214,7 +219,7 @@ mod tests {
             .draw(|frame| render::draw(frame, &mut state))
             .expect("grid must draw");
         sync_watches(&mut stream, &mut state).expect("grid watches must sync");
-        assert!(std::io::Read::read(&mut peer, &mut byte).is_err());
+        assert_grid_watches(&mut peer, &state);
         let tile = &state.box_areas[0];
         assert_eq!(tile.content, viewer_area);
         assert_eq!(tile.content.right(), 100);
@@ -265,6 +270,7 @@ mod tests {
                     pane: state.selected_terminals()[tile.index].pane.clone(),
                     cols: tile.content.width,
                     rows: tile.content.height,
+                    viewer: false,
                 }
             );
         }
@@ -293,6 +299,7 @@ mod tests {
                 pane: viewer.pane.clone(),
                 cols: viewer.area.width,
                 rows: viewer.area.height,
+                viewer: true,
             }
         );
     }

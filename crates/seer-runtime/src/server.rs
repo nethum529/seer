@@ -80,13 +80,18 @@ fn handle_message(
     match message {
         ClientMsg::Detach => Ok(true),
         ClientMsg::Watch {
-            pane, cols, rows, ..
+            pane,
+            cols,
+            rows,
+            viewer,
+            ..
         } => shared.watch_size(
             connection_id,
             &pane,
             Some(seer_core::PaneSize { cols, rows }),
+            viewer,
         ),
-        ClientMsg::Unwatch { pane, .. } => shared.watch_size(connection_id, &pane, None),
+        ClientMsg::Unwatch { pane, .. } => shared.watch_size(connection_id, &pane, None, false),
         ClientMsg::Resize {
             workspace,
             tab,

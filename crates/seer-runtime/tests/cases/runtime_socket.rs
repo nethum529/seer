@@ -149,6 +149,7 @@ fn broadcasts_to_concurrent_connections() {
             pane: first_pane.clone(),
             cols: 80,
             rows: 24,
+            viewer: true,
         },
     );
     send_input(&mut viewer, &first_pane, "printf 'viewer-input\\n'\n");
@@ -160,6 +161,7 @@ fn broadcasts_to_concurrent_connections() {
             pane: "w1:missing".into(),
             cols: 80,
             rows: 24,
+            viewer: true,
         },
     );
     wait_for_refused(&mut viewer);

@@ -42,6 +42,7 @@ fn a_watcher_sees_another_persons_terminals_and_types_only_with_a_grant() {
             pane: pane.clone(),
             cols: 80,
             rows: 24,
+            viewer: true,
         },
     );
     wait_for(
@@ -322,6 +323,7 @@ fn remote_mouse_is_grant_checked_and_encoded_in_the_destination_mode() {
             pane: at.pane.clone(),
             cols: 80,
             rows: 24,
+            viewer: true,
         },
     );
     type_locally(

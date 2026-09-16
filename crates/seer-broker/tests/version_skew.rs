@@ -73,6 +73,7 @@ fn a_runtime_ignores_unknown_fields_from_the_room_and_drops_the_link_on_other_ch
         pane: pane.clone(),
         cols: 80,
         rows: 24,
+        viewer: true,
     };
     send_raw(&mut stream, &with_future_field(&watch, "Watch"));
     next_reply(
@@ -115,6 +116,7 @@ fn the_broker_ignores_unknown_fields_from_a_watcher_and_ends_its_link_on_other_c
         pane: pane.clone(),
         cols: 80,
         rows: 24,
+        viewer: true,
     };
     send_raw(&mut bob, &with_future_field(&watch, "Watch"));
     wait_for(
@@ -215,6 +217,7 @@ fn watched_stream(
             pane: pane.into(),
             cols: 80,
             rows: 24,
+            viewer: true,
         },
     );
     let deadline = Instant::now() + WAIT;
