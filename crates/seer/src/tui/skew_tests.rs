@@ -45,6 +45,7 @@ fn cells_with_unknown_field() -> String {
             cursor: Cursor::default(),
             modes: TerminalModes::default(),
         },
+        seq: 0,
     };
     let json = serde_json::to_string(&cells).expect("cells must encode");
     json.replacen(r#"{"Cells":{"#, r#"{"Cells":{"future":1,"#, 1)

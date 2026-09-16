@@ -18,25 +18,16 @@ impl SharedSession {
         viewer: bool,
     ) -> io::Result<bool> {
         let lease = lock(&self.lease)?;
-        let (valid, current) = {
+        {
             let session = lock(&self.session)?;
             let valid = session.pane_hosts.contains_key(pane)
                 && size.is_none_or(|size| size.cols > 0 && size.rows > 0);
-            let current = session.pane_hosts.get(pane).map(|host| ServerMsg::Cells {
-                user: session.user.clone(),
-                pane: pane.to_owned(),
-                frame: size
-                    .and_then(|size| host.view(size))
-                    .unwrap_or_else(|| host.frame()),
-            });
-            (valid, current)
-        };
-        if !valid {
-            drop(lease);
-            self.send_refused(id, "terminal or size is invalid".into())?;
-            return Ok(false);
-        }
-        {
+            if !valid {
+                drop(session);
+                drop(lease);
+                self.send_refused(id, "terminal or size is invalid".into())?;
+                return Ok(false);
+            }
             let mut connections = lock(&self.connections)?;
             let Some(connection) = connections
                 .iter_mut()
@@ -63,12 +54,11 @@ impl SharedSession {
                     }
                     // A new watcher must see the screen as it stands. A quiet
                     // terminal produces nothing to poll, so send it here.
-                    if let Some(current) = &current {
-                        connection.send(writer::encode(current)?);
-                    }
+                    send_screen(connection, &session, pane)?;
                 }
                 None => {
                     connection.watches.remove(pane);
+                    connection.seqs.remove(pane);
                     connection.claimed.remove(pane);
                     if connection.watches.is_empty() {
                         connection.watch_started = false;
@@ -78,6 +68,23 @@ impl SharedSession {
             }
         }
         self.flush_messages(&[])?;
+        Ok(false)
+    }
+
+    pub(super) fn resend(&self, id: u64, pane: &str) -> io::Result<bool> {
+        let _lease = lock(&self.lease)?;
+        let session = lock(&self.session)?;
+        let mut connections = lock(&self.connections)?;
+        let Some(connection) = connections
+            .iter_mut()
+            .find(|connection| connection.id == id)
+        else {
+            return Ok(true);
+        };
+        if connection.read_only && !connection.watches.contains_key(pane) {
+            return Ok(false);
+        }
+        send_screen(connection, &session, pane)?;
         Ok(false)
     }
 
@@ -93,6 +100,26 @@ impl SharedSession {
         connection.claimed.insert(pane.into(), Instant::now());
         Ok(own_sizes(&connections) != before)
     }
+}
+
+fn send_screen(
+    connection: &mut Connection,
+    session: &crate::UserSession,
+    pane: &str,
+) -> io::Result<()> {
+    let Some(host) = session.pane_hosts.get(pane) else {
+        return Ok(());
+    };
+    let screen = connection
+        .numbered(session, pane, || host.frame())
+        .unwrap_or_else(|| ServerMsg::Cells {
+            user: session.user.clone(),
+            pane: pane.to_owned(),
+            frame: host.frame(),
+            seq: 0,
+        });
+    connection.send(writer::encode(&screen)?);
+    Ok(())
 }
 
 pub(super) fn claimed_pane(message: &ClientMsg) -> Option<&str> {

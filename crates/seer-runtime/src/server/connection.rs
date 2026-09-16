@@ -6,9 +6,9 @@ use std::sync::Arc;
 use std::sync::mpsc::{self, SyncSender};
 use std::time::Instant;
 
-use seer_core::TerminalCapabilities;
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, PeekTarget as TargetInfo, ServerMsg, codec};
+use seer_core::{TerminalCapabilities, TerminalFrame};
 
 use super::{SharedSession, connection_loop, lock, writer};
 use crate::UserSession;
@@ -112,6 +112,7 @@ pub(super) struct Connection {
     pub(super) id: u64,
     pub(super) pid: Option<u32>,
     pub(super) watches: BTreeMap<String, PaneSize>,
+    pub(super) seqs: BTreeMap<String, u64>,
     pub(super) claimed: BTreeMap<String, Instant>,
     pub(super) output: SyncSender<Arc<[u8]>>,
     pub(super) stream: UnixStream,
@@ -134,6 +135,7 @@ impl Connection {
             id,
             pid: super::peer::peer_pid(&stream),
             watches: BTreeMap::new(),
+            seqs: BTreeMap::new(),
             claimed: BTreeMap::new(),
             output,
             stream,
@@ -171,8 +173,8 @@ impl Connection {
         match self.projection(session) {
             ConnectionProjection::Full => {
                 for (message, output) in messages.iter().zip(encoded) {
-                    let output = match self.fitted(session, message) {
-                        Some(fitted) => writer::encode(&fitted)?,
+                    let output = match self.screen(session, message) {
+                        Some(screen) => writer::encode(&screen)?,
                         None => Arc::clone(output),
                     };
                     if !self.send(output) {
@@ -185,16 +187,16 @@ impl Connection {
                     let Some(message) = project_message(&tree, message) else {
                         continue;
                     };
-                    let fitted = self.fitted(session, &message);
-                    if !self.send(writer::encode(fitted.as_ref().unwrap_or(&message))?) {
+                    let screen = self.screen(session, &message);
+                    if !self.send(writer::encode(screen.as_ref().unwrap_or(&message))?) {
                         return Ok(false);
                     }
                 }
             }
             ConnectionProjection::Catalog(watched) => {
                 for message in messages.iter().filter(|m| catalog_passes(&watched, m)) {
-                    let fitted = self.fitted(session, message);
-                    if !self.send(writer::encode(fitted.as_ref().unwrap_or(message))?) {
+                    let screen = self.screen(session, message);
+                    if !self.send(writer::encode(screen.as_ref().unwrap_or(message))?) {
                         return Ok(false);
                     }
                 }
@@ -210,17 +212,44 @@ impl Connection {
 
     // Each watcher gets the screen wrapped to its own size (issue 406). A
     // full screen app comes at the PTY size, which grows to the largest
-    // full viewer watch (issue 433).
-    fn fitted(&self, session: &UserSession, message: &ServerMsg) -> Option<ServerMsg> {
-        let ServerMsg::Cells { user, pane, .. } = message else {
+    // full viewer watch (issue 433). A read only link numbers the screens
+    // of each watched pane, so a viewer can name the one it holds. None
+    // means the shared full frame is right.
+    pub(super) fn screen(
+        &mut self,
+        session: &UserSession,
+        message: &ServerMsg,
+    ) -> Option<ServerMsg> {
+        let ServerMsg::Cells { pane, frame, .. } = message else {
             return None;
         };
-        let size = *self.watches.get(pane)?;
-        let frame = session.pane_hosts.get(pane)?.view(size)?;
+        self.numbered(session, pane, || frame.clone())
+    }
+
+    pub(super) fn numbered(
+        &mut self,
+        session: &UserSession,
+        pane: &str,
+        full: impl FnOnce() -> TerminalFrame,
+    ) -> Option<ServerMsg> {
+        let size = self.watches.get(pane);
+        let view = size.and_then(|size| session.pane_hosts.get(pane)?.view(*size));
+        let counted = self.read_only && size.is_some();
+        if view.is_none() && !counted {
+            return None;
+        }
+        let seq = if counted {
+            let seq = self.seqs.entry(pane.to_owned()).or_insert(0);
+            *seq += 1;
+            *seq
+        } else {
+            0
+        };
         Some(ServerMsg::Cells {
-            user: user.clone(),
-            pane: pane.clone(),
-            frame,
+            user: session.user.clone(),
+            pane: pane.to_owned(),
+            frame: view.unwrap_or_else(full),
+            seq,
         })
     }
 
@@ -235,6 +264,7 @@ impl Connection {
             .cloned()
             .collect();
         self.watches.retain(|pane, _| valid.contains(pane));
+        self.seqs.retain(|pane, _| valid.contains(pane));
         self.claimed.retain(|pane, _| valid.contains(pane));
         if self.catalog {
             return ConnectionProjection::Catalog(valid);

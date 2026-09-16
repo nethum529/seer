@@ -125,6 +125,7 @@ pub fn client_summary(message: &ClientMsg) -> String {
             viewer,
         } => format!("Watch user={user} pane={pane} size={cols}x{rows} viewer={viewer}"),
         ClientMsg::Unwatch { user, pane } => format!("Unwatch user={user} pane={pane}"),
+        ClientMsg::Resync { user, pane } => format!("Resync user={user} pane={pane}"),
         ClientMsg::TypeInto { user, pane, bytes } => {
             format!("TypeInto user={user} pane={pane} bytes={}", bytes.len())
         }
@@ -213,9 +214,15 @@ pub fn server_summary(message: &ServerMsg) -> String {
             format!("Tree tabs={tabs} panes={panes}")
         }
         ServerMsg::Frame { pane, bytes } => format!("Frame pane={pane} bytes={}", bytes.len()),
-        ServerMsg::Cells { user, pane, frame } => {
-            format!("Cells user={user} pane={pane} {}", frame_summary(frame))
-        }
+        ServerMsg::Cells {
+            user,
+            pane,
+            frame,
+            seq,
+        } => format!(
+            "Cells user={user} pane={pane} seq={seq} {}",
+            frame_summary(frame)
+        ),
         ServerMsg::OpenStream { .. } => "OpenStream".to_owned(),
     }
 }

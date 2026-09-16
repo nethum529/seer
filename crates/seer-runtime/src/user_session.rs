@@ -104,6 +104,7 @@ impl UserSession {
             | ClientMsg::QueryTargets { .. }
             | ClientMsg::Watch { .. }
             | ClientMsg::Unwatch { .. }
+            | ClientMsg::Resync { .. }
             | ClientMsg::Terminals { .. }
             | ClientMsg::SetAllGrants { .. }
             | ClientMsg::SetGrant { .. }
@@ -132,6 +133,7 @@ impl UserSession {
                         user: self.user.clone(),
                         pane: pane.clone(),
                         frame,
+                        seq: 0,
                     }
                 })
             })
@@ -187,6 +189,7 @@ impl UserSession {
                     user: self.user.clone(),
                     pane: pane.id.clone(),
                     frame: host.frame(),
+                    seq: 0,
                 })
             })
             .collect::<Vec<_>>();
@@ -322,6 +325,7 @@ impl UserSession {
                 user: self.user.clone(),
                 pane: pane.to_owned(),
                 frame: host.frame(),
+                seq: 0,
             })
             .into_iter()
             .collect())

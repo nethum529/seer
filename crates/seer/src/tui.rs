@@ -228,7 +228,9 @@ fn apply_message(
             state.can_type_here = can_type_here.into_iter().collect();
         }
         ServerMsg::Tree { tree } => state.replace_tree(tree),
-        ServerMsg::Cells { user, pane, frame } => state.note_frame(user, pane, frame),
+        ServerMsg::Cells {
+            user, pane, frame, ..
+        } => state.note_frame(user, pane, frame),
         ServerMsg::Terminals { user, terminals } => {
             if let Some(viewer) = &state.viewer
                 && viewer.user == user

@@ -65,6 +65,7 @@ fn main() -> io::Result<()> {
                 user: "alice".into(),
                 pane: "p1".into(),
                 frame: frame(cols, rows, text_rows),
+                seq: 0,
             };
             println!("Cells,{cols},{rows},{text_rows},{}", size(&message)?);
         }

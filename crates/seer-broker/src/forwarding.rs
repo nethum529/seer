@@ -230,6 +230,12 @@ impl<'a> Coordinator<'a> {
                 }
                 Ok(())
             }
+            ClientMsg::Resync { user, pane } => {
+                if let Some(runtime) = self.runtimes.get_mut(&user) {
+                    runtime.send(&ClientMsg::Resync { user, pane })?;
+                }
+                Ok(())
+            }
             ClientMsg::Terminals { user } => self.list(&user),
             ClientMsg::MouseInto { user, pane, mouse } => self.mouse_into(&user, &pane, mouse),
             ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
@@ -299,11 +305,14 @@ impl<'a> Coordinator<'a> {
         })?;
         self.watches
             .insert((user.to_owned(), pane.to_owned()), (size, viewer));
+        // The cached screen is not numbered. The runtime answers the Watch
+        // with a numbered screen, and the viewer counts from that one.
         if let Some(frame) = frame {
             self.write(&ServerMsg::Cells {
                 user: user.into(),
                 pane: pane.into(),
                 frame,
+                seq: 0,
             })?;
         }
         Ok(())
@@ -362,13 +371,16 @@ impl<'a> Coordinator<'a> {
                     .frames
                     .retain(|pane, _| panes.contains(pane.as_str()));
             }
-            ServerMsg::Cells { pane, frame, .. } => {
+            ServerMsg::Cells {
+                pane, frame, seq, ..
+            } => {
                 runtime.frames.insert(pane.clone(), frame.clone());
                 if self.watches.contains_key(&(user.into(), pane.clone())) {
                     self.write(&ServerMsg::Cells {
                         user: user.into(),
                         pane,
                         frame,
+                        seq,
                     })?;
                 }
             }

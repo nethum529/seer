@@ -104,6 +104,12 @@ pub enum ClientMsg {
         user: String,
         pane: String,
     },
+    /// Asks for the whole screen of one watched pane. The answer is a Cells
+    /// message with the next seq for that pane on this link.
+    Resync {
+        user: String,
+        pane: String,
+    },
     Terminals {
         user: String,
     },
@@ -201,6 +207,11 @@ pub enum ServerMsg {
         user: String,
         pane: String,
         frame: TerminalFrame,
+        /// Counts the screens sent for this pane on a read only link, from
+        /// 1 at Watch. 0 means the sender did not number it. A whole screen
+        /// replaces what the viewer holds at any seq.
+        #[serde(default)]
+        seq: u64,
     },
     Bye {
         reason: String,

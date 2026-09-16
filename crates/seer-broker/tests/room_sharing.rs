@@ -364,6 +364,98 @@ fn remote_mouse_is_grant_checked_and_encoded_in_the_destination_mode() {
     ));
 }
 
+// R-411: a viewer that doubts its copy of a screen asks for the screen
+// again. The answer is the whole screen, and it takes the next number in
+// that viewer's sequence for the pane.
+#[test]
+fn a_viewer_that_asks_again_gets_the_whole_screen_with_the_next_number() {
+    let mut room = Room::start(false);
+    let mut window = room.publish("alice", ALICE_SECRET);
+    let at = first_terminal(&own_tree(&mut window));
+    let mut alice = join_room(room.address, "alice", ALICE_SECRET);
+    let mut bob = join_room(room.address, "bob", BOB_SECRET);
+    wait_for_published(&mut alice, "alice");
+    send(
+        &mut bob,
+        &ClientMsg::Watch {
+            user: "alice".into(),
+            pane: at.pane.clone(),
+            cols: 80,
+            rows: 24,
+            viewer: true,
+        },
+    );
+    type_locally(&mut window, &at, "printf 'sett''led\\n'\n");
+    let held = wait_for(&mut bob, |message| {
+        matches!(message, ServerMsg::Cells { pane, frame, .. }
+            if *pane == at.pane && prompt_follows(&frame_text(frame), "settled"))
+    });
+    let ServerMsg::Cells {
+        frame: held_frame,
+        seq: held_seq,
+        ..
+    } = held
+    else {
+        unreachable!()
+    };
+
+    assert!(
+        no_cells_for(&mut bob, &at.pane, Duration::from_secs(2)),
+        "a quiet terminal must send nothing on its own, so the next screen is the answer"
+    );
+
+    send(
+        &mut bob,
+        &ClientMsg::Resync {
+            user: "alice".into(),
+            pane: at.pane.clone(),
+        },
+    );
+    let answer = wait_for(
+        &mut bob,
+        |message| matches!(message, ServerMsg::Cells { pane, .. } if *pane == at.pane),
+    );
+    let ServerMsg::Cells { frame, seq, .. } = answer else {
+        unreachable!()
+    };
+    assert_eq!(
+        seq,
+        held_seq + 1,
+        "the answer must take the next number in the viewer's sequence"
+    );
+    assert_eq!(
+        frame, held_frame,
+        "the answer must be the whole screen as it stands"
+    );
+}
+
+fn no_cells_for(stream: &mut std::net::TcpStream, pane: &str, quiet: Duration) -> bool {
+    stream
+        .set_read_timeout(Some(quiet))
+        .expect("read timeout must set");
+    let deadline = Instant::now() + quiet;
+    let mut quiet_pane = true;
+    while Instant::now() < deadline {
+        match codec::decode::<_, ServerMsg>(stream) {
+            Ok(ServerMsg::Cells { pane: shown, .. }) if shown == pane => {
+                quiet_pane = false;
+                break;
+            }
+            Ok(_) => {}
+            Err(_) => break,
+        }
+    }
+    stream
+        .set_read_timeout(Some(WAIT))
+        .expect("read timeout must set");
+    quiet_pane
+}
+
+fn prompt_follows(text: &str, marker: &str) -> bool {
+    text.find(marker)
+        .is_some_and(|start| text[start + marker.len()..].contains('$'))
+}
+
 #[test]
 fn reconnecting_a_viewer_does_not_report_a_live_terminal_as_empty() {
     let mut room = Room::start(false);
