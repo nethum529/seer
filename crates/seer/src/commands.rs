@@ -2,7 +2,6 @@ use std::io::{self, IsTerminal, Read};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use seer_core::Tree;
 use seer_core::proto::{ClientInfo, ClientMsg, Person, PersonState, ServerMsg, codec};
 use seer_net::{Socket, Stream};
 
@@ -13,8 +12,10 @@ use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
 pub(crate) use exit::exit;
+pub(crate) use handshake::{Welcome, authenticate, hello};
 pub(crate) use selection::{attach_bare, peek, selected_server};
 mod exit;
+mod handshake;
 mod lifecycle;
 pub(crate) use lifecycle::{leave, perms, stop};
 mod ps;
@@ -298,18 +299,6 @@ fn edit_distance_at_most_one(left: &[u8], right: &[u8]) -> bool {
     differences == 0 || long_index == longer.len()
 }
 
-pub(crate) fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
-    let mut stream = connect(&server.endpoint)?;
-    let hello = ClientMsg::Hello {
-        user_id: server.user_id.clone(),
-        credential: server.credential.clone(),
-        version: env!("CARGO_PKG_VERSION").into(),
-    };
-    send(&mut stream, &hello)?;
-    let tree = welcome_tree(receive_reply(&mut stream)?)?;
-    Ok((stream, tree))
-}
-
 fn people(server: &ServerEntry) -> Result<Vec<Person>, CommandError> {
     let (mut stream, _) = authenticate(server)?;
     send(&mut stream, &ClientMsg::ListPeople)?;
@@ -320,14 +309,6 @@ fn people_reply(reply: ServerMsg) -> Result<Vec<Person>, CommandError> {
     match reply {
         ServerMsg::People { people } => Ok(people),
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
-        _ => Err(unexpected_reply()),
-    }
-}
-
-fn welcome_tree(reply: ServerMsg) -> Result<Tree, CommandError> {
-    match reply {
-        ServerMsg::Welcome { tree, .. } => Ok(tree),
-        ServerMsg::Refused { reason } => Err(CommandError::usage(format!("refused: {reason}"))),
         _ => Err(unexpected_reply()),
     }
 }

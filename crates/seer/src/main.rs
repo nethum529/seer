@@ -24,6 +24,7 @@ mod tui_link;
 mod tui_navigation;
 mod tui_sync;
 mod update;
+mod version_skew;
 mod viewer;
 
 fn main() -> ExitCode {

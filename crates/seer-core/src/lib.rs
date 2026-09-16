@@ -6,6 +6,7 @@ pub mod layout;
 pub mod proto;
 mod terminal;
 mod tree;
+pub mod version;
 
 pub use cells::{Cell, Color};
 pub use layout::PaneRect;

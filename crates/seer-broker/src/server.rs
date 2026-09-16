@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientInfo, ClientMsg, Person, PersonState, ServerMsg, codec};
+use seer_core::version::major_minor;
 use seer_net::{EndpointId, Listener, Session, Socket, Stream, load_or_create_secret_key};
 
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
@@ -390,12 +391,6 @@ fn check_version(stream: &mut Socket, version: &str) -> io::Result<bool> {
     let reason =
         format!("version mismatch: server {server_version}, client {version}. Run: seer update");
     refuse(stream, &reason).map(|()| false)
-}
-
-fn major_minor(version: &str) -> Option<(&str, &str)> {
-    let (major, remainder) = version.split_once('.')?;
-    let (minor, _) = remainder.split_once('.')?;
-    Some((major, minor))
 }
 
 pub(crate) fn read_message<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ClientMsg> {
