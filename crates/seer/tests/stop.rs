@@ -9,6 +9,7 @@ use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
 #[path = "support/cli_run.rs"]
@@ -43,6 +44,17 @@ fn fake_room_process() {
         else {
             continue;
         };
+        if std::env::var("SEER_FAKE_ROOM_MODE").as_deref() == Ok("no-stop-answer") {
+            let welcome = ServerMsg::Welcome {
+                user_id: OWNER.into(),
+                name: "alice".into(),
+                client_id: "client".into(),
+                tree: Tree::new(),
+            };
+            let _ = codec::encode(&mut stream, &welcome);
+            let _ = codec::decode::<_, ClientMsg>(&mut stream);
+            continue;
+        }
         let reason =
             format!("version mismatch: server {version}, client {client}. Run: seer update");
         let _ = codec::encode(&mut stream, &ServerMsg::Refused { reason });
@@ -94,6 +106,41 @@ fn stop_ends_a_room_server_of_another_minor_version_on_this_computer() {
     }
 }
 
+#[test]
+fn stop_ends_a_room_server_on_this_computer_that_closes_without_an_answer() {
+    let config = TestConfig::new();
+    let state_dir = config.root.join("state");
+    fs::create_dir_all(&state_dir).expect("state directory must exist");
+    let version = env!("CARGO_PKG_VERSION");
+    let hosted = unused_address();
+    let hosted_room = spawn_fake_room_in_mode(
+        hosted,
+        version,
+        "no-stop-answer",
+        Some(&state_dir.join("broker.pid")),
+    );
+    let elsewhere = unused_address();
+    let other_room = spawn_fake_room_in_mode(elsewhere, version, "no-stop-answer", None);
+    write_broker_config(&config, hosted, &state_dir);
+
+    write_identity(&config, elsewhere);
+    let unanswered = run(&config, &["stop"], "");
+    assert_eq!(unanswered.status.code(), Some(1));
+    assert!(unanswered.stdout.is_empty());
+    assert_eq!(
+        text(&unanswered.stderr),
+        "The room server closed the connection without an answer. It may run an older Seer than this one.\n"
+    );
+    assert!(process_exists(other_room.pid()));
+
+    write_identity(&config, hosted);
+    let stopped = run(&config, &["stop"], "");
+
+    assert_eq!(stopped.status.code(), Some(0), "{}", text(&stopped.stderr));
+    assert_eq!(text(&stopped.stdout), "Room server stopped.\n");
+    wait_for_process_end(hosted_room.pid());
+}
+
 fn older_minor_version() -> String {
     let minor: u32 = env!("CARGO_PKG_VERSION_MINOR")
         .parse()
@@ -108,12 +155,22 @@ fn unused_address() -> SocketAddr {
 }
 
 fn spawn_fake_room(address: SocketAddr, version: &str, pid_path: Option<&Path>) -> FakeRoom {
+    spawn_fake_room_in_mode(address, version, "refuse", pid_path)
+}
+
+fn spawn_fake_room_in_mode(
+    address: SocketAddr,
+    version: &str,
+    mode: &str,
+    pid_path: Option<&Path>,
+) -> FakeRoom {
     let test_binary = std::env::current_exe().expect("test binary path must be available");
     let mut command = Command::new(test_binary);
     command
         .args(["fake_room_process", "--exact", "--nocapture"])
         .env("SEER_FAKE_ROOM_ADDRESS", address.to_string())
         .env("SEER_FAKE_ROOM_VERSION", version)
+        .env("SEER_FAKE_ROOM_MODE", mode)
         .stdin(Stdio::null())
         .stdout(Stdio::null())
         .stderr(Stdio::null());

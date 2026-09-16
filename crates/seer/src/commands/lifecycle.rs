@@ -5,6 +5,7 @@ use super::{
 use crate::store::{ServerEntry, ServerStore};
 use crate::version_skew::{VersionRefusal, version_refusal};
 use seer_core::proto::{ClientMsg, ServerMsg};
+use std::io;
 
 pub(crate) fn leave() -> Result<(), CommandError> {
     let server = selected_server()?;
@@ -35,12 +36,16 @@ pub(crate) fn stop() -> Result<(), CommandError> {
     let server = selected_server()?;
     match stop_room(&server) {
         Ok(()) => {}
-        // Issue 419: a room server from before seer update refuses the new
-        // Seer. When this computer runs it, its process is stopped instead.
-        Err(StopFailure::VersionRefused(refusal)) => {
+        // Issues 419 and 436: a room server from before seer update refuses
+        // the new Seer or closes the link with no answer to Stop. When this
+        // computer runs it, its process is stopped instead.
+        Err(failure @ (StopFailure::VersionRefused(_) | StopFailure::NoAnswer)) => {
             if !crate::start::stop_hosted_room(&server.endpoint).map_err(CommandError::system)? {
                 let room_runs_here = crate::start::hosts_room(&server.endpoint);
-                return Err(CommandError::usage(refusal.advice(room_runs_here)));
+                return Err(CommandError::usage(match failure {
+                    StopFailure::VersionRefused(refusal) => refusal.advice(room_runs_here),
+                    _ => NO_ANSWER.to_owned(),
+                }));
             }
         }
         Err(StopFailure::Command(error)) => return Err(error),
@@ -52,8 +57,11 @@ pub(crate) fn stop() -> Result<(), CommandError> {
     Ok(())
 }
 
+const NO_ANSWER: &str = "The room server closed the connection without an answer. It may run an older Seer than this one.";
+
 enum StopFailure {
     VersionRefused(VersionRefusal),
+    NoAnswer,
     Command(CommandError),
 }
 
@@ -74,7 +82,12 @@ fn stop_room(server: &ServerEntry) -> Result<(), StopFailure> {
         }
     };
     send(&mut stream, &ClientMsg::Stop)?;
-    wait_for_completion(&mut stream, |reply| matches!(reply, ServerMsg::Bye { .. }))?;
+    match wait_for_reply(&mut stream, |reply| matches!(reply, ServerMsg::Bye { .. })) {
+        Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
+            return Err(StopFailure::NoAnswer);
+        }
+        result => result.map_err(CommandError::system)??,
+    }
     let deadline = std::time::Instant::now() + NETWORK_TIMEOUT;
     while super::connect(&server.endpoint).is_ok() {
         if std::time::Instant::now() >= deadline {
@@ -89,16 +102,22 @@ fn wait_for_completion(
     stream: &mut seer_net::Socket,
     done: impl Fn(&ServerMsg) -> bool,
 ) -> Result<(), CommandError> {
+    wait_for_reply(stream, done).map_err(CommandError::system)?
+}
+
+fn wait_for_reply(
+    stream: &mut seer_net::Socket,
+    done: impl Fn(&ServerMsg) -> bool,
+) -> io::Result<Result<(), CommandError>> {
     let deadline = std::time::Instant::now() + NETWORK_TIMEOUT;
     loop {
         match receive_reply_before(stream, deadline)? {
-            reply if done(&reply) => break,
+            reply if done(&reply) => return Ok(Ok(())),
             ServerMsg::People { .. } => continue,
-            ServerMsg::Refused { reason } => return Err(CommandError::usage(reason)),
-            _ => return Err(unexpected_reply()),
+            ServerMsg::Refused { reason } => return Ok(Err(CommandError::usage(reason))),
+            _ => return Ok(Err(unexpected_reply())),
         }
     }
-    Ok(())
 }
 
 pub(crate) fn perms(can_type: bool) -> Result<(), CommandError> {

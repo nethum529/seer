@@ -360,16 +360,12 @@ fn receive(stream: &mut impl Stream) -> Result<ServerMsg, CommandError> {
 }
 
 fn receive_reply(stream: &mut impl Stream) -> Result<ServerMsg, CommandError> {
-    receive_reply_before(stream, Instant::now() + NETWORK_TIMEOUT)
+    receive_reply_before(stream, Instant::now() + NETWORK_TIMEOUT).map_err(CommandError::system)
 }
 
-fn receive_reply_before<S: Stream>(
-    stream: &mut S,
-    deadline: Instant,
-) -> Result<ServerMsg, CommandError> {
+fn receive_reply_before<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ServerMsg> {
     loop {
-        let reply = codec::decode(&mut DeadlineReader { stream, deadline })
-            .map_err(CommandError::system)?;
+        let reply = codec::decode(&mut DeadlineReader { stream, deadline })?;
         if !matches!(
             reply,
             ServerMsg::Tree { .. }
