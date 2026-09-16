@@ -12,6 +12,9 @@ use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, codec};
 
 use super::server_io::receive;
 
+#[path = "runtimes.rs"]
+mod runtimes;
+
 static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 pub(crate) struct TestConfig {
@@ -33,9 +36,11 @@ impl Drop for TestConfig {
             .arg("stop")
             .env("XDG_CONFIG_HOME", &self.root)
             .env("XDG_STATE_HOME", self.root.join("state-home"))
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+        runtimes::stop_runtimes(&self.root);
         let _ = fs::remove_dir_all(&self.root);
     }
 }

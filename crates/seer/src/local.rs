@@ -255,15 +255,26 @@ pub(crate) fn stop(user_id: &str) -> io::Result<bool> {
     let Some(pid) = read_pid(&directory.join("runtime.pid")) else {
         return Ok(false);
     };
+    stop_pid(pid, || connect(&socket, None).is_ok())?;
+    Ok(true)
+}
+
+// A negative pid names a process group.
+pub(crate) fn stop_pid(pid: i32, alive: impl Fn() -> bool) -> io::Result<()> {
     signal(pid, libc::SIGTERM)?;
     let deadline = Instant::now() + START_TIMEOUT;
-    while connect(&socket, None).is_ok() && Instant::now() < deadline {
+    while alive() && Instant::now() < deadline {
         thread::sleep(POLL_INTERVAL);
     }
-    if connect(&socket, None).is_ok() {
+    if alive() {
         signal(pid, libc::SIGKILL)?;
     }
-    Ok(true)
+    Ok(())
+}
+
+pub(crate) fn process_alive(pid: i32) -> bool {
+    // SAFETY: kill with signal 0 only checks that the process exists.
+    unsafe { libc::kill(pid, 0) == 0 }
 }
 
 fn read_pid(path: &Path) -> Option<i32> {

@@ -9,6 +9,7 @@ mod input;
 mod local;
 mod panels;
 mod person_menu;
+mod processes;
 mod prompt;
 mod render;
 mod routes;

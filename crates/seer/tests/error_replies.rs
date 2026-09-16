@@ -10,6 +10,8 @@ use std::time::{Duration, Instant};
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 
+#[path = "support/runtimes.rs"]
+mod runtimes;
 #[path = "support/server_io.rs"]
 mod server_io;
 
@@ -300,9 +302,11 @@ impl Drop for TestConfig {
             .arg("stop")
             .env("XDG_CONFIG_HOME", &self.root)
             .env("XDG_STATE_HOME", self.root.join("state-home"))
+            .stdin(Stdio::null())
             .stdout(Stdio::null())
             .stderr(Stdio::null())
             .status();
+        runtimes::stop_runtimes(&self.root);
         let _ = fs::remove_dir_all(&self.root);
     }
 }

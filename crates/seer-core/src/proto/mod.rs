@@ -172,6 +172,10 @@ pub enum ServerMsg {
         tabs: u32,
         foreground: String,
         idle_secs: u64,
+        #[serde(default)]
+        windows: Option<Vec<u32>>,
+        #[serde(default)]
+        shells: Option<u32>,
     },
     Clients {
         clients: Vec<ClientInfo>,

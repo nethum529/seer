@@ -126,6 +126,7 @@ impl BrokerState {
                         tabs,
                         foreground,
                         idle_secs,
+                        ..
                     }) => (*tabs, foreground.clone(), *idle_secs),
                     _ => (0, String::new(), 0),
                 };

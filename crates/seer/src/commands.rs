@@ -17,6 +17,8 @@ pub(crate) use selection::{attach_bare, peek, selected_server};
 mod exit;
 mod lifecycle;
 pub(crate) use lifecycle::{leave, perms, stop};
+mod ps;
+pub(crate) use ps::{PsAction, ps};
 mod selection;
 use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -187,13 +189,13 @@ pub(crate) fn list() -> Result<(), CommandError> {
     let store = ServerStore::load().map_err(CommandError::system)?;
     let mut servers: Vec<&ServerEntry> = store.servers.iter().collect();
     servers.sort_by_key(|server| !server.current);
-    let rows: Vec<ListRow> = servers.into_iter().map(list_server).collect();
-    print_table(&rows);
+    let rows: Vec<Vec<String>> = servers.into_iter().map(list_server).collect();
+    print_columns(&["SERVER", "YOU", "STATE", "PEOPLE"], &rows);
     Ok(())
 }
 
-fn list_server(server: &ServerEntry) -> ListRow {
-    match people(server) {
+fn list_server(server: &ServerEntry) -> Vec<String> {
+    let (state, people) = match people(server) {
         Ok(people) => {
             let attached = people
                 .iter()
@@ -202,20 +204,19 @@ fn list_server(server: &ServerEntry) -> ListRow {
             let mut sorted: Vec<&Person> = people.iter().collect();
             sorted.sort_unstable_by_key(|person| person.name.to_ascii_lowercase());
             let entries: Vec<String> = sorted.into_iter().map(describe_person).collect();
-            ListRow {
-                server: server.alias.clone(),
-                you: server.name.clone(),
-                state: if attached { "attached" } else { "detached" },
-                people: entries.join(", "),
-            }
+            (
+                if attached { "attached" } else { "detached" },
+                entries.join(", "),
+            )
         }
-        Err(_) => ListRow {
-            server: server.alias.clone(),
-            you: server.name.clone(),
-            state: "unreachable",
-            people: String::new(),
-        },
-    }
+        Err(_) => ("unreachable", String::new()),
+    };
+    vec![
+        server.alias.clone(),
+        server.name.clone(),
+        state.to_owned(),
+        people,
+    ]
 }
 
 fn describe_person(person: &Person) -> String {
@@ -444,7 +445,7 @@ fn finish_session(
     match exit {
         tui::SessionExit::Detached => print_detached(&server.alias),
         tui::SessionExit::ServerStopped => print_server_stopped(),
-        tui::SessionExit::Client => {}
+        tui::SessionExit::Client | tui::SessionExit::TerminalLost => {}
     }
     Ok(())
 }
@@ -457,40 +458,36 @@ fn unexpected_reply() -> CommandError {
     CommandError::system("unexpected server reply")
 }
 
-struct ListRow {
-    server: String,
-    you: String,
-    state: &'static str,
-    people: String,
-}
-
-fn print_table(rows: &[ListRow]) {
-    let server_width = rows
+// The last column is not padded, so no line ends with spaces.
+fn print_columns(header: &[&str], rows: &[Vec<String>]) {
+    let widths: Vec<usize> = header
         .iter()
-        .map(|row| row.server.len())
-        .max()
-        .unwrap_or(0)
-        .max("SERVER".len());
-    let you_width = rows
-        .iter()
-        .map(|row| row.you.len())
-        .max()
-        .unwrap_or(0)
-        .max("YOU".len());
-    let state_width = rows
-        .iter()
-        .map(|row| row.state.len())
-        .max()
-        .unwrap_or(0)
-        .max("STATE".len());
-    println!(
-        "{:<server_width$}  {:<you_width$}  {:<state_width$}  PEOPLE",
-        "SERVER", "YOU", "STATE"
-    );
+        .enumerate()
+        .map(|(column, title)| {
+            rows.iter()
+                .map(|row| row[column].len())
+                .max()
+                .unwrap_or(0)
+                .max(title.len())
+        })
+        .collect();
+    let line = |cells: &[&str]| {
+        cells
+            .iter()
+            .enumerate()
+            .map(|(column, cell)| {
+                if column + 1 == cells.len() {
+                    (*cell).to_owned()
+                } else {
+                    format!("{cell:<width$}", width = widths[column])
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("  ")
+    };
+    println!("{}", line(header));
     for row in rows {
-        println!(
-            "{:<server_width$}  {:<you_width$}  {:<state_width$}  {}",
-            row.server, row.you, row.state, row.people
-        );
+        let cells: Vec<&str> = row.iter().map(String::as_str).collect();
+        println!("{}", line(&cells));
     }
 }

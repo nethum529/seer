@@ -106,6 +106,7 @@ enum ConnectionProjection {
 
 pub(super) struct Connection {
     pub(super) id: u64,
+    pub(super) pid: Option<u32>,
     pub(super) watches: BTreeMap<String, PaneSize>,
     pub(super) claimed: BTreeMap<String, Instant>,
     pub(super) output: SyncSender<Arc<[u8]>>,
@@ -127,6 +128,7 @@ impl Connection {
         writer::spawn(id, writer, queued)?;
         Ok(Self {
             id,
+            pid: super::peer::peer_pid(&stream),
             watches: BTreeMap::new(),
             claimed: BTreeMap::new(),
             output,
