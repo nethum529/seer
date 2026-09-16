@@ -1,122 +1,126 @@
 # Seer
 
-Seer lets people share live terminals in a room. One person hosts the room.
-Friends join with one pasted line. Each person's terminals run on their own
-computer, with their own files, tools, shell, and provider logins.
+Seer shares live terminals in a room. One person hosts the room. Each
+person runs their own terminals on their own computer.
 
-Everyone in the room can watch. The only grant is "can type here": it lets
-another person type into your terminals. The broker checks grants, which
-survive a room restart. The room host is trusted and can read shared output
-and input.
+- Your terminals use your own files, tools, shell, and logins.
+- Everyone in the room can watch the terminals of everyone else.
+- One grant, "can type here", lets another person type into your
+  terminals.
+- Linux and macOS. Version 0.5.7.
 
-Closing a Seer window or losing the room connection leaves your local shells
-running. Open Seer again to return to them. A computer or runtime restart
-restores the saved layout with new shells, not the old running processes.
+![A macOS terminal watched from a Linux computer, with the people picker open at the top right](docs/images/watch-macos-from-linux.png)
 
-The room host command currently runs on Linux. Participants can use Linux or
-macOS. An agent inbox is planned; this build has no chat or human messaging.
-Herdr and luvus remain the reference code bases for the terminal core.
-
-## Quickstart
-
-Install Seer on the owner's Linux machine:
+## Install
 
     curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh
 
-Restart the terminal if the installer asks you to. Start the server:
+- The installer puts the binaries in ~/.local/bin. It does not use sudo.
+- You do not need Rust, Git, or a GitHub account.
+- Restart the terminal if the installer asks you to.
+
+## Host a room
+
+The room server runs on Linux only.
 
     seer start
 
-Send the printed seer join line to a friend who has Seer. The friend pastes it
-into Terminal and selects a name. A friend without Seer pastes the install line
-printed under it. They do not need Rust, Git, or a GitHub account.
+The command prints a join line. Send it to a friend. A join line works
+one time and expires in 1 hour.
 
-Open the people and terminals screen:
+Make a new line, with a life of 1 to 168 hours:
+
+    seer invite --hours 24
+
+## Join a room
+
+Paste the line from the host into your terminal.
+
+- With Seer installed, the line starts with `seer join`.
+- Without Seer, use the install line that the host sends with it. It
+  installs Seer and joins in one step.
+
+Then select a name. Press Enter to accept your system user name.
+
+## Open Seer
 
     seer
 
-The terminal keeps the whole window. The control at the top right shows
-"Seer" and the name of the person you look at. Left click it to open the
-picker, then select a person to see their live terminals. A terminal takes
-its name from its foreground process, or uses "shell" for a shell. A shell
-is idle; another foreground process is busy.
+![A Linux terminal watched from a macOS computer](docs/images/watch-linux-from-macos.png)
 
-When you are alone, the screen shows a join line that expires in 24 hours.
-Right click the control at the top right to copy the invite or open a
-terminal. Clipboard access must be enabled in your terminal.
+- Type or paste to send input to the selected terminal.
+- All keys go to the terminal. Seer has no prefix key.
+- Click a terminal to select it. Drag to select and copy text.
 
-## Controls
+## People and permissions
 
-Main screen:
+Left click the control at the top right to open the people picker.
 
-- Type or paste to open the selected terminal and send the first input.
-- All terminal keys, including q, Escape, and Ctrl+B, go to the terminal.
-- Left click the top right control to open the picker. It shows your typing
-  permission for the person you look at, every person with the host marked,
-  and the server address. Five names fill one column, then a new column is
-  added to the left. Select a person to see their terminals.
-- Right click the same control for the session panel. Use it to open, close,
-  or select a terminal, copy the invite, go back, and quit Seer.
-- Click a terminal to open it for typing. Drag to select and copy text.
-- Scroll over the picker to see more columns, or over the terminal area.
+![The people picker, with the typing permission, the people in the room, and the room address](docs/images/people-picker.png)
 
-Viewer:
+- The first line shows your typing permission for the person you watch.
+- The list shows every person, with the host marked.
+- Select a person to see their live terminals.
+- A terminal takes its name from its foreground program. A shell uses
+  the name "shell" and the state "idle". Other programs are "busy".
 
-- Use the mouse to open the session panel and select Back for the overview.
-- Input is enabled for your terminals and for people who gave you a grant.
-- Seer has no prefix. Keys belong to the terminal until you open a panel
-  or a menu.
+Right click a person row to open their menu. It shows their presence,
+idle time, and terminals. Use j and k to select, Enter to watch, and
+Space to give or remove your "can type here" grant. The box changes
+when the room server confirms it.
 
-Right click another person's row in the picker to open their menu. It shows
-their presence, idle time, terminals, watch actions, and your "can type here"
-grant for them. Use j and k to select an action, Enter to watch, and Space to
-toggle the grant.
-The checkbox changes when the broker confirms it. Esc or a click outside
-closes the menu.
+Right click the top right control for the session panel. Use it to
+open, close, or select a terminal, copy the join line, go back, and
+quit Seer.
 
-Seer controls use Catppuccin Mocha when COLORTERM is truecolor. Otherwise they
-use a 16-color palette. Focused borders use the accent color. Other borders use
-overlay0. Terminal output keeps your own terminal colors: the default text and
-background colors and the 16 ANSI colors of your terminal profile, also when you
-watch another person. Explicit RGB colors and color indexes 16 to 255 stay
-unchanged.
+## Commands
 
-## Server commands
+- `seer` opens the people and terminals screen. `seer attach` is the
+  same.
+- `seer start` opens a new room. The people of the old room are
+  removed. `seer start --restore` reopens the old room with its people.
+- `seer invite --hours N` makes a new join line.
+- `seer join <line>` joins a room.
+- `seer perms --on` lets every person in the room type into your
+  terminals. `seer perms --off` removes every grant.
+- `seer peek <person>` opens Seer with that person selected.
+- `seer list` lists your saved rooms and people.
+- `seer detach` disconnects a selected client. Its terminals continue.
+- `seer leave` removes you from the room and stops your terminals on
+  this computer. The room stays open for the others.
+- `seer stop` stops the room server. Only the host can do this. Other
+  people keep their terminals.
+- `seer update` installs the latest release.
+- `seer exit` leaves Seer from inside a Seer terminal.
 
-- seer attach opens the people and terminals screen.
-- seer invite --hours 24 creates a new invitation.
-- seer list lists saved servers and people.
-- seer detach disconnects a selected client without stopping its terminals.
-- seer stop ends your local terminals for the selected room. If this computer
-  hosts that room, it also stops the room server. Other people's shells keep
-  running.
-- seer start opens a new room. The people of the old room are removed. An
-  invitation made before a stop stays valid. seer start --restore reopens the
-  old room with its members.
+## Good to know
 
-Remote connections to the broker are encrypted. See docs/adr/0002-builtin-connect.md.
-Research notes are in docs/research/. Read CONTRIBUTING.md before a change.
+- Your local shells continue when you close the Seer window or lose
+  the room connection. Open Seer again to return to them.
+- A restart of the computer or the runtime restores the saved layout
+  with new shells. The old programs do not come back.
+- One computer at a time can publish the terminals of one person.
+- All persons must use the same major and minor version. A different
+  version prints a message that tells you to run `seer update`.
+- Remote connections are encrypted. See
+  [ADR 0002](docs/adr/0002-builtin-connect.md).
+- The host is trusted. The host computer moves the data of the room.
+- Seer controls use Catppuccin Mocha colors when COLORTERM is
+  truecolor, and 16 colors if not. Terminal output keeps the colors of
+  your own terminal.
+- Your terminal must permit clipboard access to copy the join line.
+- There is no chat. An agent inbox is planned but not built.
+
+## Known faults
+
+- A watched terminal does not fill the window when a full screen
+  program runs in it. See issue 433.
+- A Seer window can stay behind after a session and use one CPU core.
+  See issue 429.
 
 ## Build from source
 
     cargo build --workspace
 
-## Upgrade from 0.4.7 to 0.5.0
-
-Upgrade the broker and every participant's three Seer binaries together.
-Major and minor versions must match. Room identity, membership, seats, and
-grants stay in the existing room store.
-
-Before the host stops the old 0.4.7 broker, everyone must save their work and
-finish any jobs in the old hosted terminals. The old broker controls those
-processes; this upgrade cannot move a running shell to another computer.
-
-Start the upgraded room and open Seer on each participant's computer. Their
-first local terminals start fresh. Seer does not copy host files, provider
-credentials, or host terminal snapshots. Keep any host files you still need
-and transfer them through your normal file workflow.
-
-Only one computer can publish terminals for a person in a room at a time.
-Use a separate room identity for a second person. To move your own identity
-to another computer, stop its local runtime on the first computer first.
-See [ADR 0009](docs/adr/0009-participant-owned-terminals.md).
+Read [CONTRIBUTING.md](CONTRIBUTING.md) before a change. The decisions
+are in docs/adr/. The research is in docs/research/.
