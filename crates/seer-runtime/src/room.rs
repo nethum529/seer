@@ -7,6 +7,7 @@ use std::thread;
 use std::time::Duration;
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::version::version_mismatch;
 use seer_net::{Session, Socket, Stream};
 
 const ENDPOINT_VAR: &str = "SEER_ROOM_ENDPOINT";
@@ -19,6 +20,7 @@ pub(crate) const SECRET_VARS: [&str; 2] = [CREDENTIAL_VAR, KEY_VAR];
 const IROH_PREFIX: &str = "iroh:";
 const FIRST_BACKOFF: Duration = Duration::from_secs(1);
 const MAX_BACKOFF: Duration = Duration::from_secs(30);
+const VERSION_RETRY: Duration = Duration::from_secs(30);
 
 pub(crate) struct RoomConfig {
     endpoint: String,
@@ -46,24 +48,41 @@ pub(crate) fn spawn(
     user_id: String,
     generation: String,
     serve: impl Fn(UnixStream) + Send + 'static,
+    note_refusal: impl Fn(Option<String>) + Send + 'static,
 ) -> io::Result<()> {
     thread::Builder::new()
         .name("runtime-room".into())
-        .spawn(move || publish_loop(&config, &user_id, &generation, &serve))?;
+        .spawn(move || publish_loop(&config, &user_id, &generation, &serve, &note_refusal))?;
     Ok(())
 }
 
-fn publish_loop(config: &RoomConfig, user_id: &str, generation: &str, serve: &impl Fn(UnixStream)) {
+fn publish_loop(
+    config: &RoomConfig,
+    user_id: &str,
+    generation: &str,
+    serve: &impl Fn(UnixStream),
+    note_refusal: &impl Fn(Option<String>),
+) {
     let mut backoff = FIRST_BACKOFF;
+    let mut refused = false;
     loop {
-        match publish_once(config, user_id, generation, serve) {
+        match publish_once(
+            config,
+            user_id,
+            generation,
+            serve,
+            &mut refused,
+            note_refusal,
+        ) {
             Ok(()) => backoff = FIRST_BACKOFF,
             Err(error) => {
                 seer_core::debug_log!("room connection ended error={error}");
                 eprintln!("runtime room connection ended: {error}");
             }
         }
-        thread::sleep(backoff);
+        // Issue 423: a room of another version refuses again until one side
+        // updates, so the runtime tries again only once every 30 s.
+        thread::sleep(if refused { VERSION_RETRY } else { backoff });
         backoff = (backoff * 2).min(MAX_BACKOFF);
     }
 }
@@ -73,6 +92,8 @@ fn publish_once(
     user_id: &str,
     generation: &str,
     serve: &impl Fn(UnixStream),
+    refused: &mut bool,
+    note_refusal: &impl Fn(Option<String>),
 ) -> io::Result<()> {
     let link = Link::connect(config)?;
     let mut control = link.open_socket()?;
@@ -86,8 +107,15 @@ fn publish_once(
         },
     )?;
     match codec::decode(&mut control)? {
-        ServerMsg::Published { .. } => {}
+        ServerMsg::Published { .. } => {
+            *refused = false;
+            note_refusal(None);
+        }
         ServerMsg::Refused { reason } => {
+            if version_mismatch(&reason).is_some() {
+                *refused = true;
+                note_refusal(Some(reason.clone()));
+            }
             return Err(io::Error::other(format!(
                 "room refused this runtime: {reason}"
             )));

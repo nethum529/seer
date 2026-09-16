@@ -13,7 +13,9 @@ use crate::server::BrokerState;
 
 mod input;
 mod transport;
+mod unreadable;
 use transport::{Event, ReaderTask, RuntimeConnection, spawn_client_reader};
+use unreadable::Unreadable;
 
 pub(crate) fn forward<S: Stream + Clone>(
     client: S,
@@ -37,6 +39,7 @@ struct Coordinator<'a> {
     runtimes: HashMap<String, RuntimeConnection>,
     watches: HashMap<(String, String), (PaneSize, bool)>,
     lists: BTreeSet<String>,
+    unreadable: Unreadable,
 }
 
 impl<'a> Coordinator<'a> {
@@ -78,6 +81,7 @@ impl<'a> Coordinator<'a> {
             runtimes: HashMap::new(),
             watches: HashMap::new(),
             lists: BTreeSet::new(),
+            unreadable: Unreadable::default(),
         })
     }
 
@@ -103,6 +107,7 @@ impl<'a> Coordinator<'a> {
                 for user in users {
                     let _ = self.list(&user);
                 }
+                self.refresh_unreadable()?;
                 refreshed = std::time::Instant::now();
             }
             let event = match self.events.recv_timeout(std::time::Duration::from_secs(1)) {
@@ -154,14 +159,7 @@ impl<'a> Coordinator<'a> {
                 {
                     match result {
                         Ok(message) => self.handle_runtime(&user, message)?,
-                        Err(_) => {
-                            seer_core::debug_log!(
-                                "runtime lost user={user} client={} error={:?}",
-                                self.client_id,
-                                result.as_ref().err()
-                            );
-                            self.close_runtime(&user)?;
-                        }
+                        Err(error) => self.runtime_lost(&user, &error)?,
                     }
                 }
             }
@@ -262,8 +260,7 @@ impl<'a> Coordinator<'a> {
 
     fn runtime(&mut self, user: &str) -> io::Result<&mut RuntimeConnection> {
         if !self.runtimes.contains_key(user) {
-            let person = self.person(user)?;
-            let mut runtime = RuntimeConnection::connect(self.broker, &person, &self.event_sender)?;
+            let mut runtime = self.connect_runtime(user)?;
             for ((target, pane), (size, viewer)) in &self.watches {
                 if target == user {
                     runtime.send(&ClientMsg::Watch {

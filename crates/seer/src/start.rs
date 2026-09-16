@@ -8,7 +8,15 @@ mod stop;
 #[cfg(target_os = "linux")]
 pub(crate) use restore::restore_owner;
 #[cfg(target_os = "linux")]
-pub(crate) use stop::stop_hosted_broker;
+pub(crate) use stop::{hosts_room, stop_hosted_broker, stop_hosted_room};
+#[cfg(target_os = "macos")]
+pub(crate) fn hosts_room(_endpoint: &str) -> bool {
+    false
+}
+#[cfg(target_os = "macos")]
+pub(crate) fn stop_hosted_room(_endpoint: &str) -> std::io::Result<bool> {
+    Ok(false)
+}
 #[cfg(target_os = "linux")]
 mod wordmark;
 #[cfg(target_os = "linux")]

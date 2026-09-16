@@ -6,6 +6,7 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientInfo, ClientMsg, Person, PersonState, ServerMsg, codec};
+use seer_core::version::major_minor;
 use seer_net::{EndpointId, Listener, Session, Socket, Stream, load_or_create_secret_key};
 
 use crate::attachments::{AttachmentGuard, Attachments, ClientWriter};
@@ -375,9 +376,14 @@ fn handshake(
             token,
         } => claim_runtime_stream(stream, broker, &user_id, &credential, &token)
             .map(|()| Handshake::Done),
-        ClientMsg::Join { seat_token, name } => {
-            join(stream, broker.registry(), &seat_token, &name).map(|()| Handshake::Done)
-        }
+        ClientMsg::Join {
+            seat_token,
+            name,
+            version,
+        } => match check_version(stream, version.as_deref().unwrap_or("before 0.6.0"))? {
+            true => join(stream, broker.registry(), &seat_token, &name).map(|()| Handshake::Done),
+            false => Ok(Handshake::Done),
+        },
         _ => refuse(stream, EXPECTED_HELLO).map(|()| Handshake::Done),
     }
 }
@@ -390,12 +396,6 @@ fn check_version(stream: &mut Socket, version: &str) -> io::Result<bool> {
     let reason =
         format!("version mismatch: server {server_version}, client {version}. Run: seer update");
     refuse(stream, &reason).map(|()| false)
-}
-
-fn major_minor(version: &str) -> Option<(&str, &str)> {
-    let (major, remainder) = version.split_once('.')?;
-    let (minor, _) = remainder.split_once('.')?;
-    Some((major, minor))
 }
 
 pub(crate) fn read_message<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ClientMsg> {

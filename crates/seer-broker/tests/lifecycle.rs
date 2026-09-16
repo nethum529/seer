@@ -94,6 +94,7 @@ fn bulk_permissions_change_only_the_callers_grants_for_current_people() {
         &mut joining,
         &ClientMsg::Join {
             seat_token: token.into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
             name: "charlie".into(),
         },
     );

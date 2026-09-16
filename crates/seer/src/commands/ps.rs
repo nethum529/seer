@@ -109,7 +109,7 @@ fn clean(processes: &[Process]) -> Result<(), CommandError> {
     Ok(())
 }
 
-fn stop_runtime(processes: &[Process], pid: u32) -> Result<(), CommandError> {
+pub(super) fn stop_runtime(processes: &[Process], pid: u32) -> Result<(), CommandError> {
     let Some(process) = processes.iter().find(|process| process.pid() == pid) else {
         return Err(CommandError::usage(format!(
             "PID {pid} is not a Seer process of yours on this computer. Run seer ps."

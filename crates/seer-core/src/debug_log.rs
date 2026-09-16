@@ -183,7 +183,9 @@ pub fn server_summary(message: &ServerMsg) -> String {
             can_type_here.join(","),
             you_may_type_into.join(",")
         ),
-        ServerMsg::RuntimeReady { generation } => format!("RuntimeReady generation={generation}"),
+        ServerMsg::RuntimeReady { generation, .. } => {
+            format!("RuntimeReady generation={generation}")
+        }
         ServerMsg::Published { generation } => format!("Published generation={generation}"),
         ServerMsg::Welcome {
             user_id, client_id, ..

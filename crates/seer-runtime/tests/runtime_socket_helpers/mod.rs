@@ -44,7 +44,7 @@ pub(crate) fn connect_viewer(path: &Path) -> UnixStream {
                 .expect("viewer attach must encode");
                 match codec::decode::<_, ServerMsg>(&mut stream).expect("runtime ready must decode")
                 {
-                    ServerMsg::RuntimeReady { generation } => {
+                    ServerMsg::RuntimeReady { generation, .. } => {
                         assert!(!generation.is_empty());
                         stream
                             .set_read_timeout(Some(MESSAGE_TIMEOUT))

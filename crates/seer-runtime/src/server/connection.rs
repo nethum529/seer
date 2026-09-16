@@ -11,6 +11,7 @@ use seer_core::Tree;
 use seer_core::proto::{ClientMsg, PeekTarget as TargetInfo, ServerMsg, codec};
 use seer_core::{TerminalCapabilities, TerminalFrame};
 
+use super::room_refusal::ready;
 use super::{SharedSession, connection_loop, lock, writer};
 use crate::UserSession;
 
@@ -21,7 +22,9 @@ pub(super) fn handle_connection(
     generation: String,
     remote: bool,
 ) -> io::Result<()> {
-    let Some(first) = greet(&mut stream, generation, remote)? else {
+    let greeted = shared.room_refusal()?;
+    let ready = ready(&generation, greeted.clone());
+    let Some(first) = greet(&mut stream, &ready, remote)? else {
         return Ok(());
     };
     match first {
@@ -31,7 +34,10 @@ pub(super) fn handle_connection(
                 "a room stream cannot own this runtime",
             ));
         }
-        ClientMsg::AttachRuntime => shared.add_connection(connection_id, stream.try_clone()?)?,
+        ClientMsg::AttachRuntime => {
+            shared.add_connection(connection_id, stream.try_clone()?)?;
+            shared.resend_room_refusal(connection_id, &generation, &greeted)?;
+        }
         ClientMsg::ObserveRuntime => {
             shared.add_view_connection(connection_id, stream.try_clone()?, None, true)?
         }
@@ -66,6 +72,9 @@ pub(super) fn handle_connection(
         ClientMsg::ExitClient { pane } if !remote => {
             return super::size_lease::handle_exit_client(&mut stream, shared, &pane);
         }
+        ClientMsg::Stop if !remote => {
+            return super::restart::handle_restart(&mut stream, shared);
+        }
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,
@@ -83,17 +92,17 @@ pub(super) fn handle_connection(
 /// runtime after the broker asks for it, so the request arrives first.
 fn greet(
     stream: &mut UnixStream,
-    generation: String,
+    ready: &ServerMsg,
     remote: bool,
 ) -> io::Result<Option<ClientMsg>> {
     if remote {
         let Ok(first) = codec::decode(stream) else {
             return Ok(None);
         };
-        codec::encode(stream, &ServerMsg::RuntimeReady { generation })?;
+        codec::encode(stream, ready)?;
         return Ok(Some(first));
     }
-    codec::encode(stream, &ServerMsg::RuntimeReady { generation })?;
+    codec::encode(stream, ready)?;
     Ok(codec::decode(stream).ok())
 }
 

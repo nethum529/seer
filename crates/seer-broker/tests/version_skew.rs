@@ -139,22 +139,7 @@ fn the_broker_ignores_unknown_fields_from_a_watcher_and_ends_its_link_on_other_c
 #[test]
 fn the_broker_drops_unknown_fields_from_a_runtime_and_ends_its_stream_on_other_changes() {
     let room = Room::start(false);
-    let mut control = TcpStream::connect(room.address).expect("fake runtime must connect");
-    control
-        .set_read_timeout(Some(WAIT))
-        .expect("read timeout must set");
-    send(
-        &mut control,
-        &ClientMsg::PublishRuntime {
-            user_id: "bob".into(),
-            credential: BOB_SECRET.into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-            generation: "gen-fake".into(),
-        },
-    );
-    let ServerMsg::Published { .. } = decode(&mut control) else {
-        panic!("the room must accept the fake runtime");
-    };
+    let mut control = fake_runtime(room.address);
     let mut alice = join_room(room.address, "alice", ALICE_SECRET);
     let (tree, pane) = one_pane_tree();
 
@@ -182,6 +167,8 @@ fn the_broker_drops_unknown_fields_from_a_runtime_and_ends_its_stream_on_other_c
     );
     assert_closed(&mut stream, "a missing field");
 
+    drop(control);
+    let mut control = fake_runtime(room.address);
     let mut stream = watched_stream(room.address, &mut control, &mut alice, &tree, &pane);
     send_raw(&mut stream, UNKNOWN_KIND);
     assert_closed(&mut stream, "an unknown message kind");
@@ -190,6 +177,83 @@ fn the_broker_drops_unknown_fields_from_a_runtime_and_ends_its_stream_on_other_c
     wait_for(&mut alice, |message| {
         matches!(message, ServerMsg::People { .. })
     });
+}
+
+// Issue 425: the watcher must not take a frozen screen for a live one, and the
+// room must not open the failing stream again and again.
+#[test]
+fn a_watcher_sees_a_notice_when_the_room_cannot_read_a_runtime() {
+    let room = Room::start(false);
+    let mut control = fake_runtime(room.address);
+    let mut alice = join_room(room.address, "alice", ALICE_SECRET);
+    let (tree, pane) = one_pane_tree();
+    let mut stream = watched_stream(room.address, &mut control, &mut alice, &tree, &pane);
+    send(&mut alice, &ClientMsg::Terminals { user: "bob".into() });
+
+    send_raw(&mut stream, UNKNOWN_KIND);
+    let notice = Instant::now() + Duration::from_secs(5);
+    loop {
+        alice
+            .set_read_timeout(Some(notice.saturating_duration_since(Instant::now())))
+            .expect("read timeout must set");
+        if let ServerMsg::Refused { .. } = decode(&mut alice) {
+            break;
+        }
+    }
+    assert!(
+        observe_request(room.address, &mut control, Duration::from_secs(3)).is_none(),
+        "the room must not open the stream again"
+    );
+
+    drop((control, stream));
+    let mut control = fake_runtime(room.address);
+    let mut stream = observed_stream(room.address, &mut control, &tree, Duration::from_secs(5));
+    alice
+        .set_read_timeout(Some(WAIT))
+        .expect("read timeout must set");
+    let frame = TerminalFrame {
+        rows: Vec::new(),
+        cursor: Cursor::default(),
+        modes: TerminalModes::default(),
+    };
+    codec::encode(
+        &mut stream,
+        &ServerMsg::Cells {
+            user: "bob".into(),
+            pane: pane.clone(),
+            frame,
+            seq: 0,
+        },
+    )
+    .expect("fake runtime frame must send");
+    wait_for(
+        &mut alice,
+        |message| matches!(message, ServerMsg::Cells { pane: shown, .. } if *shown == pane),
+    );
+}
+
+fn fake_runtime(address: SocketAddr) -> TcpStream {
+    let deadline = Instant::now() + WAIT;
+    while Instant::now() < deadline {
+        let mut control = TcpStream::connect(address).expect("fake runtime must connect");
+        control
+            .set_read_timeout(Some(WAIT))
+            .expect("read timeout must set");
+        send(
+            &mut control,
+            &ClientMsg::PublishRuntime {
+                user_id: "bob".into(),
+                credential: BOB_SECRET.into(),
+                version: env!("CARGO_PKG_VERSION").into(),
+                generation: "gen-fake".into(),
+            },
+        );
+        if let ServerMsg::Published { .. } = decode(&mut control) {
+            return control;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    panic!("the room never accepted the fake runtime");
 }
 
 fn one_pane_tree() -> (Tree, String) {
@@ -221,9 +285,50 @@ fn watched_stream(
             viewer: true,
         },
     );
-    let deadline = Instant::now() + WAIT;
-    while Instant::now() < deadline {
-        let ServerMsg::OpenStream { token } = decode(control) else {
+    observed_stream(address, control, tree, WAIT)
+}
+
+fn observed_stream(
+    address: SocketAddr,
+    control: &mut TcpStream,
+    tree: &Tree,
+    wait: Duration,
+) -> TcpStream {
+    let mut stream = observe_request(address, control, wait)
+        .expect("the broker never asked the fake runtime to observe");
+    for message in [
+        ServerMsg::RuntimeReady {
+            generation: "gen-fake".into(),
+            version: None,
+            room_refused: None,
+        },
+        ServerMsg::Tree { tree: tree.clone() },
+        ServerMsg::Terminals {
+            user: "bob".into(),
+            terminals: Vec::new(),
+        },
+    ] {
+        codec::encode(&mut stream, &message).expect("fake runtime reply must send");
+    }
+    let watch: ClientMsg = codec::decode(&mut stream).expect("the watch must arrive");
+    assert!(matches!(watch, ClientMsg::Watch { .. }));
+    stream
+}
+
+fn observe_request(
+    address: SocketAddr,
+    control: &mut TcpStream,
+    wait: Duration,
+) -> Option<TcpStream> {
+    let deadline = Instant::now() + wait;
+    while let Some(left) = deadline
+        .checked_duration_since(Instant::now())
+        .filter(|left| !left.is_zero())
+    {
+        control
+            .set_read_timeout(Some(left))
+            .expect("read timeout must set");
+        let Ok(ServerMsg::OpenStream { token }) = codec::decode(control) else {
             continue;
         };
         let mut stream = TcpStream::connect(address).expect("fake runtime stream must connect");
@@ -238,26 +343,11 @@ fn watched_stream(
                 token,
             },
         );
-        if !matches!(codec::decode(&mut stream), Ok(ClientMsg::ObserveRuntime)) {
-            continue;
+        if matches!(codec::decode(&mut stream), Ok(ClientMsg::ObserveRuntime)) {
+            return Some(stream);
         }
-        for message in [
-            ServerMsg::RuntimeReady {
-                generation: "gen-fake".into(),
-            },
-            ServerMsg::Tree { tree: tree.clone() },
-            ServerMsg::Terminals {
-                user: "bob".into(),
-                terminals: Vec::new(),
-            },
-        ] {
-            codec::encode(&mut stream, &message).expect("fake runtime reply must send");
-        }
-        let watch: ClientMsg = codec::decode(&mut stream).expect("the watch must arrive");
-        assert!(matches!(watch, ClientMsg::Watch { .. }));
-        return stream;
     }
-    panic!("the broker never asked the fake runtime to observe");
+    None
 }
 
 fn publication(fake_broker: &TcpListener) -> TcpStream {

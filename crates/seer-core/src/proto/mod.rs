@@ -16,6 +16,8 @@ pub enum ClientMsg {
     Join {
         seat_token: String,
         name: String,
+        #[serde(default)]
+        version: Option<String>,
     },
     Invite {
         hours: Option<u32>,
@@ -154,6 +156,13 @@ pub enum ServerMsg {
     },
     RuntimeReady {
         generation: String,
+        /// A runtime before 0.6.0 sends no version.
+        #[serde(default)]
+        version: Option<String>,
+        /// Issue 423: the reason of the room refusal for the version, while it lasts.
+        /// The runtime sends RuntimeReady again to its windows when it changes.
+        #[serde(default)]
+        room_refused: Option<String>,
     },
     Published {
         generation: String,

@@ -15,14 +15,26 @@ pub(super) fn start_room(
     ids: &Arc<AtomicU64>,
 ) -> io::Result<()> {
     let user = lock(&shared.session)?.user.clone();
-    let shared = Arc::clone(shared);
+    let serving = Arc::clone(shared);
+    let noting = Arc::clone(shared);
     let ids = Arc::clone(ids);
     let generation = generation.to_owned();
-    crate::room::spawn(room, user, generation.clone(), move |stream| {
-        if let Err(error) = spawn_connection(stream, &shared, &ids, &generation, true) {
-            eprintln!("runtime could not serve a room stream: {error}");
-        }
-    })
+    let noted_generation = generation.clone();
+    crate::room::spawn(
+        room,
+        user,
+        generation.clone(),
+        move |stream| {
+            if let Err(error) = spawn_connection(stream, &serving, &ids, &generation, true) {
+                eprintln!("runtime could not serve a room stream: {error}");
+            }
+        },
+        move |reason| {
+            if let Err(error) = noting.set_room_refusal(&noted_generation, reason) {
+                eprintln!("runtime could not tell the windows about the room: {error}");
+            }
+        },
+    )
 }
 
 pub(super) fn spawn_connection(

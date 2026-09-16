@@ -25,7 +25,9 @@ use std::time::Duration;
 pub(crate) enum SessionExit {
     Client,
     Detached,
+    Restarted,
     ServerStopped,
+    LocalLinkLost,
     TerminalLost,
 }
 
@@ -34,6 +36,7 @@ pub(crate) fn run(
     room: Option<Socket>,
     tree: Tree,
     server: crate::store::ServerEntry,
+    standing_notice: Option<String>,
 ) -> io::Result<SessionExit> {
     seer_core::debug_log!(
         "session start server={} room={}",
@@ -42,6 +45,7 @@ pub(crate) fn run(
     );
     let mut terminal = TerminalSession::start()?;
     let mut state = ClientState::for_server(tree, &server);
+    state.set_standing_notice(standing_notice);
     let mut start_person = navigation::take_start_person();
     let mut routes = Routes::new(local.clone(), room.clone(), state.own_user.clone());
     subscribe(&mut routes, &state).or_else(ignore_setup_disconnect)?;
@@ -50,7 +54,7 @@ pub(crate) fn run(
     let room_reader = room
         .clone()
         .map(|room| spawn_reader(room, Source::Room, sender.clone()));
-    let reconnects = Reconnects::new(server, sender);
+    let reconnects = Reconnects::new(server.clone(), sender);
     if room.is_none() {
         reconnects.start();
     }
@@ -59,6 +63,7 @@ pub(crate) fn run(
         &mut terminal.terminal,
         &mut routes,
         Inputs {
+            server: &server,
             events: &events,
             terminal_events: &terminal_events,
         },
@@ -95,6 +100,7 @@ fn subscribe(routes: &mut Routes, state: &ClientState) -> io::Result<()> {
 }
 
 struct Inputs<'a> {
+    server: &'a crate::store::ServerEntry,
     events: &'a Events,
     terminal_events: &'a Receiver<Event>,
 }
@@ -112,11 +118,14 @@ fn run_loop(
     loop {
         for _ in 0..64 {
             match inputs.events.try_recv() {
-                Ok(envelope) => match drain(envelope, stream, state, start_person)? {
-                    Some(exit) => return Ok(exit),
-                    None => dirty = true,
-                },
-                Err(TryRecvError::Disconnected) => return Ok(SessionExit::ServerStopped),
+                Ok(envelope) => {
+                    note_runtime(&envelope, inputs.server, state);
+                    match drain(envelope, stream, state, start_person)? {
+                        Some(exit) => return Ok(exit),
+                        None => dirty = true,
+                    }
+                }
+                Err(TryRecvError::Disconnected) => return Ok(SessionExit::LocalLinkLost),
                 Err(TryRecvError::Empty) => break,
             }
         }
@@ -125,7 +134,7 @@ fn run_loop(
             reconnects.start();
             dirty = true;
         }
-        if let Some(room) = reconnects.take() {
+        if let Some(room) = reconnects.take(state) {
             readers.push(reconnects.adopt(room.clone())?);
             stream.restore_room(room);
             resubscribe(stream, state)?;
@@ -161,6 +170,24 @@ fn run_loop(
     }
 }
 
+fn note_runtime(envelope: &Envelope, server: &crate::store::ServerEntry, state: &mut ClientState) {
+    if let (
+        Source::Local,
+        Ok(ServerMsg::RuntimeReady {
+            version,
+            room_refused,
+            ..
+        }),
+    ) = (&envelope.source, &envelope.message)
+    {
+        state.set_standing_notice(crate::local::standing_notice(
+            server,
+            version.as_deref(),
+            room_refused.as_deref(),
+        ));
+    }
+}
+
 // The local runtime ending stops this window. The room ending does not.
 fn drain(
     envelope: Envelope,
@@ -176,7 +203,7 @@ fn drain(
             Ok(None)
         }
         (_, Ok(message)) => apply_message(message, stream, state, start_person),
-        (Source::Local, Err(_)) => Ok(Some(SessionExit::ServerStopped)),
+        (Source::Local, Err(_)) => Ok(Some(SessionExit::LocalLinkLost)),
         (Source::Room, Err(_)) => {
             stream.drop_room();
             Ok(None)
@@ -299,6 +326,7 @@ fn apply_message(
         ServerMsg::Bye { reason } => {
             return Ok(Some(match reason.as_str() {
                 "detached" => SessionExit::Detached,
+                "restarted" => SessionExit::Restarted,
                 "server stopped" => SessionExit::ServerStopped,
                 _ => SessionExit::Client,
             }));

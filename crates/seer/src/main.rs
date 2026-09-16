@@ -24,6 +24,7 @@ mod tui_link;
 mod tui_navigation;
 mod tui_sync;
 mod update;
+mod version_skew;
 mod viewer;
 
 fn main() -> ExitCode {
@@ -37,3 +38,5 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod screen_tests;
+#[cfg(test)]
+mod tui_link_tests;

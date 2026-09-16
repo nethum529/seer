@@ -2,7 +2,6 @@ use std::io::{self, IsTerminal, Read};
 use std::net::TcpStream;
 use std::time::{Duration, Instant};
 
-use seer_core::Tree;
 use seer_core::proto::{ClientInfo, ClientMsg, Person, PersonState, ServerMsg, codec};
 use seer_net::{Socket, Stream};
 
@@ -13,12 +12,16 @@ use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
 pub(crate) use exit::exit;
+pub(crate) use handshake::{Welcome, authenticate, hello};
 pub(crate) use selection::{attach_bare, peek, selected_server};
 mod exit;
+mod handshake;
 mod lifecycle;
 pub(crate) use lifecycle::{leave, perms, stop};
 mod ps;
 pub(crate) use ps::{PsAction, ps};
+mod restart;
+pub(crate) use restart::restart;
 mod selection;
 use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -80,6 +83,7 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
         .unwrap_or(&invitation);
     let capsule = capsule::parse(invitation).map_err(CommandError::system)?;
     let endpoint = capsule.endpoint.to_string();
+    handshake::check_room_version(&endpoint)?;
 
     let default_name = std::env::var("USER")
         .ok()
@@ -97,6 +101,7 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
         let join = ClientMsg::Join {
             seat_token: capsule.token.clone(),
             name,
+            version: Some(env!("CARGO_PKG_VERSION").into()),
         };
         send(&mut stream, &join)?;
         match receive(&mut stream)? {
@@ -298,18 +303,6 @@ fn edit_distance_at_most_one(left: &[u8], right: &[u8]) -> bool {
     differences == 0 || long_index == longer.len()
 }
 
-pub(crate) fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), CommandError> {
-    let mut stream = connect(&server.endpoint)?;
-    let hello = ClientMsg::Hello {
-        user_id: server.user_id.clone(),
-        credential: server.credential.clone(),
-        version: env!("CARGO_PKG_VERSION").into(),
-    };
-    send(&mut stream, &hello)?;
-    let tree = welcome_tree(receive_reply(&mut stream)?)?;
-    Ok((stream, tree))
-}
-
 fn people(server: &ServerEntry) -> Result<Vec<Person>, CommandError> {
     let (mut stream, _) = authenticate(server)?;
     send(&mut stream, &ClientMsg::ListPeople)?;
@@ -320,14 +313,6 @@ fn people_reply(reply: ServerMsg) -> Result<Vec<Person>, CommandError> {
     match reply {
         ServerMsg::People { people } => Ok(people),
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
-        _ => Err(unexpected_reply()),
-    }
-}
-
-fn welcome_tree(reply: ServerMsg) -> Result<Tree, CommandError> {
-    match reply {
-        ServerMsg::Welcome { tree, .. } => Ok(tree),
-        ServerMsg::Refused { reason } => Err(CommandError::usage(format!("refused: {reason}"))),
         _ => Err(unexpected_reply()),
     }
 }
@@ -379,16 +364,12 @@ fn receive(stream: &mut impl Stream) -> Result<ServerMsg, CommandError> {
 }
 
 fn receive_reply(stream: &mut impl Stream) -> Result<ServerMsg, CommandError> {
-    receive_reply_before(stream, Instant::now() + NETWORK_TIMEOUT)
+    receive_reply_before(stream, Instant::now() + NETWORK_TIMEOUT).map_err(CommandError::system)
 }
 
-fn receive_reply_before<S: Stream>(
-    stream: &mut S,
-    deadline: Instant,
-) -> Result<ServerMsg, CommandError> {
+fn receive_reply_before<S: Stream>(stream: &mut S, deadline: Instant) -> io::Result<ServerMsg> {
     loop {
-        let reply = codec::decode(&mut DeadlineReader { stream, deadline })
-            .map_err(CommandError::system)?;
+        let reply = codec::decode(&mut DeadlineReader { stream, deadline })?;
         if !matches!(
             reply,
             ServerMsg::Tree { .. }
@@ -436,15 +417,24 @@ fn finish_session(
     if let Ok(directory) = crate::local::runtime_directory(&server.user_id) {
         seer_core::debug_log::open(&directory, "client", &server.user_id);
     }
-    let (local, tree) = crate::local::attach(server).map_err(CommandError::system)?;
+    let (local, tree, standing_notice) =
+        crate::local::attach(server).map_err(CommandError::system)?;
     if let Some(room) = &room {
         crate::tui_link::prepare_room(room).map_err(CommandError::system)?;
     }
     tui::set_peek_person(peek_person);
-    let exit = tui::run(local, room, tree, server.clone()).map_err(CommandError::system)?;
+    let exit = tui::run(local, room, tree, server.clone(), standing_notice)
+        .map_err(CommandError::system)?;
     match exit {
         tui::SessionExit::Detached => print_detached(&server.alias),
         tui::SessionExit::ServerStopped => print_server_stopped(),
+        tui::SessionExit::Restarted => restart::print_restarted(),
+        tui::SessionExit::LocalLinkLost if crate::local::runtime_answers(&server.user_id) => {
+            println!(
+                "Your terminals on this computer still run. Run: seer restart. The restart ends the running shells."
+            );
+        }
+        tui::SessionExit::LocalLinkLost => print_server_stopped(),
         tui::SessionExit::Client | tui::SessionExit::TerminalLost => {}
     }
     Ok(())

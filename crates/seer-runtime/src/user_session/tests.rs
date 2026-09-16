@@ -154,6 +154,7 @@ fn focuses_a_pane_and_ignores_deferred_messages() {
         },
         ClientMsg::Join {
             seat_token: "seat".into(),
+            version: None,
             name: "alice".into(),
         },
         ClientMsg::Invite { hours: None },

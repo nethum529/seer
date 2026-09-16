@@ -12,9 +12,11 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::version::major_minor;
 use seer_net::{Socket, Stream};
 
 use crate::store::ServerEntry;
+use crate::version_skew::refusal_message;
 
 const START_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
@@ -22,24 +24,31 @@ const READY_TIMEOUT: Duration = Duration::from_secs(5);
 const KILL_GRACE: Duration = Duration::from_secs(1);
 
 // The runtime keeps running when this window closes and when the room stops.
-pub(crate) fn attach(server: &ServerEntry) -> io::Result<(Socket, Tree)> {
+pub(crate) fn attach(server: &ServerEntry) -> io::Result<Attached> {
     let directory = runtime_directory(&server.user_id)?;
     let socket = directory.join("socket");
-    if let Ok(stream) = connect(&socket, None) {
-        return attach_stream(stream);
+    if let Ok(ready) = greet(&socket, None, READY_TIMEOUT) {
+        return attach_stream(server, ready);
     }
     // Two windows opening together must share one runtime, not race to spawn
     // two and leave a stale PID behind.
     let _startup = StartupLock::hold(&directory.join("startup.lock"))?;
-    if let Ok(stream) = connect(&socket, None) {
-        return attach_stream(stream);
+    if let Ok(ready) = greet(&socket, None, READY_TIMEOUT) {
+        return attach_stream(server, ready);
     }
     let generation = generation();
     let mut child = start(&directory, &socket, server, &generation)?;
-    let stream = connect_until_ready(&socket, &generation, &mut child, &directory)?;
+    let ready = connect_until_ready(&socket, &generation, &mut child, &directory)?;
     write_private(&directory.join("runtime.pid"), &child.id().to_string())?;
-    attach_stream(stream)
+    attach_stream(server, ready)
 }
+
+// The local link, the terminal tree, and the standing notice for a runtime of
+// another Seer version or a room that refuses the runtime.
+pub(crate) type Attached = (Socket, Tree, Option<String>);
+
+// The stream, the runtime version, and the room refusal.
+type Ready = (UnixStream, Option<String>, Option<String>);
 
 struct StartupLock(File);
 
@@ -69,14 +78,50 @@ impl Drop for StartupLock {
     }
 }
 
-fn attach_stream(mut stream: UnixStream) -> io::Result<(Socket, Tree)> {
+fn attach_stream(
+    server: &ServerEntry,
+    (mut stream, version, room_refused): Ready,
+) -> io::Result<Attached> {
     codec::encode(&mut stream, &ClientMsg::AttachRuntime)?;
     let ServerMsg::Tree { tree } = codec::decode(&mut stream)? else {
         return Err(io::Error::other("the runtime did not send your terminals"));
     };
     let socket = Socket::from(stream);
     socket.set_read_timeout(None)?;
-    Ok((socket, tree))
+    let notice = standing_notice(server, version.as_deref(), room_refused.as_deref());
+    Ok((socket, tree, notice))
+}
+
+// Issue 423: for a runtime of another version the step is seer restart, so
+// that notice wins over the room refusal.
+pub(crate) fn standing_notice(
+    server: &ServerEntry,
+    version: Option<&str>,
+    room_refused: Option<&str>,
+) -> Option<String> {
+    runtime_notice(version).or_else(|| {
+        let step = refusal_message(room_refused?, crate::start::hosts_room(&server.endpoint));
+        Some(format!(
+            "Your terminals are not shared with the room {}. {step}",
+            server.alias
+        ))
+    })
+}
+
+// seer update replaces the binaries but stops no process, so a window can
+// attach to a runtime from before the update. Seer does not stop it.
+fn runtime_notice(version: Option<&str>) -> Option<String> {
+    let own = major_minor(env!("CARGO_PKG_VERSION"));
+    if version
+        .and_then(major_minor)
+        .is_some_and(|found| Some(found) == own)
+    {
+        return None;
+    }
+    Some(
+        "Your terminals on this computer run an older Seer (or another version). Run: seer restart. The restart ends the running shells."
+            .to_owned(),
+    )
 }
 
 // The user ID is minted for one person in one room, so it scopes the local
@@ -88,7 +133,7 @@ pub(crate) fn runtime_directory(user_id: &str) -> io::Result<PathBuf> {
     Ok(directory)
 }
 
-fn state_dir() -> io::Result<PathBuf> {
+pub(crate) fn state_dir() -> io::Result<PathBuf> {
     if let Some(path) = env::var_os("XDG_STATE_HOME").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(path).join("seer"));
     }
@@ -106,14 +151,20 @@ pub(crate) fn connect_within(
     generation: Option<&str>,
     ready_timeout: Duration,
 ) -> io::Result<UnixStream> {
+    greet(socket, generation, ready_timeout).map(|(stream, ..)| stream)
+}
+
+fn greet(socket: &Path, generation: Option<&str>, ready_timeout: Duration) -> io::Result<Ready> {
     let mut stream = UnixStream::connect(socket)?;
     stream.set_read_timeout(Some(ready_timeout))?;
     match codec::decode::<_, ServerMsg>(&mut stream)? {
-        ServerMsg::RuntimeReady { generation: found }
-            if generation.is_none_or(|wanted| wanted == found) =>
-        {
+        ServerMsg::RuntimeReady {
+            generation: found,
+            version,
+            room_refused,
+        } if generation.is_none_or(|wanted| wanted == found) => {
             stream.set_read_timeout(None)?;
-            Ok(stream)
+            Ok((stream, version, room_refused))
         }
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
@@ -127,12 +178,12 @@ fn connect_until_ready(
     generation: &str,
     child: &mut Child,
     directory: &Path,
-) -> io::Result<UnixStream> {
+) -> io::Result<Ready> {
     let deadline = Instant::now() + START_TIMEOUT;
     let mut last = io::Error::new(io::ErrorKind::TimedOut, "the runtime did not start");
     while Instant::now() < deadline {
-        match connect(socket, Some(generation)) {
-            Ok(stream) => return Ok(stream),
+        match greet(socket, Some(generation), READY_TIMEOUT) {
+            Ok(ready) => return Ok(ready),
             Err(error) => last = error,
         }
         if let Some(status) = child.try_wait()? {
@@ -253,6 +304,11 @@ fn find_runtime() -> io::Result<PathBuf> {
     ))
 }
 
+pub(crate) fn runtime_answers(user_id: &str) -> bool {
+    runtime_directory(user_id)
+        .is_ok_and(|directory| connect(&directory.join("socket"), None).is_ok())
+}
+
 // This reaches only the shells on this computer. Another participant's shells
 // run on their own computer.
 pub(crate) fn stop(user_id: &str) -> io::Result<bool> {
@@ -311,3 +367,6 @@ fn signal(pid: i32, number: i32) -> io::Result<()> {
         Err(error)
     }
 }
+
+#[cfg(test)]
+mod tests;

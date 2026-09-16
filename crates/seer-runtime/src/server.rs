@@ -11,7 +11,9 @@ use crate::UserSession;
 
 mod connection;
 mod peer;
+mod restart;
 mod room_link;
+mod room_refusal;
 mod screen;
 mod size_lease;
 mod status;
@@ -143,6 +145,7 @@ struct SharedSession {
     connections: Mutex<Vec<Connection>>,
     lease: Mutex<()>,
     last_input: Mutex<Instant>,
+    room_refused: Mutex<Option<String>>,
 }
 
 impl SharedSession {
@@ -153,6 +156,7 @@ impl SharedSession {
             connections: Mutex::new(Vec::new()),
             lease: Mutex::new(()),
             last_input: Mutex::new(Instant::now()),
+            room_refused: Mutex::new(None),
         }
     }
 

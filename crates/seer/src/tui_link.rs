@@ -1,3 +1,5 @@
+use crate::commands::Welcome;
+use crate::state::ClientState;
 use crossterm::event::{self, Event};
 use seer_core::proto::{ServerMsg, codec};
 use seer_net::Socket;
@@ -93,6 +95,8 @@ pub(crate) struct Reconnects {
     sender: mpsc::SyncSender<Envelope>,
     rooms: Receiver<Socket>,
     requests: mpsc::SyncSender<Socket>,
+    refusals: Receiver<String>,
+    refusal_sender: mpsc::SyncSender<String>,
     stopped: Arc<AtomicBool>,
 }
 
@@ -102,11 +106,14 @@ impl Reconnects {
         sender: mpsc::SyncSender<Envelope>,
     ) -> Self {
         let (requests, rooms) = mpsc::sync_channel(1);
+        let (refusal_sender, refusals) = mpsc::sync_channel(1);
         Self {
             server,
             sender,
             rooms,
             requests,
+            refusals,
+            refusal_sender,
             stopped: Arc::new(AtomicBool::new(false)),
         }
     }
@@ -114,14 +121,21 @@ impl Reconnects {
     pub(crate) fn start(&self) {
         let server = self.server.clone();
         let rooms = self.requests.clone();
+        let refusals = self.refusal_sender.clone();
         let stopped = Arc::clone(&self.stopped);
         thread::spawn(move || {
             let mut wait = Duration::from_secs(1);
             while !stopped.load(Ordering::Relaxed) {
-                if let Ok((room, _)) = crate::commands::authenticate(&server)
-                    && rooms.send(room).is_ok()
-                {
-                    return;
+                match crate::commands::hello(&server) {
+                    Ok(Welcome::Accepted(room, _)) => {
+                        if rooms.send(room).is_ok() {
+                            return;
+                        }
+                    }
+                    Ok(Welcome::Refused(reason)) => {
+                        let _ = refusals.try_send(refusal_notice(&server, &reason));
+                    }
+                    Err(_) => {}
                 }
                 thread::sleep(wait);
                 wait = (wait * 2).min(Duration::from_secs(30));
@@ -129,8 +143,13 @@ impl Reconnects {
         });
     }
 
-    pub(crate) fn take(&self) -> Option<Socket> {
-        self.rooms.try_recv().ok()
+    pub(crate) fn take(&self, state: &mut ClientState) -> Option<Socket> {
+        if let Some(notice) = self.refusals.try_iter().last() {
+            state.set_room_notice(Some(notice));
+        }
+        let room = self.rooms.try_recv().ok()?;
+        state.set_room_notice(None);
+        Some(room)
     }
 
     pub(crate) fn adopt(&self, room: Socket) -> io::Result<JoinHandle<()>> {
@@ -141,4 +160,10 @@ impl Reconnects {
     pub(crate) fn stop(&self) {
         self.stopped.store(true, Ordering::Relaxed);
     }
+}
+
+fn refusal_notice(server: &crate::store::ServerEntry, reason: &str) -> String {
+    let step =
+        crate::version_skew::refusal_message(reason, crate::start::hosts_room(&server.endpoint));
+    format!("{}: {step}", server.alias)
 }
