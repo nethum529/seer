@@ -384,6 +384,33 @@ impl<'a> Coordinator<'a> {
                     })?;
                 }
             }
+            ServerMsg::CellsDiff {
+                user: _,
+                pane,
+                seq,
+                diff,
+            } => {
+                let applied = runtime
+                    .frames
+                    .get(&pane)
+                    .map(|held| seer_core::frame_diff::apply(held, &diff));
+                match applied {
+                    Some(Ok(frame)) => {
+                        runtime.frames.insert(pane.clone(), frame);
+                    }
+                    _ => {
+                        runtime.frames.remove(&pane);
+                    }
+                }
+                if self.watches.contains_key(&(user.into(), pane.clone())) {
+                    self.write(&ServerMsg::CellsDiff {
+                        user: user.into(),
+                        pane,
+                        seq,
+                        diff,
+                    })?;
+                }
+            }
             ServerMsg::Terminals { terminals, .. } => {
                 let workspace = runtime.tree.workspaces.first();
                 let terminals: Vec<_> = terminals

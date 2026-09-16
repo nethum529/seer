@@ -6,7 +6,7 @@ use std::time::Instant;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, MouseKind, PaneSize};
 
-use super::{SharedSession, connection::Connection, lock, writer};
+use super::{SharedSession, connection::Connection, lock};
 use crate::user_session::terminals::SizeClaims;
 
 impl SharedSession {
@@ -54,11 +54,14 @@ impl SharedSession {
                     }
                     // A new watcher must see the screen as it stands. A quiet
                     // terminal produces nothing to poll, so send it here.
-                    send_screen(connection, &session, pane)?;
+                    if !send_screen(connection, &session, pane)? {
+                        return Ok(true);
+                    }
                 }
                 None => {
                     connection.watches.remove(pane);
                     connection.seqs.remove(pane);
+                    connection.baselines.remove(pane);
                     connection.claimed.remove(pane);
                     if connection.watches.is_empty() {
                         connection.watch_started = false;
@@ -84,8 +87,7 @@ impl SharedSession {
         if connection.read_only && !connection.watches.contains_key(pane) {
             return Ok(false);
         }
-        send_screen(connection, &session, pane)?;
-        Ok(false)
+        Ok(!send_screen(connection, &session, pane)?)
     }
 
     pub(super) fn claim_pane(&self, id: u64, pane: &str) -> io::Result<bool> {
@@ -102,24 +104,24 @@ impl SharedSession {
     }
 }
 
+// A whole screen that does not fit the output queue never reaches the
+// viewer, and a diff on top of it would never apply. So the link ends, the
+// broker opens a new one, and the count starts again. False means the link
+// must end.
 fn send_screen(
     connection: &mut Connection,
     session: &crate::UserSession,
     pane: &str,
-) -> io::Result<()> {
-    let Some(host) = session.pane_hosts.get(pane) else {
-        return Ok(());
+) -> io::Result<bool> {
+    let Some(output) = connection.whole(session, pane)? else {
+        return Ok(true);
     };
-    let screen = connection
-        .numbered(session, pane, || host.frame())
-        .unwrap_or_else(|| ServerMsg::Cells {
-            user: session.user.clone(),
-            pane: pane.to_owned(),
-            frame: host.frame(),
-            seq: 0,
-        });
-    connection.send(writer::encode(&screen)?);
-    Ok(())
+    if connection.send(output) {
+        return Ok(true);
+    }
+    connection.baselines.remove(pane);
+    connection.seqs.remove(pane);
+    Ok(false)
 }
 
 pub(super) fn claimed_pane(message: &ClientMsg) -> Option<&str> {

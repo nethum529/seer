@@ -223,6 +223,16 @@ pub fn server_summary(message: &ServerMsg) -> String {
             "Cells user={user} pane={pane} seq={seq} {}",
             frame_summary(frame)
         ),
+        ServerMsg::CellsDiff {
+            user,
+            pane,
+            seq,
+            diff,
+        } => format!(
+            "CellsDiff user={user} pane={pane} seq={seq} shift={} cells={}",
+            diff.shift,
+            diff.cells.len()
+        ),
         ServerMsg::OpenStream { .. } => "OpenStream".to_owned(),
     }
 }

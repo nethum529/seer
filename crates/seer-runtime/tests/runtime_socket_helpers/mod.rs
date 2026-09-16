@@ -7,6 +7,7 @@ use std::process::{Child, Output};
 use std::thread;
 use std::time::{Duration, Instant};
 
+use seer_core::frame_diff::apply_next;
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, TerminalFrame, TerminalInput};
 
@@ -166,23 +167,41 @@ pub(crate) fn assert_no_message(stream: &mut UnixStream, pane: Option<&str>) {
         .expect("message read timeout must restore");
 }
 
+// Holds the screen as the client does (R-411): a whole screen replaces it,
+// a diff at the next number applies, and any other diff asks for the whole
+// screen again.
 pub(crate) fn wait_for_cells_containing(stream: &mut UnixStream, expected: &str) -> String {
     let start = Instant::now();
+    let mut held: Option<(TerminalFrame, u64)> = None;
     loop {
         assert!(
             start.elapsed() < MESSAGE_TIMEOUT,
             "Cells did not contain {expected}"
         );
-        if let ServerMsg::Cells { frame, .. } = read_message(stream) {
-            let text = frame
-                .rows
-                .iter()
-                .flatten()
-                .map(|cell| cell.character)
-                .collect::<String>();
-            if text.contains(expected) {
-                return text;
+        match read_message(stream) {
+            ServerMsg::Cells { frame, seq, .. } => held = Some((frame, seq)),
+            ServerMsg::CellsDiff {
+                user,
+                pane,
+                seq,
+                diff,
+            } => {
+                held = held
+                    .and_then(|(frame, held_seq)| apply_next(&frame, held_seq, seq, &diff))
+                    .map(|frame| (frame, seq));
+                if held.is_none() {
+                    send(stream, &ClientMsg::Resync { user, pane });
+                }
             }
+            _ => continue,
+        }
+        let text = held
+            .iter()
+            .flat_map(|(frame, _)| frame.rows.iter().flatten())
+            .map(|cell| cell.character)
+            .collect::<String>();
+        if text.contains(expected) {
+            return text;
         }
     }
 }

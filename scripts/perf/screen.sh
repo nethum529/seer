@@ -124,8 +124,8 @@ run_probe() {
     fi
 }
 
-echo "rev,repeat,workload,cols,rows,seq,t_ms,bytes,frame_cols,frame_rows,changed_cells,shift,diff_cells,diff_bytes,sent_bytes,kind,apply_ok" >"$raw"
-echo "rev,repeat,workload,cols,rows,keys,last_key_ms,window_ms,updates,bytes" >"$windows"
+echo "rev,repeat,workload,cols,rows,seq,t_ms,bytes,frame_cols,frame_rows,changed_cells,shift,diff_cells,diff_bytes,sent_bytes,kind,apply_ok,full_bytes,floor_ok" >"$raw"
+echo "rev,repeat,workload,cols,rows,keys,last_key_ms,window_ms,updates,bytes,final_match" >"$windows"
 : >"$errors"
 : >"$out/probe.log"
 start_room

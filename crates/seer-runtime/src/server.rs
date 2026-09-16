@@ -12,6 +12,7 @@ use crate::UserSession;
 mod connection;
 mod peer;
 mod room_link;
+mod screen;
 mod size_lease;
 mod status;
 mod util;

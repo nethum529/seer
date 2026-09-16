@@ -190,6 +190,8 @@ fn note_room_offline(state: &mut ClientState) {
     let own = state.own_user.clone();
     state.terminals.retain(|user, _| user == &own);
     state.frames.retain(|(user, _), _| user == &own);
+    state.seqs.clear();
+    state.resyncing.clear();
     if state
         .viewer
         .as_ref()
@@ -229,8 +231,21 @@ fn apply_message(
         }
         ServerMsg::Tree { tree } => state.replace_tree(tree),
         ServerMsg::Cells {
-            user, pane, frame, ..
-        } => state.note_frame(user, pane, frame),
+            user,
+            pane,
+            frame,
+            seq,
+        } => state.note_frame(user, pane, frame, seq),
+        ServerMsg::CellsDiff {
+            user,
+            pane,
+            seq,
+            diff,
+        } => {
+            if state.note_diff(user.clone(), pane.clone(), seq, &diff) {
+                send(stream, &ClientMsg::Resync { user, pane })?;
+            }
+        }
         ServerMsg::Terminals { user, terminals } => {
             if let Some(viewer) = &state.viewer
                 && viewer.user == user

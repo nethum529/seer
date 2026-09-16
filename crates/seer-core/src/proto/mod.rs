@@ -3,6 +3,7 @@ pub(crate) mod frame_rows;
 
 use serde::{Deserialize, Serialize};
 
+use crate::frame_diff::FrameDiff;
 use crate::{SplitDirection, TerminalCapabilities, TerminalFrame, TerminalInput, Tree};
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
@@ -213,6 +214,15 @@ pub enum ServerMsg {
         #[serde(default)]
         seq: u64,
     },
+    /// The change from the screen at seq - 1 to the screen at seq, for the
+    /// viewer that holds seq - 1. A viewer that holds another number asks
+    /// again with Resync.
+    CellsDiff {
+        user: String,
+        pane: String,
+        seq: u64,
+        diff: FrameDiff,
+    },
     Bye {
         reason: String,
     },
@@ -285,4 +295,56 @@ pub struct TerminalInfo {
     pub state: String,
     pub cols: u16,
     pub rows: u16,
+}
+
+/// The fewest bytes a Cells of this shape can take on the wire, with this
+/// header, whichever row form frame_rows picks. A row of one repeated
+/// smallest cell is the shortest row. The commas between rows are not
+/// counted, so the result stays a floor.
+pub fn cells_floor(
+    user: &str,
+    pane: &str,
+    seq: u64,
+    frame: &TerminalFrame,
+) -> std::io::Result<usize> {
+    let cols = frame.rows.first().map_or(0, Vec::len);
+    let smallest = crate::Cell {
+        character: ' ',
+        fg: crate::Color::Default,
+        bg: crate::Color::Default,
+        bold: true,
+        italic: true,
+        underline: true,
+        dim: true,
+        inverse: true,
+        hidden: true,
+        strikeout: true,
+    };
+    let header = cells_len(user, pane, seq, frame, Vec::new())?;
+    let one_row = cells_len(user, pane, seq, frame, vec![vec![smallest; cols]])?;
+    Ok(header + frame.rows.len() * (one_row - header))
+}
+
+fn cells_len(
+    user: &str,
+    pane: &str,
+    seq: u64,
+    frame: &TerminalFrame,
+    rows: Vec<Vec<crate::Cell>>,
+) -> std::io::Result<usize> {
+    let mut out = Vec::new();
+    codec::encode(
+        &mut out,
+        &ServerMsg::Cells {
+            user: user.to_owned(),
+            pane: pane.to_owned(),
+            frame: TerminalFrame {
+                rows,
+                cursor: frame.cursor,
+                modes: frame.modes,
+            },
+            seq,
+        },
+    )?;
+    Ok(out.len())
 }

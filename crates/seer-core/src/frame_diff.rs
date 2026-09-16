@@ -113,6 +113,18 @@ pub fn apply(previous: &TerminalFrame, diff: &FrameDiff) -> Result<TerminalFrame
     })
 }
 
+/// The seq rule of R-411: a diff at `seq` applies only to the screen held at
+/// `seq - 1`.
+#[must_use]
+pub fn apply_next(
+    held: &TerminalFrame,
+    held_seq: u64,
+    seq: u64,
+    diff: &FrameDiff,
+) -> Option<TerminalFrame> {
+    (held_seq.checked_add(1)? == seq).then(|| apply(held, diff).ok())?
+}
+
 fn shape(frame: &TerminalFrame) -> Option<(usize, usize)> {
     let cols = frame.rows.first()?.len();
     if cols == 0 || frame.rows.iter().any(|row| row.len() != cols) {

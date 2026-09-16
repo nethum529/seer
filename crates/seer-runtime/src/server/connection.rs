@@ -1,4 +1,5 @@
 use seer_core::PaneSize;
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::os::unix::net::UnixStream;
@@ -42,11 +43,17 @@ pub(super) fn handle_connection(
             ..
         } => {
             shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane), false)?;
-            if let Err(error) =
-                shared.watch_size(connection_id, &pane, Some(PaneSize { cols, rows }), viewer)
-            {
-                shared.remove_connection(connection_id)?;
-                return Err(error);
+            match shared.watch_size(connection_id, &pane, Some(PaneSize { cols, rows }), viewer) {
+                Ok(false) => {}
+                Ok(true) => {
+                    shared.remove_connection(connection_id)?;
+                    let _ = stream.shutdown(std::net::Shutdown::Both);
+                    return Ok(());
+                }
+                Err(error) => {
+                    shared.remove_connection(connection_id)?;
+                    return Err(error);
+                }
             }
         }
         ClientMsg::Terminals { .. } => {
@@ -113,6 +120,7 @@ pub(super) struct Connection {
     pub(super) pid: Option<u32>,
     pub(super) watches: BTreeMap<String, PaneSize>,
     pub(super) seqs: BTreeMap<String, u64>,
+    pub(super) baselines: BTreeMap<String, TerminalFrame>,
     pub(super) claimed: BTreeMap<String, Instant>,
     pub(super) output: SyncSender<Arc<[u8]>>,
     pub(super) stream: UnixStream,
@@ -136,6 +144,7 @@ impl Connection {
             pid: super::peer::peer_pid(&stream),
             watches: BTreeMap::new(),
             seqs: BTreeMap::new(),
+            baselines: BTreeMap::new(),
             claimed: BTreeMap::new(),
             output,
             stream,
@@ -173,30 +182,31 @@ impl Connection {
         match self.projection(session) {
             ConnectionProjection::Full => {
                 for (message, output) in messages.iter().zip(encoded) {
-                    let output = match self.screen(session, message) {
-                        Some(screen) => writer::encode(&screen)?,
-                        None => Arc::clone(output),
-                    };
+                    let output = self.update(session, message, output)?;
                     if !self.send(output) {
                         return Ok(false);
                     }
                 }
             }
             ConnectionProjection::Watched(tree) => {
-                for message in messages {
-                    let Some(message) = project_message(&tree, message) else {
-                        continue;
+                for (message, output) in messages.iter().zip(encoded) {
+                    let output = match project_message(&tree, message) {
+                        Some(Cow::Borrowed(message)) => self.update(session, message, output)?,
+                        Some(Cow::Owned(projected)) => writer::encode(&projected)?,
+                        None => continue,
                     };
-                    let screen = self.screen(session, &message);
-                    if !self.send(writer::encode(screen.as_ref().unwrap_or(&message))?) {
+                    if !self.send(output) {
                         return Ok(false);
                     }
                 }
             }
             ConnectionProjection::Catalog(watched) => {
-                for message in messages.iter().filter(|m| catalog_passes(&watched, m)) {
-                    let screen = self.screen(session, message);
-                    if !self.send(writer::encode(screen.as_ref().unwrap_or(message))?) {
+                for (message, output) in messages.iter().zip(encoded) {
+                    if !catalog_passes(&watched, message) {
+                        continue;
+                    }
+                    let output = self.update(session, message, output)?;
+                    if !self.send(output) {
                         return Ok(false);
                     }
                 }
@@ -208,49 +218,6 @@ impl Connection {
             }
         }
         Ok(true)
-    }
-
-    // Each watcher gets the screen wrapped to its own size (issue 406). A
-    // full screen app comes at the PTY size, which grows to the largest
-    // full viewer watch (issue 433). A read only link numbers the screens
-    // of each watched pane, so a viewer can name the one it holds. None
-    // means the shared full frame is right.
-    pub(super) fn screen(
-        &mut self,
-        session: &UserSession,
-        message: &ServerMsg,
-    ) -> Option<ServerMsg> {
-        let ServerMsg::Cells { pane, frame, .. } = message else {
-            return None;
-        };
-        self.numbered(session, pane, || frame.clone())
-    }
-
-    pub(super) fn numbered(
-        &mut self,
-        session: &UserSession,
-        pane: &str,
-        full: impl FnOnce() -> TerminalFrame,
-    ) -> Option<ServerMsg> {
-        let size = self.watches.get(pane);
-        let view = size.and_then(|size| session.pane_hosts.get(pane)?.view(*size));
-        let counted = self.read_only && size.is_some();
-        if view.is_none() && !counted {
-            return None;
-        }
-        let seq = if counted {
-            let seq = self.seqs.entry(pane.to_owned()).or_insert(0);
-            *seq += 1;
-            *seq
-        } else {
-            0
-        };
-        Some(ServerMsg::Cells {
-            user: session.user.clone(),
-            pane: pane.to_owned(),
-            frame: view.unwrap_or_else(full),
-            seq,
-        })
     }
 
     fn projection(&mut self, session: &UserSession) -> ConnectionProjection {
@@ -265,6 +232,7 @@ impl Connection {
             .collect();
         self.watches.retain(|pane, _| valid.contains(pane));
         self.seqs.retain(|pane, _| valid.contains(pane));
+        self.baselines.retain(|pane, _| valid.contains(pane));
         self.claimed.retain(|pane, _| valid.contains(pane));
         if self.catalog {
             return ConnectionProjection::Catalog(valid);
@@ -287,23 +255,23 @@ fn catalog_passes(watched: &BTreeSet<String>, message: &ServerMsg) -> bool {
     }
 }
 
-fn project_message(tree: &Tree, message: &ServerMsg) -> Option<ServerMsg> {
+fn project_message<'a>(tree: &Tree, message: &'a ServerMsg) -> Option<Cow<'a, ServerMsg>> {
     match message {
-        ServerMsg::Tree { .. } => Some(ServerMsg::Tree { tree: tree.clone() }),
+        ServerMsg::Tree { .. } => Some(Cow::Owned(ServerMsg::Tree { tree: tree.clone() })),
         ServerMsg::Frame { pane, .. } | ServerMsg::Cells { pane, .. }
             if !tree_contains_pane(tree, pane) =>
         {
             None
         }
-        ServerMsg::Terminals { user, terminals } => Some(ServerMsg::Terminals {
+        ServerMsg::Terminals { user, terminals } => Some(Cow::Owned(ServerMsg::Terminals {
             user: user.clone(),
             terminals: terminals
                 .iter()
                 .filter(|terminal| tree_contains_pane(tree, &terminal.pane))
                 .cloned()
                 .collect(),
-        }),
-        _ => Some(message.clone()),
+        })),
+        _ => Some(Cow::Borrowed(message)),
     }
 }
 
