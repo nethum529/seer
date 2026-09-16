@@ -38,3 +38,5 @@ fn main() -> ExitCode {
 
 #[cfg(test)]
 mod screen_tests;
+#[cfg(test)]
+mod tui_link_tests;

@@ -44,6 +44,7 @@ pub(crate) struct ClientState {
     pub(crate) invite_pending: bool,
     pub(crate) notice: String,
     pub(crate) standing_notice: Option<String>,
+    pub(crate) room_notice: Option<String>,
     pub(crate) room_was_lost: bool,
     pub(crate) watches: BTreeMap<(String, String), (Size, bool)>,
     pub(crate) pending_new: Option<BTreeSet<String>>,
@@ -101,6 +102,7 @@ impl ClientState {
             invite_pending: false,
             notice: String::new(),
             standing_notice: None,
+            room_notice: None,
             room_was_lost: false,
             watches: BTreeMap::new(),
             pending_new: None,
@@ -114,6 +116,10 @@ impl ClientState {
 
     pub(crate) fn set_standing_notice(&mut self, notice: Option<String>) {
         self.standing_notice = notice;
+    }
+
+    pub(crate) fn set_room_notice(&mut self, notice: Option<String>) {
+        self.room_notice = notice;
     }
 
     pub(crate) fn user(&self) -> &str {

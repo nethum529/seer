@@ -129,7 +129,7 @@ fn run_loop(
             reconnects.start();
             dirty = true;
         }
-        if let Some(room) = reconnects.take() {
+        if let Some(room) = reconnects.take(state) {
             readers.push(reconnects.adopt(room.clone())?);
             stream.restore_room(room);
             resubscribe(stream, state)?;

@@ -3,8 +3,9 @@ use ratatui::{Frame, layout::Rect, widgets::Paragraph};
 
 pub(super) fn notice(frame: &mut Frame<'_>, state: &ClientState) {
     let area = frame.area();
-    let notice = match &state.standing_notice {
-        Some(standing) if state.notice.is_empty() => standing,
+    let notice = match (&state.room_notice, &state.standing_notice) {
+        (Some(room), _) if state.notice.is_empty() => room,
+        (None, Some(standing)) if state.notice.is_empty() => standing,
         _ => &state.notice,
     };
     if notice.is_empty() || area.is_empty() {
