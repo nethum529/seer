@@ -102,6 +102,7 @@ fn joins_commit_person_and_seat_atomically() {
         address,
         &ClientMsg::Join {
             seat_token: "seat-one".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
             name: "Guest_1".into(),
         },
     );
@@ -133,6 +134,7 @@ fn joins_commit_person_and_seat_atomically() {
         address,
         &ClientMsg::Join {
             seat_token: "seat-one".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
             name: "Other".into(),
         },
     );
@@ -142,6 +144,7 @@ fn joins_commit_person_and_seat_atomically() {
         address,
         &ClientMsg::Join {
             seat_token: "expired-seat".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
             name: "Late".into(),
         },
     );
@@ -151,6 +154,7 @@ fn joins_commit_person_and_seat_atomically() {
         address,
         &ClientMsg::Join {
             seat_token: "seat-two".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
             name: "bad name".into(),
         },
     );
@@ -159,6 +163,7 @@ fn joins_commit_person_and_seat_atomically() {
         address,
         &ClientMsg::Join {
             seat_token: "seat-two".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
             name: "aLiCe".into(),
         },
     );
@@ -167,6 +172,7 @@ fn joins_commit_person_and_seat_atomically() {
         address,
         &ClientMsg::Join {
             seat_token: "seat-two".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
             name: "Guest-2".into(),
         },
     );
@@ -194,6 +200,7 @@ fn joins_commit_person_and_seat_atomically() {
         reopened_address,
         &ClientMsg::Join {
             seat_token: "seat-one".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
             name: "Reused".into(),
         },
     );
@@ -256,6 +263,20 @@ fn the_room_accepts_another_patch_release_and_refuses_another_minor_release() {
     assert!(matches!(reply, ServerMsg::Refused { .. }), "{reply:?}");
     let (_published, reply) = exchange(address, &publish(&other_patch));
     assert!(matches!(reply, ServerMsg::Published { .. }), "{reply:?}");
+    let join = |version: Option<&str>| ClientMsg::Join {
+        seat_token: "seat-one".into(),
+        name: "carol".into(),
+        version: version.map(Into::into),
+    };
+    let (_, reply) = exchange(address, &join(None));
+    let ServerMsg::Refused { reason } = reply else {
+        panic!("a Join without a version must be refused, got {reply:?}");
+    };
+    assert!(reason.contains("Run: seer update"), "{reason}");
+    let (_, reply) = exchange(address, &join(Some(&other_minor)));
+    assert!(matches!(reply, ServerMsg::Refused { .. }), "{reply:?}");
+    let (_, reply) = exchange(address, &join(Some(&other_patch)));
+    assert!(matches!(reply, ServerMsg::Joined { .. }), "{reply:?}");
     remove_state_directory(&state_dir);
 }
 

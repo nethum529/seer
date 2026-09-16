@@ -4,7 +4,7 @@ use seer_net::Socket;
 
 use super::{CommandError, connect, receive_reply, send, unexpected_reply};
 use crate::store::ServerEntry;
-use crate::version_skew::refusal_message;
+use crate::version_skew::{refusal_message, version_refusal};
 
 pub(crate) enum Welcome {
     Accepted(Socket, Tree),
@@ -33,5 +33,24 @@ pub(crate) fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), Comma
             &reason,
             crate::start::hosts_room(&server.endpoint),
         ))),
+    }
+}
+
+// A Hello with no credentials gets the version verdict from every room
+// server, also one from before the Join version check, and uses no seat.
+pub(crate) fn check_room_version(endpoint: &str) -> Result<(), CommandError> {
+    let probe = ServerEntry {
+        endpoint: endpoint.to_owned(),
+        alias: String::new(),
+        user_id: String::new(),
+        name: String::new(),
+        credential: String::new(),
+        current: false,
+    };
+    match hello(&probe)? {
+        Welcome::Refused(reason) if version_refusal(&reason).is_some() => {
+            Err(CommandError::usage(refusal_message(&reason, false)))
+        }
+        _ => Ok(()),
     }
 }

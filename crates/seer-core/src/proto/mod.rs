@@ -16,6 +16,8 @@ pub enum ClientMsg {
     Join {
         seat_token: String,
         name: String,
+        #[serde(default)]
+        version: Option<String>,
     },
     Invite {
         hours: Option<u32>,

@@ -50,6 +50,7 @@ fn identifies_only_mutating_messages() {
         },
         ClientMsg::Join {
             seat_token: "seat".into(),
+            version: None,
             name: "alice".into(),
         },
         ClientMsg::Invite { hours: None },

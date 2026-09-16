@@ -122,12 +122,21 @@ fn join_persists_the_private_store_without_the_seat_token() {
     let endpoint = listener.id().to_string();
     let alias = endpoint[..8].to_owned();
     let server = thread::spawn(move || {
+        let (_, mut probe, _session) = listener.accept().expect("version probe must connect");
+        assert!(matches!(receive(&mut probe), ClientMsg::Hello { .. }));
+        send(
+            &mut probe,
+            &ServerMsg::Refused {
+                reason: "invalid credentials".into(),
+            },
+        );
         let (device_id, mut first, _session) =
             listener.accept().expect("first client must connect");
         assert_eq!(
             receive(&mut first),
             ClientMsg::Join {
                 seat_token: "seat-token".into(),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
                 name: "alice".into(),
             }
         );
@@ -145,6 +154,7 @@ fn join_persists_the_private_store_without_the_seat_token() {
             receive(&mut second),
             ClientMsg::Join {
                 seat_token: "seat-token".into(),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
                 name: "bob".into(),
             }
         );

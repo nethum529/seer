@@ -376,9 +376,14 @@ fn handshake(
             token,
         } => claim_runtime_stream(stream, broker, &user_id, &credential, &token)
             .map(|()| Handshake::Done),
-        ClientMsg::Join { seat_token, name } => {
-            join(stream, broker.registry(), &seat_token, &name).map(|()| Handshake::Done)
-        }
+        ClientMsg::Join {
+            seat_token,
+            name,
+            version,
+        } => match check_version(stream, version.as_deref().unwrap_or("before 0.6.0"))? {
+            true => join(stream, broker.registry(), &seat_token, &name).map(|()| Handshake::Done),
+            false => Ok(Handshake::Done),
+        },
         _ => refuse(stream, EXPECTED_HELLO).map(|()| Handshake::Done),
     }
 }

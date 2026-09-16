@@ -54,12 +54,22 @@ fn join_hides_the_invitation_on_a_terminal() {
         .expect("listener must have an address")
         .port();
     let server = thread::spawn(move || {
+        let mut probe = accept(&listener);
+        assert!(matches!(receive(&mut probe), ClientMsg::Hello { .. }));
+        codec::encode(
+            &mut probe,
+            &ServerMsg::Refused {
+                reason: "invalid credentials".into(),
+            },
+        )
+        .expect("probe reply must encode");
         let mut stream = accept(&listener);
         let join = receive(&mut stream);
         assert_eq!(
             join,
             ClientMsg::Join {
                 seat_token: "private-seat".into(),
+                version: Some(env!("CARGO_PKG_VERSION").into()),
                 name: "bob".into(),
             }
         );
@@ -126,6 +136,15 @@ fn run_join(reply: ServerMsg) -> Output {
         .expect("listener must have an address")
         .port();
     let server = thread::spawn(move || {
+        let mut probe = accept(&listener);
+        assert!(matches!(receive(&mut probe), ClientMsg::Hello { .. }));
+        codec::encode(
+            &mut probe,
+            &ServerMsg::Refused {
+                reason: "invalid credentials".into(),
+            },
+        )
+        .expect("probe reply must encode");
         let mut stream = accept(&listener);
         let message = receive(&mut stream);
         assert!(matches!(message, ClientMsg::Join { .. }));

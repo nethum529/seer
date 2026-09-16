@@ -83,6 +83,7 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
         .unwrap_or(&invitation);
     let capsule = capsule::parse(invitation).map_err(CommandError::system)?;
     let endpoint = capsule.endpoint.to_string();
+    handshake::check_room_version(&endpoint)?;
 
     let default_name = std::env::var("USER")
         .ok()
@@ -100,6 +101,7 @@ pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
         let join = ClientMsg::Join {
             seat_token: capsule.token.clone(),
             name,
+            version: Some(env!("CARGO_PKG_VERSION").into()),
         };
         send(&mut stream, &join)?;
         match receive(&mut stream)? {
