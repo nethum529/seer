@@ -27,6 +27,7 @@ pub(crate) enum SessionExit {
     Detached,
     Restarted,
     ServerStopped,
+    LocalLinkLost,
     TerminalLost,
 }
 
@@ -35,6 +36,7 @@ pub(crate) fn run(
     room: Option<Socket>,
     tree: Tree,
     server: crate::store::ServerEntry,
+    standing_notice: Option<String>,
 ) -> io::Result<SessionExit> {
     seer_core::debug_log!(
         "session start server={} room={}",
@@ -43,6 +45,7 @@ pub(crate) fn run(
     );
     let mut terminal = TerminalSession::start()?;
     let mut state = ClientState::for_server(tree, &server);
+    state.set_standing_notice(standing_notice);
     let mut start_person = navigation::take_start_person();
     let mut routes = Routes::new(local.clone(), room.clone(), state.own_user.clone());
     subscribe(&mut routes, &state).or_else(ignore_setup_disconnect)?;
@@ -117,7 +120,7 @@ fn run_loop(
                     Some(exit) => return Ok(exit),
                     None => dirty = true,
                 },
-                Err(TryRecvError::Disconnected) => return Ok(SessionExit::ServerStopped),
+                Err(TryRecvError::Disconnected) => return Ok(SessionExit::LocalLinkLost),
                 Err(TryRecvError::Empty) => break,
             }
         }
@@ -177,7 +180,7 @@ fn drain(
             Ok(None)
         }
         (_, Ok(message)) => apply_message(message, stream, state, start_person),
-        (Source::Local, Err(_)) => Ok(Some(SessionExit::ServerStopped)),
+        (Source::Local, Err(_)) => Ok(Some(SessionExit::LocalLinkLost)),
         (Source::Room, Err(_)) => {
             stream.drop_room();
             Ok(None)

@@ -93,11 +93,18 @@ fn greet(
         let Ok(first) = codec::decode(stream) else {
             return Ok(None);
         };
-        codec::encode(stream, &ServerMsg::RuntimeReady { generation })?;
+        codec::encode(stream, &ready(generation))?;
         return Ok(Some(first));
     }
-    codec::encode(stream, &ServerMsg::RuntimeReady { generation })?;
+    codec::encode(stream, &ready(generation))?;
     Ok(codec::decode(stream).ok())
+}
+
+fn ready(generation: String) -> ServerMsg {
+    ServerMsg::RuntimeReady {
+        generation,
+        version: Some(env!("CARGO_PKG_VERSION").to_owned()),
+    }
 }
 
 // A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.

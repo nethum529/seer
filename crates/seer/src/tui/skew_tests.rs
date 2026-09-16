@@ -64,10 +64,10 @@ fn a_screen_update_with_an_unknown_field_shows_from_either_route() {
 }
 
 #[test]
-fn an_unreadable_message_from_the_own_runtime_ends_the_window() {
+fn an_unreadable_message_from_the_own_runtime_ends_only_the_local_link() {
     for json in [UNKNOWN_KIND, MISSING_FIELD] {
         let (exit, ..) = receive(Source::Local, json);
-        assert_eq!(exit, Some(SessionExit::ServerStopped), "{json}");
+        assert_eq!(exit, Some(SessionExit::LocalLinkLost), "{json}");
     }
 }
 

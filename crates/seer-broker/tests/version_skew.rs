@@ -244,6 +244,7 @@ fn watched_stream(
         for message in [
             ServerMsg::RuntimeReady {
                 generation: "gen-fake".into(),
+                version: None,
             },
             ServerMsg::Tree { tree: tree.clone() },
             ServerMsg::Terminals {

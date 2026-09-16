@@ -79,7 +79,7 @@ fn losing_the_local_runtime_ends_the_window() {
     )
     .expect("a local failure must be handled");
 
-    assert_eq!(exit, Some(SessionExit::ServerStopped));
+    assert_eq!(exit, Some(SessionExit::LocalLinkLost));
 }
 
 #[test]

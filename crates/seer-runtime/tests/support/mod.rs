@@ -68,7 +68,7 @@ pub fn connect_when_ready(path: &Path) -> UnixStream {
                     .expect("runtime attach must encode");
                 match codec::decode::<_, ServerMsg>(&mut stream).expect("runtime ready must decode")
                 {
-                    ServerMsg::RuntimeReady { generation } => {
+                    ServerMsg::RuntimeReady { generation, .. } => {
                         assert!(!generation.is_empty());
                     }
                     other => panic!("expected RuntimeReady, got {other:?}"),

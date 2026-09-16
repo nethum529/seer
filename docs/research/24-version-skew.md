@@ -260,7 +260,8 @@ Each test passes against origin/main a6ee98f with no code change.
 | Runtime, from the room (room stream and control link, fake broker) | crates/seer-broker/tests/version_skew.rs a_runtime_ignores_unknown_fields_from_the_room_and_drops_the_link_on_other_changes |
 | Broker, from a watching client | crates/seer-broker/tests/version_skew.rs the_broker_ignores_unknown_fields_from_a_watcher_and_ends_its_link_on_other_changes |
 | Broker, from a runtime (fake runtime) | crates/seer-broker/tests/version_skew.rs the_broker_drops_unknown_fields_from_a_runtime_and_ends_its_stream_on_other_changes |
-| Client, from its own runtime and from the room | crates/seer/src/tui/skew_tests.rs, three tests |
+| Client, from its own runtime and from the room | crates/seer/src/tui/skew_tests.rs, three tests. Since issue 421 an unreadable message from the own runtime ends only the local link. When the runtime socket still answers, the window prints "Your terminals on this computer still run. Run: seer restart." and not "Server stopped." |
+| Client, attach to a runtime that sends no version (issue 421) | crates/seer/src/local/tests.rs a_window_on_a_runtime_without_a_version_shows_the_restart_notice |
 | Broker version check, patch and minor | crates/seer-broker/tests/handshake.rs the_room_accepts_another_patch_release_and_refuses_another_minor_release |
 
 The fake broker and the fake runtime use ports from the operating system

@@ -415,16 +415,24 @@ fn finish_session(
     if let Ok(directory) = crate::local::runtime_directory(&server.user_id) {
         seer_core::debug_log::open(&directory, "client", &server.user_id);
     }
-    let (local, tree) = crate::local::attach(server).map_err(CommandError::system)?;
+    let (local, tree, standing_notice) =
+        crate::local::attach(server).map_err(CommandError::system)?;
     if let Some(room) = &room {
         crate::tui_link::prepare_room(room).map_err(CommandError::system)?;
     }
     tui::set_peek_person(peek_person);
-    let exit = tui::run(local, room, tree, server.clone()).map_err(CommandError::system)?;
+    let exit = tui::run(local, room, tree, server.clone(), standing_notice)
+        .map_err(CommandError::system)?;
     match exit {
         tui::SessionExit::Detached => print_detached(&server.alias),
         tui::SessionExit::ServerStopped => print_server_stopped(),
         tui::SessionExit::Restarted => restart::print_restarted(),
+        tui::SessionExit::LocalLinkLost if crate::local::runtime_answers(&server.user_id) => {
+            println!(
+                "Your terminals on this computer still run. Run: seer restart. The restart ends the running shells."
+            );
+        }
+        tui::SessionExit::LocalLinkLost => print_server_stopped(),
         tui::SessionExit::Client | tui::SessionExit::TerminalLost => {}
     }
     Ok(())

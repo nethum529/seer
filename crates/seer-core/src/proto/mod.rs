@@ -154,6 +154,9 @@ pub enum ServerMsg {
     },
     RuntimeReady {
         generation: String,
+        /// A runtime before 0.6.0 sends no version.
+        #[serde(default)]
+        version: Option<String>,
     },
     Published {
         generation: String,
