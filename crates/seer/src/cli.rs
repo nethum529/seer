@@ -2,7 +2,7 @@ use std::process::ExitCode;
 
 use crate::commands::{self, CommandError, PsAction};
 
-const HELP: &str = "seer opens the interface.\n\nUsage: seer <command>\n\nCommands:\n  start [--restore]   Start the server on this machine\n  stop                Stop the server\n  update              Replace the binaries with the latest release\n  invite [--hours N]  Create a join line for a friend\n  join [capsule]      Join a server with a pasted line\n  list                List saved servers and people\n  attach              Open people and terminals\n  detach              Detach this client\n  exit                Leave Seer from inside a Seer terminal\n  leave               Remove yourself from the room\n  perms --on|--off    Allow or refuse everyone access to your terminals\n  peek <person>       Open with this person selected\n  ps [--clean]        Show your Seer processes here, or stop the windows without a terminal\n  ps --stop <pid>     Stop one runtime with its shells\n  help                Show this help\n\nMain screen: type into the selected terminal. All keys go to it.\nUse the mouse to select terminals and open Seer controls.\nLeft click the top right control to pick the person you look at.\nRight click the same control for the session actions.\nUse the back row in session to return to the overview.\nSession: j/k select, enter open, esc close, n new, x close, q quit.\nPerson menu: right click a person row. j/k select, enter watch,\nspace grant, esc close.\nFirst run: right click the top right control to copy the invite.\n";
+const HELP: &str = "seer opens the interface.\n\nUsage: seer <command>\n\nCommands:\n  start [--restore]   Start the server on this machine\n  stop                Stop the server\n  update              Replace the binaries with the latest release\n  invite [--hours N]  Create a join line for a friend\n  join [capsule]      Join a server with a pasted line\n  list                List saved servers and people\n  attach              Open people and terminals\n  detach              Detach this client\n  exit                Leave Seer from inside a Seer terminal\n  leave               Remove yourself from the room\n  perms --on|--off    Allow or refuse everyone access to your terminals\n  peek <person>       Open with this person selected\n  ps [--clean]        Show your Seer processes here, or stop the windows without a terminal\n  ps --stop <pid>     Stop one runtime with its shells\n  restart [--yes]     Restart your terminals here on the installed Seer\n  help                Show this help\n\nMain screen: type into the selected terminal. All keys go to it.\nUse the mouse to select terminals and open Seer controls.\nLeft click the top right control to pick the person you look at.\nRight click the same control for the session actions.\nUse the back row in session to return to the overview.\nSession: j/k select, enter open, esc close, n new, x close, q quit.\nPerson menu: right click a person row. j/k select, enter watch,\nspace grant, esc close.\nFirst run: right click the top right control to copy the invite.\n";
 
 #[derive(Debug, Eq, PartialEq)]
 enum Command {
@@ -21,6 +21,7 @@ enum Command {
     Perms(bool),
     Peek(String),
     Ps(PsAction),
+    Restart(bool),
 }
 
 enum ParseError {
@@ -72,6 +73,7 @@ fn execute(command: Command) -> ExitCode {
         Command::Perms(on) => commands::perms(on),
         Command::Peek(person) => commands::peek(&person),
         Command::Ps(action) => commands::ps(action),
+        Command::Restart(yes) => commands::restart(yes),
     };
     finish(result)
 }
@@ -129,6 +131,11 @@ fn parse(mut arguments: impl Iterator<Item = String>) -> Result<Command, ParseEr
                 let pid = arguments.next().ok_or(ParseError::Usage)?;
                 Command::Ps(PsAction::Stop(pid.parse().map_err(|_| ParseError::Usage)?))
             }
+            Some(_) => return Err(ParseError::Usage),
+        },
+        "restart" => match arguments.next().as_deref() {
+            None => Command::Restart(false),
+            Some("--yes") => Command::Restart(true),
             Some(_) => return Err(ParseError::Usage),
         },
         _ => return Err(ParseError::Unknown(first)),

@@ -11,6 +11,7 @@ use crate::UserSession;
 
 mod connection;
 mod peer;
+mod restart;
 mod room_link;
 mod screen;
 mod size_lease;

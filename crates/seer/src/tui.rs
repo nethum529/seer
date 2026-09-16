@@ -25,6 +25,7 @@ use std::time::Duration;
 pub(crate) enum SessionExit {
     Client,
     Detached,
+    Restarted,
     ServerStopped,
     TerminalLost,
 }
@@ -299,6 +300,7 @@ fn apply_message(
         ServerMsg::Bye { reason } => {
             return Ok(Some(match reason.as_str() {
                 "detached" => SessionExit::Detached,
+                "restarted" => SessionExit::Restarted,
                 "server stopped" => SessionExit::ServerStopped,
                 _ => SessionExit::Client,
             }));

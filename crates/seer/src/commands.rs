@@ -20,6 +20,8 @@ mod lifecycle;
 pub(crate) use lifecycle::{leave, perms, stop};
 mod ps;
 pub(crate) use ps::{PsAction, ps};
+mod restart;
+pub(crate) use restart::restart;
 mod selection;
 use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
@@ -422,6 +424,7 @@ fn finish_session(
     match exit {
         tui::SessionExit::Detached => print_detached(&server.alias),
         tui::SessionExit::ServerStopped => print_server_stopped(),
+        tui::SessionExit::Restarted => restart::print_restarted(),
         tui::SessionExit::Client | tui::SessionExit::TerminalLost => {}
     }
     Ok(())

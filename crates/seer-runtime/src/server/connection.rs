@@ -66,6 +66,9 @@ pub(super) fn handle_connection(
         ClientMsg::ExitClient { pane } if !remote => {
             return super::size_lease::handle_exit_client(&mut stream, shared, &pane);
         }
+        ClientMsg::Stop if !remote => {
+            return super::restart::handle_restart(&mut stream, shared);
+        }
         _ => {
             return Err(io::Error::new(
                 io::ErrorKind::InvalidInput,

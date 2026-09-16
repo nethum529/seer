@@ -88,7 +88,7 @@ pub(crate) fn runtime_directory(user_id: &str) -> io::Result<PathBuf> {
     Ok(directory)
 }
 
-fn state_dir() -> io::Result<PathBuf> {
+pub(crate) fn state_dir() -> io::Result<PathBuf> {
     if let Some(path) = env::var_os("XDG_STATE_HOME").filter(|value| !value.is_empty()) {
         return Ok(PathBuf::from(path).join("seer"));
     }
