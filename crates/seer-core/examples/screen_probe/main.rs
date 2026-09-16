@@ -1,20 +1,24 @@
-// Measurement probe for issue 417. It attaches one host window to a local
-// runtime, joins the room as a guest that watches the host's first pane,
-// types a script into the host window at a fixed rate, and records every
-// screen update that arrives at the guest socket. The method is in
-// docs/research/23-screen-data.md.
+// Measurement probe for issues 417 and 411. It attaches one host window to
+// a local runtime, joins the room as a guest that watches the host's first
+// pane, types a script into the host window at a fixed rate, and records
+// every screen update that arrives at the guest socket. For each update it
+// also runs the scroll diff of seer_core::frame_diff against the previous
+// frame, sizes it as a message, and checks that the diff applies back to
+// the current frame. The method is in docs/research/23-screen-data.md.
 //
 // Output, one line per screen update after the first key:
 //   update,<label>,<cols>,<rows>,<seq>,<t_ms>,<bytes>,<frame_cols>,<frame_rows>,
-//          <changed_cells>,<changed_rows>,<row_diff_bytes>,<cell_diff_bytes>,
-//          <shift>,<scroll_cells>,<scroll_diff_bytes>
-// and one closing line:
+//          <changed_cells>,<shift>,<diff_cells>,<diff_bytes>,<sent_bytes>,
+//          <kind>,<apply_ok>
+// kind is full or diff by the cap rule, sent_bytes is the bytes of that
+// kind, and apply_ok is 1 when the diff applied gives the current frame.
+// One closing line:
 //   window,<label>,<cols>,<rows>,<keys>,<last_key_ms>,<window_ms>,<updates>,<bytes>
 // The window runs from the first key to the last update. last_key_ms is
 // when the last key was sent, so a run can be split into a typing part and
 // an output part.
-mod estimate;
 mod link;
+mod measure;
 mod script;
 
 use script::Step;
@@ -103,7 +107,7 @@ struct Update {
     bytes: usize,
     frame_cols: usize,
     frame_rows: usize,
-    diff: estimate::Diff,
+    measure: measure::Measure,
 }
 
 fn main() -> io::Result<()> {
@@ -231,14 +235,14 @@ fn capture(
             continue;
         }
         last_update = Instant::now();
-        let diff = estimate::diff(previous.as_ref(), &frame, &options.host, pane, bytes)?;
+        let measure = measure::measure(previous.as_ref(), &frame, &options.host, pane, bytes)?;
         updates.push(Update {
             seq: updates.len() + 1,
             at: last_update - start,
             bytes,
             frame_cols: frame.rows.first().map_or(0, Vec::len),
             frame_rows: frame.rows.len(),
-            diff,
+            measure,
         });
         previous = Some(frame);
     }
@@ -267,13 +271,13 @@ fn report(options: &Options, updates: &[Update], summary: &Summary) -> io::Resul
             update.bytes,
             update.frame_cols,
             update.frame_rows,
-            update.diff.changed_cells,
-            update.diff.changed_rows,
-            update.diff.row_diff_bytes,
-            update.diff.cell_diff_bytes,
-            update.diff.shift,
-            update.diff.scroll_cells,
-            update.diff.scroll_diff_bytes,
+            update.measure.changed_cells,
+            update.measure.shift,
+            update.measure.diff_cells,
+            update.measure.diff_bytes,
+            update.measure.sent_bytes,
+            if update.measure.full { "full" } else { "diff" },
+            u8::from(update.measure.apply_ok),
         )?;
     }
     let window_ms = updates.last().map_or(0, |update| update.at.as_millis());

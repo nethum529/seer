@@ -57,7 +57,7 @@ impl PaneGrid {
     #[must_use]
     pub fn snapshot(&self) -> TerminalFrame {
         let grid = self.terminal.grid();
-        let display_offset = grid.display_offset() as i32;
+        let display_offset = grid.display_offset().min(grid.history_size()) as i32;
         let rows = (0..grid.screen_lines())
             .map(|row| {
                 let line = Line(row as i32 - display_offset);
@@ -345,6 +345,26 @@ mod tests {
 
         assert_eq!(replies.take(), b"firstsecond".to_vec());
         assert!(replies.take().is_empty());
+    }
+
+    // Alacritty grows display_offset on a scroll inside a region while a
+    // viewer is scrolled back, but it caps it at the scrollback limit, not
+    // at the rows that exist. The snapshot must show the oldest row that
+    // exists at the top, not a row past it and not a row below it.
+    #[test]
+    fn a_viewer_scrolled_past_the_history_sees_the_oldest_row_at_the_top() {
+        let long = b"line of text that is quite long and will wrap around the edge";
+        let mut grid = PaneGrid::new(20, 6);
+        grid.feed(long);
+        grid.resize(14, 8);
+        grid.handle_input(&TerminalInput::new(InputEvent::Scrollback { lines: 1 }))
+            .expect("scrollback is valid input");
+        grid.feed(b"\x1b[3M");
+        grid.feed(long);
+
+        let snapshot = grid.snapshot();
+        let top: String = snapshot.rows[0].iter().map(|cell| cell.character).collect();
+        assert_eq!(top, "line of text t");
     }
 
     #[test]
