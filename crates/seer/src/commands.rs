@@ -465,21 +465,22 @@ fn print_columns(header: &[&str], rows: &[Vec<String>]) {
         .enumerate()
         .map(|(column, title)| {
             rows.iter()
-                .map(|row| row[column].len())
+                .map(|row| row.get(column).map_or(0, |text| text.chars().count()))
                 .max()
                 .unwrap_or(0)
-                .max(title.len())
+                .max(title.chars().count())
         })
         .collect();
     let line = |cells: &[&str]| {
-        cells
+        widths
             .iter()
             .enumerate()
-            .map(|(column, cell)| {
-                if column + 1 == cells.len() {
-                    (*cell).to_owned()
+            .map(|(column, width)| {
+                let text = cells.get(column).copied().unwrap_or("");
+                if column + 1 == widths.len() {
+                    text.to_owned()
                 } else {
-                    format!("{cell:<width$}", width = widths[column])
+                    format!("{text:<width$}")
                 }
             })
             .collect::<Vec<_>>()

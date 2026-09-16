@@ -1,8 +1,6 @@
-use std::path::Path;
-
 use super::{CommandError, print_columns};
 use crate::local;
-use crate::processes::{self, Detail, Kind, Process, RuntimeStatus};
+use crate::processes::{self, Detail, Kind, Process, RuntimeStatus, Snapshot};
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum PsAction {
@@ -28,10 +26,10 @@ fn print_list(processes: &[Process]) {
         .iter()
         .map(|process| {
             vec![
-                process.pid.to_string(),
+                process.pid().to_string(),
                 process.kind.name().to_owned(),
-                format_up(process.up_secs),
-                format!("{}%", process.cpu),
+                format_up(process.snapshot.up_secs),
+                format!("{}%", process.snapshot.cpu),
                 describe(&process.detail),
                 process
                     .state_home
@@ -94,43 +92,70 @@ fn count(number: usize, noun: &str) -> String {
 }
 
 fn clean(processes: &[Process]) -> Result<(), CommandError> {
-    let stuck: Vec<&Process> = processes
+    let mut stopped = 0;
+    for window in processes
         .iter()
         .filter(|process| process.kind == Kind::Window && !process.has_terminal())
-        .collect();
-    for window in &stuck {
-        let pid = to_signed(window.pid)?;
-        local::stop_pid(pid, || local::process_alive(pid)).map_err(CommandError::system)?;
+    {
+        if stop_process(&window.snapshot)? {
+            stopped += 1;
+        }
     }
-    if stuck.is_empty() {
+    if stopped == 0 {
         println!("No window without a terminal.");
     } else {
-        println!(
-            "Stopped {} without a terminal.",
-            count(stuck.len(), "window")
-        );
+        println!("Stopped {} without a terminal.", count(stopped, "window"));
     }
     Ok(())
 }
 
 fn stop_runtime(processes: &[Process], pid: u32) -> Result<(), CommandError> {
-    let Some(process) = processes.iter().find(|process| process.pid == pid) else {
+    let Some(process) = processes.iter().find(|process| process.pid() == pid) else {
         return Err(CommandError::usage(format!(
             "PID {pid} is not a Seer process of yours on this computer. Run seer ps."
         )));
     };
-    let Detail::Runtime { socket, .. } = &process.detail else {
+    if process.kind != Kind::Runtime {
         return Err(CommandError::usage(format!(
             "PID {pid} is a {}, not a runtime. seer ps --stop stops only a runtime.",
             process.kind.name()
         )));
-    };
-    let alive = |socket: &Path| local::connect(socket, None).is_ok();
-    local::stop_pid(to_signed(pid)?, || alive(socket)).map_err(CommandError::system)?;
-    println!("Runtime {pid} stopped with its shells.");
+    }
+    let shells = processes::children(pid).map_err(CommandError::system)?;
+    if !stop_process(&process.snapshot)? {
+        return Err(CommandError::usage(format!(
+            "PID {pid} is not that runtime any more. Run seer ps again."
+        )));
+    }
+    for shell in &shells {
+        stop_process(shell)?;
+    }
+    let left = shells
+        .iter()
+        .filter(|shell| processes::is_same(shell))
+        .count();
+    if left > 0 {
+        return Err(CommandError::usage(format!(
+            "Runtime {pid} stopped, but {} still run.",
+            count(left, "shell")
+        )));
+    }
+    println!(
+        "Runtime {pid} stopped with {}.",
+        count(shells.len(), "shell")
+    );
     Ok(())
 }
 
-fn to_signed(pid: u32) -> Result<i32, CommandError> {
-    i32::try_from(pid).map_err(CommandError::system)
+// Returns false when the PID no longer names the listed process.
+fn stop_process(snapshot: &Snapshot) -> Result<bool, CommandError> {
+    if !processes::is_same(snapshot) {
+        return Ok(false);
+    }
+    let pid = i32::try_from(snapshot.pid).map_err(CommandError::system)?;
+    local::stop_pid(pid, || local::process_alive(pid)).map_err(CommandError::system)?;
+    if local::process_alive(pid) {
+        return Err(CommandError::usage(format!("PID {pid} did not stop.")));
+    }
+    Ok(true)
 }

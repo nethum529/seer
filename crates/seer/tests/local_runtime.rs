@@ -3,7 +3,7 @@
 use std::fs;
 use std::net::TcpListener;
 use std::os::unix::net::UnixStream;
-use std::os::unix::process::CommandExt;
+use std::os::unix::process::{CommandExt, ExitStatusExt};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Output, Stdio};
 use std::thread;
@@ -386,7 +386,10 @@ fn seer_ps_lists_the_processes_and_stops_a_named_runtime() {
     );
 
     let stopped = seer(&root, &["ps", "--stop", &pid.to_string()]);
-    assert!(stopped.contains("stopped with its shells"), "{stopped}");
+    assert!(
+        stopped.contains(&format!("Runtime {pid} stopped with 1 shell")),
+        "{stopped}"
+    );
     let deadline = Instant::now() + EXIT_WAIT;
     while std::iter::once(&pid)
         .chain(&shells)
@@ -398,4 +401,37 @@ fn seer_ps_lists_the_processes_and_stops_a_named_runtime() {
         );
         thread::sleep(Duration::from_millis(25));
     }
+}
+
+// Issue 429: the command exists for wedged processes. A runtime with no
+// socket that ignores SIGTERM must still be killed, and the success line
+// must come only after it is gone.
+#[test]
+fn seer_ps_stop_kills_a_runtime_that_ignores_sigterm() {
+    let root = test_root("seer-ps-kill");
+    let _cleanup = CleanOnDrop(root.clone());
+    let mut command = Command::new("sleep");
+    command.arg0("seer-runtime").arg("1000");
+    // SAFETY: signal only changes a signal disposition before exec.
+    unsafe {
+        command.pre_exec(|| {
+            libc::signal(libc::SIGTERM, libc::SIG_IGN);
+            Ok(())
+        });
+    }
+    let mut child = command.spawn().expect("the fake runtime must start");
+    let pid = child.id();
+    let reaper = thread::spawn(move || child.wait());
+
+    let stopped = seer(&root, &["ps", "--stop", &pid.to_string()]);
+
+    assert!(
+        stopped.contains(&format!("Runtime {pid} stopped")),
+        "{stopped}"
+    );
+    let status = reaper
+        .join()
+        .expect("the reaper must finish")
+        .expect("the fake runtime must be waited on");
+    assert_eq!(status.signal(), Some(libc::SIGKILL));
 }

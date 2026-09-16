@@ -19,6 +19,7 @@ use crate::store::ServerEntry;
 const START_TIMEOUT: Duration = Duration::from_secs(5);
 const POLL_INTERVAL: Duration = Duration::from_millis(20);
 const READY_TIMEOUT: Duration = Duration::from_secs(5);
+const KILL_GRACE: Duration = Duration::from_secs(1);
 
 // The runtime keeps running when this window closes and when the room stops.
 pub(crate) fn attach(server: &ServerEntry) -> io::Result<(Socket, Tree)> {
@@ -97,8 +98,16 @@ fn state_dir() -> io::Result<PathBuf> {
 }
 
 pub(crate) fn connect(socket: &Path, generation: Option<&str>) -> io::Result<UnixStream> {
+    connect_within(socket, generation, READY_TIMEOUT)
+}
+
+pub(crate) fn connect_within(
+    socket: &Path,
+    generation: Option<&str>,
+    ready_timeout: Duration,
+) -> io::Result<UnixStream> {
     let mut stream = UnixStream::connect(socket)?;
-    stream.set_read_timeout(Some(READY_TIMEOUT))?;
+    stream.set_read_timeout(Some(ready_timeout))?;
     match codec::decode::<_, ServerMsg>(&mut stream)? {
         ServerMsg::RuntimeReady { generation: found }
             if generation.is_none_or(|wanted| wanted == found) =>
@@ -262,14 +271,23 @@ pub(crate) fn stop(user_id: &str) -> io::Result<bool> {
 // A negative pid names a process group.
 pub(crate) fn stop_pid(pid: i32, alive: impl Fn() -> bool) -> io::Result<()> {
     signal(pid, libc::SIGTERM)?;
-    let deadline = Instant::now() + START_TIMEOUT;
-    while alive() && Instant::now() < deadline {
-        thread::sleep(POLL_INTERVAL);
-    }
-    if alive() {
+    if wait_while(&alive, START_TIMEOUT) {
         signal(pid, libc::SIGKILL)?;
+        // A killed process stays visible until its parent reaps it.
+        wait_while(&alive, KILL_GRACE);
     }
     Ok(())
+}
+
+fn wait_while(condition: &impl Fn() -> bool, limit: Duration) -> bool {
+    let deadline = Instant::now() + limit;
+    while condition() {
+        if Instant::now() >= deadline {
+            return true;
+        }
+        thread::sleep(POLL_INTERVAL);
+    }
+    false
 }
 
 pub(crate) fn process_alive(pid: i32) -> bool {
