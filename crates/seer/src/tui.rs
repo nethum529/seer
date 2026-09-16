@@ -54,7 +54,7 @@ pub(crate) fn run(
     let room_reader = room
         .clone()
         .map(|room| spawn_reader(room, Source::Room, sender.clone()));
-    let reconnects = Reconnects::new(server, sender);
+    let reconnects = Reconnects::new(server.clone(), sender);
     if room.is_none() {
         reconnects.start();
     }
@@ -63,6 +63,7 @@ pub(crate) fn run(
         &mut terminal.terminal,
         &mut routes,
         Inputs {
+            server: &server,
             events: &events,
             terminal_events: &terminal_events,
         },
@@ -99,6 +100,7 @@ fn subscribe(routes: &mut Routes, state: &ClientState) -> io::Result<()> {
 }
 
 struct Inputs<'a> {
+    server: &'a crate::store::ServerEntry,
     events: &'a Events,
     terminal_events: &'a Receiver<Event>,
 }
@@ -116,10 +118,13 @@ fn run_loop(
     loop {
         for _ in 0..64 {
             match inputs.events.try_recv() {
-                Ok(envelope) => match drain(envelope, stream, state, start_person)? {
-                    Some(exit) => return Ok(exit),
-                    None => dirty = true,
-                },
+                Ok(envelope) => {
+                    note_runtime(&envelope, inputs.server, state);
+                    match drain(envelope, stream, state, start_person)? {
+                        Some(exit) => return Ok(exit),
+                        None => dirty = true,
+                    }
+                }
                 Err(TryRecvError::Disconnected) => return Ok(SessionExit::LocalLinkLost),
                 Err(TryRecvError::Empty) => break,
             }
@@ -162,6 +167,24 @@ fn run_loop(
             Err(RecvTimeoutError::Timeout) => {}
             Err(RecvTimeoutError::Disconnected) => return Ok(SessionExit::TerminalLost),
         }
+    }
+}
+
+fn note_runtime(envelope: &Envelope, server: &crate::store::ServerEntry, state: &mut ClientState) {
+    if let (
+        Source::Local,
+        Ok(ServerMsg::RuntimeReady {
+            version,
+            room_refused,
+            ..
+        }),
+    ) = (&envelope.source, &envelope.message)
+    {
+        state.set_standing_notice(crate::local::standing_notice(
+            server,
+            version.as_deref(),
+            room_refused.as_deref(),
+        ));
     }
 }
 

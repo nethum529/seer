@@ -157,6 +157,10 @@ pub enum ServerMsg {
         /// A runtime before 0.6.0 sends no version.
         #[serde(default)]
         version: Option<String>,
+        /// Issue 423: the reason of the room refusal for the version, while it lasts.
+        /// The runtime sends RuntimeReady again to its windows when it changes.
+        #[serde(default)]
+        room_refused: Option<String>,
     },
     Published {
         generation: String,

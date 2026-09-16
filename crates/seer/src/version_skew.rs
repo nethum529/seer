@@ -1,4 +1,4 @@
-use seer_core::version::major_minor;
+use seer_core::version::{major_minor, version_mismatch};
 
 /// The two versions in a refusal from a room server of another minor version.
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -7,15 +7,9 @@ pub(crate) struct VersionRefusal {
     pub(crate) client: String,
 }
 
-// Every room server since 0.5 refuses with
-// "version mismatch: server X, client Y. Run: seer update".
 pub(crate) fn version_refusal(reason: &str) -> Option<VersionRefusal> {
-    let (_, rest) = reason.split_once("version mismatch: server ")?;
-    let (server, rest) = rest.split_once(", client ")?;
-    let client = rest.split_whitespace().next()?.trim_end_matches('.');
-    let server_series = major_minor(server)?;
-    let client_series = major_minor(client)?;
-    (server_series != client_series).then(|| VersionRefusal {
+    let (server, client) = version_mismatch(reason)?;
+    Some(VersionRefusal {
         server: server.to_owned(),
         client: client.to_owned(),
     })

@@ -25,7 +25,15 @@ fn a_window_on_a_runtime_without_a_version_shows_the_restart_notice() {
     });
 
     let ready = greet(&socket, None, READY_TIMEOUT).expect("the old greeting must decode");
-    let (_, _, notice) = attach_stream(ready).expect("the window must attach");
+    let server = ServerEntry {
+        endpoint: "127.0.0.1:9".into(),
+        alias: "room".into(),
+        user_id: "owner".into(),
+        name: "owner".into(),
+        credential: "credential".into(),
+        current: true,
+    };
+    let (_, _, notice) = attach_stream(&server, ready).expect("the window must attach");
     runtime.join().expect("fake runtime must stop");
     let _ = fs::remove_dir_all(&directory);
 
