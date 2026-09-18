@@ -178,13 +178,9 @@ fn prompt_defaults_create_config_and_owner_store() {
     assert!(output.stdout.contains("Your name [alice]: "));
     assert!(!output.stdout.contains("Published address"));
     assert!(
-        output.stdout.contains(concat!(
-            " ___  ___  ___  _ _\n",
-            "(_-< / -_)/ -_)| '_|\n",
-            "/__/ \\___|\\___||_|\n",
-            "\n",
-            "Server started.\nYou are alice.\n"
-        )),
+        output
+            .stdout
+            .starts_with("Your name [alice]: Server started.\nYou are alice.\n"),
         "{}",
         output.stdout
     );
@@ -283,6 +279,7 @@ fn failed_broker_prints_only_the_last_twenty_log_lines() {
     let output = run_start(&executable, &directory, "", &[("SEER_FAKE_FAIL", "1")]);
 
     assert_eq!(output.status.code(), Some(1));
+    assert_eq!(output.stdout, "");
     assert!(!output.stderr.contains("failure-line-1\n"));
     assert!(output.stderr.contains("failure-line-6\n"));
     assert!(output.stderr.contains("failure-line-25\n"));

@@ -28,7 +28,7 @@ impl Host {
         command
     }
 
-    fn run(&self, args: &[&str]) {
+    fn run(&self, args: &[&str]) -> String {
         let mut child = self.command().args(args).spawn().expect("seer must start");
         child
             .stdin
@@ -42,6 +42,7 @@ impl Host {
             "{}",
             String::from_utf8_lossy(&output.stderr)
         );
+        String::from_utf8_lossy(&output.stdout).into_owned()
     }
 }
 
@@ -78,7 +79,8 @@ fn restore_recovers_an_owner_credential_that_authenticates() {
         .expect("owner ID");
     fs::remove_file(&path).expect("owner store must be deleted");
     host.run(&["stop"]);
-    host.run(&["start", "--restore"]);
+    let output = host.run(&["start", "--restore"]);
+    assert!(output.starts_with("Server started.\n"), "{output}");
 
     let restored: toml::Value =
         toml::from_str(&fs::read_to_string(path).expect("owner store must be restored"))
