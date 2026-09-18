@@ -196,11 +196,11 @@ impl TestFiles {
     fn start_broker(&self) -> Child {
         let output = fs::File::create(&self.broker_output).expect("broker output must open");
         let log = fs::File::create(&self.broker_log).expect("broker log must open");
-        Command::new(broker_binary())
+        Command::new(env!("CARGO_BIN_EXE_seer-broker"))
             .arg(&self.broker_config)
             .env("XDG_RUNTIME_DIR", &self.runtime_dir)
             .env("SEER_RUNTIME_BIN", &self.runtime_wrapper)
-            .env("SEER_TEST_RUNTIME_BIN", runtime_binary())
+            .env("SEER_TEST_RUNTIME_BIN", env!("CARGO_BIN_EXE_seer-runtime"))
             .env("SEER_TEST_ROOT", &self.root)
             .stdout(Stdio::from(output))
             .stderr(Stdio::from(log))
@@ -239,36 +239,6 @@ impl Drop for BrokerProcess {
     fn drop(&mut self) {
         terminate_child(&mut self.0);
     }
-}
-
-fn broker_binary() -> PathBuf {
-    sibling_binary("seer-broker")
-}
-
-fn runtime_binary() -> PathBuf {
-    sibling_binary("seer-runtime")
-}
-
-fn sibling_binary(binary: &str) -> PathBuf {
-    let sibling = Path::new(env!("CARGO_BIN_EXE_seer"))
-        .parent()
-        .expect("seer binary must have a parent")
-        .join(binary);
-    let cargo = std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into());
-    let manifest = Path::new(env!("CARGO_MANIFEST_DIR"));
-    let mut build = Command::new(cargo)
-        .args(["build", "-p", "seer", "--bin", binary])
-        .current_dir(manifest)
-        .spawn()
-        .expect("sibling binary must build");
-    let status = wait_for_child(&mut build, Duration::from_secs(60)).unwrap_or_else(|| {
-        let _ = build.kill();
-        assert!(wait_for_child(&mut build, Duration::from_secs(2)).is_some());
-        panic!("sibling binary build timed out");
-    });
-    assert!(status.success(), "sibling binary must build");
-    assert!(sibling.is_file(), "sibling binary must exist after build");
-    sibling
 }
 
 fn terminate_child(child: &mut Child) {
