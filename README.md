@@ -1,5 +1,7 @@
 # Seer
 
+![Seer launch video: nethum starts a room, kyler joins, and nethum types into the agent in the terminal of kyler](docs/images/seer-launch.gif)
+
 Seer shares live terminals in a room. One person hosts the room. Each
 person runs their own terminals on their own computer.
 
