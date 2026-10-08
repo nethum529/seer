@@ -138,8 +138,10 @@ mod tests {
     use std::time::{Duration, Instant};
 
     const PROFILE: &str = "SEER_LOGIN_PROBE=profile; export SEER_LOGIN_PROBE\n";
-    const POSIX_PROBE: &str =
+    const BASH_PROBE: &str =
         "printf 'probe=%s-%s\\n' \"$(shopt -q login_shell && echo login)\" \"$SEER_LOGIN_PROBE\"\n";
+    // POSIX sh has no login flag to read. Only a login sh reads .profile.
+    const SH_PROBE: &str = "printf 'probe=login-%s\\n' \"$SEER_LOGIN_PROBE\"\n";
     const ZSH_PROBE: &str =
         "printf 'probe=%s-%s\\n' \"$([[ -o login ]] && echo login)\" \"$SEER_LOGIN_PROBE\"\n";
     const FISH_PROBE: &str =
@@ -152,8 +154,8 @@ mod tests {
         let home = env::temp_dir().join(format!("seer-login-probe-{}", std::process::id()));
         write_profiles(&home);
         for (name, probe) in [
-            ("bash", POSIX_PROBE),
-            ("sh", POSIX_PROBE),
+            ("bash", BASH_PROBE),
+            ("sh", SH_PROBE),
             ("zsh", ZSH_PROBE),
             ("fish", FISH_PROBE),
         ] {
