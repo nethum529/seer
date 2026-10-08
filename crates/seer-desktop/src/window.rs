@@ -3,9 +3,9 @@ use std::io;
 use futures::StreamExt;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Context, Div, Font, FontWeight, InteractiveElement, IntoElement, Keystroke, MouseButton,
-    ParentElement, Render, ScrollHandle, SharedString, Styled, Task, Window, div, px, relative,
-    rgb,
+    App, Context, Div, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
+    MouseButton, ParentElement, Render, ScrollHandle, SharedString, Stateful, Styled, Task, Window,
+    div, px, relative, rgb,
 };
 use seer::ServerStore;
 use seer_core::TerminalFrame;
@@ -14,7 +14,8 @@ use seer_core::proto::ServerMsg;
 use crate::link::{Link, Messages};
 use crate::palette;
 use crate::screen::{self, Screen};
-use crate::sidebar::{self, Tablist};
+use crate::sidebar::{self, Keys};
+use crate::tip;
 
 const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";
 const LINK_LOST: &str = "The link to your terminals stopped. Open Seer again.";
@@ -33,7 +34,7 @@ pub(crate) struct SeerWindow {
     content: Content,
     font: Font,
     ui_font: SharedString,
-    tablist: Tablist,
+    keys: Keys,
     _messages: Option<Task<()>>,
 }
 
@@ -62,17 +63,18 @@ impl SeerWindow {
                 }
             })
         });
-        let tablist = Tablist {
-            focus: cx.focus_handle(),
+        let keys = Keys {
+            tabs: cx.focus_handle().tab_stop(true),
+            who: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
             ring: false,
         };
-        window.focus(&tablist.focus);
+        window.focus(&keys.tabs);
         Self {
             content,
             font,
             ui_font: ui_font(cx),
-            tablist,
+            keys,
             _messages: messages,
         }
     }
@@ -102,7 +104,7 @@ impl SeerWindow {
     }
 
     pub(crate) fn press(&mut self, pane: &str, window: &mut Window, cx: &mut Context<Self>) {
-        window.focus(&self.tablist.focus);
+        window.focus(&self.keys.tabs);
         self.select(pane, cx);
     }
 
@@ -124,9 +126,25 @@ impl SeerWindow {
             return;
         };
         let pane = terminal.pane.clone();
-        self.tablist.reveal(at);
-        self.tablist.ring = true;
+        self.keys.reveal(at);
+        self.keys.ring = true;
         self.select(&pane, cx);
+    }
+
+    fn travel(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+        self.keys.ring = match keystroke.key.as_str() {
+            "tab" if keystroke.modifiers.shift => {
+                window.focus_prev();
+                true
+            }
+            "tab" => {
+                window.focus_next();
+                true
+            }
+            "escape" => false,
+            _ => return,
+        };
+        cx.notify();
     }
 
     fn receive(&mut self, message: io::Result<ServerMsg>, cx: &mut Context<Self>) {
@@ -179,10 +197,13 @@ impl Render for SeerWindow {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|view, _, _, cx| {
-                    view.tablist.ring = false;
+                    view.keys.ring = false;
                     cx.notify();
                 }),
-            );
+            )
+            .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
+                view.travel(&event.keystroke, window, cx)
+            }));
         let (link, name) = match &self.content {
             Content::Message(message) => {
                 return root
@@ -207,7 +228,7 @@ impl Render for SeerWindow {
                     .flex_col()
                     .child(
                         bar().gap(px(10.)).pl(px(14.)).pr(px(8.)).child(
-                            sidebar::who(name, 18., 10.)
+                            sidebar::who(name, 18., 10., &self.ui_font, &self.keys, window)
                                 .min_w_0()
                                 .h(px(32.))
                                 .pl(px(6.))
@@ -215,7 +236,7 @@ impl Render for SeerWindow {
                         ),
                     )
                     .when(!terminals.is_empty(), |main| {
-                        main.child(sidebar::strip(terminals, shown, &self.tablist, cx))
+                        main.child(sidebar::strip(terminals, shown, &self.keys, window, cx))
                     })
                     .child(terminal),
             );
@@ -224,21 +245,18 @@ impl Render for SeerWindow {
             .iter()
             .find(|terminal| Some(terminal.pane.as_str()) == shown)
             .map(|terminal| terminal.name.clone());
-        root.child(sidebar::sidebar(name, terminals, shown, &self.tablist, cx))
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(
-                        bar()
-                            .justify_center()
-                            .px(px(14.))
-                            .child(heading(name, title)),
-                    )
-                    .child(terminal),
-            )
+        let who = sidebar::who(name, 22., 11., &self.ui_font, &self.keys, window);
+        let side = sidebar::sidebar(who, terminals, shown, &self.keys, window, cx);
+        let title = heading(name, title, &self.ui_font);
+        root.child(side).child(
+            div()
+                .flex_1()
+                .min_w_0()
+                .flex()
+                .flex_col()
+                .child(bar().justify_center().px(px(14.)).child(title))
+                .child(terminal),
+        )
     }
 }
 
@@ -253,8 +271,12 @@ fn bar() -> Div {
         .border_color(rgb(palette::LINE))
 }
 
-fn heading(name: &SharedString, terminal: Option<String>) -> Div {
-    let title = div()
+fn heading(name: &SharedString, terminal: Option<String>, font: &SharedString) -> Stateful<Div> {
+    let full = match &terminal {
+        Some(terminal) => format!("{name} / {terminal}").into(),
+        None => name.clone(),
+    };
+    let title = tip::on_hover(div().id("title"), full, font.clone())
         .min_w_0()
         .flex()
         .font_weight(FontWeight::MEDIUM)

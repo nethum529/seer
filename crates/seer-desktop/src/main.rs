@@ -4,6 +4,7 @@ mod link;
 mod palette;
 mod screen;
 mod sidebar;
+mod tip;
 mod window;
 
 use window::SeerWindow;

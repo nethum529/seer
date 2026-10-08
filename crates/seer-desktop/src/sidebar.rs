@@ -2,23 +2,29 @@ use gpui::prelude::FluentBuilder;
 use gpui::{
     Context, Div, FocusHandle, FontWeight, InteractiveElement, KeyDownEvent, MouseButton,
     ParentElement, Pixels, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
-    Styled, div, point, px, relative, rgb,
+    Styled, Window, div, point, px, relative, rgb,
 };
 use seer_core::proto::TerminalInfo;
 
 use crate::palette;
+use crate::tip;
 use crate::window::SeerWindow;
 
 const WIDTH: f32 = 248.;
 const STRIP_PAD: f32 = 8.;
 
-pub(crate) struct Tablist {
-    pub(crate) focus: FocusHandle,
+pub(crate) struct Keys {
+    pub(crate) tabs: FocusHandle,
+    pub(crate) who: FocusHandle,
     pub(crate) scroll: ScrollHandle,
     pub(crate) ring: bool,
 }
 
-impl Tablist {
+impl Keys {
+    pub(crate) fn ring(&self, focus: &FocusHandle, window: &Window) -> bool {
+        self.ring && focus.is_focused(window)
+    }
+
     // gpui scroll_to_item puts the item flush on the list edge and ignores
     // the list padding.
     pub(crate) fn reveal(&self, at: usize) {
@@ -61,12 +67,14 @@ fn fit(start: Pixels, end: Pixels, view_start: Pixels, view_end: Pixels, offset:
 }
 
 pub(crate) fn sidebar(
-    name: &SharedString,
+    who: Stateful<Div>,
     terminals: &[TerminalInfo],
     shown: Option<&str>,
-    tablist: &Tablist,
+    keys: &Keys,
+    window: &Window,
     cx: &mut Context<SeerWindow>,
 ) -> Div {
+    let ring = keys.ring(&keys.tabs, window);
     div()
         .flex_none()
         .w(px(WIDTH))
@@ -77,16 +85,9 @@ pub(crate) fn sidebar(
         .bg(rgb(palette::WINDOW))
         .border_r_1()
         .border_color(rgb(palette::LINE))
+        .child(who.w_full().h(px(40.)).mt(px(2.)).pl(px(8.)).pr(px(10.)))
         .child(
-            who(name, 22., 11.)
-                .w_full()
-                .h(px(40.))
-                .mt(px(2.))
-                .pl(px(8.))
-                .pr(px(10.)),
-        )
-        .child(
-            list(div().id("tabs"), tablist, cx)
+            list(div().id("tabs"), keys, cx)
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -97,18 +98,27 @@ pub(crate) fn sidebar(
                 .children(
                     terminals
                         .iter()
-                        .map(|terminal| tab(terminal, shown, tablist.ring, cx)),
+                        .map(|terminal| tab(terminal, shown, ring, cx)),
                 ),
         )
 }
 
-pub(crate) fn who(name: &SharedString, avatar: f32, initial: f32) -> Div {
+pub(crate) fn who(
+    name: &SharedString,
+    avatar: f32,
+    initial: f32,
+    font: &SharedString,
+    keys: &Keys,
+    window: &Window,
+) -> Stateful<Div> {
     let letter: SharedString = name
         .chars()
         .next()
         .map(|first| first.to_uppercase().collect::<String>().into())
         .unwrap_or_default();
-    div()
+    tip::on_hover(div().id("who"), name.clone(), font.clone())
+        .track_focus(&keys.who)
+        .relative()
         .flex()
         .items_center()
         .gap(px(9.))
@@ -134,6 +144,10 @@ pub(crate) fn who(name: &SharedString, avatar: f32, initial: f32) -> Div {
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(name.clone()),
         )
+        .when(keys.ring(&keys.who, window), |who| {
+            who.child(outline())
+                .child(tip::below(name.clone(), font.clone()))
+        })
 }
 
 // gpui 0.2.2 keeps the first measure of a text that does not wrap. That
@@ -149,10 +163,12 @@ pub(crate) fn one_line(text: Div) -> Div {
 pub(crate) fn strip(
     terminals: &[TerminalInfo],
     shown: Option<&str>,
-    tablist: &Tablist,
+    keys: &Keys,
+    window: &Window,
     cx: &mut Context<SeerWindow>,
 ) -> Stateful<Div> {
-    list(div().id("strip"), tablist, cx)
+    let ring = keys.ring(&keys.tabs, window);
+    list(div().id("strip"), keys, cx)
         .flex_none()
         .flex()
         .gap(px(4.))
@@ -172,7 +188,7 @@ pub(crate) fn strip(
                 .whitespace_nowrap()
                 .text_color(rgb(if on { palette::TEXT } else { palette::TEXT_2 }))
                 .when(on, |tab| tab.bg(rgb(palette::PILL)))
-                .when(on && tablist.ring, |tab| tab.child(outline()))
+                .when(on && ring, |tab| tab.child(outline()))
                 .child(dot())
                 .child(terminal.name.clone())
         }))
@@ -187,14 +203,14 @@ pub(crate) fn step(key: &str, count: usize, now: Option<usize>) -> Option<usize>
         "down" | "right" => Some(now.map_or(0, |at| if at == last { 0 } else { at + 1 })),
         "home" => Some(0),
         "end" => Some(last),
-        "enter" | "space" | "tab" => Some(now.unwrap_or(0)),
+        "enter" | "space" => Some(now.unwrap_or(0)),
         _ => None,
     }
 }
 
-fn list(list: Stateful<Div>, tablist: &Tablist, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
-    list.track_focus(&tablist.focus)
-        .track_scroll(&tablist.scroll)
+fn list(list: Stateful<Div>, keys: &Keys, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
+    list.track_focus(&keys.tabs)
+        .track_scroll(&keys.scroll)
         .on_key_down(
             cx.listener(|view, event: &KeyDownEvent, _, cx| view.key(&event.keystroke, cx)),
         )
