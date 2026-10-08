@@ -23,9 +23,14 @@ pub(crate) fn install(command: &mut CommandBuilder, shell: &Shell) -> io::Result
     let name = Path::new(&shell.program)
         .file_name()
         .and_then(|name| name.to_str());
+    // Apple's /bin/bash reads ENV only when it runs as sh, so it starts as a
+    // plain login bash without the exit function.
+    let env_bash = shell.login
+        && name == Some("bash")
+        && !(cfg!(target_os = "macos") && shell.program == "/bin/bash");
     // bash reads long options only before short options, so a login bash
     // gets --login with --posix.
-    if shell.login && name != Some("bash") {
+    if shell.login && !env_bash {
         command.arg("-l");
     }
     match name {
@@ -33,7 +38,8 @@ pub(crate) fn install(command: &mut CommandBuilder, shell: &Shell) -> io::Result
             let function = format!("function exit; {} exit; end", fish_quote(&seer));
             command.args(["-C", &function]);
         }
-        Some("bash") if shell.login => install_bash_login(command, &files, &seer)?,
+        Some("bash") if env_bash => install_bash_login(command, &files, &seer)?,
+        Some("bash") if shell.login => {}
         Some("bash") => {
             let rc = files.join("bashrc");
             let body = format!("{BASH_RC_FILES}exit() {{ {} exit; }}\n", posix_quote(&seer));
