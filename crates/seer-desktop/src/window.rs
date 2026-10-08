@@ -186,6 +186,14 @@ fn ui_font(cx: &App) -> SharedString {
 
 impl Render for SeerWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        // gpui starts a tip only on a mouse move that the tooltip listener
+        // gets, so the tips come back in the frame after Escape clears them.
+        if self.keys.mode == Mode::Quiet {
+            cx.on_next_frame(window, |view, _, cx| {
+                view.keys.mode = Mode::Pointer;
+                cx.notify();
+            });
+        }
         let root = div()
             .size_full()
             .flex()
@@ -201,12 +209,6 @@ impl Render for SeerWindow {
                     cx.notify();
                 }),
             )
-            .on_mouse_move(cx.listener(|view, _, _, cx| {
-                if view.keys.mode == Mode::Quiet {
-                    view.keys.mode = Mode::Pointer;
-                    cx.notify();
-                }
-            }))
             .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                 view.travel(&event.keystroke, window, cx)
             }));
