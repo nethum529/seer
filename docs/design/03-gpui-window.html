@@ -1,0 +1,946 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seer</title>
+<style>
+/* PALETTE START */
+:root {
+  /* gpui-component Default Dark (Longbridge), crates/component/src/theme/default-theme.json,
+     Tailwind neutral scale from default-colors.json. Primary is near white, so the accent is monochrome. */
+  color-scheme: dark;
+  --desk: #171717;
+  --win-border: #262626;
+  --side: #0a0a0a;
+  --bg: #0a0a0a;
+  --raised: #171717;
+  --card: rgba(255, 255, 255, .02);
+  --line: #262626;
+  --line-2: #404040;
+  --hover: #171717;
+  --pill: #262626;
+  --chip: #262626;
+  --chip-2: #404040;
+  --text: #fafafa;
+  --text-2: #d4d4d4;
+  --muted: #a3a3a3;
+  --faint: #737373;
+  --fainter: #525252;
+  --accent: #fafafa;
+  --on-accent: #171717;
+  --ok: #4ade80;
+  --warn: #facc15;
+  --err: #f87171;
+  --a-green: #4ade80;
+  --a-yellow: #facc15;
+  --a-red: #f87171;
+  --a-blue: #60a5fa;
+  --a-magenta: #c084fc;
+  --a-cyan: #22d3ee;
+  --a-orange: #fb923c;
+  --scrim: rgba(0, 0, 0, .5);
+  --shadow: rgba(0, 0, 0, .55);
+}
+/* PALETTE END */
+:root {
+  --ui: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Berkeley Mono", "SF Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: grid; place-items: center; overflow: hidden;
+  background: radial-gradient(1100px 700px at 50% 35%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 70%), var(--desk);
+  color: var(--text); font: 13px/1.4 var(--ui); cursor: default;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+button, textarea { font: inherit; color: inherit; cursor: default; }
+button { background: none; border: 0; padding: 0; margin: 0; text-align: left; }
+:focus { outline: none; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+
+.win {
+  position: relative; display: flex; flex-direction: column;
+  width: min(1360px, calc(100vw - 48px)); height: min(860px, calc(100vh - 48px));
+  background: var(--bg); border: 1px solid var(--win-border); border-radius: 14px;
+  box-shadow: 0 40px 100px var(--shadow), 0 10px 30px var(--shadow);
+  overflow: hidden; user-select: none; -webkit-user-select: none;
+}
+.body { flex: 1; display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 0; }
+
+.lights { display: flex; gap: 8px; flex: none; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .25); }
+.lights i:nth-child(1) { background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+
+.side {
+  display: flex; flex-direction: column; min-height: 0; padding: 0 10px;
+  background: var(--side); border-right: 1px solid var(--line);
+}
+.side-top { flex: none; height: 44px; display: flex; align-items: center; padding-left: 4px; }
+
+.who {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 40px;
+  padding: 0 10px 0 8px; border-radius: 8px;
+}
+.who:hover { background: var(--hover); }
+.who[aria-expanded="true"] { background: var(--pill); }
+.who-name { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who .chev { color: var(--faint); flex: none; }
+.who-m { display: none; width: auto; height: 32px; padding: 0 8px 0 6px; }
+.who-m .av { width: 18px; height: 18px; font-size: 10px; }
+
+.newt {
+  flex: none; display: flex; align-items: center; gap: 8px; width: 100%; height: 32px;
+  margin-top: 6px; padding: 0 10px 0 11px; border-radius: 8px;
+  background: var(--accent); color: var(--on-accent); font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 1px 2px var(--shadow);
+}
+.newt:hover { background: color-mix(in srgb, var(--accent) 90%, white); }
+.newt:active { background: color-mix(in srgb, var(--accent) 90%, black); }
+.newt:focus-visible { outline: 1px solid var(--text); outline-offset: 1px; }
+.newt svg { flex: none; }
+.newt kbd { margin-left: auto; font: 500 11.5px var(--ui); color: color-mix(in srgb, var(--on-accent) 55%, transparent); }
+
+.av {
+  flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--chip-2); color: var(--text); font: 600 11px/1 var(--ui);
+}
+.dots { display: inline-flex; gap: 4px; align-items: center; }
+.dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+.dot.working { background: var(--warn); }
+.dot.blocked { background: var(--err); }
+.dot.idle { background: var(--ok); }
+.dot.plain { box-shadow: inset 0 0 0 1px var(--fainter); }
+.you { color: var(--accent); font-size: 11.5px; font-weight: 500; margin-left: 6px; }
+.host { color: var(--fainter); font-size: 11.5px; margin-left: 6px; }
+
+.mtabs { display: none; }
+.tabs { flex: 1; min-height: 0; overflow-y: auto; margin-top: 10px; display: flex; flex-direction: column; gap: 2px; scrollbar-width: none; }
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; grid-template-rows: auto auto;
+  column-gap: 10px; row-gap: 1px; align-items: center; width: 100%; padding: 7px 10px 8px 12px; border-radius: 8px;
+}
+.tab:hover { background: var(--hover); }
+.tab.on { background: var(--pill); }
+.tab .dot { grid-row: 1; grid-column: 1; }
+.tab-name { grid-row: 1; grid-column: 2; font-weight: 500; color: var(--text); }
+.tab-since { grid-row: 1; grid-column: 3; font-size: 11.5px; color: var(--fainter); font-variant-numeric: tabular-nums; }
+.tab-task {
+  grid-row: 2; grid-column: 2 / span 2; font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+
+.mi-pres { margin-left: 8px; font-size: 11.5px; color: var(--fainter); white-space: nowrap; }
+.away .fade { opacity: .55; }
+.offline .fade { opacity: .3; }
+
+.side-foot {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 44px;
+  margin: 0 -10px; padding: 0 10px 0 18px; border-top: 1px solid var(--line);
+  color: var(--muted); white-space: nowrap;
+}
+.side-foot code { font: 11.5px var(--mono); color: var(--fainter); }
+.icon-btn {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px;
+  color: var(--faint);
+}
+.icon-btn:hover, .icon-btn[aria-expanded="true"] { background: var(--pill); color: var(--text); }
+.side-foot .icon-btn { margin-left: auto; }
+
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.mbar {
+  flex: none; height: 44px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  padding: 0 14px; border-bottom: 1px solid var(--line);
+}
+.mbar .lights, .mbar-act { display: none; }
+.title { grid-column: 2; color: var(--text); font-weight: 500; white-space: nowrap; }
+.title .sep { color: var(--fainter); margin: 0 4px; }
+.title .tt { color: var(--muted); font-weight: 400; }
+
+.stream {
+  flex: 1; min-height: 0; overflow-y: auto; overflow-x: hidden;
+  display: flex; flex-direction: column; gap: 8px; padding: 14px 14px 12px;
+  font: 12.5px/1.55 var(--mono); color: var(--text-2);
+  user-select: text; -webkit-user-select: text; cursor: text;
+  scrollbar-width: thin; scrollbar-color: var(--chip-2) transparent;
+}
+.stream > :first-child { margin-top: auto; }
+.blk {
+  position: relative; flex: none; padding: 8px 10px 11px 14px; border-radius: 8px;
+  background: var(--card); border: 1px solid var(--line);
+}
+.blk:hover { border-color: var(--line-2); }
+.blk.fail { background: color-mix(in srgb, var(--err) 6%, transparent); border-color: color-mix(in srgb, var(--err) 22%, transparent); box-shadow: inset 2px 0 0 var(--err); }
+.blk.run { box-shadow: inset 2px 0 0 var(--warn); }
+.blk.sel, .blk.sel:hover { border-color: var(--accent); background: color-mix(in srgb, var(--accent) 6%, transparent); }
+.blk.fail.sel { background: color-mix(in srgb, var(--err) 6%, transparent); }
+.bh {
+  display: flex; align-items: center; gap: 12px; min-height: 22px; margin-bottom: 2px;
+  font-size: 11.5px; color: var(--fainter); user-select: none; -webkit-user-select: none; white-space: nowrap; overflow: hidden; cursor: default;
+}
+.bh-br { color: var(--faint); overflow: hidden; text-overflow: ellipsis; }
+.bh-at { margin-left: auto; font-variant-numeric: tabular-nums; }
+.bh-acts { display: flex; gap: 2px; visibility: hidden; }
+.blk:hover .bh-acts, .blk.sel .bh-acts, .bh-acts.keep { visibility: visible; }
+.ba { display: grid; place-items: center; width: 22px; height: 22px; border-radius: 5px; color: var(--faint); }
+.ba:hover, .ba[aria-expanded="true"] { background: var(--pill); color: var(--text); }
+.ba.done { color: var(--ok); }
+.bh-at .bad { color: var(--err); }
+.bc { color: var(--text); font-weight: 600; white-space: pre-wrap; overflow-wrap: anywhere; }
+.bc .gl { color: var(--faint); font-weight: 400; margin-right: 8px; }
+.bo { margin-top: 6px; white-space: pre-wrap; overflow-wrap: anywhere; }
+.blk-ask, .blk-ask:hover, .blk-ask.sel { padding: 0; border: 0; background: none; }
+.blk-ask.sel .ask { border-color: var(--accent); }
+.ask {
+  padding: 12px 14px 12px 16px; border-radius: 8px;
+  border: 1px solid color-mix(in srgb, var(--err) 38%, transparent); background: color-mix(in srgb, var(--err) 6%, transparent);
+  box-shadow: inset 2px 0 0 var(--err);
+}
+.ask-cmd { margin: 4px 0 0 2ch; color: var(--text); overflow-wrap: anywhere; }
+.ask-note { margin-left: 2ch; color: var(--fainter); }
+.ask-q { margin-top: 10px; color: var(--text); }
+.opt { display: block; width: 100%; white-space: pre-wrap; color: var(--text-2); }
+.opt:first-of-type { color: var(--text); }
+.live { flex: none; padding: 2px 4px 0; color: var(--muted); }
+.spin { display: inline-block; min-width: 1.5ch; margin-right: 1ch; color: var(--a-orange); }
+.screen {
+  flex: 1; display: flex; flex-direction: column; overflow: hidden;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--card);
+}
+.screen-lines { flex: 1; padding: 8px 12px; white-space: pre-wrap; overflow-wrap: anywhere; color: var(--text-2); }
+.screen-status { padding: 2px 0; background: var(--side); color: var(--text-2); white-space: pre; overflow: hidden; }
+.screen-status > .g:first-child { background: var(--a-green); color: var(--bg); }
+.empty { flex: 1; display: grid; place-items: center; font: 13px var(--ui); color: var(--faint); user-select: none; -webkit-user-select: none; cursor: default; padding: 24px; text-align: center; }
+
+.g { color: var(--a-green); } .y { color: var(--a-yellow); } .r { color: var(--a-red); } .b { color: var(--a-blue); }
+.m { color: var(--a-magenta); } .t { color: var(--a-cyan); } .p { color: var(--a-orange); }
+.d { color: var(--fainter); } .s { color: var(--muted); }
+.k { font-weight: 700; }
+.k:not(.g):not(.y):not(.r):not(.b):not(.m):not(.t):not(.p) { color: var(--text); }
+
+.input { padding: 0 14px 14px; }
+.editor {
+  display: block; padding: 10px 10px 10px 12px; border: 1px solid var(--line-2); border-radius: 12px;
+  background: var(--raised); cursor: text;
+  box-shadow: 0 12px 32px var(--shadow), 0 2px 6px var(--shadow);
+}
+.editor:focus-within { border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.ed-row { display: flex; align-items: flex-end; gap: 10px; }
+.ed-row textarea { flex: 1; min-width: 0; max-height: 160px; }
+.editor textarea:focus-visible { outline: none; }
+.send {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 50%;
+  background: var(--chip); color: var(--faint);
+}
+.send.on { background: var(--accent); color: var(--on-accent); }
+.chips { display: flex; gap: 6px; margin-bottom: 6px; flex-wrap: wrap; }
+.chip {
+  display: inline-flex; align-items: center; gap: 5px; height: 20px; padding: 0 7px; border-radius: 6px;
+  background: var(--chip); color: var(--muted); font: 11.5px/1 var(--mono); white-space: nowrap;
+}
+.chip svg { color: var(--faint); flex: none; }
+.editor textarea {
+  display: block; width: 100%; resize: none; border: 0; background: none; padding: 2px 0;
+  font: 12.5px/1.55 var(--mono); color: var(--text); cursor: text;
+}
+.editor textarea::placeholder { color: var(--fainter); }
+.ro {
+  display: flex; align-items: center; gap: 8px; min-height: 48px; margin: 0 14px 14px; padding: 7px 8px 7px 14px;
+  border: 1px solid var(--line-2); border-radius: 12px; background: var(--raised);
+  box-shadow: 0 12px 32px var(--shadow), 0 2px 6px var(--shadow);
+  color: var(--muted); font-size: 12.5px;
+}
+.ro svg { flex: none; color: var(--faint); }
+.ro span { min-width: 0; }
+.ro .host-m { white-space: nowrap; }
+.ro button {
+  margin-left: auto; flex: none; height: 26px; padding: 0 10px; border-radius: 8px;
+  background: var(--chip); color: var(--text); font-size: 12px;
+}
+.ro button:hover { background: var(--chip-2); }
+
+.menu {
+  position: absolute; z-index: 20; width: 288px; padding: 4px;
+  background: var(--raised); border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 16px 40px var(--shadow), 0 2px 8px var(--shadow);
+  opacity: 0; visibility: hidden; transition: opacity 60ms ease-out, visibility 0s linear 60ms;
+}
+.menu.open { opacity: 1; visibility: visible; transition: opacity 90ms ease-out; }
+.mi {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 12px; align-items: center; column-gap: 10px;
+  height: 36px; padding: 0 10px 0 8px; border-radius: 7px;
+}
+.mi.hi { background: var(--pill); }
+.mi-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mi.cur .mi-name { font-weight: 600; }
+.mi-check { color: var(--accent); display: grid; place-items: center; }
+.bmenu { width: 172px; }
+.bm { display: flex; align-items: center; width: 100%; height: 30px; padding: 0 10px; border-radius: 7px; color: var(--text-2); }
+.bm:hover { background: var(--pill); color: var(--text); }
+
+.scrim {
+  position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px;
+  background: var(--scrim);
+  opacity: 0; visibility: hidden; transition: opacity 80ms ease-out, visibility 0s linear 80ms;
+}
+.scrim.open { opacity: 1; visibility: visible; transition: opacity 110ms ease-out; }
+.sheet {
+  position: relative; width: min(380px, 100%); padding: 16px 18px 18px;
+  background: var(--raised); border: 1px solid var(--line-2); border-radius: 12px;
+  box-shadow: 0 24px 64px var(--shadow), 0 2px 8px var(--shadow);
+}
+.sheet h2 { margin: 0; font: 600 14px/28px var(--ui); color: var(--text); }
+.sheet p { margin: 6px 0 0; color: var(--muted); }
+.sheet .x { position: absolute; top: 10px; right: 10px; }
+
+@media (max-width: 720px) {
+  body { display: block; }
+  .win { width: 100vw; height: 100vh; height: 100dvh; border: 0; border-radius: 0; box-shadow: none; }
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .side { display: none; }
+  .mbar { display: flex; gap: 10px; padding: 0 8px 0 14px; background: var(--side); }
+  .mbar .lights { display: flex; }
+  .title { display: none; }
+  .who-m { display: flex; }
+  .mbar-act { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+  .newt-m { width: auto; height: 30px; margin: 0; padding: 0 12px 0 10px; }
+  .mtabs {
+    flex: none; display: flex; gap: 4px; padding: 6px 8px; overflow-x: auto; background: var(--side);
+    border-bottom: 1px solid var(--line); scrollbar-width: none;
+  }
+  .mtabs::-webkit-scrollbar { display: none; }
+  .mtabs:empty { display: none; }
+  .mtab { display: inline-flex; align-items: center; gap: 7px; height: 32px; padding: 0 12px; border-radius: 8px; white-space: nowrap; color: var(--text-2); flex: none; }
+  .mtab.on { background: var(--pill); color: var(--text); }
+  .blk:not(.blk-ask) { padding: 8px 8px 10px 12px; }
+  .stream { padding: 10px; }
+  .input { padding: 0 10px 10px; }
+  .ro { margin: 0 10px 10px; padding-left: 12px; }
+  .ro button { height: 32px; }
+  .icon-btn { width: 34px; height: 34px; }
+  .send { width: 32px; height: 32px; }
+}
+@media (max-width: 360px) {
+  .mbar .lights { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu, .menu.open, .scrim, .scrim.open { transition: none; }
+}
+</style>
+</head>
+<body data-variate-section="index">
+<div class="win" id="win">
+  <div class="body">
+    <aside class="side">
+      <div class="side-top"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div></div>
+      <button class="who" id="who" aria-haspopup="listbox" aria-expanded="false"></button>
+      <button class="newt" type="button" data-new></button>
+      <div class="tabs" id="tabs" role="tablist"></div>
+      <div class="side-foot"><span id="roominfo"></span><button class="icon-btn" type="button" data-settings aria-label="Settings" title="Settings" aria-haspopup="dialog" aria-expanded="false"></button></div>
+    </aside>
+    <main class="main">
+      <header class="mbar">
+        <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+        <button class="who who-m" id="whoM" aria-haspopup="listbox" aria-expanded="false"></button>
+        <div class="title" id="title"></div>
+        <div class="mbar-act">
+          <button class="newt newt-m" type="button" data-new></button>
+          <button class="icon-btn" type="button" data-settings aria-label="Settings" title="Settings" aria-haspopup="dialog" aria-expanded="false"></button>
+        </div>
+      </header>
+      <nav class="mtabs" id="mtabs"></nav>
+      <div class="stream" id="stream"></div>
+      <div id="foot"></div>
+    </main>
+  </div>
+  <div class="menu" id="menu" role="listbox" tabindex="-1"></div>
+  <div class="menu bmenu" id="bmenu" role="menu"></div>
+  <div class="scrim" id="scrim">
+    <div class="sheet" role="dialog" aria-modal="true" aria-labelledby="setTitle">
+      <h2 id="setTitle">Settings</h2>
+      <button class="icon-btn x" type="button" data-close aria-label="Close"></button>
+      <p>Settings come in a later build.</p>
+    </div>
+  </div>
+</div>
+<script>
+// Shared fake room for every Seer GPUI mockup. Inline this whole block as-is.
+// Line strings are HTML. Colour classes: g green, y yellow, r red, b blue,
+// m mauve, t teal, p peach, d dim (overlay0), s subtext0, k bright bold.
+// Terminal kinds: agent, shell, app. States: working, idle, blocked.
+// A non-agent terminal that runs a program is "working" but reads "running".
+const SEER = {
+  room: { name: "seer-dev", host: "nethum", addr: "5e48802f", me: "nethum" },
+  people: [
+    {
+      id: "nethum", host: true, you: true, machine: "legion", os: "Linux",
+      presence: "active", seen: "now",
+      terminals: [
+        {
+          id: "n1", name: "claude", kind: "agent", state: "working", since: "6m",
+          task: "Fixing the seer stop buffer error, issue 436",
+          cwd: "~/Projects/seer", branch: "fix/436-stop-buffer",
+          blocks: [
+            { t: "turn", at: "10:08", prompt: "seer stop fails with a buffer error and the broker keeps running. Find the cause and fix it. Issue 436.",
+              out: [
+                '<span class="g">⏺</span> <span class="k">Read</span>(crates/seer-broker/src/server.rs)',
+                '<span class="d">  ⎿  Read 412 lines</span>',
+                '<span class="g">⏺</span> <span class="k">Search</span>(pattern: "BufWriter", path: "crates/seer-broker")',
+                '<span class="d">  ⎿  Found 3 files</span>',
+                '<span class="s">⏺</span> The stop reply goes into a BufWriter that is dropped before it flushes.',
+                '  The client reads a short frame, prints the buffer error, and the',
+                '  broker never leaves its accept loop.',
+                '<span class="g">⏺</span> <span class="k">Update</span>(crates/seer-broker/src/control.rs)',
+                '<span class="d">  ⎿  Updated control.rs with 3 additions and 1 removal</span>',
+                '<span class="d">     88</span>   let mut out = BufWriter::new(&amp;stream);',
+                '<span class="d">     89</span> <span class="r">- write_reply(&amp;mut out, &amp;Reply::Stopping);</span>',
+                '<span class="d">     89</span> <span class="g">+ write_reply(&amp;mut out, &amp;Reply::Stopping)?;</span>',
+                '<span class="d">     90</span> <span class="g">+ out.flush()?;</span>',
+                '<span class="d">     91</span> <span class="g">+ shutdown.notify_all();</span>',
+                '<span class="y">⏺</span> <span class="k">Bash</span>(cargo test -p seer-broker stop_)',
+                '<span class="d">  ⎿  Running…</span>'
+              ] },
+            { t: "live", text: "Compiling seer-broker", time: "6m 12s" }
+          ]
+        },
+        {
+          id: "n2", name: "codex", kind: "agent", state: "idle", since: "12m",
+          task: "Reviewed PR 441, found two bugs",
+          cwd: "~/Projects/seer", branch: "main",
+          blocks: [
+            { t: "turn", at: "09:51", prompt: "Review PR 441. List real bugs only, with file and line.",
+              out: [
+                '<span class="d">•</span> Ran <span class="k">gh pr diff 441</span>',
+                '<span class="d">•</span> Explored crates/seer/src/viewer.rs, crates/seer/src/state.rs',
+                '',
+                'Two findings:',
+                '',
+                '<span class="p">1.</span> <span class="b">viewer.rs:212</span> sends Resize each time an overlay opens.',
+                '   Section 2.2 says opening a panel must not send Watch or Resize.',
+                '<span class="p">2.</span> <span class="b">state.rs:88</span> drops the last owner size when the window',
+                '   loses focus, so a passive viewer can shrink the pane.',
+                '',
+                'No other issues.'
+              ] }
+          ]
+        },
+        {
+          id: "n3", name: "shell", kind: "shell", state: "idle", since: "3m",
+          task: "fish",
+          cwd: "~/Projects/seer", branch: "fix/436-stop-buffer",
+          blocks: [
+            { t: "cmd", at: "10:02", cmd: "git status -sb", ok: true, dur: "0.04s",
+              out: [
+                '## <span class="g">fix/436-stop-buffer</span>...<span class="r">origin/main</span> [ahead 1]',
+                ' <span class="r">M</span> crates/seer-broker/src/control.rs'
+              ] },
+            { t: "cmd", at: "10:03", cmd: "cargo clippy -p seer-broker -- -D warnings", ok: true, dur: "18.2s",
+              out: [
+                '<span class="g k">    Checking</span> seer-core v0.7.0 (/home/nethum/Projects/seer/crates/seer-core)',
+                '<span class="g k">    Checking</span> seer-broker v0.7.0 (/home/nethum/Projects/seer/crates/seer-broker)',
+                '<span class="g k">    Finished</span> `dev` profile [unoptimized + debuginfo] target(s) in 18.21s'
+              ] },
+            { t: "cmd", at: "10:05", cmd: "seer stop", ok: false, dur: "0.31s",
+              out: [
+                '<span class="r k">error:</span> broker reply: failed to fill whole buffer',
+                '<span class="d">hint: the room server may still run. See issue 436.</span>'
+              ] },
+            { t: "cmd", at: "10:06", cmd: "seer ps", ok: true, dur: "0.02s",
+              out: [
+                '<span class="d">PID     ROOM       TERMINALS  STARTED</span>',
+                '48211   seer-dev   3          09:12',
+                '50993   seer-dev   0          yesterday'
+              ] }
+          ]
+        }
+      ]
+    },
+    {
+      id: "kyler", host: false, you: false, machine: "kyler-mbp", os: "macOS",
+      presence: "active", seen: "now",
+      terminals: [
+        {
+          id: "k1", name: "claude", kind: "agent", state: "blocked", since: "2m",
+          task: "Waiting for approval: cargo publish --dry-run",
+          cwd: "~/code/seer", branch: "release/0.7.0",
+          blocks: [
+            { t: "turn", at: "10:04", prompt: "Get 0.7.0 ready. Bump the versions, update the changelog, then dry run the publish.",
+              out: [
+                '<span class="g">⏺</span> <span class="k">Update</span>(Cargo.toml)',
+                '<span class="d">  ⎿  version 0.6.0 to 0.7.0 in 5 crates</span>',
+                '<span class="g">⏺</span> <span class="k">Update</span>(CHANGELOG.md)',
+                '<span class="d">  ⎿  Added a 0.7.0 section with 9 entries</span>',
+                '<span class="g">⏺</span> <span class="k">Bash</span>(cargo build --release)',
+                '<span class="d">  ⎿  Finished `release` profile [optimized] target(s) in 1m 48s</span>'
+              ] },
+            { t: "ask", title: "Bash command",
+              cmd: "cargo publish --dry-run -p seer-core",
+              note: "Dry run the publish of seer-core 0.7.0",
+              q: "Do you want to proceed?",
+              options: [
+                "Yes",
+                "Yes, and do not ask again for cargo publish commands",
+                "No, and tell Claude what to do differently"
+              ] }
+          ]
+        },
+        {
+          id: "k2", name: "cargo", kind: "shell", state: "working", since: "41m",
+          task: "cargo watch",
+          cwd: "~/code/seer", branch: "release/0.7.0",
+          blocks: [
+            { t: "cmd", at: "09:23", cmd: "cargo watch -x 'check -p seer'", ok: null, dur: "41m",
+              out: [
+                '<span class="t">[Running \'cargo check -p seer\']</span>',
+                '<span class="g k">    Checking</span> seer v0.7.0 (/Users/kyler/code/seer/crates/seer)',
+                '<span class="g k">    Finished</span> `dev` profile [unoptimized + debuginfo] target(s) in 3.84s',
+                '<span class="t">[Finished running. Exit status: 0]</span>',
+                '<span class="t">[Running \'cargo check -p seer\']</span>',
+                '<span class="g k">    Checking</span> seer v0.7.0 (/Users/kyler/code/seer/crates/seer)'
+              ] }
+          ]
+        },
+        {
+          id: "k3", name: "nvim", kind: "app", state: "working", since: "9m",
+          task: "CHANGELOG.md",
+          cwd: "~/code/seer", branch: "release/0.7.0",
+          blocks: [
+            { t: "screen",
+              lines: [
+                '<span class="d">  1</span> <span class="b k"># Changelog</span>',
+                '<span class="d">  2</span>',
+                '<span class="d">  3</span> <span class="b k">## 0.7.0</span>',
+                '<span class="d">  4</span>',
+                '<span class="d">  5</span> <span class="p">-</span> seer stop flushes its reply. The room server stops at once.',
+                '<span class="d">  6</span> <span class="p">-</span> The picker shows a +N more cue when people do not fit.',
+                '<span class="d">  7</span> <span class="p">-</span> Watch carries cols and rows. Viewers cannot shrink a pane.',
+                '<span class="d">  8</span> <span class="p">-</span> seer ps --clean stops windows that have no terminal.',
+                '<span class="d">  9</span> <span class="p">-</span> Grants written by 0.6 load in 0.7.',
+                '<span class="d"> 10</span>',
+                '<span class="d"> 11</span> <span class="b k">## 0.6.0</span>',
+                '<span class="d"> 12</span>',
+                '<span class="d"> 13</span> <span class="p">-</span> Shells run on the computer of each person.'
+              ],
+              status: '<span class="g k"> NORMAL </span> CHANGELOG.md  <span class="d">markdown  utf-8  5:12</span>' }
+          ]
+        }
+      ]
+    },
+    {
+      id: "priya", host: false, you: false, machine: "priya-fw", os: "Linux",
+      presence: "active", seen: "1m",
+      terminals: [
+        {
+          id: "p1", name: "claude", kind: "agent", state: "working", since: "11m",
+          task: "Starting crates/seer-gpui with block rendering",
+          cwd: "~/src/seer", branch: "gpui/blocks",
+          blocks: [
+            { t: "turn", at: "09:58", prompt: "Start crates/seer-gpui. Draw one terminal as Warp style blocks. Use only seer-core types.",
+              out: [
+                '<span class="g">⏺</span> <span class="k">Read</span>(crates/seer-core/src/protocol.rs)',
+                '<span class="d">  ⎿  Read 388 lines</span>',
+                '<span class="g">⏺</span> <span class="k">Write</span>(crates/seer-gpui/src/block.rs)',
+                '<span class="d">  ⎿  Wrote 186 lines to crates/seer-gpui/src/block.rs</span>',
+                '<span class="g">⏺</span> <span class="k">Write</span>(crates/seer-gpui/src/window.rs)',
+                '<span class="d">  ⎿  Wrote 142 lines to crates/seer-gpui/src/window.rs</span>',
+                '<span class="g">⏺</span> <span class="k">Bash</span>(cargo run -p seer-gpui)',
+                '<span class="d">  ⎿  Window 1280x800, 3 blocks, 8.1 ms per frame</span>',
+                '<span class="s">⏺</span> Blocks draw. Next I wire the person dropdown to the Terminals message.'
+              ] },
+            { t: "live", text: "Wiring the person dropdown", time: "11m 40s" }
+          ]
+        },
+        {
+          id: "p2", name: "codex", kind: "agent", state: "working", since: "3m",
+          task: "Testing that 0.6 grant files load in 0.7",
+          cwd: "~/src/seer", branch: "grants-upgrade",
+          blocks: [
+            { t: "turn", at: "10:06", prompt: "Grant files written by 0.6 must load in 0.7. Add a test, then fix it.",
+              out: [
+                '<span class="d">•</span> Explored crates/seer-broker/src/grants.rs',
+                '<span class="d">•</span> Added crates/seer-broker/tests/grants_upgrade.rs',
+                '<span class="d">•</span> Ran <span class="k">cargo test -p seer-broker grants_upgrade</span>',
+                '<span class="d">  └</span> test grants_upgrade::loads_v06_file ... <span class="r">FAILED</span>',
+                '<span class="d">  └</span> left: [] right: ["kyler"]',
+                '<span class="d">•</span> The 0.6 file uses the key "can_type". 0.7 reads "can_type_here".'
+              ] },
+            { t: "live", text: "Working", time: "3m 05s" }
+          ]
+        }
+      ]
+    },
+    {
+      id: "marco", host: false, you: false, machine: "marco-studio", os: "macOS",
+      presence: "away", seen: "18m",
+      terminals: [
+        {
+          id: "m1", name: "claude", kind: "agent", state: "idle", since: "18m",
+          task: "Drafted ADR 0010 for the GPUI window",
+          cwd: "~/dev/seer", branch: "docs/adr-0010",
+          blocks: [
+            { t: "turn", at: "09:40", prompt: "Draft ADR 0010: the GPUI desktop window replaces the TUI. Keep it short.",
+              out: [
+                '<span class="g">⏺</span> <span class="k">Read</span>(docs/adr/0008-top-right-user-picker.md)',
+                '<span class="d">  ⎿  Read 58 lines</span>',
+                '<span class="g">⏺</span> <span class="k">Write</span>(docs/adr/0010-gpui-window.md)',
+                '<span class="d">  ⎿  Wrote 61 lines to docs/adr/0010-gpui-window.md</span>',
+                '<span class="s">⏺</span> ADR 0010 is drafted. It records the move from the TUI to GPUI',
+                '  and lists three open questions about keyboard focus.'
+              ] }
+          ]
+        },
+        {
+          id: "m2", name: "shell", kind: "shell", state: "idle", since: "20m",
+          task: "zsh",
+          cwd: "~/dev/seer", branch: "docs/adr-0010",
+          blocks: [
+            { t: "cmd", at: "09:38", cmd: "git log --oneline -4", ok: true, dur: "0.03s",
+              out: [
+                '<span class="y">3f9c2e1</span> Flush the stop reply before shutdown',
+                '<span class="y">a71d0b4</span> Picker shows +N more when people do not fit',
+                '<span class="y">e2c4498</span> Watch carries cols and rows',
+                '<span class="y">90be513</span> Release 0.6.0'
+              ] }
+          ]
+        }
+      ]
+    },
+    {
+      id: "ana", host: false, you: false, machine: "ana-thinkpad", os: "Linux",
+      presence: "offline", seen: "3h",
+      terminals: []
+    }
+  ]
+};
+</script>
+<script>
+(() => {
+  const P = SEER.people;
+  const reduce = matchMedia("(prefers-reduced-motion: reduce)").matches;
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const $ = (id) => document.getElementById(id);
+  const win = $("win"), menu = $("menu"), bmenu = $("bmenu"), scrim = $("scrim"), stream = $("stream");
+  const pick = {};
+  let cur = "kyler", hi = 0, opener = null, bOpener = null, setOpener = null;
+
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const byId = (id) => P.find((p) => p.id === id);
+  const termOf = (p) => p.terminals.find((t) => t.id === pick[p.id]) || p.terminals[0];
+  const stateWord = (t) => (t.kind === "agent" ? t.state : t.state === "working" ? "running" : "idle");
+  const av = (p) => `<span class="av fade">${p.id[0].toUpperCase()}</span>`;
+  const pres = (p) => (p.presence === "active" ? "" : `${p.presence} ${p.seen}`);
+  const agentDots = (p) => p.terminals.filter((t) => t.kind === "agent")
+    .map((t) => `<i class="dot ${t.state}" title="${t.name} ${t.state}"></i>`).join("");
+  const tdot = (t) => `<i class="dot ${t.kind === "agent" ? t.state : "plain"}" title="${t.name} ${stateWord(t)}"></i>`;
+
+  const ICON = {
+    chev: '<svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 3.75 5 6.25l2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    check: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.25 5 8.75l4.5-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    plus: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2 6h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    x: '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    gear: '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+    lock: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="5.5" width="7" height="5" rx="1" fill="none" stroke="currentColor"/><path d="M4 5.5V4a2 2 0 0 1 4 0v1.5" fill="none" stroke="currentColor"/></svg>',
+    folder: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M1.5 3a.5.5 0 0 1 .5-.5h2.8l1 1H10a.5.5 0 0 1 .5.5v5a.5.5 0 0 1-.5.5H2a.5.5 0 0 1-.5-.5z" fill="none" stroke="currentColor"/></svg>',
+    branch: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor"><circle cx="3.5" cy="2.5" r="1"/><circle cx="3.5" cy="9.5" r="1"/><circle cx="8.5" cy="3.5" r="1"/><path d="M3.5 3.5v5M8.5 4.5c0 2.5-5 1.5-5 4"/></svg>',
+    copy: '<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" fill="none" stroke="currentColor"><rect x="4.5" y="4.5" width="6" height="6" rx="1"/><path d="M2.5 8.5v-5a1 1 0 0 1 1-1h5"/></svg>',
+    more: '<svg width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" fill="currentColor"><circle cx="3" cy="6.5" r="1"/><circle cx="6.5" cy="6.5" r="1"/><circle cx="10" cy="6.5" r="1"/></svg>',
+    send: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 10V2.5M2.75 5.5 6 2.25 9.25 5.5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>'
+  };
+
+  document.querySelectorAll("[data-new]").forEach((b) => {
+    b.innerHTML = `${ICON.plus}<span>New terminal</span>` + (b.classList.contains("newt-m") ? "" : `<kbd>${mac ? "⌘T" : "Ctrl T"}</kbd>`);
+    b.title = `New terminal (${mac ? "⌘T" : "Ctrl+T"})`;
+  });
+  document.querySelectorAll("[data-settings]").forEach((b) => { b.innerHTML = ICON.gear; });
+  document.querySelector("[data-close]").innerHTML = ICON.x;
+
+  const acts = '<span class="bh-acts"><button class="ba" type="button" data-ba="copy" title="Copy" aria-label="Copy">' + ICON.copy + '</button><button class="ba" type="button" data-ba="more" title="More" aria-label="More" aria-haspopup="menu" aria-expanded="false">' + ICON.more + "</button></span>";
+
+  function blockHTML(b, t, i) {
+    const head = (right) => `<div class="bh"><span>${esc(t.cwd)}</span><span class="bh-br">${esc(t.branch)}</span><span class="bh-at">${right}</span>${acts}</div>`;
+    if (b.t === "cmd") {
+      const cls = b.ok === false ? " fail" : b.ok === null ? " run" : "";
+      const dur = b.ok === false ? `<span class="bad">${b.dur}</span>` : b.ok === null ? `running ${b.dur}` : b.dur;
+      return `<div class="blk${cls}" data-i="${i}">${head(`${dur} · ${b.at}`)}<div class="bc">${esc(b.cmd)}</div>${b.out.length ? `<div class="bo">${b.out.join("\n")}</div>` : ""}</div>`;
+    }
+    if (b.t === "turn") {
+      return `<div class="blk" data-i="${i}">${head(b.at)}<div class="bc"><span class="gl">›</span>${esc(b.prompt)}</div>${b.out.length ? `<div class="bo">${b.out.join("\n")}</div>` : ""}</div>`;
+    }
+    if (b.t === "ask") {
+      const opts = b.options.map((o, n) => `<span class="opt">${n === 0 ? "❯" : " "} ${n + 1}. ${esc(o)}</span>`).join("");
+      return `<div class="blk blk-ask" data-i="${i}"><div class="ask"><div class="k">${esc(b.title)}</div><div class="ask-cmd">${esc(b.cmd)}</div><div class="ask-note">${esc(b.note)}</div><div class="ask-q">${esc(b.q)}</div><div aria-disabled="true">${opts}</div></div></div>`;
+    }
+    if (b.t === "live") {
+      return `<div class="live"><span class="spin">✻</span>${esc(b.text)}… <span class="d">(${esc(b.time)} · esc to interrupt)</span></div>`;
+    }
+    return "";
+  }
+
+  function renderStream(p, t) {
+    if (!t) {
+      stream.innerHTML = `<div class="empty">${p.id} is offline. Last seen ${p.seen} ago.</div>`;
+      return;
+    }
+    const scr = t.blocks.find((b) => b.t === "screen");
+    if (scr) {
+      stream.innerHTML = `<div class="screen"><div class="screen-lines">${scr.lines.join("\n")}</div><div class="screen-status">${scr.status}</div></div>`;
+      return;
+    }
+    stream.innerHTML = t.blocks.map((b, i) => blockHTML(b, t, i)).join("");
+    stream.scrollTop = stream.scrollHeight;
+  }
+
+  function renderFoot(p, t) {
+    const foot = $("foot");
+    if (!t) { foot.innerHTML = ""; return; }
+    if (p.you) {
+      const ph = t.kind === "agent" ? `Message ${t.name}` : "Run a command";
+      foot.innerHTML = `<div class="input"><div class="editor" id="editor"><div class="chips"><span class="chip">${ICON.folder}${esc(t.cwd)}</span><span class="chip">${ICON.branch}${esc(t.branch)}</span></div><div class="ed-row"><textarea id="ta" rows="1" spellcheck="false" placeholder="${ph}" aria-label="${ph}"></textarea><button class="send" type="button" id="send" aria-label="Send" title="Send">${ICON.send}</button></div></div></div>`;
+      return;
+    }
+    foot.innerHTML = `<div class="ro">${ICON.lock}<span>Read only. ${p.id}'s terminals on <span class="host-m">${esc(p.machine)}</span>.</span><button type="button" data-go="nethum">My terminals</button></div>`;
+  }
+
+  function render() {
+    const p = byId(cur), t = termOf(p);
+    const who = `${av(p)}<span class="who-name">${p.id}</span>${ICON.chev}`;
+    $("who").innerHTML = who;
+    $("whoM").innerHTML = who;
+    $("title").innerHTML = t ? `${p.id}<span class="sep">/</span><span class="tt">${t.name}</span>` : p.id;
+    $("roominfo").innerHTML = `${SEER.room.name} <code>${SEER.room.addr}</code>`;
+    $("tabs").innerHTML = p.terminals.map((x) => `<button class="tab${x === t ? " on" : ""}" role="tab" aria-selected="${x === t}" data-t="${x.id}">${tdot(x)}<span class="tab-name">${x.name}</span><span class="tab-since">${x.since}</span><span class="tab-task">${esc(x.task)}</span></button>`).join("");
+    $("mtabs").innerHTML = p.terminals.map((x) => `<button class="mtab${x === t ? " on" : ""}" data-t="${x.id}">${tdot(x)}${x.name}</button>`).join("");
+    renderStream(p, t);
+    renderFoot(p, t);
+  }
+
+  function newTerminal() {
+    const me = P.find((q) => q.you);
+    const t = { id: "new-" + Date.now().toString(36), name: "shell", kind: "shell", state: "idle", since: "now", task: "fish", cwd: "~/Projects/seer", branch: "main", blocks: [] };
+    me.terminals.push(t);
+    pick[me.id] = t.id;
+    closeSettings(false);
+    go(me.id);
+    const ta = $("ta");
+    if (ta) ta.focus({ preventScroll: true });
+  }
+
+  function openSettings(btn) {
+    closeMenu(false); closeBlockMenu();
+    setOpener = btn;
+    scrim.classList.add("open");
+    btn.setAttribute("aria-expanded", "true");
+    document.querySelector("[data-close]").focus({ preventScroll: true });
+  }
+  function closeSettings(refocus) {
+    if (!setOpener) return;
+    scrim.classList.remove("open");
+    setOpener.setAttribute("aria-expanded", "false");
+    if (refocus) setOpener.focus({ preventScroll: true });
+    setOpener = null;
+  }
+
+  const plain = (html) => { const d = document.createElement("div"); d.innerHTML = html; return d.textContent; };
+  function blockData(el) {
+    const t = termOf(byId(cur));
+    return t && t.blocks[+el.dataset.i];
+  }
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (_) { /* clipboard blocked */ }
+    ta.remove();
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).catch(() => fallbackCopy(text)); return; }
+    fallbackCopy(text);
+  }
+  function blockText(b, part) {
+    const cmd = b.cmd || b.prompt || "";
+    const out = (b.out || []).map(plain).join("\n");
+    if (part === "cmd") return cmd;
+    if (part === "out") return out;
+    return out ? cmd + "\n" + out : cmd;
+  }
+  function flashDone(btn) {
+    btn.classList.add("done");
+    btn.innerHTML = ICON.check;
+    setTimeout(() => { btn.classList.remove("done"); btn.innerHTML = ICON.copy; }, 1200);
+  }
+
+  function openBlockMenu(btn) {
+    const blk = btn.closest(".blk");
+    const b = blockData(blk);
+    if (!b) return;
+    bOpener = btn;
+    btn.setAttribute("aria-expanded", "true");
+    btn.closest(".bh-acts").classList.add("keep");
+    const label = b.t === "turn" ? "Copy prompt" : "Copy command";
+    bmenu.dataset.i = blk.dataset.i;
+    bmenu.innerHTML = `<button class="bm" type="button" role="menuitem" data-copy="cmd">${label}</button>` + (b.out && b.out.length ? `<button class="bm" type="button" role="menuitem" data-copy="out">Copy output</button>` : "");
+    const wr = win.getBoundingClientRect(), br = btn.getBoundingClientRect();
+    const w = 172;
+    bmenu.style.left = Math.max(8, Math.min(br.right - wr.left - w, wr.width - w - 8)) + "px";
+    bmenu.style.top = (br.bottom - wr.top + 4) + "px";
+    bmenu.classList.add("open");
+  }
+  function closeBlockMenu() {
+    if (!bOpener) return;
+    bmenu.classList.remove("open");
+    bOpener.setAttribute("aria-expanded", "false");
+    const k = bOpener.closest(".bh-acts");
+    if (k) k.classList.remove("keep");
+    bOpener = null;
+  }
+
+  function submit() {
+    const ta = $("ta");
+    if (!ta) return;
+    const v = ta.value.trim();
+    if (!v) return;
+    const p = byId(cur), t = termOf(p);
+    if (!p.you || !t) return;
+    const now = new Date();
+    const at = String(now.getHours()).padStart(2, "0") + ":" + String(now.getMinutes()).padStart(2, "0");
+    t.blocks = t.blocks.filter((b) => b.t !== "live");
+    if (t.kind === "agent") t.blocks.push({ t: "turn", at, prompt: v, out: [] }, { t: "live", text: "Thinking", time: "0s" });
+    else t.blocks.push({ t: "cmd", at, cmd: v, ok: null, dur: "0s", out: [] });
+    t.state = "working";
+    render();
+    const nta = $("ta");
+    if (nta) nta.focus({ preventScroll: true });
+  }
+
+  function renderMenu() {
+    menu.innerHTML = P.map((q, i) => `<div class="mi ${q.presence}${i === hi ? " hi" : ""}${q.id === cur ? " cur" : ""}" role="option" aria-selected="${q.id === cur}" data-mi="${i}">${av(q)}<span class="mi-name"><span class="fade">${q.id}</span>${q.you ? '<span class="you">you</span>' : ""}${q.host ? '<span class="host">host</span>' : ""}<span class="mi-pres">${pres(q)}</span></span><span class="dots fade">${agentDots(q)}</span><span class="mi-check">${q.id === cur ? ICON.check : ""}</span></div>`).join("");
+  }
+  function setHi(i) {
+    hi = (i + P.length) % P.length;
+    menu.querySelectorAll(".mi").forEach((el, n) => el.classList.toggle("hi", n === hi));
+  }
+  function openMenu(trigger) {
+    closeBlockMenu();
+    opener = trigger;
+    hi = P.findIndex((q) => q.id === cur);
+    renderMenu();
+    const wr = win.getBoundingClientRect(), tr = trigger.getBoundingClientRect();
+    const w = Math.min(288, wr.width - 16);
+    menu.style.width = w + "px";
+    menu.style.left = Math.max(8, Math.min(tr.left - wr.left, wr.width - w - 8)) + "px";
+    menu.style.top = (tr.bottom - wr.top + 4) + "px";
+    menu.classList.add("open");
+    trigger.setAttribute("aria-expanded", "true");
+    menu.focus({ preventScroll: true });
+  }
+  function closeMenu(refocus) {
+    if (!opener) return;
+    menu.classList.remove("open");
+    opener.setAttribute("aria-expanded", "false");
+    if (refocus) opener.focus({ preventScroll: true });
+    opener = null;
+  }
+  function go(id) {
+    cur = id;
+    closeMenu(false);
+    closeBlockMenu();
+    render();
+  }
+
+  for (const id of ["who", "whoM"]) {
+    $(id).addEventListener("click", (e) => {
+      const el = e.currentTarget;
+      if (opener === el) closeMenu(true); else { closeMenu(false); openMenu(el); }
+    });
+  }
+  menu.addEventListener("mousemove", (e) => {
+    const row = e.target.closest(".mi");
+    if (row && +row.dataset.mi !== hi) setHi(+row.dataset.mi);
+  });
+  menu.addEventListener("click", (e) => {
+    const row = e.target.closest(".mi");
+    if (row) go(P[+row.dataset.mi].id);
+  });
+  document.addEventListener("mousedown", (e) => {
+    if (opener && !menu.contains(e.target) && !opener.contains(e.target)) closeMenu(false);
+    if (bOpener && !bmenu.contains(e.target) && !bOpener.contains(e.target)) closeBlockMenu();
+  });
+  scrim.addEventListener("mousedown", (e) => { if (e.target === scrim) closeSettings(true); });
+  document.addEventListener("keydown", (e) => {
+    if (opener) {
+      if (e.key === "ArrowDown") { e.preventDefault(); setHi(hi + 1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); setHi(hi - 1); }
+      else if (e.key === "Enter") { e.preventDefault(); const o = opener; go(P[hi].id); o.focus({ preventScroll: true }); }
+      else if (e.key === "Escape") { e.preventDefault(); closeMenu(true); }
+      return;
+    }
+    if (e.target.id === "ta" && e.key === "Enter" && !e.shiftKey) { e.preventDefault(); submit(); return; }
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "t") { e.preventDefault(); newTerminal(); return; }
+    if (e.key === "Escape") {
+      if (setOpener) { e.preventDefault(); closeSettings(true); }
+      else if (bOpener) { e.preventDefault(); const o = bOpener; closeBlockMenu(); o.focus({ preventScroll: true }); }
+    }
+  });
+  document.addEventListener("input", (e) => {
+    if (e.target.id !== "ta") return;
+    const ta = e.target;
+    ta.style.height = "auto";
+    ta.style.height = ta.scrollHeight + "px";
+    const s = $("send");
+    if (s) s.classList.toggle("on", ta.value.trim().length > 0);
+  });
+  document.addEventListener("click", (e) => {
+    if (e.target.closest("[data-new]")) { newTerminal(); return; }
+    const sb = e.target.closest("[data-settings]");
+    if (sb) { if (setOpener) closeSettings(true); else openSettings(sb); return; }
+    if (e.target.closest("[data-close]")) { closeSettings(true); return; }
+    const goBtn = e.target.closest("[data-go]");
+    if (goBtn) { go(goBtn.dataset.go); return; }
+    const tab = e.target.closest("[data-t]");
+    if (tab) { pick[cur] = tab.dataset.t; closeBlockMenu(); render(); return; }
+    if (e.target.closest("#send")) { submit(); return; }
+    const ed = e.target.closest("#editor");
+    if (ed && !e.target.closest("textarea")) { const ta = $("ta"); if (ta) ta.focus({ preventScroll: true }); }
+    const ba = e.target.closest("[data-ba]");
+    if (ba) {
+      const b = blockData(ba.closest(".blk"));
+      if (ba.dataset.ba === "copy" && b) { copyText(blockText(b, "all")); flashDone(ba); }
+      else if (ba.dataset.ba === "more") { if (bOpener === ba) closeBlockMenu(); else { closeBlockMenu(); openBlockMenu(ba); } }
+      return;
+    }
+    const bm = e.target.closest("[data-copy]");
+    if (bm) {
+      const blk = stream.querySelector(`.blk[data-i="${bmenu.dataset.i}"]`);
+      const b = blk && blockData(blk);
+      if (b) copyText(blockText(b, bm.dataset.copy));
+      closeBlockMenu();
+    }
+  });
+  stream.addEventListener("scroll", () => closeBlockMenu());
+  stream.addEventListener("click", (e) => {
+    if (e.target.closest(".ba")) return;
+    const sel = window.getSelection();
+    if (sel && !sel.isCollapsed) return;
+    const blk = e.target.closest(".blk");
+    stream.querySelectorAll(".blk.sel").forEach((el) => { if (el !== blk) el.classList.remove("sel"); });
+    if (blk) blk.classList.toggle("sel");
+  });
+
+  if (!reduce) {
+    const frames = ["·", "✢", "✳", "✶", "✻", "✽", "✻", "✶", "✳", "✢"];
+    let f = 0;
+    setInterval(() => {
+      f = (f + 1) % frames.length;
+      document.querySelectorAll(".spin").forEach((el) => { el.textContent = frames[f]; });
+    }, 120);
+  }
+
+  render();
+})();
+</script>
+</body>
+</html>

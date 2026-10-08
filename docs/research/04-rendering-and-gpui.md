@@ -2,6 +2,11 @@
 
 ## Decision
 
+Note, 2026-10-07: [ADR 0010](../adr/0010-gpui-desktop-app.md) replaces
+the GPUI timing below. Seer becomes a GPUI desktop app. The Ratatui and
+Crossterm items now apply to the TUI only. The pin rule for GPUI crates
+stays.
+
 - Use Ratatui 0.30 and Crossterm 0.29 for the first terminal UI. Herdr uses
   Ratatui 0.30 and Crossterm 0.29. Luvus uses the same versions.
   (`herdr:Cargo.toml:23-48`, `luvus:Cargo.toml:55-60`)

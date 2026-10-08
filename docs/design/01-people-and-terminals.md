@@ -24,7 +24,9 @@ Decisions. Do not reopen them.
 - The agent inbox is wave two. This spec covers wave one only: the TUI
   with people, live boxes, the viewer, and the input grant.
 - Everything is ratatui plus crossterm. The TUI must look as good as
-  herdr and luvus. See section 4.
+  herdr and luvus. See section 4. This now applies to the TUI only.
+  [ADR 0010](../adr/0010-gpui-desktop-app.md) makes Seer a GPUI
+  desktop app.
 
 ## 2. Screens
 
