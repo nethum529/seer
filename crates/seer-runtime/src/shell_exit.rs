@@ -49,13 +49,15 @@ pub(crate) fn install(command: &mut CommandBuilder, shell: &Shell) -> io::Result
 
 // A login bash reads no rcfile. In POSIX mode an interactive bash reads only
 // the file in ENV, and --login still sets the login flag. Leaving POSIX mode
-// keeps inherit_errexit on. POSIX mode also moves the default HISTFILE to
-// .sh_history.
+// keeps inherit_errexit on, so the file turns it off unless the user set it in
+// BASHOPTS. bash 3.2 has no inherit_errexit. POSIX mode also moves the default
+// HISTFILE to .sh_history.
 fn install_bash_login(command: &mut CommandBuilder, files: &Path, seer: &Path) -> io::Result<()> {
     let path = files.join("bash_login");
     let body = format!(
         "set +o posix\n\
-         shopt -u inherit_errexit\n\
+         case \":${{SEER_BASHOPTS-}}:\" in *:inherit_errexit:*) ;; *) shopt -u inherit_errexit 2>/dev/null ;; esac\n\
+         unset SEER_BASHOPTS\n\
          if [ -n \"${{SEER_ENV+x}}\" ]; then export ENV=\"$SEER_ENV\"; unset SEER_ENV; else unset ENV; fi\n\
          if [ -n \"${{SEER_HISTFILE+x}}\" ]; then HISTFILE=\"$HOME/.bash_history\"; unset SEER_HISTFILE; fi\n\
          {BASH_LOGIN_FILES}exit() {{ {} exit; }}\n",
@@ -64,6 +66,9 @@ fn install_bash_login(command: &mut CommandBuilder, files: &Path, seer: &Path) -
     write_private(files, &path, &body)?;
     if let Some(original) = command.get_env("ENV").map(ToOwned::to_owned) {
         command.env("SEER_ENV", original);
+    }
+    if let Some(options) = command.get_env("BASHOPTS").map(ToOwned::to_owned) {
+        command.env("SEER_BASHOPTS", options);
     }
     if command.get_env("HISTFILE").is_none() {
         command.env("SEER_HISTFILE", "1");
