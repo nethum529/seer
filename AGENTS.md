@@ -18,7 +18,7 @@ Codex alike. Read this file before you start a task.
 
 ## Settled decisions
 
-Do not reopen these. The reasons are in docs/research/.
+Do not reopen these. The reasons are in docs/research/ and docs/adr/.
 
 - Issue 338 replaces server-only execution, approved by the owner on
   2026-09-09. PTYs and shells run on each participant's own computer, using
@@ -27,12 +27,14 @@ Do not reopen these. The reasons are in docs/research/.
   per room. The broker owns identity, shared routing, grants, and metadata.
   Each local runtime owns its PTYs and agent child processes. Local input
   and process lifetime do not depend on the room connection or broker.
-- TUI stack: ratatui plus crossterm.
+- Seer becomes a native GPUI desktop app for macOS and Linux. Build new
+  user facing features in the window. The ratatui TUI stays and gets bug
+  fixes until the window replaces it. Keep core types frontend-neutral.
+  See ADR 0010 and
+  docs/design/04-gpui-feature-checklist.md.
 - Linux and macOS only, as host and as client. No Windows.
 - Seer is not a herdr replacement. Do not build herdr parity features unless
   a ticket asks for one.
-- GPUI desktop app is far future. Keep core types frontend-neutral, nothing
-  more.
 - Reference clones at /home/nethum/Projects/_research/herdr and
   /home/nethum/Projects/_research/luvus are read only. Never modify them.
 
