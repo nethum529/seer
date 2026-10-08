@@ -25,8 +25,11 @@ terminal engine.
   under test. For each corpus it runs cat six times and sends DA1
   (CSI c) after each cat. A terminal answers DA1 only after it parses
   every earlier byte, so cat plus DA1 is the time to parse all the
-  output. The result is the mean of runs 2 to 6. Then it measures 300
-  idle DA1 round trips, 10 ms apart, and reports p50 and p99.
+  output. In Seer the runtime answers, but only after each raw window
+  confirmed that it parsed every byte before the query (see Design). So
+  the Seer number includes the parse in the window. The result is the
+  mean of runs 2 to 6. Then it measures 300 idle DA1 round trips, 10 ms
+  apart, and reports p50 and p99.
 - Corpora: plain.txt is the 11 MB Shakespeare file from
   moktavizen/terminal-benchmark (the script checks its SHA-256).
   sgr.txt is 11 MB of words with 256 color, true color, bold and
@@ -41,6 +44,14 @@ terminal engine.
 - The runtime stays the only part that answers queries (DA1, cursor
   position report). The grid in the window drops its replies. So a
   query gets exactly one answer, and answers still work with no window.
+- When a read holds a query and a raw window follows the pane, the
+  runtime holds the answer. It sends a Mark after the bytes of the read,
+  and the window sends Parsed with the same number after it parsed them.
+  The runtime writes the answer when every raw window confirmed. A window
+  that does not confirm in 2 seconds (RAW_WAIT) is disconnected, and the
+  answer goes out. With the window stopped by SIGSTOP, DA1 took 2002 ms
+  and the window then showed that the link stopped. All answers are
+  written under the PTY writer lock, so they reach the program in order.
 - The PTY reader thread of the runtime parses each read into the pane
   grid, writes the replies at once, and pushes the same bytes to each
   window that follows the pane. There is no poll interval on this path.
@@ -49,11 +60,18 @@ terminal engine.
   the top byte of the 4 byte length prefix (0x80 plus a kind), so JSON
   frames do not change. Kinds: Output, Start (size), Size (resize in
   stream order), SyncEnd (a synchronized update ended by time in the
-  runtime).
+  runtime), Mark (see above).
+- The window always sends raw_output. A runtime from before T-462 does
+  not know the field (serde default) and sends cell frames. The window
+  shows whichever comes. A cell frame never replaces a raw screen,
+  because a runtime can send one cell frame before it reads the request.
 - On attach, the runtime sends Start and then VT bytes that rebuild the
-  screen, the scrollback (1000 lines), the modes, the cursor and the
-  primary screen under the alternate screen. Then live bytes follow,
-  with no gap and no overlap, because both happen under the pane lock.
+  screen, the scrollback (1000 lines), the modes, the cursor, the
+  primary screen under the alternate screen, the G0 to G3 character sets
+  and the active set. Then it sends the bytes of an escape sequence or
+  UTF-8 character that the program did not finish yet. Then live bytes
+  follow, with no gap and no overlap, because all of it happens under the
+  pane lock.
 - Backpressure: before it parses a read, the reader waits until each
   window has fewer than RAW_LIMIT (64 KiB) raw bytes queued
   (crates/seer-runtime/src/outbox.rs). So a window is at most 64 KiB plus
@@ -95,20 +113,26 @@ macOS keeps the blocking read.
 
 ## Results
 
-Run 20261008T082159Z, load 1.2 to 1.8. Times in ms.
+Run 20261008T092403Z, load 2.1 to 2.6. Times in ms. The Seer numbers
+include the Mark and Parsed round trip.
 
 | Terminal | Grid | Plain cat+DA1 | SGR cat+DA1 | Idle DA1 p50 | Idle DA1 p99 |
 |---|---|---|---|---|---|
-| Seer (T-462) | 40x148 | 147 | 81 | 0.054 | 0.076 |
-| Alacritty | 40x149 | 135 | 79 | 0.071 | 0.095 |
-| Ghostty | 40x149 | 174 | 278 | 0.067 | 0.097 |
-| kitty | 40x149 | 163 | 211 | 3.083 | 3.107 |
+| Seer (T-462) | 40x148 | 147 | 80 | 0.077 | 0.109 |
+| Alacritty | 40x149 | 134 | 81 | 0.073 | 0.111 |
+| Ghostty | 40x149 | 171 | 282 | 0.068 | 0.102 |
+| kitty | 40x149 | 163 | 209 | 3.094 | 3.124 |
+
+Earlier rows from run 20261008T082159Z, before the Mark round trip:
+
+| Terminal | Grid | Plain cat+DA1 | SGR cat+DA1 | Idle DA1 p50 | Idle DA1 p99 |
+|---|---|---|---|---|---|
 | Seer T-448 baseline | 40x148 | 170 | 60 | 4.553 | 4.617 |
 | Seer T-462 before epoll | 40x148 | 174 | 78 | 0.054 | 0.076 |
 
-- Over 6 runs of Seer and Alacritty on 2026-10-08 at a load below 2.5,
-  Seer plain was 145 to 147 and Alacritty plain was 135 to 139. SGR was
-  77 to 81 for both.
+- Over many runs of Seer and Alacritty on 2026-10-08 at a load below
+  2.5, Seer plain was 145 to 148 and Alacritty plain was 133 to 139. SGR
+  was 77 to 81 for both.
 - The T-448 SGR number is low because the old runtime dropped output
   above 1 MiB, so it did not parse all bytes.
 - kitty idle DA1 is 3 ms because of its default input_delay.
@@ -118,18 +142,27 @@ Run 20261008T082159Z, load 1.2 to 1.8. Times in ms.
 
 ## Findings
 
-- SGR output and idle DA1 match or beat Alacritty.
-- Plain output is 8 to 9 percent slower than Alacritty (about 11 ms). In
-  this run, cat used about 10 ms more system CPU under Seer than under
-  Alacritty. The probe did not find the cause: a second parser thread
-  and extra work per read did not change it.
+- SGR output and idle DA1 match Alacritty, and idle DA1 includes the
+  parse in the window.
+- Plain output is about 10 percent slower than Alacritty (147 against
+  134 ms). The cause is not known. What the probes show:
+  - cat almost never waits (1 to 6 voluntary waits) and uses no user
+    CPU. Its system CPU is 136 to 148 ms under Seer and 134 to 137 ms
+    under Alacritty. So the gap is in the kernel tty write path of cat,
+    not in a wait for the reader.
+  - Reads: for 6 cats, the Seer reader made about 28 500 reads per cat
+    (about 390 bytes each). Alacritty made about 55 000, and about half
+    of them are the EAGAIN read that ends each drain loop. So the number
+    and size of data reads are about the same.
+  - The runtime started from the Hyprland session scope (the scope of
+    Alacritty) gave 148 ms. So the cgroup is not the cause.
+  - Not the cause in probes: CPU pinning and SMT, closing descriptors in
+    the child, a nonblocking master, allocation or a mutex per read, a
+    second parser thread, and up to 4 busy threads (at most 7 ms).
 
 ## Known gaps
 
+- Plain output is about 10 percent slower than Alacritty (see Findings).
 - Not restored on attach, because alacritty_terminal 0.26 keeps them
-  private: scroll region, tab stops, active charset, title stack.
-  Hyperlinks and colors set by OSC 4 are not restored either. The
-  renderer does not use them.
-- An attach that lands in the middle of an escape sequence during a
-  heavy burst can show a few wrong cells until the program draws them
-  again.
+  private: scroll region, tab stops, title stack. Hyperlinks and colors
+  set by OSC 4 are not restored either. The renderer does not use them.
