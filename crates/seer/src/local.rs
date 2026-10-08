@@ -217,7 +217,7 @@ fn start(
     command
         .arg(socket)
         .arg(&server.user_id)
-        .arg(shell())
+        .arg(seer_runtime::LOGIN_SHELL)
         .arg(generation)
         .env("SEER_SNAPSHOT_DIR", directory)
         .env("SEER_ROOM_ENDPOINT", &server.endpoint)
@@ -255,13 +255,6 @@ fn start_directory() -> PathBuf {
         .ok()
         .or_else(|| env::var_os("HOME").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("/"))
-}
-
-fn shell() -> String {
-    env::var("SHELL")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "/bin/sh".to_owned())
 }
 
 fn generation() -> String {

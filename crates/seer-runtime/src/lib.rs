@@ -5,6 +5,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicPtr, Ordering};
 
 mod input;
+mod login_shell;
 pub mod pane_grid;
 mod pane_host;
 mod persistence;
@@ -16,6 +17,7 @@ mod shell_exit;
 mod snapshot;
 mod user_session;
 
+pub use login_shell::LOGIN_SHELL;
 pub use pane_grid::{Cell, Color, PaneGrid};
 pub use pane_host::PaneHost;
 pub use pty::PtySession;

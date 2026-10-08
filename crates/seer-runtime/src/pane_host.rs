@@ -2,6 +2,7 @@ use crate::{PaneGrid, PtySession};
 use portable_pty::CommandBuilder;
 use seer_core::{TerminalFrame, TerminalInput};
 use std::io;
+use std::path::Path;
 use std::time::{Duration, Instant};
 
 pub struct PaneHost {
@@ -9,15 +10,23 @@ pub struct PaneHost {
     grid: PaneGrid,
     pub(crate) owner_size: seer_core::PaneSize,
     last_typist: Option<(String, Instant)>,
+    program: String,
 }
 
 impl PaneHost {
     pub fn start(command: CommandBuilder, cols: u16, rows: u16) -> io::Result<Self> {
+        let program = command
+            .get_argv()
+            .first()
+            .and_then(|program| Path::new(program).file_name())
+            .map(|name| name.to_string_lossy().into_owned())
+            .unwrap_or_default();
         Ok(Self {
             session: PtySession::start(command, cols, rows)?,
             grid: PaneGrid::new(cols, rows),
             owner_size: seer_core::PaneSize { cols, rows },
             last_typist: None,
+            program,
         })
     }
 
@@ -100,6 +109,10 @@ impl PaneHost {
 
     pub fn foreground(&self) -> String {
         self.session.foreground_name()
+    }
+
+    pub(crate) fn started_program(&self) -> &str {
+        &self.program
     }
 
     pub(crate) fn has_exited(&mut self) -> io::Result<bool> {
