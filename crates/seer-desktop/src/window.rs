@@ -190,8 +190,10 @@ impl Render for SeerWindow {
         // gets, so the tips come back in the frame after Escape clears them.
         if self.keys.mode == Mode::Quiet {
             cx.on_next_frame(window, |view, _, cx| {
-                view.keys.mode = Mode::Pointer;
-                cx.notify();
+                if view.keys.mode == Mode::Quiet {
+                    view.keys.mode = Mode::Pointer;
+                    cx.notify();
+                }
             });
         }
         let root = div()
