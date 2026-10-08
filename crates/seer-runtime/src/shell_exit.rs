@@ -147,6 +147,7 @@ mod tests {
     use super::*;
     use crate::PtySession;
     use crate::pty::lock_mutex;
+    use std::io::Write;
     use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
@@ -214,14 +215,14 @@ mod tests {
         install(&mut command, &shell).expect("shell files must be written");
         let seen = Arc::new(Mutex::new(String::new()));
         let reader = Arc::clone(&seen);
-        let mut session = PtySession::start(command, 80, 24, move |bytes| {
+        let mut session = PtySession::start(command, 80, 24, move |bytes, writer| {
             let chunk = String::from_utf8_lossy(bytes);
             lock_mutex(&reader).push_str(&chunk);
             // fish waits for the reply to its device attributes query.
             if chunk.contains("\x1b[0c") {
-                b"\x1b[?62c".to_vec()
-            } else {
-                Vec::new()
+                lock_mutex(writer)
+                    .write_all(b"\x1b[?62c")
+                    .expect("reply must be written");
             }
         })
         .expect("shell must start");

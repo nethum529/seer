@@ -98,6 +98,7 @@ fn handle_message(
         ),
         ClientMsg::Unwatch { pane, .. } => shared.watch_size(connection_id, &pane, None, false),
         ClientMsg::Resync { pane, .. } => shared.resend(connection_id, &pane),
+        ClientMsg::Parsed { mark } => shared.parsed(connection_id, mark),
         ClientMsg::Resize {
             workspace,
             tab,

@@ -116,6 +116,10 @@ pub enum ClientMsg {
     Terminals {
         user: String,
     },
+    /// The window parsed the raw output of its pane up to this mark.
+    Parsed {
+        mark: u64,
+    },
     MouseInto {
         user: String,
         pane: String,

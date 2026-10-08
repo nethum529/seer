@@ -61,7 +61,7 @@ impl SharedSession {
                     }
                 }
                 None => {
-                    if connection.raw_pane.as_deref() == Some(pane) {
+                    if connection.raw_pane() == Some(pane) {
                         connection.unfollow_raw(&session);
                     }
                     connection.watches.remove(pane);

@@ -10,7 +10,7 @@ use std::thread;
 // Alacritty reads the PTY in blocks of this size.
 const READ_BUFFER_SIZE: usize = 64 * 1024;
 
-type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
+pub(crate) type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
@@ -20,13 +20,13 @@ pub struct PtySession {
 
 impl PtySession {
     /// Starts the command on a new PTY. The reader thread gives each block
-    /// of output to `on_output` and writes the bytes it returns back to the
-    /// PTY, so a query gets its answer without a wait for a poll.
-    pub fn start(
+    /// of output and the PTY writer to `on_output`, so a query gets its
+    /// answer without a wait for a poll.
+    pub(crate) fn start(
         command: CommandBuilder,
         cols: u16,
         rows: u16,
-        on_output: impl FnMut(&[u8]) -> Vec<u8> + Send + 'static,
+        on_output: impl FnMut(&[u8], &Writer) + Send + 'static,
     ) -> io::Result<Self> {
         let pair = native_pty_system()
             .openpty(pty_size(cols, rows))
@@ -46,6 +46,10 @@ impl PtySession {
             child,
             writer,
         })
+    }
+
+    pub(crate) fn writer(&self) -> Writer {
+        Arc::clone(&self.writer)
     }
 
     pub fn write_input(&self, bytes: &[u8]) -> io::Result<()> {
@@ -104,7 +108,7 @@ fn read_output(
     mut reader: Box<dyn Read + Send>,
     ready: &Readiness,
     writer: &Writer,
-    mut on_output: impl FnMut(&[u8]) -> Vec<u8>,
+    mut on_output: impl FnMut(&[u8], &Writer),
 ) {
     let mut bytes = vec![0; READ_BUFFER_SIZE];
 
@@ -112,14 +116,7 @@ fn read_output(
         ready.wait();
         match reader.read(&mut bytes) {
             Ok(0) => return,
-            Ok(count) => {
-                let replies = on_output(&bytes[..count]);
-                if !replies.is_empty()
-                    && let Err(error) = lock_mutex(writer).write_all(&replies)
-                {
-                    eprintln!("pane reply write failed: {error}");
-                }
-            }
+            Ok(count) => on_output(&bytes[..count], writer),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(_) => return,
         }

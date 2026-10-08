@@ -1,11 +1,14 @@
 use std::io;
 use std::os::unix::net::UnixStream;
+use std::path::Path;
 use std::process::Stdio;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::codec::{self, Incoming, RawEvent};
 use seer_core::proto::{ClientMsg, ServerMsg};
-use seer_core::{TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame};
+use seer_core::{
+    InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, TerminalInput,
+};
 use seer_runtime::PaneGrid;
 
 use crate::runtime_socket_helpers::*;
@@ -59,6 +62,7 @@ impl RawClient {
             (RawEvent::SyncEnd, Some(grid)) => {
                 grid.end_sync();
             }
+            (RawEvent::Mark(mark), Some(_)) => send(&mut self.stream, &ClientMsg::Parsed { mark }),
             (event, None) => panic!("raw stream sent {event:?} before its start"),
         }
         true
@@ -118,10 +122,7 @@ fn viewer_screen(socket: &std::path::Path, pane: &str, cols: u16, rows: u16) -> 
     }
 }
 
-#[test]
-fn the_own_window_gets_raw_output_and_a_query_gets_one_answer() {
-    let temporary = TemporaryDirectory::new();
-    let socket = temporary.path.join("runtime.sock");
+fn start_runtime(socket: &Path) -> RuntimeProcess {
     let runtime = runtime_command()
         .args([
             socket.as_os_str(),
@@ -133,8 +134,11 @@ fn the_own_window_gets_raw_output_and_a_query_gets_one_answer() {
         .stderr(Stdio::null())
         .spawn()
         .expect("runtime must start");
-    let _runtime = RuntimeProcess::new(runtime);
-    let mut stream = connect_with_timeout(&socket);
+    RuntimeProcess::new(runtime)
+}
+
+fn open_window(socket: &Path) -> (RawClient, String) {
+    let mut stream = connect_with_timeout(socket);
     send(
         &mut stream,
         &ClientMsg::TerminalCapabilities {
@@ -152,6 +156,29 @@ fn the_own_window_gets_raw_output_and_a_query_gets_one_answer() {
         mirror: None,
     };
     resize(&mut client, &pane, 80, 24);
+    (client, pane)
+}
+
+fn scrolled(client: &mut RawClient, lines: i32) -> TerminalFrame {
+    let grid = client.mirror.as_mut().expect("raw stream must start");
+    grid.handle_input(&TerminalInput::new(InputEvent::Scrollback { lines }))
+        .expect("scrollback is valid input");
+    grid.snapshot()
+}
+
+fn assert_same(open: &mut RawClient, reopened: &mut RawClient) {
+    assert_eq!(reopened.snapshot(), open.snapshot());
+    for lines in [1_000, -990, -10] {
+        assert_eq!(scrolled(reopened, lines), scrolled(open, lines));
+    }
+}
+
+#[test]
+fn the_own_window_gets_raw_output_and_a_query_gets_one_answer() {
+    let temporary = TemporaryDirectory::new();
+    let socket = temporary.path.join("runtime.sock");
+    let _runtime = start_runtime(&socket);
+    let (mut client, pane) = open_window(&socket);
 
     send_input(
         &mut client.stream,
@@ -166,4 +193,38 @@ fn the_own_window_gets_raw_output_and_a_query_gets_one_answer() {
     send_input(&mut client.stream, &pane, "echo size:$(stty size):\n");
     client.read_until("size:30 100:");
     assert_eq!(viewer_screen(&socket, &pane, 100, 30), client.snapshot());
+}
+
+// Each stage stops the program in a state that a new window must rebuild:
+// an open escape sequence with the line drawing set active, the line
+// drawing set selected, and a full screen app over the shell.
+#[test]
+fn a_reopened_window_shows_what_a_window_that_stayed_open_shows() {
+    let temporary = TemporaryDirectory::new();
+    let socket = temporary.path.join("runtime.sock");
+    let _runtime = start_runtime(&socket);
+    let (mut open, pane) = open_window(&socket);
+
+    send_input(
+        &mut open.stream,
+        &pane,
+        concat!(
+            "stty -echo; seq 40; ",
+            "printf 'stage-%d\\033)0\\016\\033[31' 1; read x; ",
+            "printf 'mlqqk\\017\\033[0m\\nstage-%d\\033(0' 2; read x; ",
+            "printf 'lqqk\\033(B\\n\\033[?1049h\\033[44mapp stage-%d' 3; read x; ",
+            "printf '\\033[?1049l\\033[0mstage-%d\\n' 4; stty echo\n",
+        ),
+    );
+    for stage in 1..4 {
+        open.read_until(&format!("stage-{stage}"));
+        let (mut reopened, _) = open_window(&socket);
+        reopened.read_until(&format!("stage-{stage}"));
+        send_input(&mut reopened.stream, &pane, "\n");
+        let next = format!("stage-{}", stage + 1);
+        open.read_until(&next);
+        reopened.read_until(&next);
+        assert_same(&mut open, &mut reopened);
+    }
+    assert!(text(&open.snapshot()).contains("\u{250c}\u{2500}\u{2500}\u{2510}"));
 }

@@ -126,6 +126,7 @@ pub fn client_summary(message: &ClientMsg) -> String {
         } => format!("Watch user={user} pane={pane} size={cols}x{rows} viewer={viewer}"),
         ClientMsg::Unwatch { user, pane } => format!("Unwatch user={user} pane={pane}"),
         ClientMsg::Resync { user, pane } => format!("Resync user={user} pane={pane}"),
+        ClientMsg::Parsed { mark } => format!("Parsed mark={mark}"),
         ClientMsg::TypeInto { user, pane, bytes } => {
             format!("TypeInto user={user} pane={pane} bytes={}", bytes.len())
         }

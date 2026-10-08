@@ -12,6 +12,7 @@ const RAW_OUTPUT: u8 = 0x80;
 const RAW_START: u8 = 0x81;
 const RAW_SIZE: u8 = 0x82;
 const RAW_SYNC_END: u8 = 0x83;
+const RAW_MARK: u8 = 0x84;
 pub const MAX_RAW_OUTPUT: usize = 0xff_ffff;
 
 /// One event of the raw stream of a pane, in the order of the PTY output.
@@ -29,6 +30,9 @@ pub enum RawEvent {
     },
     /// The runtime ended a synchronized update after its timeout.
     SyncEnd,
+    /// The window sends ClientMsg::Parsed with this number when it parsed
+    /// all output before it. The answer to a query waits for that.
+    Mark(u64),
 }
 
 pub enum Incoming<T> {
@@ -87,8 +91,13 @@ where
 }
 
 pub fn encode_raw(event: &RawEvent) -> io::Result<Vec<u8>> {
+    let mark;
     let (kind, body) = match event {
         RawEvent::Output(bytes) => (RAW_OUTPUT, bytes.as_slice()),
+        RawEvent::Mark(number) => {
+            mark = number.to_be_bytes();
+            (RAW_MARK, mark.as_slice())
+        }
         RawEvent::Start { cols, rows } => return Ok(raw_size(RAW_START, *cols, *rows)),
         RawEvent::Size { cols, rows } => return Ok(raw_size(RAW_SIZE, *cols, *rows)),
         RawEvent::SyncEnd => (RAW_SYNC_END, [].as_slice()),
@@ -124,6 +133,11 @@ fn raw_event(kind: u8, body: Vec<u8>) -> io::Result<RawEvent> {
             })
         }
         (RAW_SYNC_END, []) => Ok(RawEvent::SyncEnd),
+        (RAW_MARK, mark) if mark.len() == 8 => {
+            let mut number = [0; 8];
+            number.copy_from_slice(mark);
+            Ok(RawEvent::Mark(u64::from_be_bytes(number)))
+        }
         _ => Err(io::Error::new(
             io::ErrorKind::InvalidData,
             "unknown raw stream frame",

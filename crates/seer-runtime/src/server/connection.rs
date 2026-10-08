@@ -14,6 +14,7 @@ use super::room_refusal::ready;
 use super::{SharedSession, connection_loop, lock, writer};
 use crate::UserSession;
 use crate::outbox::Outbox;
+use crate::pane_output::Output;
 
 pub(super) fn handle_connection(
     mut stream: UnixStream,
@@ -129,7 +130,7 @@ pub(super) struct Connection {
     pub(super) baselines: BTreeMap<String, TerminalFrame>,
     pub(super) claimed: BTreeMap<String, Instant>,
     pub(super) outbox: Arc<Outbox>,
-    pub(super) raw_pane: Option<String>,
+    pub(super) raw_pane: Option<(String, Output)>,
     pub(super) stream: UnixStream,
     pub(super) capabilities: Option<TerminalCapabilities>,
     pub(super) viewport: Option<ReportedViewport>,

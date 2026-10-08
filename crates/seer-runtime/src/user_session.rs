@@ -104,6 +104,7 @@ impl UserSession {
             | ClientMsg::Watch { .. }
             | ClientMsg::Unwatch { .. }
             | ClientMsg::Resync { .. }
+            | ClientMsg::Parsed { .. }
             | ClientMsg::Terminals { .. }
             | ClientMsg::SetAllGrants { .. }
             | ClientMsg::SetGrant { .. }
@@ -484,9 +485,8 @@ pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "unsupported terminal capability version",
+        Err(invalid_input(
+            "unsupported terminal capability version".to_owned(),
         ))
     }
 }

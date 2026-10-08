@@ -1,8 +1,10 @@
-use alacritty_terminal::grid::{Cursor, Dimensions, Grid};
+use alacritty_terminal::grid::{Charsets, Cursor, Dimensions, Grid};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell, Flags};
 use alacritty_terminal::term::{Term, TermMode};
-use alacritty_terminal::vte::ansi::{Color, CursorShape, CursorStyle};
+use alacritty_terminal::vte::ansi::{
+    CharsetIndex, Color, CursorShape, CursorStyle, Handler, StandardCharset,
+};
 use std::io::Write;
 
 use super::TerminalReplies;
@@ -34,12 +36,21 @@ const RESET_MODES: [(TermMode, u16); 4] = [
     (TermMode::URGENCY_HINTS, 1042),
 ];
 
+const SETS: [(CharsetIndex, u8); 4] = [
+    (CharsetIndex::G0, b'('),
+    (CharsetIndex::G1, b')'),
+    (CharsetIndex::G2, b'*'),
+    (CharsetIndex::G3, b'+'),
+];
+
 /// Bytes that bring a new terminal of the same size to the state of `term`:
 /// the scrollback, the screen, the screen under a full screen app, the
-/// modes, the cursor and the pen. The scroll region, the tab stops, the
-/// character sets and the title are private in alacritty_terminal 0.26, so
-/// a new terminal gets the defaults.
+/// modes, the character sets, the cursor and the pen. The scroll region,
+/// the tab stops and the title are private in alacritty_terminal 0.26, so a
+/// new terminal gets the defaults.
 pub(super) fn restore(term: &mut Term<TerminalReplies>) -> Vec<u8> {
+    let shifted = shifted_out(term);
+    let ascii = Charsets::default();
     let mut out = Vec::new();
     if term.mode().contains(TermMode::ALT_SCREEN) {
         // From the alt screen, swap_alt only swaps. The swap back clears the
@@ -47,19 +58,65 @@ pub(super) fn restore(term: &mut Term<TerminalReplies>) -> Vec<u8> {
         // cursor, which 1049h already did. The clone undoes the clear.
         let alt = term.grid().clone();
         term.swap_alt();
+        let primary = term.grid().cursor.charsets;
         lines(&mut out, term.grid());
         place(&mut out, term.grid(), &term.grid().cursor);
+        designate(&mut out, ascii, primary);
         term.swap_alt();
         *term.grid_mut() = alt;
         out.extend_from_slice(b"\x1b[?1049h\x1b[H");
+        designate(&mut out, primary, ascii);
     }
     let grid = term.grid();
     lines(&mut out, grid);
     modes(&mut out, *term.mode(), term.cursor_style());
     place(&mut out, grid, &grid.saved_cursor);
+    designate(&mut out, ascii, grid.saved_cursor.charsets);
     out.extend_from_slice(b"\x1b7");
+    designate(&mut out, grid.saved_cursor.charsets, ascii);
     place(&mut out, grid, &grid.cursor);
+    designate(&mut out, ascii, grid.cursor.charsets);
+    if shifted {
+        out.push(0x0e);
+    }
     out
+}
+
+// alacritty_terminal 0.26 keeps private which set (G0 after SI, G1 after
+// SO) maps the output. Print one probe character, read the cell, and put
+// the cursor and the rows that the print can change back.
+fn shifted_out(term: &mut Term<TerminalReplies>) -> bool {
+    let cursor = term.grid().cursor.clone();
+    let sets = cursor.charsets;
+    if sets[CharsetIndex::G0] == sets[CharsetIndex::G1] {
+        return false;
+    }
+    let line = cursor.point.line;
+    let rows: Vec<_> = [line - 1, line]
+        .into_iter()
+        .filter(|row| *row >= term.grid().topmost_line())
+        .map(|row| (row, term.grid()[row].clone()))
+        .collect();
+    term.grid_mut().cursor.input_needs_wrap = false;
+    term.input('q');
+    let shown = term.grid()[line][cursor.point.column].c;
+    for (row, cells) in rows {
+        term.grid_mut()[row] = cells;
+    }
+    term.grid_mut().cursor = cursor;
+    shown == sets[CharsetIndex::G1].map('q')
+}
+
+fn designate(out: &mut Vec<u8>, from: Charsets, to: Charsets) {
+    for (index, slot) in SETS {
+        if from[index] != to[index] {
+            let set = match to[index] {
+                StandardCharset::Ascii => b'B',
+                StandardCharset::SpecialCharacterAndLineDrawing => b'0',
+            };
+            out.extend_from_slice(&[0x1b, slot, set]);
+        }
+    }
 }
 
 fn lines(out: &mut Vec<u8>, grid: &Grid<Cell>) {

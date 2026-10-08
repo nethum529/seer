@@ -5,9 +5,8 @@ use gpui::{
     point, px, relative, size,
 };
 use seer_core::{Cell, Cursor};
-use std::sync::PoisonError;
 
-use crate::link::Terminal;
+use crate::link::{Terminal, lock};
 use crate::palette;
 use crate::window::SeerWindow;
 
@@ -201,11 +200,11 @@ impl Rows {
         window: &mut Window,
     ) -> Painted {
         let (changed, at) = {
-            let mut held = terminal.lock().unwrap_or_else(PoisonError::into_inner);
+            let mut held = lock(terminal);
             let Some(terminal) = held.as_mut() else {
                 return Painted::default();
             };
-            let shown = (grid, grid.rows.min(usize::from(terminal.size().1)));
+            let shown = (grid, grid.rows.min(terminal.rows()));
             let damage = terminal.take_damage();
             let changed: Vec<usize> = match damage {
                 Some(damage) if self.grid == Some(shown) => {

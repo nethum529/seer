@@ -6817,6 +6817,7 @@ version = "0.6.0"
 dependencies = [
  "alacritty_terminal",
  "libc",
+ "memchr",
  "portable-pty",
  "seer-core",
  "seer-net",
