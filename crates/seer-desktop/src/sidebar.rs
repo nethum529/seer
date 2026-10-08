@@ -1,7 +1,8 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, Div, FontWeight, InteractiveElement, MouseButton, ParentElement, SharedString,
-    Stateful, StatefulInteractiveElement, Styled, div, px, relative, rgb,
+    Context, Div, FocusHandle, FontWeight, InteractiveElement, KeyDownEvent, MouseButton,
+    ParentElement, Pixels, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
+    Styled, div, point, px, relative, rgb,
 };
 use seer_core::proto::TerminalInfo;
 
@@ -9,11 +10,61 @@ use crate::palette;
 use crate::window::SeerWindow;
 
 const WIDTH: f32 = 248.;
+const STRIP_PAD: f32 = 8.;
+
+pub(crate) struct Tablist {
+    pub(crate) focus: FocusHandle,
+    pub(crate) scroll: ScrollHandle,
+    pub(crate) ring: bool,
+}
+
+impl Tablist {
+    // gpui scroll_to_item puts the item flush on the list edge and ignores
+    // the list padding.
+    pub(crate) fn reveal(&self, at: usize) {
+        let Some(item) = self.scroll.bounds_for_item(at) else {
+            return;
+        };
+        let view = self.scroll.bounds();
+        let max = self.scroll.max_offset();
+        let offset = self.scroll.offset();
+        let pad = px(STRIP_PAD);
+        let x = fit(
+            item.left() - pad,
+            item.right() + pad,
+            view.left(),
+            view.right(),
+            offset.x,
+        );
+        let y = fit(
+            item.top(),
+            item.bottom(),
+            view.top(),
+            view.bottom(),
+            offset.y,
+        );
+        self.scroll.set_offset(point(
+            x.clamp(-max.width, px(0.)),
+            y.clamp(-max.height, px(0.)),
+        ));
+    }
+}
+
+fn fit(start: Pixels, end: Pixels, view_start: Pixels, view_end: Pixels, offset: Pixels) -> Pixels {
+    if start + offset < view_start {
+        view_start - start
+    } else if end + offset > view_end {
+        view_end - end
+    } else {
+        offset
+    }
+}
 
 pub(crate) fn sidebar(
     name: &SharedString,
     terminals: &[TerminalInfo],
     shown: Option<&str>,
+    tablist: &Tablist,
     cx: &mut Context<SeerWindow>,
 ) -> Div {
     div()
@@ -35,8 +86,7 @@ pub(crate) fn sidebar(
                 .pr(px(10.)),
         )
         .child(
-            div()
-                .id("tabs")
+            list(div().id("tabs"), tablist, cx)
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
@@ -44,7 +94,11 @@ pub(crate) fn sidebar(
                 .flex()
                 .flex_col()
                 .gap(px(2.))
-                .children(terminals.iter().map(|terminal| tab(terminal, shown, cx))),
+                .children(
+                    terminals
+                        .iter()
+                        .map(|terminal| tab(terminal, shown, tablist.ring, cx)),
+                ),
         )
 }
 
@@ -71,29 +125,39 @@ pub(crate) fn who(name: &SharedString, avatar: f32, initial: f32) -> Div {
                 .text_size(px(initial))
                 .line_height(relative(1.))
                 .font_weight(FontWeight::SEMIBOLD)
-                .child(letter),
+                // gpui draws this letter 1 px higher than the browser does in
+                // the design, measured by ink rows at both avatar sizes.
+                .child(div().relative().top(px(1.)).child(letter)),
         )
         .child(
-            div()
-                .min_w_0()
-                .truncate()
+            one_line(div().flex_1())
                 .font_weight(FontWeight::SEMIBOLD)
                 .child(name.clone()),
         )
 }
 
+// gpui 0.2.2 keeps the first measure of a text that does not wrap. That
+// measure has no width, so truncate() never draws the ellipsis. A text that
+// wraps is measured again for each width, and line_clamp keeps one line.
+pub(crate) fn one_line(text: Div) -> Div {
+    text.min_w_0()
+        .overflow_hidden()
+        .text_ellipsis()
+        .line_clamp(1)
+}
+
 pub(crate) fn strip(
     terminals: &[TerminalInfo],
     shown: Option<&str>,
+    tablist: &Tablist,
     cx: &mut Context<SeerWindow>,
 ) -> Stateful<Div> {
-    div()
-        .id("strip")
+    list(div().id("strip"), tablist, cx)
         .flex_none()
         .flex()
         .gap(px(4.))
         .py(px(6.))
-        .px(px(8.))
+        .px(px(STRIP_PAD))
         .overflow_x_scroll()
         .bg(rgb(palette::WINDOW))
         .border_b_1()
@@ -108,12 +172,40 @@ pub(crate) fn strip(
                 .whitespace_nowrap()
                 .text_color(rgb(if on { palette::TEXT } else { palette::TEXT_2 }))
                 .when(on, |tab| tab.bg(rgb(palette::PILL)))
+                .when(on && tablist.ring, |tab| tab.child(outline()))
                 .child(dot())
                 .child(terminal.name.clone())
         }))
 }
 
-fn tab(terminal: &TerminalInfo, shown: Option<&str>, cx: &mut Context<SeerWindow>) -> Div {
+// The tab list is one tab stop. The arrow keys move the selection, as in the
+// WAI-ARIA tabs pattern with automatic activation.
+pub(crate) fn step(key: &str, count: usize, now: Option<usize>) -> Option<usize> {
+    let last = count.checked_sub(1)?;
+    match key {
+        "up" | "left" => Some(now.map_or(last, |at| at.checked_sub(1).unwrap_or(last))),
+        "down" | "right" => Some(now.map_or(0, |at| if at == last { 0 } else { at + 1 })),
+        "home" => Some(0),
+        "end" => Some(last),
+        "enter" | "space" | "tab" => Some(now.unwrap_or(0)),
+        _ => None,
+    }
+}
+
+fn list(list: Stateful<Div>, tablist: &Tablist, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
+    list.track_focus(&tablist.focus)
+        .track_scroll(&tablist.scroll)
+        .on_key_down(
+            cx.listener(|view, event: &KeyDownEvent, _, cx| view.key(&event.keystroke, cx)),
+        )
+}
+
+fn tab(
+    terminal: &TerminalInfo,
+    shown: Option<&str>,
+    ring: bool,
+    cx: &mut Context<SeerWindow>,
+) -> Div {
     let row = selectable(terminal, cx)
         .w_full()
         .pt(px(7.))
@@ -123,14 +215,13 @@ fn tab(terminal: &TerminalInfo, shown: Option<&str>, cx: &mut Context<SeerWindow
         .gap(px(10.))
         .child(dot())
         .child(
-            div()
-                .min_w_0()
-                .truncate()
+            one_line(div().flex_1())
                 .font_weight(FontWeight::MEDIUM)
                 .child(terminal.name.clone()),
         );
     if shown == Some(terminal.pane.as_str()) {
         row.bg(rgb(palette::PILL))
+            .when(ring, |row| row.child(outline()))
     } else {
         row.hover(|style| style.bg(rgb(palette::HOVER)))
     }
@@ -138,10 +229,26 @@ fn tab(terminal: &TerminalInfo, shown: Option<&str>, cx: &mut Context<SeerWindow
 
 fn selectable(terminal: &TerminalInfo, cx: &mut Context<SeerWindow>) -> Div {
     let pane = terminal.pane.clone();
-    div().flex().items_center().rounded(px(8.)).on_mouse_down(
-        MouseButton::Left,
-        cx.listener(move |view, _, _, cx| view.select(&pane, cx)),
-    )
+    div()
+        .relative()
+        .flex()
+        .items_center()
+        .rounded(px(8.))
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |view, _, window, cx| view.press(&pane, window, cx)),
+        )
+}
+
+// The design draws the focus ring as a 1 px outline with a -1 px offset, so
+// the ring sits on the inner edge of the tab.
+fn outline() -> Div {
+    div()
+        .absolute()
+        .inset_0()
+        .rounded(px(8.))
+        .border_1()
+        .border_color(rgb(palette::ACCENT))
 }
 
 // The design draws a ring for a terminal whose agent state is not known.

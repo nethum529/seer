@@ -3,8 +3,9 @@ use std::io;
 use futures::StreamExt;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Context, Div, Font, FontWeight, IntoElement, ParentElement, Render, SharedString, Styled,
-    Task, Window, div, px, relative, rgb,
+    App, Context, Div, Font, FontWeight, InteractiveElement, IntoElement, Keystroke, MouseButton,
+    ParentElement, Render, ScrollHandle, SharedString, Styled, Task, Window, div, px, relative,
+    rgb,
 };
 use seer::ServerStore;
 use seer_core::TerminalFrame;
@@ -13,7 +14,7 @@ use seer_core::proto::ServerMsg;
 use crate::link::{Link, Messages};
 use crate::palette;
 use crate::screen::{self, Screen};
-use crate::sidebar;
+use crate::sidebar::{self, Tablist};
 
 const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";
 const LINK_LOST: &str = "The link to your terminals stopped. Open Seer again.";
@@ -32,11 +33,12 @@ pub(crate) struct SeerWindow {
     content: Content,
     font: Font,
     ui_font: SharedString,
+    tablist: Tablist,
     _messages: Option<Task<()>>,
 }
 
 impl SeerWindow {
-    pub(crate) fn new(cx: &mut Context<Self>) -> Self {
+    pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let font = screen::terminal_font(cx);
         let (content, messages) = match open() {
             Ok(Some((link, name, messages))) => {
@@ -60,10 +62,17 @@ impl SeerWindow {
                 }
             })
         });
+        let tablist = Tablist {
+            focus: cx.focus_handle(),
+            scroll: ScrollHandle::new(),
+            ring: false,
+        };
+        window.focus(&tablist.focus);
         Self {
             content,
             font,
             ui_font: ui_font(cx),
+            tablist,
             _messages: messages,
         }
     }
@@ -90,6 +99,34 @@ impl SeerWindow {
         };
         self.check(result, cx);
         cx.notify();
+    }
+
+    pub(crate) fn press(&mut self, pane: &str, window: &mut Window, cx: &mut Context<Self>) {
+        window.focus(&self.tablist.focus);
+        self.select(pane, cx);
+    }
+
+    pub(crate) fn key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+        let Content::Terminal(link, _) = &self.content else {
+            return;
+        };
+        let held = keystroke.modifiers;
+        if held.control || held.alt || held.platform || held.function {
+            return;
+        }
+        let terminals = link.terminals();
+        let now = terminals
+            .iter()
+            .position(|terminal| Some(terminal.pane.as_str()) == link.shown());
+        let Some((at, terminal)) = sidebar::step(&keystroke.key, terminals.len(), now)
+            .and_then(|at| Some((at, terminals.get(at)?)))
+        else {
+            return;
+        };
+        let pane = terminal.pane.clone();
+        self.tablist.reveal(at);
+        self.tablist.ring = true;
+        self.select(&pane, cx);
     }
 
     fn receive(&mut self, message: io::Result<ServerMsg>, cx: &mut Context<Self>) {
@@ -138,7 +175,14 @@ impl Render for SeerWindow {
             .font_family(self.ui_font.clone())
             .text_size(px(13.))
             .line_height(relative(1.4))
-            .text_color(rgb(palette::TEXT));
+            .text_color(rgb(palette::TEXT))
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|view, _, _, cx| {
+                    view.tablist.ring = false;
+                    cx.notify();
+                }),
+            );
         let (link, name) = match &self.content {
             Content::Message(message) => {
                 return root
@@ -164,13 +208,14 @@ impl Render for SeerWindow {
                     .child(
                         bar().gap(px(10.)).pl(px(14.)).pr(px(8.)).child(
                             sidebar::who(name, 18., 10.)
+                                .min_w_0()
                                 .h(px(32.))
                                 .pl(px(6.))
                                 .pr(px(8.)),
                         ),
                     )
                     .when(!terminals.is_empty(), |main| {
-                        main.child(sidebar::strip(terminals, shown, cx))
+                        main.child(sidebar::strip(terminals, shown, &self.tablist, cx))
                     })
                     .child(terminal),
             );
@@ -179,7 +224,7 @@ impl Render for SeerWindow {
             .iter()
             .find(|terminal| Some(terminal.pane.as_str()) == shown)
             .map(|terminal| terminal.name.clone());
-        root.child(sidebar::sidebar(name, terminals, shown, cx))
+        root.child(sidebar::sidebar(name, terminals, shown, &self.tablist, cx))
             .child(
                 div()
                     .flex_1()
@@ -210,22 +255,23 @@ fn bar() -> Div {
 
 fn heading(name: &SharedString, terminal: Option<String>) -> Div {
     let title = div()
+        .min_w_0()
         .flex()
-        .whitespace_nowrap()
         .font_weight(FontWeight::MEDIUM)
-        .child(name.clone());
+        .child(sidebar::one_line(div()).child(name.clone()));
     let Some(terminal) = terminal else {
         return title;
     };
     title
         .child(
             div()
+                .flex_none()
                 .mx(px(4.))
                 .text_color(rgb(palette::FAINTER))
                 .child("/"),
         )
         .child(
-            div()
+            sidebar::one_line(div())
                 .font_weight(FontWeight::NORMAL)
                 .text_color(rgb(palette::MUTED))
                 .child(terminal),

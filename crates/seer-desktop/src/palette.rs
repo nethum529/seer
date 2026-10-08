@@ -8,6 +8,7 @@ pub(crate) const HOVER: u32 = 0x171717;
 pub(crate) const PILL: u32 = 0x262626;
 pub(crate) const CHIP_2: u32 = 0x404040;
 pub(crate) const TEXT: u32 = 0xfafafa;
+pub(crate) const ACCENT: u32 = 0xfafafa;
 pub(crate) const TEXT_2: u32 = 0xd4d4d4;
 pub(crate) const MUTED: u32 = 0xa3a3a3;
 pub(crate) const FAINT: u32 = 0x737373;
