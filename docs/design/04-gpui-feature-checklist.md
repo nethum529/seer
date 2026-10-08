@@ -56,6 +56,7 @@ When a PR decides or builds a row, it updates the row.
 | The terminals of a person in the person menu. Enter to watch | README People, help | Placed: the vertical tabs after you pick the person. | R-450 |
 | Your typing permission for the person you watch, in the first line of the picker | README People | No place yet. | R-451 |
 | Give or remove the "can type here" grant with Space in the person menu. The box changes when the room server confirms it | README People, help | No place yet. R-451 also decides how the window shows the confirmation. | R-451 |
+| With a grant, type and use the mouse in the terminals of another person | README People | Placed: the terminal area of that person, the same as for your own terminal. R-449 builds keys and mouse. R-451 decides how the window shows that you may type. | R-449, R-451 |
 | seer perms --on: every person in the room can type into your terminals | README Commands, help | No place yet. The command stays. | R-453 |
 | seer perms --off: remove every grant | README People, README Commands, help | No place yet. The command stays. | R-453 |
 | seer peek NAME opens Seer with that person selected | README Commands, help | Placed: the command opens the window with that person picked in the dropdown. The command stays. | R-450 |
