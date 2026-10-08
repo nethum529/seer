@@ -73,10 +73,7 @@ pub(crate) fn selected_server() -> Result<ServerEntry, CommandError> {
             .cloned()
             .ok_or_else(|| CommandError::usage("this terminal's room is not saved"));
     }
-    if store.servers.len() == 1 {
-        return Ok(store.servers[0].clone());
-    }
-    if let Some(server) = store.servers.iter().find(|server| server.current) {
+    if let Some(server) = store.default_server() {
         return Ok(server.clone());
     }
     let stdin = io::stdin();
