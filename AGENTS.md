@@ -96,3 +96,32 @@ before every PR.
   and PR text.
 - Plain ASCII only. No emojis, no em dashes, no decorative formatting.
 - Be simple, brief, and direct. Write for a non-native English speaker.
+
+## UI work
+
+These rules apply to every change that a person can see in the desktop
+window: layout, spacing, color, type, icons, focus, hover, and motion.
+
+- Use two skill sets, and read the full skill file again each time you use
+  it. A read from earlier in the session does not count.
+  - Emil Kowalski: https://github.com/emilkowalski/skills, local clone at
+    /home/nethum/Projects/_research/emil-skills.
+  - Jakub Krehel: https://github.com/jakubkrehel/skills (the better-* skills)
+    and https://github.com/jakubkrehel/make-interfaces-feel-better, local
+    clones at /home/nethum/Projects/_research/jakub-skills and
+    /home/nethum/Projects/_research/jakub-make-interfaces-feel-better.
+- Read them before you start a UI surface, before each UI commit, and before
+  you report done. The local clones are read only. Pull them for the latest
+  copy.
+- The design target is docs/design/03-gpui-window.html.
+- No eyebrow headers. Do not put a small label (often upper case or letter
+  spaced) above a title or a section.
+- Spacing is a first class concern. Use one spacing scale. Check every
+  padding, gap, and alignment against the design and against the neighbor
+  elements.
+- Check at pixel level. Run the app, take screenshots of small regions (one
+  row, one button, one card edge), zoom in, and find what is wrong: a 1 px
+  shift, uneven padding, a color step, a clipped glyph. Fix it and check
+  again.
+- When the window matches the design, continue to polish. Done means no
+  defect is left that you can find in a close screenshot.
