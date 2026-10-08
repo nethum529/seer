@@ -1,0 +1,11 @@
+[package]
+name = "seer-desktop"
+version.workspace = true
+edition.workspace = true
+
+[dependencies]
+futures = "0.3"
+gpui = "=0.2.2"
+seer = { path = "../seer" }
+seer-core = { path = "../seer-core" }
+seer-net = { path = "../seer-net" }
