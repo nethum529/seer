@@ -82,10 +82,12 @@ screens. The settings sheet in the copy is a placeholder.
   terminals at the same time. Neither one breaks the other.
 - New user facing features go to the window. The TUI gets bug fixes.
   A ticket can still ask for a TUI change.
-- The move ends when the window holds every row of the feature
-  checklist that has a place in the window, on macOS and on Linux, in
-  a release. Then a separate ticket removes the TUI, and ratatui and
-  crossterm with it.
+- The move ends when two conditions are true. First, no row of the
+  feature checklist says "No place yet": each row has a place in the
+  window, or a reason that it needs none. Second, the window holds
+  every row that has a place, on macOS and on Linux, in a release.
+  Then a separate ticket removes the TUI, and ratatui and crossterm
+  with it.
 - After the TUI is removed, seer, seer attach, and seer peek open the
   window. R-457 decides how the command finds and starts the app.
 
