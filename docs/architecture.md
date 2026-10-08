@@ -112,9 +112,12 @@ or resize terminals.
 
 ## Design record
 
+- [ADR 0010: GPUI desktop app](adr/0010-gpui-desktop-app.md) makes Seer a native
+  GPUI desktop app for macOS and Linux. The TUI stays until the window replaces it.
 - [ADR 0009: participant-owned terminals](adr/0009-participant-owned-terminals.md)
   supersedes the server execution and broker lifetime rules in ADRs 0004 and 0007.
 - [ADR 0008: user picker](adr/0008-top-right-user-picker.md) defines the top right
-  people control. Terminal keys go to the shell until an explicit menu opens.
+  people control of the TUI only. Terminal keys go to the shell until an explicit
+  menu opens. The window uses a person dropdown instead.
 - [ADR 0002: built-in connection](adr/0002-builtin-connect.md) records iroh.
 - [Research index](research/README.md) records earlier design evidence.
