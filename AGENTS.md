@@ -114,6 +114,9 @@ window: layout, spacing, color, type, icons, focus, hover, and motion.
   you report done. The local clones are read only. Pull them for the latest
   copy.
 - The design target is docs/design/03-gpui-window.html.
+- The terminal fills its area flush to the edges. Never nest it in a card
+  (no border, radius, margin, or second fill around it). This wins over
+  the design file.
 - No eyebrow headers. Do not put a small label (often upper case or letter
   spaced) above a title or a section.
 - Spacing is a first class concern. Use one spacing scale. Check every
