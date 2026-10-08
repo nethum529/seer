@@ -11,7 +11,10 @@ fn main() {
     Application::new().run(|cx| {
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
-                cx.quit();
+                // gpui 0.2.2 on X11 runs this callback while it holds its
+                // client state, and quit takes that state again. Quit on a
+                // later turn of the main thread.
+                cx.spawn(async |cx| cx.update(|cx| cx.quit())).detach();
             }
         })
         .detach();
