@@ -24,7 +24,7 @@ const READY_TIMEOUT: Duration = Duration::from_secs(5);
 const KILL_GRACE: Duration = Duration::from_secs(1);
 
 // The runtime keeps running when this window closes and when the room stops.
-pub(crate) fn attach(server: &ServerEntry) -> io::Result<Attached> {
+pub fn attach(server: &ServerEntry) -> io::Result<Attached> {
     let directory = runtime_directory(&server.user_id)?;
     let socket = directory.join("socket");
     if let Ok(ready) = greet(&socket, None, READY_TIMEOUT) {
@@ -45,7 +45,7 @@ pub(crate) fn attach(server: &ServerEntry) -> io::Result<Attached> {
 
 // The local link, the terminal tree, and the standing notice for a runtime of
 // another Seer version or a room that refuses the runtime.
-pub(crate) type Attached = (Socket, Tree, Option<String>);
+pub type Attached = (Socket, Tree, Option<String>);
 
 // The stream, the runtime version, and the room refusal.
 type Ready = (UnixStream, Option<String>, Option<String>);
@@ -217,7 +217,7 @@ fn start(
     command
         .arg(socket)
         .arg(&server.user_id)
-        .arg(shell())
+        .arg(seer_runtime::LOGIN_SHELL)
         .arg(generation)
         .env("SEER_SNAPSHOT_DIR", directory)
         .env("SEER_ROOM_ENDPOINT", &server.endpoint)
@@ -255,13 +255,6 @@ fn start_directory() -> PathBuf {
         .ok()
         .or_else(|| env::var_os("HOME").map(PathBuf::from))
         .unwrap_or_else(|| PathBuf::from("/"))
-}
-
-fn shell() -> String {
-    env::var("SHELL")
-        .ok()
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "/bin/sh".to_owned())
 }
 
 fn generation() -> String {

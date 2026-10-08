@@ -12,24 +12,31 @@ const DIRECTORY_MODE: u32 = 0o700;
 const FILE_MODE: u32 = 0o600;
 static NEXT_TEMPORARY: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct ServerEntry {
+pub struct ServerEntry {
     pub(crate) endpoint: String,
     pub(crate) alias: String,
-    pub(crate) user_id: String,
+    pub user_id: String,
     pub(crate) name: String,
     pub(crate) credential: String,
     pub(crate) current: bool,
 }
 
 #[derive(Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
-pub(crate) struct ServerStore {
+pub struct ServerStore {
     #[serde(default)]
     pub(crate) servers: Vec<ServerEntry>,
 }
 
 impl ServerStore {
-    pub(crate) fn load() -> io::Result<Self> {
+    pub fn load() -> io::Result<Self> {
         Self::load_from(&store_path()?)
+    }
+
+    pub fn default_server(&self) -> Option<&ServerEntry> {
+        match self.servers.as_slice() {
+            [only] => Some(only),
+            servers => servers.iter().find(|server| server.current),
+        }
     }
 
     pub(crate) fn load_from(path: &Path) -> io::Result<Self> {

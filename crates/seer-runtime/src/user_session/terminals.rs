@@ -114,20 +114,14 @@ impl UserSession {
             .flat_map(|workspace| &workspace.tabs)
             .flat_map(|tab| &tab.panes)
             .map(|pane| {
-                let foreground = self
-                    .pane_hosts
-                    .get(&pane.id)
-                    .map(PaneHost::foreground)
-                    .unwrap_or_default();
+                let host = self.pane_hosts.get(&pane.id);
+                let foreground = host.map(PaneHost::foreground).unwrap_or_default();
                 let shell = foreground.is_empty()
                     || matches!(
                         foreground.as_str(),
                         "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh" | "nu"
                     )
-                    || std::path::Path::new(&self.shell)
-                        .file_name()
-                        .and_then(|name| name.to_str())
-                        == Some(foreground.as_str());
+                    || host.map(PaneHost::started_program) == Some(foreground.as_str());
                 TerminalInfo {
                     last_typist: self
                         .pane_hosts

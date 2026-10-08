@@ -1,8 +1,7 @@
 use crate::PaneHost;
 use crate::persistence::{self, Store};
 use crate::room::SECRET_VARS;
-use crate::{shell_env, shell_exit};
-use portable_pty::CommandBuilder;
+use crate::{login_shell, shell_env, shell_exit};
 use seer_core::layout::{PaneRect, rects};
 use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, TerminalInfo};
 use seer_core::{
@@ -376,9 +375,10 @@ impl UserSession {
     }
 
     pub(crate) fn start_host(&self, pane_rect: &PaneRect) -> io::Result<PaneHost> {
-        let mut command = CommandBuilder::new(&self.shell);
+        let shell = login_shell::resolve(&self.shell);
+        let mut command = shell.command();
         shell_env::remove_session_vars(&mut command);
-        shell_exit::install(&mut command, &self.shell)?;
+        shell_exit::install(&mut command, &shell)?;
         command.env("TERM", "xterm-256color");
         command.env("COLORTERM", "truecolor");
         command.env("SEER_USER_ID", &self.user);
