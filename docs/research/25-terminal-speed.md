@@ -54,7 +54,11 @@ terminal engine.
 - The answers go to a queue under the pane lock, and one answer thread
   per PTY writes them. So they reach the program in order, and the
   reader never waits for the PTY writer. Input that waits for a program
-  that does not read cannot stop the output.
+  that does not read cannot stop the output. When 64 KiB of answers wait
+  (ANSWER_LIMIT in crates/seer-runtime/src/pty.rs), new answers are
+  dropped. Only a program that does not read its input fills the queue,
+  and a wait for room would stop the reader again. With 1.5 million
+  unread DSR queries the runtime grew 4 to 12 KiB (5.8 MiB before).
 - The PTY reader thread of the runtime parses each read into the pane
   grid, writes the replies at once, and pushes the same bytes to each
   window that follows the pane. There is no poll interval on this path.

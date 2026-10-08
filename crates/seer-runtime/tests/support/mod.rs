@@ -194,6 +194,16 @@ impl RuntimeProcess {
             .is_none()
     }
 
+    pub fn resident_kib(&self) -> u64 {
+        let pid = self.0.as_ref().expect("runtime process must exist").id();
+        fs::read_to_string(format!("/proc/{pid}/status"))
+            .expect("runtime status must be readable")
+            .lines()
+            .find_map(|line| line.strip_prefix("VmRSS:"))
+            .and_then(|kib| kib.trim().trim_end_matches(" kB").parse().ok())
+            .expect("runtime status must give VmRSS")
+    }
+
     pub fn close_parent_pipe(&mut self) {
         let child = self.0.as_mut().expect("runtime process must exist");
         drop(child.stdin.take());

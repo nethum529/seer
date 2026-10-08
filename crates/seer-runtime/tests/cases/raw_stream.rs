@@ -252,3 +252,26 @@ fn output_keeps_flowing_while_the_program_does_not_read_its_input() {
     send_input(&mut client.stream, &pane, &"y".repeat(100_000));
     client.read_until("read-all");
 }
+
+#[test]
+fn runtime_memory_stays_bounded_while_a_program_does_not_read_its_answers() {
+    let temporary = TemporaryDirectory::new();
+    let socket = temporary.path.join("runtime.sock");
+    let runtime = start_runtime(&socket);
+    let (mut client, pane) = open_window(&socket);
+
+    send_input(
+        &mut client.stream,
+        &pane,
+        concat!(
+            "stty raw -echo; q=$(printf '\\033[5n'); ",
+            "yes \"$q\" | head -c 2500000; echo burst-o''ne; sleep 1; ",
+            "yes \"$q\" | head -c 7500000; echo burst-t''wo; sleep 600\n",
+        ),
+    );
+    client.read_until("burst-one");
+    let before = runtime.resident_kib();
+    client.read_until("burst-two");
+    let grown = runtime.resident_kib().saturating_sub(before);
+    assert!(grown < 3 * 1024, "runtime grew by {grown} KiB");
+}

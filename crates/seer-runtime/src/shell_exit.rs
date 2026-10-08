@@ -219,9 +219,7 @@ mod tests {
             lock_mutex(&reader).push_str(&chunk);
             // fish waits for the reply to its device attributes query.
             if chunk.contains("\x1b[0c") {
-                answers
-                    .send(b"\x1b[?62c".to_vec())
-                    .expect("reply must be queued");
+                answers.send(b"\x1b[?62c".to_vec());
             }
         })
         .expect("shell must start");

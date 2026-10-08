@@ -190,7 +190,7 @@ fn answer<T>(
     let mut pane = lock_mutex(shared);
     let (value, bytes) = step(&mut pane);
     if !bytes.is_empty() {
-        let _ = answers.send(bytes);
+        answers.send(bytes);
     }
     value
 }

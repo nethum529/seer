@@ -4,15 +4,39 @@ use std::io::{self, Read, Write};
 use std::os::fd::RawFd;
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 // Alacritty reads the PTY in blocks of this size.
 const READ_BUFFER_SIZE: usize = 64 * 1024;
+// The same bound as the raw output queued for a window (outbox.rs).
+const ANSWER_LIMIT: usize = 64 * 1024;
 
 type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
-pub(crate) type Answers = Sender<Vec<u8>>;
+
+/// The queue of answers to queries for the answer thread of a PTY.
+#[derive(Clone)]
+pub(crate) struct Answers {
+    queue: Sender<Vec<u8>>,
+    pending: Arc<AtomicUsize>,
+}
+
+impl Answers {
+    /// Queues `bytes`, or drops them when ANSWER_LIMIT bytes wait. Only a
+    /// program that does not read its input fills the queue. To wait for
+    /// room would stop the PTY reader, and then that program would never
+    /// read.
+    pub(crate) fn send(&self, bytes: Vec<u8>) {
+        let count = bytes.len();
+        if self.pending.fetch_add(count, Ordering::Relaxed) + count > ANSWER_LIMIT
+            || self.queue.send(bytes).is_err()
+        {
+            self.pending.fetch_sub(count, Ordering::Relaxed);
+        }
+    }
+}
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
@@ -37,13 +61,18 @@ impl PtySession {
             .map_err(to_io_error)?;
         let reader = pair.master.try_clone_reader().map_err(to_io_error)?;
         let writer: Writer = Arc::new(Mutex::new(pair.master.take_writer().map_err(to_io_error)?));
-        let (answers, pending) = mpsc::channel();
+        let (queue, waiting) = mpsc::channel();
+        let answers = Answers {
+            queue,
+            pending: Arc::new(AtomicUsize::new(0)),
+        };
+        let pending = Arc::clone(&answers.pending);
         let replies = Arc::clone(&writer);
         let ready = Readiness::new(pair.master.as_raw_fd())?;
 
         let _answer_task = thread::Builder::new()
             .name("pty-answer-writer".to_owned())
-            .spawn(move || write_answers(pending, &replies))?;
+            .spawn(move || write_answers(waiting, &pending, &replies))?;
         let reader_answers = answers.clone();
         let _reader_task = thread::Builder::new()
             .name("pty-output-reader".to_owned())
@@ -133,11 +162,12 @@ fn read_output(
     }
 }
 
-fn write_answers(pending: Receiver<Vec<u8>>, writer: &Writer) {
-    for bytes in pending {
+fn write_answers(waiting: Receiver<Vec<u8>>, pending: &AtomicUsize, writer: &Writer) {
+    for bytes in waiting {
         if let Err(error) = lock_mutex(writer).write_all(&bytes) {
             eprintln!("pane reply write failed: {error}");
         }
+        pending.fetch_sub(bytes.len(), Ordering::Relaxed);
     }
 }
 
