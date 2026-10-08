@@ -3,6 +3,7 @@ use gpui::{AppContext, Application, Bounds, WindowBounds, WindowOptions, px, siz
 mod link;
 mod palette;
 mod screen;
+mod sidebar;
 mod window;
 
 use window::SeerWindow;

@@ -16,7 +16,7 @@ pub struct ServerEntry {
     pub(crate) endpoint: String,
     pub(crate) alias: String,
     pub user_id: String,
-    pub(crate) name: String,
+    pub name: String,
     pub(crate) credential: String,
     pub(crate) current: bool,
 }
