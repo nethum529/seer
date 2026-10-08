@@ -14,7 +14,7 @@ use seer_core::proto::ServerMsg;
 use crate::link::{Link, Messages};
 use crate::palette;
 use crate::screen::{self, Screen};
-use crate::sidebar::{self, Keys};
+use crate::sidebar::{self, Keys, Mode};
 use crate::tip;
 
 const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";
@@ -67,7 +67,7 @@ impl SeerWindow {
             tabs: cx.focus_handle().tab_stop(true),
             who: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
-            ring: false,
+            mode: Mode::Pointer,
         };
         window.focus(&keys.tabs);
         Self {
@@ -127,21 +127,21 @@ impl SeerWindow {
         };
         let pane = terminal.pane.clone();
         self.keys.reveal(at);
-        self.keys.ring = true;
+        self.keys.mode = Mode::Keyboard;
         self.select(&pane, cx);
     }
 
     fn travel(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
-        self.keys.ring = match keystroke.key.as_str() {
+        self.keys.mode = match keystroke.key.as_str() {
             "tab" if keystroke.modifiers.shift => {
                 window.focus_prev();
-                true
+                Mode::Keyboard
             }
             "tab" => {
                 window.focus_next();
-                true
+                Mode::Keyboard
             }
-            "escape" => false,
+            "escape" => Mode::Quiet,
             _ => return,
         };
         cx.notify();
@@ -197,10 +197,16 @@ impl Render for SeerWindow {
             .on_mouse_down(
                 MouseButton::Left,
                 cx.listener(|view, _, _, cx| {
-                    view.keys.ring = false;
+                    view.keys.mode = Mode::Pointer;
                     cx.notify();
                 }),
             )
+            .on_mouse_move(cx.listener(|view, _, _, cx| {
+                if view.keys.mode == Mode::Quiet {
+                    view.keys.mode = Mode::Pointer;
+                    cx.notify();
+                }
+            }))
             .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                 view.travel(&event.keystroke, window, cx)
             }));
@@ -247,7 +253,7 @@ impl Render for SeerWindow {
             .map(|terminal| terminal.name.clone());
         let who = sidebar::who(name, 22., 11., &self.ui_font, &self.keys, window);
         let side = sidebar::sidebar(who, terminals, shown, &self.keys, window, cx);
-        let title = heading(name, title, &self.ui_font);
+        let title = heading(name, title, &self.ui_font, self.keys.hover());
         root.child(side).child(
             div()
                 .flex_1()
@@ -271,12 +277,17 @@ fn bar() -> Div {
         .border_color(rgb(palette::LINE))
 }
 
-fn heading(name: &SharedString, terminal: Option<String>, font: &SharedString) -> Stateful<Div> {
+fn heading(
+    name: &SharedString,
+    terminal: Option<String>,
+    font: &SharedString,
+    hover: bool,
+) -> Stateful<Div> {
     let full = match &terminal {
         Some(terminal) => format!("{name} / {terminal}").into(),
         None => name.clone(),
     };
-    let title = tip::on_hover(div().id("title"), full, font.clone())
+    let title = tip::on_hover(div().id("title"), full, font.clone(), hover)
         .min_w_0()
         .flex()
         .font_weight(FontWeight::MEDIUM)

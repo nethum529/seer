@@ -17,12 +17,23 @@ pub(crate) struct Keys {
     pub(crate) tabs: FocusHandle,
     pub(crate) who: FocusHandle,
     pub(crate) scroll: ScrollHandle,
-    pub(crate) ring: bool,
+    pub(crate) mode: Mode,
+}
+
+#[derive(Clone, Copy, PartialEq)]
+pub(crate) enum Mode {
+    Pointer,
+    Keyboard,
+    Quiet,
 }
 
 impl Keys {
     pub(crate) fn ring(&self, focus: &FocusHandle, window: &Window) -> bool {
-        self.ring && focus.is_focused(window)
+        self.mode == Mode::Keyboard && focus.is_focused(window)
+    }
+
+    pub(crate) fn hover(&self) -> bool {
+        self.mode != Mode::Quiet
     }
 
     // gpui scroll_to_item puts the item flush on the list edge and ignores
@@ -116,38 +127,44 @@ pub(crate) fn who(
         .next()
         .map(|first| first.to_uppercase().collect::<String>().into())
         .unwrap_or_default();
-    tip::on_hover(div().id("who"), name.clone(), font.clone())
-        .track_focus(&keys.who)
-        .relative()
-        .flex()
-        .items_center()
-        .gap(px(9.))
-        .rounded(px(8.))
-        .child(
-            div()
-                .flex_none()
-                .size(px(avatar))
-                .rounded_full()
-                .flex()
-                .items_center()
-                .justify_center()
-                .bg(rgb(palette::CHIP_2))
-                .text_size(px(initial))
-                .line_height(relative(1.))
-                .font_weight(FontWeight::SEMIBOLD)
-                // gpui draws this letter 1 px higher than the browser does in
-                // the design, measured by ink rows at both avatar sizes.
-                .child(div().relative().top(px(1.)).child(letter)),
-        )
-        .child(
-            one_line(div().flex_1())
-                .font_weight(FontWeight::SEMIBOLD)
-                .child(name.clone()),
-        )
-        .when(keys.ring(&keys.who, window), |who| {
-            who.child(outline())
-                .child(tip::below(name.clone(), font.clone()))
-        })
+    let ring = keys.ring(&keys.who, window);
+    tip::on_hover(
+        div().id("who"),
+        name.clone(),
+        font.clone(),
+        keys.hover() && !ring,
+    )
+    .track_focus(&keys.who)
+    .relative()
+    .flex()
+    .items_center()
+    .gap(px(9.))
+    .rounded(px(8.))
+    .child(
+        div()
+            .flex_none()
+            .size(px(avatar))
+            .rounded_full()
+            .flex()
+            .items_center()
+            .justify_center()
+            .bg(rgb(palette::CHIP_2))
+            .text_size(px(initial))
+            .line_height(relative(1.))
+            .font_weight(FontWeight::SEMIBOLD)
+            // gpui draws this letter 1 px higher than the browser does in
+            // the design, measured by ink rows at both avatar sizes.
+            .child(div().relative().top(px(1.)).child(letter)),
+    )
+    .child(
+        one_line(div().flex_1())
+            .font_weight(FontWeight::SEMIBOLD)
+            .child(name.clone()),
+    )
+    .when(ring, |who| {
+        who.child(outline())
+            .child(tip::below(name.clone(), font.clone()))
+    })
 }
 
 // gpui 0.2.2 keeps the first measure of a text that does not wrap. That

@@ -1,3 +1,4 @@
+use gpui::prelude::FluentBuilder;
 use gpui::{
     AppContext, Context, Div, IntoElement, ParentElement, Render, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Window, anchored, deferred, div, point, px, relative, rgb,
@@ -6,6 +7,7 @@ use gpui::{
 use crate::palette;
 
 const GAP: f32 = 4.;
+const MAX_WIDTH: f32 = 280.;
 
 struct Tip {
     text: SharedString,
@@ -23,18 +25,23 @@ impl Render for Tip {
     }
 }
 
+// gpui removes a shown tooltip in the first frame that draws its element
+// without one.
 pub(crate) fn on_hover(
     element: Stateful<Div>,
     text: SharedString,
     font: SharedString,
+    show: bool,
 ) -> Stateful<Div> {
     element
-        .tooltip(move |_, cx| {
-            let tip = Tip {
-                text: text.clone(),
-                font: font.clone(),
-            };
-            cx.new(|_| tip).into()
+        .when(show, |element| {
+            element.tooltip(move |_, cx| {
+                let tip = Tip {
+                    text: text.clone(),
+                    font: font.clone(),
+                };
+                cx.new(|_| tip).into()
+            })
         })
         // gpui hides a tooltip only when it draws a frame, and a pointer
         // that leaves this element does not cause a frame.
@@ -57,16 +64,14 @@ pub(crate) fn below(text: SharedString, font: SharedString) -> Div {
 // root, so it does not get the root font.
 fn tip(text: SharedString, font: SharedString) -> Div {
     div()
-        .h(px(26.))
+        .max_w(px(MAX_WIDTH))
+        .py(px(4.6))
         .px(px(10.))
-        .flex()
-        .items_center()
         .rounded(px(8.))
         .bg(rgb(palette::ACCENT))
         .text_color(rgb(palette::ON_ACCENT))
         .font_family(font)
         .text_size(px(12.))
         .line_height(relative(1.4))
-        .whitespace_nowrap()
         .child(text)
 }
