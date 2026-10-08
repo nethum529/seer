@@ -17,6 +17,10 @@ split panes, correct terminal behavior, mouse and keyboard input, agent status,
 agent control, and a small versioned local API. Add remote use, extensions,
 orchestration, broad dashboards, and GPUI later.
 
+Note, 2026-10-07: [ADR 0010](../adr/0010-gpui-desktop-app.md) replaces
+the GPUI timing in this report, including the "GPUI desktop frontend" row
+below. Seer becomes a GPUI desktop app. That row is historical.
+
 Do not promise Herdr binary, skill, socket, ID, or plugin source compatibility.
 Herdr is a design reference. Compatibility would make its full current CLI and
 plugin callback surface part of our permanent contract.
