@@ -106,6 +106,7 @@ impl Render for SeerWindow {
                 .items_center()
                 .justify_center()
                 .p(px(24.))
+                .text_center()
                 .text_size(px(13.))
                 .text_color(rgb(palette::FAINT))
                 .child(message.clone()),
