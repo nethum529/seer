@@ -66,6 +66,7 @@ fn identifies_only_mutating_messages() {
         ClientMsg::TerminalCapabilities {
             capabilities: TerminalCapabilities {
                 protocol_version: TERMINAL_PROTOCOL_VERSION,
+                raw_output: false,
             },
         },
     ];
@@ -93,11 +94,12 @@ fn polls_output_without_connections() {
     let deadline = Instant::now() + Duration::from_secs(5);
     let mut updated = false;
     while Instant::now() < deadline {
-        let (messages, has_connections) = shared
+        let (_, has_connections) = shared
             .poll_and_broadcast()
             .expect("session poll must succeed");
         assert!(!has_connections);
-        updated = messages.iter().any(|message| match message {
+        let snapshot = shared.session.lock().expect("session lock").snapshot();
+        updated = snapshot.iter().any(|message| match message {
             ServerMsg::Cells { frame, .. } => frame
                 .rows
                 .iter()

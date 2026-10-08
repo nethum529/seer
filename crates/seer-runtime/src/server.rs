@@ -11,6 +11,7 @@ use crate::UserSession;
 
 mod connection;
 mod peer;
+mod raw;
 mod restart;
 mod room_link;
 mod room_refusal;
@@ -436,8 +437,8 @@ impl SharedSession {
 
     fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {
         let _lease = lock(&self.lease)?;
-        let messages = lock(&self.session)?.poll();
-        let has_connections = !lock(&self.connections)?.is_empty();
+        let (has_connections, frames) = raw::watchers(&lock(&self.connections)?);
+        let messages = lock(&self.session)?.poll(frames);
         if has_connections {
             self.flush_messages(&messages)?;
         }

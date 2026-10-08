@@ -116,12 +116,12 @@ impl UserSession {
     }
 
     #[must_use]
-    pub fn poll(&mut self) -> Vec<ServerMsg> {
+    pub fn poll(&mut self, frames: bool) -> Vec<ServerMsg> {
         let mut messages: Vec<_> = self
             .pane_hosts
             .iter_mut()
             .filter_map(|(pane, host)| {
-                host.poll().then(|| {
+                (host.poll() && frames).then(|| {
                     let frame = host.frame();
                     #[cfg(debug_assertions)]
                     seer_core::debug_log::transition(

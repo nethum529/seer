@@ -54,11 +54,16 @@ impl SharedSession {
                     }
                     // A new watcher must see the screen as it stands. A quiet
                     // terminal produces nothing to poll, so send it here.
-                    if !send_screen(connection, &session, pane)? {
+                    if connection.raw() {
+                        connection.follow_raw(&session, pane);
+                    } else if !send_screen(connection, &session, pane)? {
                         return Ok(true);
                     }
                 }
                 None => {
+                    if connection.raw_pane.as_deref() == Some(pane) {
+                        connection.unfollow_raw(&session);
+                    }
                     connection.watches.remove(pane);
                     connection.seqs.remove(pane);
                     connection.baselines.remove(pane);

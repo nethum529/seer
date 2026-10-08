@@ -4,6 +4,37 @@ use serde::{Serialize, de::DeserializeOwned};
 
 const MAX_FRAME_SIZE: usize = 16 * 1024 * 1024;
 pub const MAX_PRE_AUTH_FRAME_SIZE: usize = 4 * 1024;
+// A JSON frame length is at most 16 MiB, so its first byte is 0 or 1. A raw
+// stream frame sets the top bit of the first byte, keeps its kind in that
+// byte, and has a 24 bit length.
+const RAW_FLAG: u8 = 0x80;
+const RAW_OUTPUT: u8 = 0x80;
+const RAW_START: u8 = 0x81;
+const RAW_SIZE: u8 = 0x82;
+const RAW_SYNC_END: u8 = 0x83;
+pub const MAX_RAW_OUTPUT: usize = 0xff_ffff;
+
+/// One event of the raw stream of a pane, in the order of the PTY output.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub enum RawEvent {
+    Output(Vec<u8>),
+    /// A new screen of this size. The next output rebuilds the screen.
+    Start {
+        cols: u16,
+        rows: u16,
+    },
+    Size {
+        cols: u16,
+        rows: u16,
+    },
+    /// The runtime ended a synchronized update after its timeout.
+    SyncEnd,
+}
+
+pub enum Incoming<T> {
+    Message(T),
+    Raw(RawEvent),
+}
 
 pub fn encode<W, T>(writer: &mut W, message: &T) -> io::Result<()>
 where
@@ -34,9 +65,78 @@ where
     R: Read,
     T: DeserializeOwned,
 {
-    let max_frame_size = max_frame_size.min(MAX_FRAME_SIZE);
     let mut prefix = [0; 4];
     reader.read_exact(&mut prefix)?;
+    decode_body(reader, prefix, max_frame_size)
+}
+
+pub fn decode_incoming<R, T>(reader: &mut R) -> io::Result<Incoming<T>>
+where
+    R: Read,
+    T: DeserializeOwned,
+{
+    let mut prefix = [0; 4];
+    reader.read_exact(&mut prefix)?;
+    if prefix[0] & RAW_FLAG == 0 {
+        return decode_body(reader, prefix, MAX_FRAME_SIZE).map(Incoming::Message);
+    }
+    let length = u32::from_be_bytes([0, prefix[1], prefix[2], prefix[3]]) as usize;
+    let mut body = vec![0; length];
+    reader.read_exact(&mut body)?;
+    raw_event(prefix[0], body).map(Incoming::Raw)
+}
+
+pub fn encode_raw(event: &RawEvent) -> io::Result<Vec<u8>> {
+    let (kind, body) = match event {
+        RawEvent::Output(bytes) => (RAW_OUTPUT, bytes.as_slice()),
+        RawEvent::Start { cols, rows } => return Ok(raw_size(RAW_START, *cols, *rows)),
+        RawEvent::Size { cols, rows } => return Ok(raw_size(RAW_SIZE, *cols, *rows)),
+        RawEvent::SyncEnd => (RAW_SYNC_END, [].as_slice()),
+    };
+    if body.len() > MAX_RAW_OUTPUT {
+        return Err(frame_too_large(MAX_RAW_OUTPUT));
+    }
+    let length = (body.len() as u32).to_be_bytes();
+    let mut frame = Vec::with_capacity(body.len() + 4);
+    frame.extend_from_slice(&[kind, length[1], length[2], length[3]]);
+    frame.extend_from_slice(body);
+    Ok(frame)
+}
+
+fn raw_size(kind: u8, cols: u16, rows: u16) -> Vec<u8> {
+    let [c0, c1] = cols.to_be_bytes();
+    let [r0, r1] = rows.to_be_bytes();
+    vec![kind, 0, 0, 4, c0, c1, r0, r1]
+}
+
+fn raw_event(kind: u8, body: Vec<u8>) -> io::Result<RawEvent> {
+    match (kind, body.as_slice()) {
+        (RAW_OUTPUT, _) => Ok(RawEvent::Output(body)),
+        (RAW_START | RAW_SIZE, [c0, c1, r0, r1]) => {
+            let (cols, rows) = (
+                u16::from_be_bytes([*c0, *c1]),
+                u16::from_be_bytes([*r0, *r1]),
+            );
+            Ok(if kind == RAW_START {
+                RawEvent::Start { cols, rows }
+            } else {
+                RawEvent::Size { cols, rows }
+            })
+        }
+        (RAW_SYNC_END, []) => Ok(RawEvent::SyncEnd),
+        _ => Err(io::Error::new(
+            io::ErrorKind::InvalidData,
+            "unknown raw stream frame",
+        )),
+    }
+}
+
+fn decode_body<R, T>(reader: &mut R, prefix: [u8; 4], max_frame_size: usize) -> io::Result<T>
+where
+    R: Read,
+    T: DeserializeOwned,
+{
+    let max_frame_size = max_frame_size.min(MAX_FRAME_SIZE);
     let length = u32::from_be_bytes(prefix) as usize;
     if length > max_frame_size {
         return Err(frame_too_large(max_frame_size));

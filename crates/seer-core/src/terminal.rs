@@ -7,6 +7,11 @@ pub const TERMINAL_PROTOCOL_VERSION: u16 = 1;
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalCapabilities {
     pub protocol_version: u16,
+    /// The client parses the PTY bytes of the pane it watches itself, so
+    /// it gets raw stream frames for that pane and no cell frames.
+    // A new field keeps the version: a runtime refuses every other version.
+    #[serde(default)]
+    pub raw_output: bool,
 }
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]

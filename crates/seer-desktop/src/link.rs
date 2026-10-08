@@ -1,13 +1,22 @@
 use std::io;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, Mutex, PoisonError};
 use std::thread;
 
 use futures::channel::mpsc::{UnboundedReceiver, unbounded};
-use seer_core::frame_diff::apply_next;
-use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
-use seer_core::{TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, Tree};
+use seer_core::proto::codec::{self, Incoming, RawEvent};
+use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo};
+use seer_core::{TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, Tree};
 use seer_net::Socket;
+use seer_runtime::PaneGrid;
 
-pub(crate) type Messages = UnboundedReceiver<io::Result<ServerMsg>>;
+pub(crate) enum Event {
+    Message(ServerMsg),
+    Screen,
+}
+
+pub(crate) type Messages = UnboundedReceiver<io::Result<Event>>;
+pub(crate) type Terminal = Arc<Mutex<Option<PaneGrid>>>;
 
 #[derive(Clone, PartialEq, Eq)]
 struct Target {
@@ -23,8 +32,8 @@ pub(crate) struct Link {
     tree: Tree,
     terminals: Vec<TerminalInfo>,
     size: Option<(u16, u16)>,
-    screen: Option<(TerminalFrame, u64)>,
-    resyncing: bool,
+    terminal: Terminal,
+    woken: Arc<AtomicBool>,
 }
 
 impl Link {
@@ -36,62 +45,43 @@ impl Link {
             tree: tree.clone(),
             terminals: Vec::new(),
             size: None,
-            screen: None,
-            resyncing: false,
+            terminal: Terminal::default(),
+            woken: Arc::default(),
         };
         link.send(&ClientMsg::TerminalCapabilities {
             capabilities: TerminalCapabilities {
                 protocol_version: TERMINAL_PROTOCOL_VERSION,
+                raw_output: true,
             },
         })?;
-        let messages = read_in_background(link.socket.clone());
+        let messages = read_in_background(
+            link.socket.clone(),
+            Arc::clone(&link.terminal),
+            Arc::clone(&link.woken),
+        );
         Ok((link, messages))
     }
 
-    pub(crate) fn frame(&self) -> Option<&TerminalFrame> {
-        self.screen.as_ref().map(|(frame, _)| frame)
+    pub(crate) fn terminal(&self) -> &Terminal {
+        &self.terminal
     }
 
-    pub(crate) fn receive(&mut self, message: ServerMsg) -> io::Result<()> {
-        match message {
-            ServerMsg::Tree { tree } => {
+    pub(crate) fn receive(&mut self, event: Event) -> io::Result<()> {
+        match event {
+            Event::Message(ServerMsg::Tree { tree }) => {
                 self.retarget(&tree)?;
                 self.tree = tree;
                 Ok(())
             }
-            ServerMsg::Terminals { user, terminals } if user == self.user => {
+            Event::Message(ServerMsg::Terminals { user, terminals }) if user == self.user => {
                 self.terminals = terminals;
                 Ok(())
             }
-            ServerMsg::Cells {
-                user,
-                pane,
-                frame,
-                seq,
-            } if self.shows(&user, &pane) => {
-                self.screen = Some((frame, seq));
-                self.resyncing = false;
+            Event::Message(_) => Ok(()),
+            Event::Screen => {
+                self.woken.store(false, Ordering::Release);
                 Ok(())
             }
-            ServerMsg::CellsDiff {
-                user,
-                pane,
-                seq,
-                diff,
-            } if self.shows(&user, &pane) && !self.resyncing => {
-                self.screen = self
-                    .screen
-                    .take()
-                    .and_then(|(held, held_seq)| apply_next(&held, held_seq, seq, &diff))
-                    .map(|frame| (frame, seq));
-                if self.screen.is_some() {
-                    return Ok(());
-                }
-                // One request per gap. Later diffs wait for the whole screen.
-                self.resyncing = true;
-                self.send(&ClientMsg::Resync { user, pane })
-            }
-            _ => Ok(()),
         }
     }
 
@@ -138,8 +128,7 @@ impl Link {
 
     fn show(&mut self, target: Option<Target>) -> io::Result<()> {
         self.target = target;
-        self.screen = None;
-        self.resyncing = false;
+        *self.terminal.lock().unwrap_or_else(PoisonError::into_inner) = None;
         self.watch()
     }
 
@@ -162,14 +151,6 @@ impl Link {
             cols,
             rows,
         })
-    }
-
-    fn shows(&self, user: &str, pane: &str) -> bool {
-        user == self.user
-            && self
-                .target
-                .as_ref()
-                .is_some_and(|target| target.pane == pane)
     }
 
     fn send(&mut self, message: &ClientMsg) -> io::Result<()> {
@@ -206,16 +187,46 @@ fn pane_target(tree: &Tree, pane: &str) -> Option<Target> {
     })
 }
 
-fn read_in_background(mut socket: Socket) -> Messages {
+// The raw output is parsed here, before the next read, so the runtime
+// cannot run far ahead of the screen. The main thread gets one wake for
+// all the output that comes before it draws.
+fn read_in_background(mut socket: Socket, terminal: Terminal, woken: Arc<AtomicBool>) -> Messages {
     let (sender, receiver) = unbounded();
     thread::spawn(move || {
         loop {
-            let message = codec::decode(&mut socket);
-            let failed = message.is_err();
-            if sender.unbounded_send(message).is_err() || failed {
+            let event = match codec::decode_incoming(&mut socket) {
+                Ok(Incoming::Message(message)) => Ok(Event::Message(message)),
+                Ok(Incoming::Raw(raw)) => {
+                    apply(&terminal, raw);
+                    if woken.swap(true, Ordering::AcqRel) {
+                        continue;
+                    }
+                    Ok(Event::Screen)
+                }
+                Err(error) => Err(error),
+            };
+            let failed = event.is_err();
+            if sender.unbounded_send(event).is_err() || failed {
                 break;
             }
         }
     });
     receiver
+}
+
+// The runtime ends a synchronized update by time and sends SyncEnd. The
+// mirror does not check the time itself, so both end it at the same byte.
+fn apply(terminal: &Terminal, event: RawEvent) {
+    let mut held = terminal.lock().unwrap_or_else(PoisonError::into_inner);
+    match (event, &mut *held) {
+        (RawEvent::Start { cols, rows }, held) => *held = Some(PaneGrid::mirror(cols, rows)),
+        (RawEvent::Output(bytes), Some(grid)) => {
+            grid.feed(&bytes);
+        }
+        (RawEvent::Size { cols, rows }, Some(grid)) => grid.resize(cols, rows),
+        (RawEvent::SyncEnd, Some(grid)) => {
+            grid.end_sync();
+        }
+        (_, None) => {}
+    }
 }

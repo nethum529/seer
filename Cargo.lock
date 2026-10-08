@@ -6800,6 +6800,7 @@ dependencies = [
  "seer",
  "seer-core",
  "seer-net",
+ "seer-runtime",
 ]
 
 [[package]]

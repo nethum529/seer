@@ -19,3 +19,4 @@ Each file breaks one system into components, then compares.
 - 22-stream-adapter.md
 - 23-screen-data.md
 - 24-version-skew.md
+- 25-terminal-speed.md

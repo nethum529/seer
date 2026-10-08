@@ -9,6 +9,7 @@ use seer_runtime::PaneGrid;
 fn terminal_behavior_fixture() {
     let capabilities = TerminalCapabilities {
         protocol_version: TERMINAL_PROTOCOL_VERSION,
+        raw_output: false,
     };
     let message = ClientMsg::TerminalCapabilities { capabilities };
     let mut wire = Vec::new();
