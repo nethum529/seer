@@ -23,12 +23,15 @@ const MONO_FAMILIES: [&str; 8] = [
 ];
 
 pub(crate) fn terminal_font(cx: &App) -> Font {
+    font(first_installed(cx, &MONO_FAMILIES).unwrap_or("monospace"))
+}
+
+pub(crate) fn first_installed<'a>(cx: &App, families: &[&'a str]) -> Option<&'a str> {
     let installed = cx.text_system().all_font_names();
-    let family = MONO_FAMILIES
-        .into_iter()
+    families
+        .iter()
+        .copied()
         .find(|family| installed.iter().any(|name| name == family))
-        .unwrap_or("monospace");
-    font(family)
 }
 
 pub(crate) struct Screen {

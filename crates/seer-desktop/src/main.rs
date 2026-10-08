@@ -3,6 +3,8 @@ use gpui::{AppContext, Application, Bounds, WindowBounds, WindowOptions, px, siz
 mod link;
 mod palette;
 mod screen;
+mod sidebar;
+mod tip;
 mod window;
 
 use window::SeerWindow;
@@ -30,7 +32,7 @@ fn main() {
         // gpui on Wayland does not send the title from TitlebarOptions.
         let opened = cx.open_window(options, |window, cx| {
             window.set_window_title("Seer");
-            cx.new(SeerWindow::new)
+            cx.new(|cx| SeerWindow::new(window, cx))
         });
         if let Err(error) = opened {
             eprintln!("seer: could not open the window: {error}");

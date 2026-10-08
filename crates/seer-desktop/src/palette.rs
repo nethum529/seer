@@ -1,14 +1,19 @@
 use gpui::{Rgba, rgb};
 use seer_core::{Cell, Color};
 
-// The approved design uses gpui-component Default Dark. The card color is
-// the design's white at 2 percent on the window color, as one solid color.
+// The approved design uses gpui-component Default Dark.
 pub(crate) const WINDOW: u32 = 0x0a0a0a;
-pub(crate) const CARD: u32 = 0x0f0f0f;
 pub(crate) const LINE: u32 = 0x262626;
+pub(crate) const HOVER: u32 = 0x171717;
+pub(crate) const PILL: u32 = 0x262626;
+pub(crate) const CHIP_2: u32 = 0x404040;
+pub(crate) const TEXT: u32 = 0xfafafa;
+pub(crate) const ACCENT: u32 = 0xfafafa;
+pub(crate) const ON_ACCENT: u32 = 0x171717;
+pub(crate) const TEXT_2: u32 = 0xd4d4d4;
+pub(crate) const MUTED: u32 = 0xa3a3a3;
 pub(crate) const FAINT: u32 = 0x737373;
-const TEXT: u32 = 0xfafafa;
-const TEXT_2: u32 = 0xd4d4d4;
+pub(crate) const FAINTER: u32 = 0x525252;
 
 const ANSI: [u32; 16] = [
     0x262626, 0xf87171, 0x4ade80, 0xfacc15, 0x60a5fa, 0xc084fc, 0x22d3ee, 0xd4d4d4, 0x737373,
@@ -20,7 +25,7 @@ pub(crate) fn cursor() -> Rgba {
     rgb(TEXT_2)
 }
 
-// The text color and the background color of one cell. None is the card.
+// The text color and the background color of one cell. None is the window.
 pub(crate) fn cell_colors(cell: &Cell) -> (Rgba, Option<Rgba>) {
     let mut fg = match cell.fg {
         Color::Default if cell.bold => rgb(TEXT),
@@ -32,11 +37,11 @@ pub(crate) fn cell_colors(cell: &Cell) -> (Rgba, Option<Rgba>) {
         color => Some(terminal_color(color)),
     };
     if cell.inverse {
-        let swapped = bg.unwrap_or(rgb(CARD));
+        let swapped = bg.unwrap_or(rgb(WINDOW));
         bg = Some(fg);
         fg = swapped;
     }
-    let behind = bg.unwrap_or(rgb(CARD));
+    let behind = bg.unwrap_or(rgb(WINDOW));
     if cell.hidden {
         fg = behind;
     } else if cell.dim {

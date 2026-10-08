@@ -3,7 +3,7 @@ use std::thread;
 
 use futures::channel::mpsc::{UnboundedReceiver, unbounded};
 use seer_core::frame_diff::apply_next;
-use seer_core::proto::{ClientMsg, ServerMsg, codec};
+use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
 use seer_core::{TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, Tree};
 use seer_net::Socket;
 
@@ -20,6 +20,8 @@ pub(crate) struct Link {
     socket: Socket,
     user: String,
     target: Option<Target>,
+    tree: Tree,
+    terminals: Vec<TerminalInfo>,
     size: Option<(u16, u16)>,
     screen: Option<(TerminalFrame, u64)>,
     resyncing: bool,
@@ -31,6 +33,8 @@ impl Link {
             socket,
             user,
             target: first_target(tree),
+            tree: tree.clone(),
+            terminals: Vec::new(),
             size: None,
             screen: None,
             resyncing: false,
@@ -50,7 +54,15 @@ impl Link {
 
     pub(crate) fn receive(&mut self, message: ServerMsg) -> io::Result<()> {
         match message {
-            ServerMsg::Tree { tree } => self.retarget(&tree),
+            ServerMsg::Tree { tree } => {
+                self.retarget(&tree)?;
+                self.tree = tree;
+                Ok(())
+            }
+            ServerMsg::Terminals { user, terminals } if user == self.user => {
+                self.terminals = terminals;
+                Ok(())
+            }
             ServerMsg::Cells {
                 user,
                 pane,
@@ -83,6 +95,24 @@ impl Link {
         }
     }
 
+    pub(crate) fn terminals(&self) -> &[TerminalInfo] {
+        &self.terminals
+    }
+
+    pub(crate) fn shown(&self) -> Option<&str> {
+        self.target.as_ref().map(|target| target.pane.as_str())
+    }
+
+    pub(crate) fn select(&mut self, pane: &str) -> io::Result<()> {
+        let Some(target) = pane_target(&self.tree, pane) else {
+            return Ok(());
+        };
+        if self.target.as_ref() == Some(&target) {
+            return Ok(());
+        }
+        self.show(Some(target))
+    }
+
     pub(crate) fn resize(&mut self, cols: u16, rows: u16) -> io::Result<()> {
         if cols == 0 || rows == 0 || self.size == Some((cols, rows)) {
             return Ok(());
@@ -103,7 +133,11 @@ impl Link {
         if still_there {
             return Ok(());
         }
-        self.target = first_target(tree);
+        self.show(first_target(tree))
+    }
+
+    fn show(&mut self, target: Option<Target>) -> io::Result<()> {
+        self.target = target;
         self.screen = None;
         self.resyncing = false;
         self.watch()
@@ -155,6 +189,20 @@ fn first_target(tree: &Tree) -> Option<Target> {
         workspace: workspace.id.clone(),
         tab: tab.id.clone(),
         pane,
+    })
+}
+
+fn pane_target(tree: &Tree, pane: &str) -> Option<Target> {
+    tree.workspaces.iter().find_map(|workspace| {
+        workspace
+            .tabs
+            .iter()
+            .find(|tab| tab.panes.iter().any(|candidate| candidate.id == pane))
+            .map(|tab| Target {
+                workspace: workspace.id.clone(),
+                tab: tab.id.clone(),
+                pane: pane.to_owned(),
+            })
     })
 }
 

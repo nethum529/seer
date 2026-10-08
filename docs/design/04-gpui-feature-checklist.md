@@ -19,7 +19,8 @@ Each row starts with one of these words:
   reason.
 - No control: a rule or a behavior with nothing to click.
 
-Items: T-448 (#448) first window, R-449 (#449) input, R-450 (#450)
+Items: T-448 (#448) first window, T-464 (#464) sidebar and terminal
+frame, R-449 (#449) input, R-450 (#450)
 person dropdown, R-451 (#451) grants, R-452 (#452) New terminal,
 R-453 (#453) settings, R-454 (#454) invite sheet, R-455 (#455) join
 from a link, R-456 (#456) room menu, R-457 (#457) packaging, R-458
@@ -32,13 +33,13 @@ When a PR decides or builds a row, it updates the row.
 | Feature | Source | Window place, or reason | Item |
 | --- | --- | --- | --- |
 | seer and seer attach open the people and terminals screen | README Commands, help | Placed: the desktop window. The commands stay. | T-448 |
-| Your own terminal shows live, with the colors that the program sets | README Open Seer | Placed: the main area. Terminal output shows as rounded cards. | T-448 |
+| Your own terminal shows live, with the colors that the program sets | README Open Seer | Placed: the main area. The terminal fills the main area. The owner removed the card. | T-448, T-464 |
 | Your terminals use your own files, tools, shell, and logins | README intro | No control. The shell starts as your login shell, also when the app starts from the Dock or a desktop launcher. | T-448 |
 | Type or paste into the selected terminal | README Open Seer, help Main screen | Placed: the selected terminal and the floating input bar. | R-449 |
 | All keys go to the terminal. Seer has no prefix key | README Open Seer, help Main screen | Placed: keyboard focus in the terminal area. R-449 decides which keys the window keeps for itself. The mockup uses Ctrl T, or Cmd T on macOS, for New terminal, and shells also use Ctrl T. | R-449 |
-| Select a terminal: click it, or j, k, and Enter in the session panel | README Open Seer, help | Placed: the vertical tabs in the sidebar. | R-452 for own terminals, R-450 for others |
-| Drag to select and copy text | README Open Seer | Placed: text selection in a card, and Copy and More on card hover. R-449 decides how a drag shares the mouse with the program. | R-449 |
-| Terminal name from the foreground program. A shell is "shell" and "idle". Other programs are "busy" | README People | Placed: the tab name and state dot in the sidebar, and the title above the terminal. | R-450 |
+| Select a terminal: click it, or j, k, and Enter in the session panel | README Open Seer, help | Placed: the vertical tabs in the sidebar. A press on a tab selects it. R-449 decides the keys. | T-464 for own terminals, R-450 for others |
+| Drag to select and copy text | README Open Seer | Placed: text selection in the terminal area. The terminal has no card, so R-449 decides where Copy and More go. R-449 decides how a drag shares the mouse with the program. | R-449 |
+| Terminal name from the foreground program. A shell is "shell" and "idle". Other programs are "busy" | README People | Placed: the tab name in the sidebar and the title above the terminal. The state dot in the sidebar. | T-464 for the name, R-450 for the dot |
 | The back row in the session panel returns to the overview | help | Not needed: the sidebar tabs stay on screen, so the window has no separate overview. | none |
 | Quit Seer: the quit row in the session panel, or q | README People, help | Placed: close the window. The shells continue. | T-448 |
 | The session panel: right click the top right control | README People, help | Not needed: each row of the panel has its own row in this list. | none |
