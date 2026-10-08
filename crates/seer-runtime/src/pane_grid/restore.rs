@@ -83,14 +83,16 @@ pub(super) fn restore(term: &mut Term<TerminalReplies>) -> Vec<u8> {
 }
 
 // alacritty_terminal 0.26 keeps private which set (G0 after SI, G1 after
-// SO) maps the output. Print one probe character, read the cell, and put
-// the cursor and the rows that the print can change back.
+// SO) maps the output. Make G1 differ from G0, print one probe character,
+// read the cell, and put the cursor (with its sets) and the rows that the
+// print can change back.
 fn shifted_out(term: &mut Term<TerminalReplies>) -> bool {
     let cursor = term.grid().cursor.clone();
-    let sets = cursor.charsets;
-    if sets[CharsetIndex::G0] == sets[CharsetIndex::G1] {
-        return false;
-    }
+    let probe = match cursor.charsets[CharsetIndex::G0] {
+        StandardCharset::Ascii => StandardCharset::SpecialCharacterAndLineDrawing,
+        StandardCharset::SpecialCharacterAndLineDrawing => StandardCharset::Ascii,
+    };
+    term.configure_charset(CharsetIndex::G1, probe);
     let line = cursor.point.line;
     let rows: Vec<_> = [line - 1, line]
         .into_iter()
@@ -104,7 +106,7 @@ fn shifted_out(term: &mut Term<TerminalReplies>) -> bool {
         term.grid_mut()[row] = cells;
     }
     term.grid_mut().cursor = cursor;
-    shown == sets[CharsetIndex::G1].map('q')
+    shown == probe.map('q')
 }
 
 fn designate(out: &mut Vec<u8>, from: Charsets, to: Charsets) {

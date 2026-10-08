@@ -45,12 +45,7 @@ impl Unfinished {
             rest = &chunk[start + 1..];
         }
         if self.state != State::Ground {
-            let state = &mut self.state;
-            let Some(end) = rest.iter().position(|&byte| {
-                *state = next(*state, byte);
-                *state == State::Ground
-            }) else {
-                self.keep(rest);
+            let Some(end) = self.follow_sequence(rest) else {
                 return;
             };
             self.bytes.clear();
@@ -60,6 +55,23 @@ impl Unfinished {
             .extend_from_slice(&rest[rest.len().saturating_sub(3)..]);
         let open = open_utf8(&self.bytes);
         self.bytes.drain(..self.bytes.len() - open);
+    }
+
+    // Gives where the sequence ends. A control byte inside an escape or CSI
+    // sequence runs at once and does not change the state, so a new window
+    // must not get it again.
+    fn follow_sequence(&mut self, bytes: &[u8]) -> Option<usize> {
+        for (index, &byte) in bytes.iter().enumerate() {
+            if runs_at_once(self.state, byte) {
+                continue;
+            }
+            self.state = next(self.state, byte);
+            if self.state == State::Ground {
+                return Some(index);
+            }
+            self.keep(&[byte]);
+        }
+        None
     }
 
     pub(super) fn bytes(&self) -> &[u8] {
@@ -94,6 +106,14 @@ fn next(state: State, byte: u8) -> State {
         (DcsPassthrough, 0x9c) | (OscString, 0x07) => Ground,
         (state, _) => state,
     }
+}
+
+fn runs_at_once(state: State, byte: u8) -> bool {
+    use State::*;
+    matches!(
+        state,
+        Escape | EscapeIntermediate | CsiEntry | CsiParam | CsiIntermediate | CsiIgnore
+    ) && matches!(byte, 0x00..=0x17 | 0x19 | 0x1c..=0x1f)
 }
 
 // The length of a UTF-8 character that the end of `bytes` cuts.

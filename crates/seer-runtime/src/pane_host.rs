@@ -28,7 +28,7 @@ impl PaneHost {
         let reader = pane_output::reader(Arc::clone(&shared));
         let session = PtySession::start(command, cols, rows, reader)?;
         Ok(Self {
-            output: Output::new(shared, session.writer()),
+            output: Output::new(shared, session.answers()),
             session,
             owner_size: seer_core::PaneSize { cols, rows },
             last_typist: None,

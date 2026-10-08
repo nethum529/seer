@@ -4,52 +4,62 @@ use std::io::{self, Read, Write};
 use std::os::fd::RawFd;
 #[cfg(target_os = "linux")]
 use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
 // Alacritty reads the PTY in blocks of this size.
 const READ_BUFFER_SIZE: usize = 64 * 1024;
 
-pub(crate) type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
+type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
+pub(crate) type Answers = Sender<Vec<u8>>;
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
     writer: Writer,
+    answers: Answers,
 }
 
 impl PtySession {
     /// Starts the command on a new PTY. The reader thread gives each block
-    /// of output and the PTY writer to `on_output`, so a query gets its
-    /// answer without a wait for a poll.
+    /// of output to `on_output`, so a query gets its answer without a wait
+    /// for a poll. An answer thread writes the answers sent to `Answers` in
+    /// order, so the reader does not wait while input waits for the program.
     pub(crate) fn start(
         command: CommandBuilder,
         cols: u16,
         rows: u16,
-        on_output: impl FnMut(&[u8], &Writer) + Send + 'static,
+        on_output: impl FnMut(&[u8], &Answers) + Send + 'static,
     ) -> io::Result<Self> {
         let pair = native_pty_system()
             .openpty(pty_size(cols, rows))
             .map_err(to_io_error)?;
         let reader = pair.master.try_clone_reader().map_err(to_io_error)?;
         let writer: Writer = Arc::new(Mutex::new(pair.master.take_writer().map_err(to_io_error)?));
+        let (answers, pending) = mpsc::channel();
         let replies = Arc::clone(&writer);
         let ready = Readiness::new(pair.master.as_raw_fd())?;
 
+        let _answer_task = thread::Builder::new()
+            .name("pty-answer-writer".to_owned())
+            .spawn(move || write_answers(pending, &replies))?;
+        let reader_answers = answers.clone();
         let _reader_task = thread::Builder::new()
             .name("pty-output-reader".to_owned())
-            .spawn(move || read_output(reader, &ready, &replies, on_output))?;
+            .spawn(move || read_output(reader, &ready, &reader_answers, on_output))?;
         let child = pair.slave.spawn_command(command).map_err(to_io_error)?;
 
         Ok(Self {
             master: pair.master,
             child,
             writer,
+            answers,
         })
     }
 
-    pub(crate) fn writer(&self) -> Writer {
-        Arc::clone(&self.writer)
+    pub(crate) fn answers(&self) -> Answers {
+        self.answers.clone()
     }
 
     pub fn write_input(&self, bytes: &[u8]) -> io::Result<()> {
@@ -107,8 +117,8 @@ fn pty_size(cols: u16, rows: u16) -> PtySize {
 fn read_output(
     mut reader: Box<dyn Read + Send>,
     ready: &Readiness,
-    writer: &Writer,
-    mut on_output: impl FnMut(&[u8], &Writer),
+    answers: &Answers,
+    mut on_output: impl FnMut(&[u8], &Answers),
 ) {
     let mut bytes = vec![0; READ_BUFFER_SIZE];
 
@@ -116,9 +126,17 @@ fn read_output(
         ready.wait();
         match reader.read(&mut bytes) {
             Ok(0) => return,
-            Ok(count) => on_output(&bytes[..count], writer),
+            Ok(count) => on_output(&bytes[..count], answers),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(_) => return,
+        }
+    }
+}
+
+fn write_answers(pending: Receiver<Vec<u8>>, writer: &Writer) {
+    for bytes in pending {
+        if let Err(error) = lock_mutex(writer).write_all(&bytes) {
+            eprintln!("pane reply write failed: {error}");
         }
     }
 }

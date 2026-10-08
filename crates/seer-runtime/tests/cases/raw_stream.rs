@@ -196,8 +196,9 @@ fn the_own_window_gets_raw_output_and_a_query_gets_one_answer() {
 }
 
 // Each stage stops the program in a state that a new window must rebuild:
-// an open escape sequence with the line drawing set active, the line
-// drawing set selected, and a full screen app over the shell.
+// an open escape sequence (with a new line inside it) with the line drawing
+// set active, the line drawing set selected, the shifted set with G0 and G1
+// equal, and a full screen app over the shell.
 #[test]
 fn a_reopened_window_shows_what_a_window_that_stayed_open_shows() {
     let temporary = TemporaryDirectory::new();
@@ -210,13 +211,15 @@ fn a_reopened_window_shows_what_a_window_that_stayed_open_shows() {
         &pane,
         concat!(
             "stty -echo; seq 40; ",
-            "printf 'stage-%d\\033)0\\016\\033[31' 1; read x; ",
+            "printf 'stage-%d\\033)0\\016\\033[31\\r\\n' 1; read x; ",
             "printf 'mlqqk\\017\\033[0m\\nstage-%d\\033(0' 2; read x; ",
-            "printf 'lqqk\\033(B\\n\\033[?1049h\\033[44mapp stage-%d' 3; read x; ",
-            "printf '\\033[?1049l\\033[0mstage-%d\\n' 4; stty echo\n",
+            "printf 'lqqk\\033(B\\n\\033)B\\016stage-%d' 3; read x; ",
+            "printf '\\033)0lqqk\\017\\nstage-%d' 4; read x; ",
+            "printf '\\033[?1049h\\033[44mapp stage-%d' 5; read x; ",
+            "printf '\\033[?1049l\\033[0mstage-%d\\n' 6; stty echo\n",
         ),
     );
-    for stage in 1..4 {
+    for stage in 1..6 {
         open.read_until(&format!("stage-{stage}"));
         let (mut reopened, _) = open_window(&socket);
         reopened.read_until(&format!("stage-{stage}"));
@@ -227,4 +230,25 @@ fn a_reopened_window_shows_what_a_window_that_stayed_open_shows() {
         assert_same(&mut open, &mut reopened);
     }
     assert!(text(&open.snapshot()).contains("\u{250c}\u{2500}\u{2500}\u{2510}"));
+}
+
+#[test]
+fn output_keeps_flowing_while_the_program_does_not_read_its_input() {
+    let temporary = TemporaryDirectory::new();
+    let socket = temporary.path.join("runtime.sock");
+    let _runtime = start_runtime(&socket);
+    let (mut client, pane) = open_window(&socket);
+
+    send_input(
+        &mut client.stream,
+        &pane,
+        concat!(
+            "stty raw -echo; echo re''ady; sleep 1; ",
+            "head -c 1000000 /dev/zero | tr '\\0' x; head -c 100000 > /dev/null; ",
+            "stty sane; echo; echo read-a''ll\n",
+        ),
+    );
+    client.read_until("ready");
+    send_input(&mut client.stream, &pane, &"y".repeat(100_000));
+    client.read_until("read-all");
 }

@@ -1,12 +1,11 @@
 use seer_core::proto::codec::RawEvent;
 use std::collections::VecDeque;
-use std::io::Write;
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
 use crate::PaneGrid;
 use crate::outbox::Outbox;
-use crate::pty::{Writer, lock_mutex};
+use crate::pty::{Answers, lock_mutex};
 use unfinished::Unfinished;
 
 mod unfinished;
@@ -43,27 +42,25 @@ struct Held {
 
 pub(crate) type SharedOutput = Arc<Mutex<PaneOutput>>;
 
-/// The output of a pane and the PTY writer for the answers to queries.
+/// The output of a pane and the queue for the answers to queries.
 #[derive(Clone)]
 pub(crate) struct Output {
     shared: SharedOutput,
-    writer: Writer,
+    answers: Answers,
 }
 
 impl Output {
-    pub(crate) fn new(shared: SharedOutput, writer: Writer) -> Self {
-        Self { shared, writer }
+    pub(crate) fn new(shared: SharedOutput, answers: Answers) -> Self {
+        Self { shared, answers }
     }
 
     pub(crate) fn lock(&self) -> MutexGuard<'_, PaneOutput> {
         lock_mutex(&self.shared)
     }
 
-    /// Runs `step` and writes the answers it gives to the PTY. The writer
-    /// lock comes before the pane lock, so answers that two threads let go
-    /// reach the program in order.
+    /// Runs `step` and queues the answers it gives for the PTY.
     pub(crate) fn answer<T>(&self, step: impl FnOnce(&mut PaneOutput) -> (T, Vec<u8>)) -> T {
-        answer(&self.writer, &self.shared, step)
+        answer(&self.answers, &self.shared, step)
     }
 
     pub(crate) fn parsed(&self, sink: &Arc<Outbox>, mark: u64) {
@@ -183,17 +180,17 @@ impl PaneOutput {
     }
 }
 
+// The answers go to the queue under the pane lock, so answers that two
+// threads let go reach the program in order.
 fn answer<T>(
-    writer: &Writer,
+    answers: &Answers,
     shared: &SharedOutput,
     step: impl FnOnce(&mut PaneOutput) -> (T, Vec<u8>),
 ) -> T {
-    let mut writer = lock_mutex(writer);
-    let (value, answers) = step(&mut lock_mutex(shared));
-    if !answers.is_empty()
-        && let Err(error) = writer.write_all(&answers)
-    {
-        eprintln!("pane reply write failed: {error}");
+    let mut pane = lock_mutex(shared);
+    let (value, bytes) = step(&mut pane);
+    if !bytes.is_empty() {
+        let _ = answers.send(bytes);
     }
     value
 }
@@ -201,8 +198,8 @@ fn answer<T>(
 /// The PTY reader of a pane. It waits until every connection has room, so
 /// a fast program cannot run far ahead of the window that shows it. A
 /// connection that takes no output for RAW_WAIT is closed.
-pub(crate) fn reader(output: SharedOutput) -> impl FnMut(&[u8], &Writer) + Send + 'static {
-    move |bytes, writer| {
+pub(crate) fn reader(output: SharedOutput) -> impl FnMut(&[u8], &Answers) + Send + 'static {
+    move |bytes, answers| {
         let sinks: Vec<_> = lock_mutex(&output)
             .sinks
             .iter()
@@ -214,7 +211,7 @@ pub(crate) fn reader(output: SharedOutput) -> impl FnMut(&[u8], &Writer) + Send 
                 sink.close();
             }
         }
-        answer(writer, &output, |pane| {
+        answer(answers, &output, |pane| {
             let shown = pane.grid.feed(bytes);
             pane.changed |= shown;
             pane.unfinished.follow(bytes);

@@ -50,8 +50,11 @@ terminal engine.
   The runtime writes the answer when every raw window confirmed. A window
   that does not confirm in 2 seconds (RAW_WAIT) is disconnected, and the
   answer goes out. With the window stopped by SIGSTOP, DA1 took 2002 ms
-  and the window then showed that the link stopped. All answers are
-  written under the PTY writer lock, so they reach the program in order.
+  and the window then showed that the link stopped.
+- The answers go to a queue under the pane lock, and one answer thread
+  per PTY writes them. So they reach the program in order, and the
+  reader never waits for the PTY writer. Input that waits for a program
+  that does not read cannot stop the output.
 - The PTY reader thread of the runtime parses each read into the pane
   grid, writes the replies at once, and pushes the same bytes to each
   window that follows the pane. There is no poll interval on this path.
@@ -69,7 +72,9 @@ terminal engine.
   screen, the scrollback (1000 lines), the modes, the cursor, the
   primary screen under the alternate screen, the G0 to G3 character sets
   and the active set. Then it sends the bytes of an escape sequence or
-  UTF-8 character that the program did not finish yet. Then live bytes
+  UTF-8 character that the program did not finish yet. Control bytes
+  inside an escape or CSI sequence ran at once in the runtime, so they
+  are not sent again. Then live bytes
   follow, with no gap and no overlap, because all of it happens under the
   pane lock.
 - Backpressure: before it parses a read, the reader waits until each
@@ -130,6 +135,9 @@ Earlier rows from run 20261008T082159Z, before the Mark round trip:
 | Seer T-448 baseline | 40x148 | 170 | 60 | 4.553 | 4.617 |
 | Seer T-462 before epoll | 40x148 | 174 | 78 | 0.054 | 0.076 |
 
+- After the answer thread (run 20261008T100007Z, load 1.5): Seer plain
+  146, SGR 80, idle DA1 0.084 / 0.120; Alacritty plain 135, SGR 80, idle
+  DA1 0.075 / 0.115.
 - Over many runs of Seer and Alacritty on 2026-10-08 at a load below
   2.5, Seer plain was 145 to 148 and Alacritty plain was 133 to 139. SGR
   was 77 to 81 for both.
