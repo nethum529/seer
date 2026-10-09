@@ -117,6 +117,12 @@ window: layout, spacing, color, type, icons, focus, hover, and motion.
 - The terminal fills its area flush to the edges. Never nest it in a card
   (no border, radius, margin, or second fill around it). This wins over
   the design file.
+- Capitalize names and labels. Use sentence case for UI text (Claude,
+  Shell, New terminal), never all lower case.
+- Do not crowd a screen with information. Show only what the person needs
+  now.
+- Study products with high UI standards (for example Linear, Harvey, Ramp,
+  Raycast) and compare the window against them.
 - No eyebrow headers. Do not put a small label (often upper case or letter
   spaced) above a title or a section.
 - Spacing is a first class concern. Use one spacing scale. Check every
