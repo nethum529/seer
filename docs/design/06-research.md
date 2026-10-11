@@ -1,7 +1,8 @@
-# Design v2 research (WIP)
+# Design v2 research
 
-Status: research partly done. No mockup yet. Screenshots are not in the
-repo.
+Notes behind docs/design/06-window-v2.html. Screenshots are not in the
+repo. Some type facts come from third party write-ups, not from the
+product. Those are marked "third party".
 
 ## Products
 
@@ -37,6 +38,19 @@ repo.
   https://docs.warp.dev/university/developer-workflows/beginner/how-to-make-warps-ui-more-minimal
 - Mercury (https://mercury.com). Marketing page only, nothing for app
   rows.
+- Vercel (https://vercel.com/geist/typography). Geist splits type into
+  Label and Copy. Labels are "designed for single-lines" and have room
+  for icons. Label 14 strong is the menu style, Label 13 is a second
+  line, Label 12 is tertiary text in busy views. This matches the Seer
+  tab row: a 13 px name, a 12 px task line.
+- Arc (https://arc.net). Sidebar tab labels are 13 px, weight 500.
+  Padding 8/12, radius 8, a 16 px icon with an 8 px gap. Only the
+  current tab has a fill. Third party:
+  https://open-design.ai/plugins/design-system-arc/
+- Stripe (https://stripe.com). One family (Sohne), light weights, tight
+  tracking on large sizes, tabular figures everywhere. Sohne is a
+  commercial Klim font, so Seer cannot bundle it. Third party:
+  https://styles.refero.design/style/48e5de76-05d5-4c4e-a269-c7c245b291ec
 
 ## Common rules
 
@@ -57,6 +71,14 @@ repo.
   character, a bit wider.
 - Mona Sans was tested and dropped: wide and quirky at 13 px.
 
-Not decided yet. Leaning to Inter (with cv11, Display cut for titles) or
-Geist plus Geist Mono. For GPUI, bundle static TTF instances (Regular,
-Medium, Semibold), because variable axis support in GPUI is limited.
+## Decision
+
+- First: Inter for the UI and JetBrains Mono for the terminal. Inter has
+  the largest x-height, so 12 px task lines and times read best in close
+  crops. JetBrains Mono is the most legible mono at 12.5 px.
+- Second: Geist and Geist Mono. One family, crisper, a smaller x-height.
+- Third: IBM Plex Sans. Too wide for the 248 px sidebar.
+- Dropped: Mona Sans.
+- For GPUI, bundle static TTF instances (Inter Text Regular, Medium,
+  SemiBold, plus Inter Display for the join heading), because variable
+  axis support in GPUI is limited. Details: docs/design/06-window-v2.md.
