@@ -4,8 +4,9 @@ use gpui::{
     ShapedLine, StrikethroughStyle, Style, TextRun, UnderlineStyle, Window, fill, font, outline,
     point, px, relative, size,
 };
-use seer_core::{Cell, TerminalFrame};
+use seer_core::{Cell, Cursor};
 
+use crate::link::{Terminal, lock};
 use crate::palette;
 use crate::window::SeerWindow;
 
@@ -53,6 +54,7 @@ pub(crate) struct Painted {
     line_height: Pixels,
 }
 
+#[derive(Clone, Copy, PartialEq)]
 struct Grid {
     origin: Point<Pixels>,
     cell_width: Pixels,
@@ -71,6 +73,20 @@ impl Grid {
             size(self.cell_width * width as f32, self.line_height),
         )
     }
+}
+
+// The shaped rows of the last paint. Only the rows that the terminal
+// changed since then are shaped again.
+#[derive(Default)]
+pub(crate) struct Rows {
+    grid: Option<(Grid, usize)>,
+    shaped: Vec<Shaped>,
+}
+
+#[derive(Clone, Default)]
+struct Shaped {
+    line: ShapedLine,
+    backgrounds: Vec<(usize, usize, Rgba)>,
 }
 
 #[derive(Default)]
@@ -125,31 +141,13 @@ impl Element for Screen {
     ) -> Self::PrepaintState {
         let grid = self.grid(bounds, window);
         let (cols, rows) = (to_u16(grid.cols), to_u16(grid.rows));
-        self.view.update(cx, |view, cx| view.resize(cols, rows, cx));
-        let Some(frame) = self.view.read(cx).frame() else {
-            return Painted::default();
-        };
-        let mut painted = Painted {
-            line_height: grid.line_height,
-            ..Painted::default()
-        };
-        for (index, cells) in frame.rows.iter().take(grid.rows).enumerate() {
-            let row = row(cells, grid.cols, &self.font);
-            for (start, end, color) in &row.backgrounds {
-                painted
-                    .quads
-                    .push(fill(grid.cell(*start, index, end - start), *color));
-            }
-            let line = window.text_system().shape_line(
-                row.text.into(),
-                px(FONT_SIZE),
-                &row.runs,
-                Some(grid.cell_width),
-            );
-            painted.lines.push((grid.cell(0, index, 0).origin, line));
-        }
-        painted.cursor = cursor(frame, &grid);
-        painted
+        self.view.update(cx, |view, cx| {
+            view.resize(cols, rows, cx);
+            let Some((terminal, rows)) = view.screen() else {
+                return Painted::default();
+            };
+            rows.paint(terminal, grid, &self.font, window)
+        })
     }
 
     fn paint(
@@ -190,6 +188,73 @@ impl Screen {
             cols: (bounds.size.width / cell_width).floor() as usize,
             rows: (bounds.size.height / line_height).floor() as usize,
         }
+    }
+}
+
+impl Rows {
+    fn paint(
+        &mut self,
+        terminal: &Terminal,
+        grid: Grid,
+        font: &Font,
+        window: &mut Window,
+    ) -> Painted {
+        let (changed, at) = {
+            let mut held = lock(terminal);
+            let Some(terminal) = held.as_mut() else {
+                return Painted::default();
+            };
+            let shown = (grid, grid.rows.min(terminal.rows()));
+            let damage = terminal.take_damage();
+            let changed: Vec<usize> = match damage {
+                Some(damage) if self.grid == Some(shown) => {
+                    damage.into_iter().filter(|row| *row < shown.1).collect()
+                }
+                _ => {
+                    self.grid = Some(shown);
+                    self.shaped = vec![Shaped::default(); shown.1];
+                    (0..shown.1).collect()
+                }
+            };
+            let changed: Vec<(usize, Vec<Cell>)> = changed
+                .into_iter()
+                .map(|index| (index, terminal.row(index)))
+                .collect();
+            (changed, terminal.cursor())
+        };
+        for (index, cells) in changed {
+            self.shaped[index] = shape(&cells, &grid, font, window);
+        }
+        let mut painted = Painted {
+            line_height: grid.line_height,
+            cursor: cursor(at, &grid),
+            ..Painted::default()
+        };
+        for (index, shaped) in self.shaped.iter().enumerate() {
+            for (start, end, color) in &shaped.backgrounds {
+                painted
+                    .quads
+                    .push(fill(grid.cell(*start, index, end - start), *color));
+            }
+            painted
+                .lines
+                .push((grid.cell(0, index, 0).origin, shaped.line.clone()));
+        }
+        painted
+    }
+}
+
+fn shape(cells: &[Cell], grid: &Grid, font: &Font, window: &Window) -> Shaped {
+    let row = row(cells, grid.cols, font);
+    let line = window.text_system().shape_line(
+        row.text.into(),
+        px(FONT_SIZE),
+        &row.runs,
+        Some(grid.cell_width),
+    );
+    Shaped {
+        line,
+        backgrounds: row.backgrounds,
     }
 }
 
@@ -248,10 +313,10 @@ fn text_run(cell: &Cell, color: Rgba, len: usize, font: &Font) -> TextRun {
 
 // The window cannot type into the terminal, so the cursor has the hollow
 // look of a terminal without focus, and it does not blink.
-fn cursor(frame: &TerminalFrame, grid: &Grid) -> Option<PaintQuad> {
-    let column = usize::from(frame.cursor.column);
-    let row = usize::from(frame.cursor.row);
-    (frame.cursor.visible && column < grid.cols && row < grid.rows).then(|| {
+fn cursor(cursor: Cursor, grid: &Grid) -> Option<PaintQuad> {
+    let column = usize::from(cursor.column);
+    let row = usize::from(cursor.row);
+    (cursor.visible && column < grid.cols && row < grid.rows).then(|| {
         outline(
             grid.cell(column, row, 1),
             palette::cursor(),

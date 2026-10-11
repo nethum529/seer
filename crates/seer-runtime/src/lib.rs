@@ -6,8 +6,10 @@ use std::sync::atomic::{AtomicPtr, Ordering};
 
 mod input;
 mod login_shell;
+mod outbox;
 pub mod pane_grid;
 mod pane_host;
+mod pane_output;
 mod persistence;
 mod pty;
 mod room;

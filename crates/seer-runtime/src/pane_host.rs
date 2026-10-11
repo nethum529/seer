@@ -1,13 +1,16 @@
+use crate::outbox::Outbox;
+use crate::pane_output::{self, Output, PaneOutput};
 use crate::{PaneGrid, PtySession};
 use portable_pty::CommandBuilder;
 use seer_core::{TerminalFrame, TerminalInput};
 use std::io;
 use std::path::Path;
+use std::sync::Arc;
 use std::time::{Duration, Instant};
 
 pub struct PaneHost {
     session: PtySession,
-    grid: PaneGrid,
+    output: Output,
     pub(crate) owner_size: seer_core::PaneSize,
     last_typist: Option<(String, Instant)>,
     program: String,
@@ -21,9 +24,12 @@ impl PaneHost {
             .and_then(|program| Path::new(program).file_name())
             .map(|name| name.to_string_lossy().into_owned())
             .unwrap_or_default();
+        let shared = PaneOutput::shared(PaneGrid::new(cols, rows));
+        let reader = pane_output::reader(Arc::clone(&shared));
+        let session = PtySession::start(command, cols, rows, reader)?;
         Ok(Self {
-            session: PtySession::start(command, cols, rows)?,
-            grid: PaneGrid::new(cols, rows),
+            output: Output::new(shared, session.answers()),
+            session,
             owner_size: seer_core::PaneSize { cols, rows },
             last_typist: None,
             program,
@@ -31,22 +37,29 @@ impl PaneHost {
     }
 
     pub fn poll(&mut self) -> bool {
-        let output = self.session.drain_output();
-        let changed = self.grid.feed(&output);
-        let replies = self.grid.take_replies();
-        if !replies.is_empty()
-            && let Err(error) = self.session.write_input(&replies)
-        {
-            eprintln!("pane reply write failed: {error}");
-        }
-        changed
+        self.output.answer(PaneOutput::poll)
+    }
+
+    /// Gives the output, which takes the Parsed messages of the sink.
+    pub(crate) fn attach_raw(&self, sink: Arc<Outbox>) -> Output {
+        self.output.answer(|pane| ((), pane.attach(sink)));
+        self.output.clone()
+    }
+
+    pub(crate) fn detach_raw(&self, sink: &Arc<Outbox>) {
+        self.output.answer(|pane| ((), pane.detach(sink)));
     }
 
     pub fn handle_input(&mut self, input: &TerminalInput) -> io::Result<bool> {
-        if let Some(bytes) = self.grid.handle_input(input)? {
+        let (bytes, changed) = {
+            let mut output = self.output.lock();
+            let bytes = output.grid.handle_input(input)?;
+            (bytes, output.grid.take_input_changed())
+        };
+        if let Some(bytes) = bytes {
             self.session.write_input(&bytes)?;
         }
-        Ok(self.grid.take_input_changed())
+        Ok(changed)
     }
 
     pub(crate) fn write_granted(&mut self, bytes: &[u8], sender: String) -> io::Result<()> {
@@ -62,11 +75,15 @@ impl PaneHost {
         mouse: seer_core::MouseInput,
         sender: String,
     ) -> io::Result<()> {
-        if self.grid.modes().mouse_tracking == seer_core::MouseTracking::None {
-            return Ok(());
-        }
         let input = TerminalInput::new(seer_core::InputEvent::Mouse(mouse));
-        if let Some(bytes) = self.grid.handle_input(&input)? {
+        let bytes = {
+            let mut output = self.output.lock();
+            if output.grid.modes().mouse_tracking == seer_core::MouseTracking::None {
+                return Ok(());
+            }
+            output.grid.handle_input(&input)?
+        };
+        if let Some(bytes) = bytes {
             self.write_granted(&bytes, sender)?;
         }
         Ok(())
@@ -90,21 +107,22 @@ impl PaneHost {
     }
 
     pub(crate) fn resize_visible(&mut self, cols: u16, rows: u16) -> io::Result<()> {
+        let mut output = self.output.lock();
         self.session.resize(cols, rows)?;
-        self.grid.resize(cols, rows);
+        output.resize(cols, rows);
         Ok(())
     }
 
     pub fn frame(&self) -> TerminalFrame {
-        self.grid.snapshot()
+        self.output.lock().grid.snapshot()
     }
 
     pub(crate) fn view(&self, size: seer_core::PaneSize) -> Option<TerminalFrame> {
-        self.grid.view(size.cols, size.rows)
+        self.output.lock().grid.view(size.cols, size.rows)
     }
 
     pub(crate) fn alt_screen(&self) -> bool {
-        self.grid.modes().alt_screen
+        self.output.lock().grid.modes().alt_screen
     }
 
     pub fn foreground(&self) -> String {

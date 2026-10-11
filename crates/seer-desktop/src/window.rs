@@ -8,12 +8,10 @@ use gpui::{
     div, px, relative, rgb,
 };
 use seer::ServerStore;
-use seer_core::TerminalFrame;
-use seer_core::proto::ServerMsg;
 
-use crate::link::{Link, Messages};
+use crate::link::{Event, Link, Messages, Terminal};
 use crate::palette;
-use crate::screen::{self, Screen};
+use crate::screen::{self, Rows, Screen};
 use crate::sidebar::{self, Keys, Mode};
 use crate::tip;
 
@@ -35,6 +33,7 @@ pub(crate) struct SeerWindow {
     font: Font,
     ui_font: SharedString,
     keys: Keys,
+    rows: Rows,
     _messages: Option<Task<()>>,
 }
 
@@ -75,13 +74,14 @@ impl SeerWindow {
             font,
             ui_font: ui_font(cx),
             keys,
+            rows: Rows::default(),
             _messages: messages,
         }
     }
 
-    pub(crate) fn frame(&self) -> Option<&TerminalFrame> {
+    pub(crate) fn screen(&mut self) -> Option<(&Terminal, &mut Rows)> {
         match &self.content {
-            Content::Terminal(link, _) => link.frame(),
+            Content::Terminal(link, _) => Some((link.terminal(), &mut self.rows)),
             Content::Message(_) => None,
         }
     }
@@ -147,9 +147,9 @@ impl SeerWindow {
         cx.notify();
     }
 
-    fn receive(&mut self, message: io::Result<ServerMsg>, cx: &mut Context<Self>) {
+    fn receive(&mut self, event: io::Result<Event>, cx: &mut Context<Self>) {
         let result = match &mut self.content {
-            Content::Terminal(link, _) => message.and_then(|message| link.receive(message)),
+            Content::Terminal(link, _) => event.and_then(|event| link.receive(event)),
             Content::Message(_) => Ok(()),
         };
         self.check(result, cx);

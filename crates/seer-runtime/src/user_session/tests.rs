@@ -20,7 +20,7 @@ fn plain_exit_removes_only_the_callers_shell() {
         .expect("exit must reach the shell");
     let deadline = Instant::now() + WAIT_TIMEOUT;
     while !alice.tree.workspaces[0].tabs.is_empty() && Instant::now() < deadline {
-        let messages = alice.poll();
+        let messages = alice.poll(true);
         assert!(
             !messages
                 .iter()
@@ -72,7 +72,7 @@ fn poll_omits_a_quiet_pane() {
     let mut session = session_with_tab();
     assert!(wait_for_cells(&mut session, |_| true).is_some());
 
-    assert!(session.poll().is_empty());
+    assert!(session.poll(true).is_empty());
     close_all_panes(&mut session);
 }
 
@@ -200,7 +200,7 @@ fn wait_for_cells(
     let deadline = Instant::now() + WAIT_TIMEOUT;
     let mut matched_messages = None;
     while Instant::now() < deadline {
-        let messages = session.poll();
+        let messages = session.poll(true);
         if messages.is_empty() && matched_messages.is_some() {
             return matched_messages;
         }

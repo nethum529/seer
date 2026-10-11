@@ -146,6 +146,8 @@ fn fish_quote(path: &Path) -> String {
 mod tests {
     use super::*;
     use crate::PtySession;
+    use crate::pty::lock_mutex;
+    use std::sync::{Arc, Mutex};
     use std::time::{Duration, Instant};
 
     const PROFILE: &str = "SEER_LOGIN_PROBE=profile; export SEER_LOGIN_PROBE\n";
@@ -210,23 +212,25 @@ mod tests {
             command.env_remove(name);
         }
         install(&mut command, &shell).expect("shell files must be written");
-        let mut session = PtySession::start(command, 80, 24).expect("shell must start");
+        let seen = Arc::new(Mutex::new(String::new()));
+        let reader = Arc::clone(&seen);
+        let mut session = PtySession::start(command, 80, 24, move |bytes, answers| {
+            let chunk = String::from_utf8_lossy(bytes);
+            lock_mutex(&reader).push_str(&chunk);
+            // fish waits for the reply to its device attributes query.
+            if chunk.contains("\x1b[0c") {
+                answers.send(b"\x1b[?62c".to_vec());
+            }
+        })
+        .expect("shell must start");
         session
             .write_input(probe.as_bytes())
             .expect("probe must be sent");
         let deadline = Instant::now() + Duration::from_secs(10);
-        let mut output = String::new();
-        while !output.contains("probe=login-profile") && Instant::now() < deadline {
-            let chunk = String::from_utf8_lossy(&session.drain_output()).into_owned();
-            // fish waits for the reply to its device attributes query.
-            if chunk.contains("\x1b[0c") {
-                session
-                    .write_input(b"\x1b[?62c")
-                    .expect("reply must be sent");
-            }
-            output.push_str(&chunk);
+        while !lock_mutex(&seen).contains("probe=login-profile") && Instant::now() < deadline {
             std::thread::sleep(Duration::from_millis(20));
         }
+        let output = lock_mutex(&seen).clone();
         let _ = session.kill();
         output
     }

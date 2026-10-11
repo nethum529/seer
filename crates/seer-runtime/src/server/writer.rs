@@ -1,19 +1,16 @@
 use std::io::{self, Write};
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
-use std::sync::mpsc::Receiver;
 use std::thread;
 use std::time::Duration;
 
 use seer_core::proto::{ServerMsg, codec};
 
+use crate::outbox::{Outbox, Outgoing};
+
 const WRITE_TIMEOUT: Duration = Duration::from_secs(2);
 
-pub(super) fn spawn(
-    id: u64,
-    mut stream: UnixStream,
-    output: Receiver<Arc<[u8]>>,
-) -> io::Result<()> {
+pub(super) fn spawn(id: u64, mut stream: UnixStream, output: Arc<Outbox>) -> io::Result<()> {
     stream.set_write_timeout(Some(WRITE_TIMEOUT))?;
     thread::Builder::new()
         .name(format!("runtime-writer-{id}"))
@@ -21,13 +18,20 @@ pub(super) fn spawn(
     Ok(())
 }
 
-fn write_output(id: u64, stream: &mut UnixStream, output: &Receiver<Arc<[u8]>>) {
-    while let Ok(bytes) = output.recv() {
-        if let Err(error) = stream.write_all(&bytes) {
+fn write_output(id: u64, stream: &mut UnixStream, output: &Outbox) {
+    while let Some(item) = output.pop() {
+        let written = match item {
+            Outgoing::Message(bytes) => stream.write_all(&bytes),
+            Outgoing::Raw(event) => {
+                codec::encode_raw(&event).and_then(|frame| stream.write_all(&frame))
+            }
+        };
+        if let Err(error) = written {
             eprintln!("runtime evicted slow connection {id}: {error}");
             break;
         }
     }
+    output.close();
     let _ = stream.shutdown(std::net::Shutdown::Both);
 }
 

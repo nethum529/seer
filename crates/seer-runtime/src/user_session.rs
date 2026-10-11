@@ -104,6 +104,7 @@ impl UserSession {
             | ClientMsg::Watch { .. }
             | ClientMsg::Unwatch { .. }
             | ClientMsg::Resync { .. }
+            | ClientMsg::Parsed { .. }
             | ClientMsg::Terminals { .. }
             | ClientMsg::SetAllGrants { .. }
             | ClientMsg::SetGrant { .. }
@@ -116,12 +117,12 @@ impl UserSession {
     }
 
     #[must_use]
-    pub fn poll(&mut self) -> Vec<ServerMsg> {
+    pub fn poll(&mut self, frames: bool) -> Vec<ServerMsg> {
         let mut messages: Vec<_> = self
             .pane_hosts
             .iter_mut()
             .filter_map(|(pane, host)| {
-                host.poll().then(|| {
+                (host.poll() && frames).then(|| {
                     let frame = host.frame();
                     #[cfg(debug_assertions)]
                     seer_core::debug_log::transition(
@@ -484,9 +485,8 @@ pub(super) fn validate_capabilities(capabilities: TerminalCapabilities) -> io::R
     if capabilities.protocol_version == TERMINAL_PROTOCOL_VERSION {
         Ok(())
     } else {
-        Err(io::Error::new(
-            io::ErrorKind::InvalidInput,
-            "unsupported terminal capability version",
+        Err(invalid_input(
+            "unsupported terminal capability version".to_owned(),
         ))
     }
 }

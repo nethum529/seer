@@ -1,50 +1,98 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
-use std::collections::VecDeque;
 use std::fmt::Display;
 use std::io::{self, Read, Write};
+use std::os::fd::RawFd;
+#[cfg(target_os = "linux")]
+use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::thread;
 
-const OUTPUT_LIMIT: usize = 1024 * 1024;
-const READ_BUFFER_SIZE: usize = 8 * 1024;
+// Alacritty reads the PTY in blocks of this size.
+const READ_BUFFER_SIZE: usize = 64 * 1024;
+// The same bound as the raw output queued for a window (outbox.rs).
+const ANSWER_LIMIT: usize = 64 * 1024;
+
+type Writer = Arc<Mutex<Box<dyn Write + Send>>>;
+
+/// The queue of answers to queries for the answer thread of a PTY.
+#[derive(Clone)]
+pub(crate) struct Answers {
+    queue: Sender<Vec<u8>>,
+    pending: Arc<AtomicUsize>,
+}
+
+impl Answers {
+    /// Queues `bytes`, or drops them when ANSWER_LIMIT bytes wait. Only a
+    /// program that does not read its input fills the queue. To wait for
+    /// room would stop the PTY reader, and then that program would never
+    /// read.
+    pub(crate) fn send(&self, bytes: Vec<u8>) {
+        let count = bytes.len();
+        if self.pending.fetch_add(count, Ordering::Relaxed) + count > ANSWER_LIMIT
+            || self.queue.send(bytes).is_err()
+        {
+            self.pending.fetch_sub(count, Ordering::Relaxed);
+        }
+    }
+}
 
 pub struct PtySession {
     master: Box<dyn MasterPty + Send>,
     child: Box<dyn Child + Send + Sync>,
-    writer: Box<dyn Write + Send>,
-    output: Arc<Mutex<OutputBuffers>>,
-}
-
-#[derive(Default)]
-struct OutputBuffers {
-    pending: VecDeque<u8>,
+    writer: Writer,
+    answers: Answers,
 }
 
 impl PtySession {
-    pub fn start(command: CommandBuilder, cols: u16, rows: u16) -> io::Result<Self> {
+    /// Starts the command on a new PTY. The reader thread gives each block
+    /// of output to `on_output`, so a query gets its answer without a wait
+    /// for a poll. An answer thread writes the answers sent to `Answers` in
+    /// order, so the reader does not wait while input waits for the program.
+    pub(crate) fn start(
+        command: CommandBuilder,
+        cols: u16,
+        rows: u16,
+        on_output: impl FnMut(&[u8], &Answers) + Send + 'static,
+    ) -> io::Result<Self> {
         let pair = native_pty_system()
             .openpty(pty_size(cols, rows))
             .map_err(to_io_error)?;
         let reader = pair.master.try_clone_reader().map_err(to_io_error)?;
-        let writer = pair.master.take_writer().map_err(to_io_error)?;
-        let output = Arc::new(Mutex::new(OutputBuffers::default()));
-        let reader_output = Arc::clone(&output);
+        let writer: Writer = Arc::new(Mutex::new(pair.master.take_writer().map_err(to_io_error)?));
+        let (queue, waiting) = mpsc::channel();
+        let answers = Answers {
+            queue,
+            pending: Arc::new(AtomicUsize::new(0)),
+        };
+        let pending = Arc::clone(&answers.pending);
+        let replies = Arc::clone(&writer);
+        let ready = Readiness::new(pair.master.as_raw_fd())?;
 
+        let _answer_task = thread::Builder::new()
+            .name("pty-answer-writer".to_owned())
+            .spawn(move || write_answers(waiting, &pending, &replies))?;
+        let reader_answers = answers.clone();
         let _reader_task = thread::Builder::new()
             .name("pty-output-reader".to_owned())
-            .spawn(move || read_output(reader, &reader_output))?;
+            .spawn(move || read_output(reader, &ready, &reader_answers, on_output))?;
         let child = pair.slave.spawn_command(command).map_err(to_io_error)?;
 
         Ok(Self {
             master: pair.master,
             child,
             writer,
-            output,
+            answers,
         })
     }
 
-    pub fn write_input(&mut self, bytes: &[u8]) -> io::Result<()> {
-        self.writer.write_all(bytes)
+    pub(crate) fn answers(&self) -> Answers {
+        self.answers.clone()
+    }
+
+    pub fn write_input(&self, bytes: &[u8]) -> io::Result<()> {
+        lock_mutex(&self.writer).write_all(bytes)
     }
 
     pub fn resize(&self, cols: u16, rows: u16) -> io::Result<()> {
@@ -72,11 +120,6 @@ impl PtySession {
         }
         process_name(group)
     }
-
-    pub fn drain_output(&self) -> Vec<u8> {
-        let mut output = lock_mutex(&self.output);
-        output.pending.drain(..).collect()
-    }
 }
 
 #[cfg(target_os = "linux")]
@@ -100,29 +143,86 @@ fn pty_size(cols: u16, rows: u16) -> PtySize {
     }
 }
 
-fn read_output(mut reader: Box<dyn Read + Send>, output: &Mutex<OutputBuffers>) {
-    let mut bytes = [0; READ_BUFFER_SIZE];
+fn read_output(
+    mut reader: Box<dyn Read + Send>,
+    ready: &Readiness,
+    answers: &Answers,
+    mut on_output: impl FnMut(&[u8], &Answers),
+) {
+    let mut bytes = vec![0; READ_BUFFER_SIZE];
 
     loop {
+        ready.wait();
         match reader.read(&mut bytes) {
             Ok(0) => return,
-            Ok(count) => append_output(output, &bytes[..count]),
+            Ok(count) => on_output(&bytes[..count], answers),
             Err(error) if error.kind() == io::ErrorKind::Interrupted => {}
             Err(_) => return,
         }
     }
 }
 
-fn append_output(output: &Mutex<OutputBuffers>, bytes: &[u8]) {
-    let mut output = lock_mutex(output);
-    append_bounded(&mut output.pending, bytes);
+fn write_answers(waiting: Receiver<Vec<u8>>, pending: &AtomicUsize, writer: &Writer) {
+    for bytes in waiting {
+        if let Err(error) = lock_mutex(writer).write_all(&bytes) {
+            eprintln!("pane reply write failed: {error}");
+        }
+        pending.fetch_sub(bytes.len(), Ordering::Relaxed);
+    }
 }
 
-// Discard the oldest bytes so detached output stays bounded and keeps the latest state.
-fn append_bounded(output: &mut VecDeque<u8>, bytes: &[u8]) {
-    output.extend(bytes);
-    let excess = output.len().saturating_sub(OUTPUT_LIMIT);
-    output.drain(..excess);
+// Linux tty quirk: while an epoll set holds the master descriptor, the
+// shell side writes about 20 percent faster (cat of plain text: 136 ms
+// against 163 ms). A poll(2) wait or an epoll set on a dup of the master
+// does not give the gain. Alacritty waits the same way.
+// docs/research/25-terminal-speed.md has the measurements.
+#[cfg(target_os = "linux")]
+struct Readiness(Option<OwnedFd>);
+
+#[cfg(target_os = "linux")]
+impl Readiness {
+    fn new(master: Option<RawFd>) -> io::Result<Self> {
+        let Some(master) = master else {
+            return Ok(Self(None));
+        };
+        // SAFETY: epoll_create1 takes no pointers.
+        let descriptor = unsafe { libc::epoll_create1(libc::EPOLL_CLOEXEC) };
+        if descriptor < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        // SAFETY: epoll_create1 returned a new descriptor that nothing else owns.
+        let epoll = unsafe { OwnedFd::from_raw_fd(descriptor) };
+        let mut event = libc::epoll_event {
+            events: libc::EPOLLIN as u32,
+            u64: 0,
+        };
+        // SAFETY: both descriptors are open and event lives for the call.
+        if unsafe { libc::epoll_ctl(descriptor, libc::EPOLL_CTL_ADD, master, &mut event) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+        Ok(Self(Some(epoll)))
+    }
+
+    fn wait(&self) {
+        let Some(epoll) = &self.0 else {
+            return;
+        };
+        let mut event = libc::epoll_event { events: 0, u64: 0 };
+        // SAFETY: the epoll descriptor is open and event has room for the one entry asked for.
+        unsafe { libc::epoll_wait(epoll.as_raw_fd(), &mut event, 1, -1) };
+    }
+}
+
+#[cfg(not(target_os = "linux"))]
+struct Readiness;
+
+#[cfg(not(target_os = "linux"))]
+impl Readiness {
+    fn new(_master: Option<RawFd>) -> io::Result<Self> {
+        Ok(Self)
+    }
+
+    fn wait(&self) {}
 }
 
 pub(crate) fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
@@ -134,28 +234,4 @@ pub(crate) fn lock_mutex<T>(mutex: &Mutex<T>) -> MutexGuard<'_, T> {
 
 fn to_io_error(error: impl Display) -> io::Error {
     io::Error::other(error.to_string())
-}
-
-#[cfg(all(test, target_os = "linux"))]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn output_buffers_keep_last_mebibyte_while_not_drained() {
-        let output = Mutex::new(OutputBuffers::default());
-        let bytes: Vec<u8> = (0..=OUTPUT_LIMIT)
-            .map(|index| (index % usize::from(u8::MAX)) as u8)
-            .collect();
-        append_output(&output, &bytes);
-
-        let output = output.into_inner().expect("output lock must be valid");
-        assert_eq!(output.pending.len(), OUTPUT_LIMIT);
-        assert!(
-            output
-                .pending
-                .iter()
-                .copied()
-                .eq(bytes[1..].iter().copied())
-        );
-    }
 }

@@ -91,6 +91,7 @@ fn subscribe(routes: &mut Routes, state: &ClientState) -> io::Result<()> {
     routes.send(&ClientMsg::TerminalCapabilities {
         capabilities: TerminalCapabilities {
             protocol_version: TERMINAL_PROTOCOL_VERSION,
+            raw_output: false,
         },
     })?;
     routes.send(&ClientMsg::ListPeople)?;

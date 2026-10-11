@@ -11,6 +11,7 @@ use crate::UserSession;
 
 mod connection;
 mod peer;
+mod raw;
 mod restart;
 mod room_link;
 mod room_refusal;
@@ -97,6 +98,7 @@ fn handle_message(
         ),
         ClientMsg::Unwatch { pane, .. } => shared.watch_size(connection_id, &pane, None, false),
         ClientMsg::Resync { pane, .. } => shared.resend(connection_id, &pane),
+        ClientMsg::Parsed { mark } => shared.parsed(connection_id, mark),
         ClientMsg::Resize {
             workspace,
             tab,
@@ -436,8 +438,8 @@ impl SharedSession {
 
     fn poll_and_broadcast(&self) -> io::Result<(Vec<ServerMsg>, bool)> {
         let _lease = lock(&self.lease)?;
-        let messages = lock(&self.session)?.poll();
-        let has_connections = !lock(&self.connections)?.is_empty();
+        let (has_connections, frames) = raw::watchers(&lock(&self.connections)?);
+        let messages = lock(&self.session)?.poll(frames);
         if has_connections {
             self.flush_messages(&messages)?;
         }

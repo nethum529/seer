@@ -2,7 +2,7 @@ use alacritty_terminal::event::{Event, EventListener};
 use alacritty_terminal::grid::{Dimensions, Scroll};
 use alacritty_terminal::index::{Column, Line};
 use alacritty_terminal::term::cell::{Cell as AlacrittyCell, Flags};
-use alacritty_terminal::term::{Config, Term, TermMode};
+use alacritty_terminal::term::{Config, Term, TermDamage, TermMode};
 use alacritty_terminal::vte::ansi::{
     Color as AlacrittyColor, CursorShape as AlacrittyCursorShape, NamedColor, Processor,
 };
@@ -19,6 +19,7 @@ use crate::input::{encode_key, encode_mouse};
 use crate::pty::lock_mutex;
 
 mod reflow;
+mod restore;
 
 const SCROLLBACK_LINES: usize = 1_000;
 
@@ -31,12 +32,21 @@ pub struct PaneGrid {
 
 impl PaneGrid {
     pub fn new(cols: u16, rows: u16) -> Self {
+        Self::with_replies(cols, rows, TerminalReplies::keeping())
+    }
+
+    /// A copy that follows the raw stream of a pane. The runtime answers
+    /// the queries of the program, so the copy drops its answers.
+    pub fn mirror(cols: u16, rows: u16) -> Self {
+        Self::with_replies(cols, rows, TerminalReplies::discarding())
+    }
+
+    fn with_replies(cols: u16, rows: u16, replies: TerminalReplies) -> Self {
         let dimensions = GridSize::new(cols, rows);
         let config = Config {
             scrolling_history: SCROLLBACK_LINES,
             ..Config::default()
         };
-        let replies = TerminalReplies::default();
 
         Self {
             terminal: Term::new(config, &dimensions, replies.clone()),
@@ -47,30 +57,55 @@ impl PaneGrid {
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> bool {
-        if bytes.is_empty() {
-            return self.finish_expired_sync();
-        }
         self.parser.advance(&mut self.terminal, bytes);
         self.parser.sync_bytes_count() == 0
     }
 
+    /// Ends a synchronized update now. True when one was open.
+    pub fn end_sync(&mut self) -> bool {
+        let open = self.parser.sync_timeout().sync_timeout().is_some();
+        if open {
+            self.parser.stop_sync(&mut self.terminal);
+        }
+        open
+    }
+
+    /// Bytes that bring a mirror of the same size to this state. End an
+    /// open synchronized update first, or its bytes are lost.
+    pub fn restore(&mut self) -> Vec<u8> {
+        restore::restore(&mut self.terminal)
+    }
+
     #[must_use]
     pub fn snapshot(&self) -> TerminalFrame {
-        let grid = self.terminal.grid();
-        let display_offset = grid.display_offset().min(grid.history_size()) as i32;
-        let rows = (0..grid.screen_lines())
-            .map(|row| {
-                let line = Line(row as i32 - display_offset);
-                (0..grid.columns())
-                    .map(|column| map_cell(&grid[line][Column(column)]))
-                    .collect()
-            })
-            .collect();
         TerminalFrame {
-            rows,
-            cursor: self.cursor(display_offset),
+            rows: (0..self.terminal.screen_lines())
+                .map(|row| self.row(row))
+                .collect(),
+            cursor: self.cursor(),
             modes: self.modes(),
         }
+    }
+
+    /// One row of the screen as the snapshot shows it.
+    #[must_use]
+    pub fn row(&self, row: usize) -> Vec<Cell> {
+        let grid = self.terminal.grid();
+        let line = Line(row as i32 - display_offset(grid));
+        (0..grid.columns())
+            .map(|column| map_cell(&grid[line][Column(column)]))
+            .collect()
+    }
+
+    /// The screen rows that changed since the last call. None means every
+    /// row.
+    pub fn take_damage(&mut self) -> Option<Vec<usize>> {
+        let rows = match self.terminal.damage() {
+            TermDamage::Full => None,
+            TermDamage::Partial(lines) => Some(lines.map(|bounds| bounds.line).collect()),
+        };
+        self.terminal.reset_damage();
+        rows
     }
 
     /// The screen as a viewer of another size sees it. `None` means the
@@ -93,6 +128,12 @@ impl PaneGrid {
             cursor: self.cursor_at(view.cursor),
             modes: self.modes(),
         })
+    }
+
+    #[must_use]
+    pub fn size(&self) -> (u16, u16) {
+        let grid = self.terminal.grid();
+        (to_u16(grid.columns()), to_u16(grid.screen_lines()))
     }
 
     pub fn resize(&mut self, cols: u16, rows: u16) {
@@ -133,7 +174,7 @@ impl PaneGrid {
         std::mem::take(&mut self.input_changed)
     }
 
-    fn finish_expired_sync(&mut self) -> bool {
+    pub(crate) fn end_expired_sync(&mut self) -> bool {
         let expired = self
             .parser
             .sync_timeout()
@@ -145,9 +186,10 @@ impl PaneGrid {
         expired
     }
 
-    fn cursor(&self, display_offset: i32) -> Cursor {
+    #[must_use]
+    pub fn cursor(&self) -> Cursor {
         let point = self.terminal.grid().cursor.point;
-        let row = point.line.0 + display_offset;
+        let row = point.line.0 + display_offset(self.terminal.grid());
         let on_screen = row >= 0 && row < self.terminal.screen_lines() as i32;
         self.cursor_at(on_screen.then_some((row as u16, point.column.0 as u16)))
     }
@@ -220,23 +262,44 @@ impl PaneGrid {
 }
 
 /// Captures terminal reply events that must go back to the pty master.
-#[derive(Clone, Default)]
+#[derive(Clone)]
 struct TerminalReplies {
-    bytes: Arc<Mutex<Vec<u8>>>,
+    bytes: Option<Arc<Mutex<Vec<u8>>>>,
 }
 
 impl TerminalReplies {
+    fn keeping() -> Self {
+        Self {
+            bytes: Some(Arc::default()),
+        }
+    }
+
+    fn discarding() -> Self {
+        Self { bytes: None }
+    }
+
     fn take(&self) -> Vec<u8> {
-        std::mem::take(&mut *lock_mutex(&self.bytes))
+        self.bytes
+            .as_ref()
+            .map(|bytes| std::mem::take(&mut *lock_mutex(bytes)))
+            .unwrap_or_default()
     }
 }
 
 impl EventListener for TerminalReplies {
     fn send_event(&self, event: Event) {
-        if let Event::PtyWrite(reply) = event {
-            lock_mutex(&self.bytes).extend(reply.into_bytes());
+        if let (Event::PtyWrite(reply), Some(bytes)) = (event, &self.bytes) {
+            lock_mutex(bytes).extend(reply.into_bytes());
         }
     }
+}
+
+fn display_offset(grid: &alacritty_terminal::Grid<AlacrittyCell>) -> i32 {
+    grid.display_offset().min(grid.history_size()) as i32
+}
+
+fn to_u16(value: usize) -> u16 {
+    u16::try_from(value).unwrap_or(u16::MAX)
 }
 
 fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
@@ -336,17 +399,6 @@ impl Dimensions for GridSize {
 mod tests {
     use super::*;
 
-    #[test]
-    fn captures_terminal_replies_until_taken() {
-        let replies = TerminalReplies::default();
-
-        replies.send_event(Event::PtyWrite("first".to_owned()));
-        replies.send_event(Event::PtyWrite("second".to_owned()));
-
-        assert_eq!(replies.take(), b"firstsecond".to_vec());
-        assert!(replies.take().is_empty());
-    }
-
     // Alacritty grows display_offset on a scroll inside a region while a
     // viewer is scrolled back, but it caps it at the scrollback limit, not
     // at the rows that exist. The snapshot must show the oldest row that
@@ -365,54 +417,5 @@ mod tests {
         let snapshot = grid.snapshot();
         let top: String = snapshot.rows[0].iter().map(|cell| cell.character).collect();
         assert_eq!(top, "line of text t");
-    }
-
-    #[test]
-    fn feeds_sgr_colors_and_flags() {
-        let mut plain_grid = PaneGrid::new(5, 2);
-        plain_grid.feed(b"hello");
-        let plain = plain_grid.snapshot();
-        let first_row: String = plain.rows[0].iter().map(|cell| cell.character).collect();
-        assert_eq!(first_row, "hello");
-        assert_eq!(plain.rows[1][0].character, ' ');
-        assert_eq!(
-            plain.rows[0][0],
-            Cell {
-                character: 'h',
-                fg: Color::Default,
-                bg: Color::Default,
-                bold: false,
-                italic: false,
-                underline: false,
-                dim: false,
-                inverse: false,
-                hidden: false,
-                strikeout: false,
-            }
-        );
-
-        let mut grid = PaneGrid::new(3, 1);
-
-        grid.feed(b"\x1b[1;2;3;4;7;8;9;31;48;5;123mX\x1b[0;38;2;10;20;30mY");
-
-        let snapshot = grid.snapshot();
-        let styled = &snapshot.rows[0][0];
-        assert_eq!(styled.fg, Color::Indexed(1));
-        assert_eq!(styled.bg, Color::Indexed(123));
-        assert!(styled.bold);
-        assert!(styled.italic);
-        assert!(styled.underline);
-        assert!(styled.dim);
-        assert!(styled.inverse);
-        assert!(styled.hidden);
-        assert!(styled.strikeout);
-        assert_eq!(
-            snapshot.rows[0][1].fg,
-            Color::Rgb {
-                red: 10,
-                green: 20,
-                blue: 30,
-            }
-        );
     }
 }

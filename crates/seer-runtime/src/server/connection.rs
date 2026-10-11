@@ -4,7 +4,6 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::sync::Arc;
-use std::sync::mpsc::{self, SyncSender};
 use std::time::Instant;
 
 use seer_core::Tree;
@@ -14,6 +13,8 @@ use seer_core::{TerminalCapabilities, TerminalFrame};
 use super::room_refusal::ready;
 use super::{SharedSession, connection_loop, lock, writer};
 use crate::UserSession;
+use crate::outbox::Outbox;
+use crate::pane_output::Output;
 
 pub(super) fn handle_connection(
     mut stream: UnixStream,
@@ -106,9 +107,6 @@ fn greet(
     Ok(codec::decode(stream).ok())
 }
 
-// A burst of one poll tick can hold many pane messages; the queue and the deadline must be larger than one tick.
-const OUTPUT_QUEUE_CAPACITY: usize = 64;
-
 #[derive(Clone)]
 pub(super) struct ReportedViewport {
     pub(super) workspace: String,
@@ -131,7 +129,8 @@ pub(super) struct Connection {
     pub(super) seqs: BTreeMap<String, u64>,
     pub(super) baselines: BTreeMap<String, TerminalFrame>,
     pub(super) claimed: BTreeMap<String, Instant>,
-    pub(super) output: SyncSender<Arc<[u8]>>,
+    pub(super) outbox: Arc<Outbox>,
+    pub(super) raw_pane: Option<(String, Output)>,
     pub(super) stream: UnixStream,
     pub(super) capabilities: Option<TerminalCapabilities>,
     pub(super) viewport: Option<ReportedViewport>,
@@ -146,8 +145,8 @@ pub(super) struct Connection {
 impl Connection {
     pub(super) fn new(id: u64, stream: UnixStream) -> io::Result<Self> {
         let writer = stream.try_clone()?;
-        let (output, queued) = mpsc::sync_channel(OUTPUT_QUEUE_CAPACITY);
-        writer::spawn(id, writer, queued)?;
+        let outbox = Arc::new(Outbox::default());
+        writer::spawn(id, writer, Arc::clone(&outbox))?;
         Ok(Self {
             id,
             pid: super::peer::peer_pid(&stream),
@@ -155,7 +154,8 @@ impl Connection {
             seqs: BTreeMap::new(),
             baselines: BTreeMap::new(),
             claimed: BTreeMap::new(),
-            output,
+            outbox,
+            raw_pane: None,
             stream,
             capabilities: None,
             viewport: None,
@@ -169,7 +169,7 @@ impl Connection {
     }
 
     pub(super) fn send(&self, output: Arc<[u8]>) -> bool {
-        self.output.try_send(output).is_ok()
+        self.outbox.push_message(output)
     }
 
     pub(super) fn send_messages(&self, messages: &[ServerMsg]) -> io::Result<bool> {
@@ -191,6 +191,9 @@ impl Connection {
         match self.projection(session) {
             ConnectionProjection::Full => {
                 for (message, output) in messages.iter().zip(encoded) {
+                    if self.raw() && matches!(message, ServerMsg::Cells { .. }) {
+                        continue;
+                    }
                     let output = self.update(session, message, output)?;
                     if !self.send(output) {
                         return Ok(false);
@@ -351,6 +354,7 @@ fn tree_contains_pane(tree: &Tree, pane: &str) -> bool {
 
 impl Drop for Connection {
     fn drop(&mut self) {
+        self.outbox.close();
         let _ = self.stream.shutdown(std::net::Shutdown::Both);
     }
 }
