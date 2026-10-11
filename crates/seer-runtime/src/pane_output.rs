@@ -1,5 +1,6 @@
 use seer_core::proto::codec::RawEvent;
 use std::collections::VecDeque;
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard};
 use std::time::{Duration, Instant};
 
@@ -14,6 +15,11 @@ mod unfinished;
 const RAW_WAIT: Duration = Duration::from_secs(2);
 const RESTORE_CHUNK: usize = 1024 * 1024;
 
+// One count for all panes. After a window follows the next pane, it can
+// still confirm a mark of the pane it showed before. That mark is not above
+// the count at the attach, so it cannot let go an answer of the next pane.
+static MARKS: AtomicU64 = AtomicU64::new(0);
+
 /// The grid of one pane and the connections that get its raw output. The
 /// PTY reader feeds the grid and the connections under one lock, so a
 /// connection sees the bytes and the size changes in the order the grid
@@ -24,7 +30,6 @@ pub(crate) struct PaneOutput {
     changed: bool,
     unfinished: Unfinished,
     held: VecDeque<Held>,
-    marks: u64,
 }
 
 struct Sink {
@@ -87,7 +92,6 @@ impl PaneOutput {
             changed: false,
             unfinished: Unfinished::default(),
             held: VecDeque::new(),
-            marks: 0,
         }))
     }
 
@@ -133,7 +137,7 @@ impl PaneOutput {
         outbox.push_output(self.unfinished.bytes());
         self.sinks.push(Sink {
             outbox,
-            parsed: self.marks,
+            parsed: MARKS.load(Ordering::Relaxed),
         });
         answers
     }
@@ -155,10 +159,10 @@ impl PaneOutput {
     fn hold(&mut self) -> Vec<u8> {
         let bytes = self.grid.take_replies();
         if !bytes.is_empty() {
-            self.marks += 1;
-            self.send(RawEvent::Mark(self.marks));
+            let mark = MARKS.fetch_add(1, Ordering::Relaxed) + 1;
+            self.send(RawEvent::Mark(mark));
             self.held.push_back(Held {
-                mark: self.marks,
+                mark,
                 bytes,
                 since: Instant::now(),
             });

@@ -15,10 +15,12 @@ use crate::runtime_socket_helpers::*;
 use crate::support::*;
 
 const GENERATION: &str = "0123456789abcdef0123456789abcdef";
+const ASK_DEVICE: &str = "stty -echo -icanon min 0 time 10; printf '\\033[c'; r=$(head -c 64 | od -An -c | tr -d ' \\n'); stty sane; echo \"replies:$r:e\"\"nd\"\n";
 
 struct RawClient {
     stream: UnixStream,
     mirror: Option<PaneGrid>,
+    held: Option<Vec<u64>>,
 }
 
 impl RawClient {
@@ -62,7 +64,10 @@ impl RawClient {
             (RawEvent::SyncEnd, Some(grid)) => {
                 grid.end_sync();
             }
-            (RawEvent::Mark(mark), Some(_)) => send(&mut self.stream, &ClientMsg::Parsed { mark }),
+            (RawEvent::Mark(mark), Some(_)) => match &mut self.held {
+                Some(held) => held.push(mark),
+                None => send(&mut self.stream, &ClientMsg::Parsed { mark }),
+            },
             (event, None) => panic!("raw stream sent {event:?} before its start"),
         }
         true
@@ -154,6 +159,7 @@ fn open_window(socket: &Path) -> (RawClient, String) {
     let mut client = RawClient {
         stream,
         mirror: None,
+        held: None,
     };
     resize(&mut client, &pane, 80, 24);
     (client, pane)
@@ -180,11 +186,7 @@ fn the_own_window_gets_raw_output_and_a_query_gets_one_answer() {
     let _runtime = start_runtime(&socket);
     let (mut client, pane) = open_window(&socket);
 
-    send_input(
-        &mut client.stream,
-        &pane,
-        "stty -echo -icanon min 0 time 10; printf '\\033[c'; r=$(head -c 64 | od -An -c | tr -d ' \\n'); stty sane; echo \"replies:$r:e\"\"nd\"\n",
-    );
+    send_input(&mut client.stream, &pane, ASK_DEVICE);
     client.read_until(":end");
     assert!(text(&client.snapshot()).contains("replies:033[?6c:end"));
     assert_eq!(viewer_screen(&socket, &pane, 80, 24), client.snapshot());
@@ -193,6 +195,43 @@ fn the_own_window_gets_raw_output_and_a_query_gets_one_answer() {
     send_input(&mut client.stream, &pane, "echo size:$(stty size):\n");
     client.read_until("size:30 100:");
     assert_eq!(viewer_screen(&socket, &pane, 100, 30), client.snapshot());
+}
+
+#[test]
+fn a_late_confirm_from_the_last_terminal_does_not_free_answers_in_the_next() {
+    let temporary = TemporaryDirectory::new();
+    let socket = temporary.path.join("runtime.sock");
+    let _runtime = start_runtime(&socket);
+    let mut plain = connect_with_timeout(&socket);
+    read_until_tree(&mut plain);
+    send(
+        &mut plain,
+        &ClientMsg::CreateTab {
+            workspace: "w1".into(),
+        },
+    );
+    let tab = read_until_tree_with_tab_count(&mut plain, 2).workspaces[0].tabs[1].clone();
+    drop(plain);
+    let other = &tab.panes[0].id;
+    let (mut client, pane) = open_window(&socket);
+    client.held = Some(Vec::new());
+
+    send_input(
+        &mut client.stream,
+        &pane,
+        "printf '\\033[c'; echo first-qu''ery\n",
+    );
+    client.read_until("first-query");
+    let late = client.held.replace(Vec::new()).unwrap_or_default();
+    assert!(!late.is_empty(), "the first query must give a mark");
+    send(&mut client.stream, &watch(other, 80, 24, true));
+    for mark in late {
+        send(&mut client.stream, &ClientMsg::Parsed { mark });
+    }
+
+    send_input_at(&mut client.stream, "w1", &tab.id, other, ASK_DEVICE);
+    client.read_until(":end");
+    assert!(text(&client.snapshot()).contains("replies::end"));
 }
 
 // Each stage stops the program in a state that a new window must rebuild:
