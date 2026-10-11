@@ -155,11 +155,11 @@ crates/seer-desktop/src/palette.rs and from 05:
   People use these keys many times a day.
 - Reduced motion: no scale. Opacity stays.
 
-## Open questions for the owner
+## Owner decisions
 
-1. Font: Inter and JetBrains Mono (recommended), or Geist and Geist Mono
-   (one family, a bit crisper, a smaller x-height)?
+The owner approved this design on 2026-10-11, as shown in the mockup.
+
+1. Font: Inter and JetBrains Mono.
 2. The "Read only" mark in the title bar replaces the floating read only
-   bar of 03. Is that fine?
-3. People menu: keep the agent count ("2 working"), or show only Waiting
-   and presence?
+   bar of 03.
+3. The people menu keeps the agent count ("2 working").
