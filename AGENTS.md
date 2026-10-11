@@ -35,8 +35,8 @@ Do not reopen these. The reasons are in docs/research/ and docs/adr/.
 - Linux and macOS only, as host and as client. No Windows.
 - Seer is not a herdr replacement. Do not build herdr parity features unless
   a ticket asks for one.
-- Reference clones at /home/nethum/Projects/_research/herdr and
-  /home/nethum/Projects/_research/luvus are read only. Never modify them.
+- Reference clones at ~/Projects/_research/herdr and
+  ~/Projects/_research/luvus are read only. Never modify them.
 
 ## Quality gates
 
@@ -105,11 +105,11 @@ window: layout, spacing, color, type, icons, focus, hover, and motion.
 - Use two skill sets, and read the full skill file again each time you use
   it. A read from earlier in the session does not count.
   - Emil Kowalski: https://github.com/emilkowalski/skills, local clone at
-    /home/nethum/Projects/_research/emil-skills.
+    ~/Projects/_research/emil-skills.
   - Jakub Krehel: https://github.com/jakubkrehel/skills (the better-* skills)
     and https://github.com/jakubkrehel/make-interfaces-feel-better, local
-    clones at /home/nethum/Projects/_research/jakub-skills and
-    /home/nethum/Projects/_research/jakub-make-interfaces-feel-better.
+    clones at ~/Projects/_research/jakub-skills and
+    ~/Projects/_research/jakub-make-interfaces-feel-better.
 - Read them before you start a UI surface, before each UI commit, and before
   you report done. The local clones are read only. Pull them for the latest
   copy.
