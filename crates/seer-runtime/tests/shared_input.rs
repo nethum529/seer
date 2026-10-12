@@ -13,58 +13,10 @@ use seer_core::{
 #[test]
 fn shared_control_delivers_the_same_bytes_as_local_input() {
     let directory = PathBuf::from(format!("/tmp/s451-{}", std::process::id()));
-    fs::create_dir_all(&directory).unwrap();
-    let shell = directory.join("shell");
-    fs::write(&shell, format!(
-        "#!/bin/sh\nexec python3 -u -c 'import os,tty\ntty.setraw(0)\nf=open(\"{}/input\",\"ab\",buffering=0)\nos.write(1,b\"\\x1b[?1;1003;1006;1004;2004hReady\")\nwhile True:\n b=os.read(0,4096)\n f.write(b)'\n",
-        directory.display()
-    )).unwrap();
-    fs::set_permissions(&shell, fs::Permissions::from_mode(0o700)).unwrap();
-    let target = std::env::var_os("CARGO_TARGET_DIR")
-        .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"));
-    assert!(
-        Command::new("cargo")
-            .args(["build", "-j", "2", "-p", "seer", "--bin", "seer-runtime"])
-            .status()
-            .unwrap()
-            .success()
-    );
-    let _runtime = Running(
-        Command::new(target.join("debug/seer-runtime"))
-            .arg(directory.join("socket"))
-            .arg("alice")
-            .arg(shell)
-            .arg("shared-input")
-            .env_remove("SEER_SNAPSHOT_DIR")
-            .env_remove("SEER_ROOM_ENDPOINT")
-            .stdout(Stdio::null())
-            .spawn()
-            .unwrap(),
-        directory.clone(),
-    );
-    let mut owner = connect(&directory, ClientMsg::AttachRuntime);
-    let tree = loop {
-        if let ServerMsg::Tree { tree } = codec::decode(&mut owner).unwrap() {
-            break tree;
-        }
-    };
+    let (_runtime, mut owner, tree) = start_runtime(directory.clone(), "1;1003;1006;1004;2004");
     let workspace = &tree.workspaces[0];
     let tab = &workspace.tabs[0];
     let pane = &tab.panes[0].id;
-    loop {
-        if let ServerMsg::Cells { frame, .. } = codec::decode(&mut owner).unwrap()
-            && frame
-                .rows
-                .iter()
-                .flatten()
-                .map(|cell| cell.character)
-                .collect::<String>()
-                .contains("Ready")
-        {
-            break;
-        }
-    }
     let events = [
         InputEvent::Text("Local UTF-8: \u{e9}".into()),
         InputEvent::Key(KeyInput {
@@ -145,6 +97,103 @@ fn shared_control_delivers_the_same_bytes_as_local_input() {
             break;
         }
     }
+}
+
+#[test]
+fn shared_wheel_input_matches_local_arrows_without_mouse_reporting() {
+    let directory = PathBuf::from(format!("/tmp/s451-wheel-{}", std::process::id()));
+    let (_runtime, mut owner, tree) = start_runtime(directory.clone(), "1049");
+    let workspace = &tree.workspaces[0];
+    let tab = &workspace.tabs[0];
+    let pane = &tab.panes[0].id;
+    let mut remote = connect(&directory, ClientMsg::ObserveRuntime);
+    for (shared, stream) in [(false, &mut owner), (true, &mut remote)] {
+        for kind in [MouseKind::ScrollUp, MouseKind::ScrollDown] {
+            let input = TerminalInput::new(InputEvent::Mouse(MouseInput {
+                kind,
+                button: None,
+                column: 5,
+                row: 2,
+                modifiers: Modifiers::default(),
+            }));
+            let message = if !shared {
+                ClientMsg::TerminalInput {
+                    workspace: workspace.id.clone(),
+                    tab: tab.id.clone(),
+                    pane: pane.clone(),
+                    input,
+                }
+            } else {
+                ClientMsg::GrantedTerminalInput {
+                    workspace: workspace.id.clone(),
+                    tab: tab.id.clone(),
+                    pane: pane.clone(),
+                    input,
+                    sender: "Bob".into(),
+                }
+            };
+            codec::encode(&mut *stream, &message).unwrap();
+        }
+        let expected: &[u8] = if shared {
+            b"\x1b[A\x1b[B\x1b[A\x1b[B"
+        } else {
+            b"\x1b[A\x1b[B"
+        };
+        wait_for_input(&directory, expected);
+    }
+}
+
+fn start_runtime(directory: PathBuf, modes: &str) -> (Running, UnixStream, seer_core::Tree) {
+    fs::create_dir_all(&directory).unwrap();
+    let shell = directory.join("shell");
+    fs::write(&shell, format!(
+        "#!/bin/sh\nexec python3 -u -c 'import os,tty\ntty.setraw(0)\nf=open(\"{}/input\",\"ab\",buffering=0)\nos.write(1,b\"\\x1b[?{modes}hReady\")\nwhile True:\n b=os.read(0,4096)\n f.write(b)'\n",
+        directory.display()
+    )).unwrap();
+    fs::set_permissions(&shell, fs::Permissions::from_mode(0o700)).unwrap();
+    let target = std::env::var_os("CARGO_TARGET_DIR")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../target"));
+    assert!(
+        Command::new(std::env::var_os("CARGO").unwrap_or_else(|| "cargo".into()))
+            .args(["build", "-j", "2", "-p", "seer", "--bin", "seer-runtime"])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let runtime = Running(
+        Command::new(target.join("debug/seer-runtime"))
+            .arg(directory.join("socket"))
+            .arg("alice")
+            .arg(shell)
+            .arg("shared-input")
+            .env_remove("SEER_SNAPSHOT_DIR")
+            .env_remove("SEER_ROOM_ENDPOINT")
+            .stdout(Stdio::null())
+            .spawn()
+            .unwrap(),
+        directory.clone(),
+    );
+    let mut owner = connect(&directory, ClientMsg::AttachRuntime);
+    let tree = loop {
+        if let ServerMsg::Tree { tree } = codec::decode(&mut owner).unwrap() {
+            break tree;
+        }
+    };
+    loop {
+        if let ServerMsg::Cells { frame, .. } = codec::decode(&mut owner).unwrap()
+            && frame
+                .rows
+                .iter()
+                .flatten()
+                .map(|cell| cell.character)
+                .collect::<String>()
+                .contains("Ready")
+        {
+            break;
+        }
+    }
+    (runtime, owner, tree)
 }
 
 fn connect(directory: &std::path::Path, message: ClientMsg) -> UnixStream {

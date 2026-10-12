@@ -65,6 +65,12 @@ impl PaneHost {
     fn input_from(&mut self, input: &TerminalInput, sender: Option<String>) -> io::Result<bool> {
         let (bytes, changed) = {
             let mut output = self.output.lock();
+            if sender.is_some() && matches!(input.event, seer_core::InputEvent::Mouse(_)) {
+                let modes = output.grid.modes();
+                if modes.mouse_tracking == seer_core::MouseTracking::None && !modes.alt_screen {
+                    return Ok(false);
+                }
+            }
             let bytes = output.grid.handle_input(input)?;
             (bytes, output.grid.take_input_changed())
         };
@@ -90,20 +96,11 @@ impl PaneHost {
         input: &TerminalInput,
         sender: String,
     ) -> io::Result<()> {
-        match &input.event {
-            seer_core::InputEvent::Scrollback { .. } => {
-                return Err(io::Error::new(
-                    io::ErrorKind::InvalidInput,
-                    "scrollback belongs to the viewer",
-                ));
-            }
-            seer_core::InputEvent::Mouse(_)
-                if self.output.lock().grid.modes().mouse_tracking
-                    == seer_core::MouseTracking::None =>
-            {
-                return Ok(());
-            }
-            _ => {}
+        if matches!(input.event, seer_core::InputEvent::Scrollback { .. }) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "scrollback belongs to the viewer",
+            ));
         }
         self.input_from(input, Some(sender)).map(|_| ())
     }

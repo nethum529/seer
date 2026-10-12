@@ -50,10 +50,21 @@ impl Grants {
     }
 
     pub(crate) fn permits(&self, owner: &str, user: &str) -> io::Result<bool> {
-        Ok(self
-            .lock()?
-            .get(owner)
-            .is_some_and(|users| users.contains(user)))
+        self.while_permitted(owner, user, || Ok(()))
+    }
+
+    pub(crate) fn while_permitted(
+        &self,
+        owner: &str,
+        user: &str,
+        forward: impl FnOnce() -> io::Result<()>,
+    ) -> io::Result<bool> {
+        let owners = self.lock()?;
+        let permitted = owners.get(owner).is_some_and(|users| users.contains(user));
+        if permitted {
+            forward()?;
+        }
+        Ok(permitted)
     }
 
     pub(crate) fn message(&self, user: &str) -> io::Result<ServerMsg> {

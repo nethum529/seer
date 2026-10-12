@@ -8,6 +8,8 @@ use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
 
 #[path = "support/binary.rs"]
 mod binary;
+#[path = "room/revocation.rs"]
+mod revocation;
 mod room;
 #[path = "room/screen.rs"]
 mod screen;
