@@ -1,14 +1,15 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, Div, FocusHandle, FontWeight, InteractiveElement, KeyDownEvent, MouseButton,
-    ParentElement, Pixels, ScrollHandle, SharedString, Stateful, StatefulInteractiveElement,
-    Styled, Window, div, point, px, relative, rgb,
+    Context, Div, FocusHandle, Font, FontFeatures, FontWeight, InteractiveElement, KeyDownEvent,
+    MouseButton, ParentElement, Pixels, ScrollHandle, SharedString, Stateful,
+    StatefulInteractiveElement, Styled, Window, div, point, px, relative, rgb,
 };
 use seer_core::proto::TerminalInfo;
 
 use crate::cap_icon::cap_icon;
 use crate::chrome;
 use crate::palette;
+use crate::tab_time;
 use crate::tip;
 use crate::window::SeerWindow;
 use crate::window::rename::{self, Surface};
@@ -338,7 +339,21 @@ fn tab(
             .min_w_0()
             .font_weight(FontWeight::MEDIUM)
             .child(rename::label(terminal, Surface::Tab, labels)),
-    );
+    )
+    .children(tab_time::label(terminal).map(|time| {
+        div()
+            .relative()
+            .top(px(-1.))
+            .flex_none()
+            .text_size(px(12.))
+            .line_height(relative(16. / 12.))
+            .font(Font {
+                features: FontFeatures(std::sync::Arc::new(vec![("tnum".into(), 1)])),
+                ..gpui::font("Inter")
+            })
+            .text_color(rgb(palette::FAINT))
+            .child(time)
+    }));
     if shown == Some(terminal.pane.as_str()) {
         row.bg(rgb(palette::SELECTED)).when(ring, |row| {
             row.child(outline()).child(tip::below(help, "Inter".into()))

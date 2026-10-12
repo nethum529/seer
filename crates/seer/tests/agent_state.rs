@@ -1,7 +1,7 @@
 use std::io;
 use std::os::unix::net::UnixStream;
 use std::process::{Child, Command, Stdio};
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_core::{InputEvent, TerminalInput};
@@ -69,8 +69,7 @@ fn agent_states_reach_owner_and_read_only_viewer() {
     wait_state(&mut viewer, None);
     for agent in ["claude", "codex"] {
         input(&mut owner, &format!("{}\n", root.join(agent).display()));
-        wait_state(&mut owner, Some("idle"));
-        wait_state(&mut viewer, Some("idle"));
+        let mut since = check_both(&mut owner, &mut viewer, Some("idle"));
         for (key, state) in [
             ("short-work\n", "working"),
             ("short-completed\n", "idle"),
@@ -88,7 +87,9 @@ fn agent_states_reach_owner_and_read_only_viewer() {
             ("quiet-work\n", "working"),
         ] {
             input(&mut owner, key);
-            check_both(&mut owner, &mut viewer, Some(state));
+            let next = check_both(&mut owner, &mut viewer, Some(state));
+            assert!(next > since, "a new state must restart its time");
+            since = next;
         }
         if agent == "claude" {
             for key in ["short-work\n", "short-title\n"] {
@@ -106,7 +107,13 @@ fn agent_states_reach_owner_and_read_only_viewer() {
                         },
                     )
                     .expect("quiet catalog");
-                    wait_state(&mut stream, Some("working"));
+                    assert_eq!(wait_state(&mut stream, Some("working")), since);
+                    let mut stream = UnixStream::connect(&socket).expect("reopened owner");
+                    stream
+                        .set_read_timeout(Some(Duration::from_secs(2)))
+                        .expect("timeout");
+                    codec::encode(&mut stream, &ClientMsg::AttachRuntime).expect("reopen owner");
+                    assert_eq!(wait_state(&mut stream, Some("working")), since);
                 }
             }
         }
@@ -148,18 +155,19 @@ fn input(stream: &mut UnixStream, text: &str) {
     .expect("input");
 }
 
-fn check_both(owner: &mut UnixStream, viewer: &mut UnixStream, state: Option<&str>) {
+fn check_both(owner: &mut UnixStream, viewer: &mut UnixStream, state: Option<&str>) -> Option<u64> {
     let start = Instant::now();
-    wait_state(owner, state);
-    wait_state(viewer, state);
+    let since = wait_state(owner, state);
+    assert_eq!(wait_state(viewer, state), since);
     assert!(
         start.elapsed() < Duration::from_millis(1200),
         "state took {:?}",
         start.elapsed()
     );
+    since
 }
 
-fn wait_state(stream: &mut UnixStream, expected: Option<&str>) {
+fn wait_state(stream: &mut UnixStream, expected: Option<&str>) -> Option<u64> {
     let deadline = Instant::now() + Duration::from_secs(2);
     loop {
         assert!(Instant::now() < deadline, "missing state {expected:?}");
@@ -170,7 +178,16 @@ fn wait_state(stream: &mut UnixStream, expected: Option<&str>) {
                 };
                 let value = serde_json::to_value(terminal).expect("metadata");
                 if value["agent_state"].as_str() == expected {
-                    return;
+                    let since = value["agent_state_since"].as_u64();
+                    assert_eq!(since.is_some(), expected.is_some(), "agent state time");
+                    if let Some(since) = since {
+                        let now = SystemTime::now()
+                            .duration_since(UNIX_EPOCH)
+                            .unwrap()
+                            .as_millis();
+                        assert!(u128::from(since) <= now && u128::from(since) + 30_000 > now);
+                    }
+                    return since;
                 }
             }
             Ok(_) => {}

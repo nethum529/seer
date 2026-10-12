@@ -149,6 +149,7 @@ impl UserSession {
                         || host.map(PaneHost::started_program) == Some(foreground.as_str()));
                 TerminalInfo {
                     agent_state: observation.agent_state,
+                    agent_state_since: observation.agent_state_since,
                     title: Some(tab.title.clone()),
                     last_typist: self
                         .pane_hosts

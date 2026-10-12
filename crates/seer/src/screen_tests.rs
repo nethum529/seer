@@ -38,6 +38,7 @@ fn the_picker_shows_every_person_and_the_permission_for_the_viewed_one() {
             .enumerate()
             .map(|(i, name)| TerminalInfo {
                 agent_state: None,
+                agent_state_since: None,
                 title: None,
                 last_typist: (i == 0).then(|| "Carol".into()),
                 pane: format!("p{i}"),
@@ -136,6 +137,7 @@ fn backgrounds_preserve_the_host_terminal() {
 fn terminal_info(name: &str) -> TerminalInfo {
     TerminalInfo {
         agent_state: None,
+        agent_state_since: None,
         title: None,
         last_typist: None,
         pane: name.into(),

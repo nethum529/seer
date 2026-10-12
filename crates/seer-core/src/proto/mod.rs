@@ -309,6 +309,9 @@ pub struct ClientInfo {
 pub struct TerminalInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_state: Option<AgentState>,
+    /// Unix milliseconds when the local runtime observed this agent state.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_state_since: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default)]
