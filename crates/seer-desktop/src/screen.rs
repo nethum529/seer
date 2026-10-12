@@ -10,6 +10,10 @@ use crate::link::{Terminal, lock};
 use crate::palette;
 use crate::window::SeerWindow;
 
+mod glyphs;
+
+use glyphs::Glyphs;
+
 const FONT_SIZE: f32 = 12.5;
 const LINE_HEIGHT: f32 = 19.;
 
@@ -34,6 +38,7 @@ impl Screen {
 pub(crate) struct Painted {
     quads: Vec<PaintQuad>,
     lines: Vec<(Point<Pixels>, ShapedLine)>,
+    glyphs: Glyphs,
     cursor: Option<PaintQuad>,
     line_height: Pixels,
 }
@@ -43,6 +48,7 @@ pub(crate) struct Grid {
     pub(crate) origin: Point<Pixels>,
     pub(crate) cell_width: Pixels,
     pub(crate) line_height: Pixels,
+    pub(crate) scale: f32,
     pub(crate) cols: usize,
     pub(crate) rows: usize,
 }
@@ -83,8 +89,6 @@ impl Grid {
     }
 }
 
-// The shaped rows of the last paint. Only the rows that the terminal
-// changed since then are shaped again.
 #[derive(Default)]
 pub(crate) struct Rows {
     grid: Option<(Grid, usize)>,
@@ -95,6 +99,7 @@ pub(crate) struct Rows {
 struct Shaped {
     line: ShapedLine,
     backgrounds: Vec<(usize, usize, Rgba)>,
+    glyphs: Glyphs,
 }
 
 #[derive(Default)]
@@ -103,6 +108,7 @@ struct Row {
     runs: Vec<TextRun>,
     style: Option<(Rgba, bool, bool, bool, bool)>,
     backgrounds: Vec<(usize, usize, Rgba)>,
+    glyphs: Glyphs,
 }
 
 impl IntoElement for Screen {
@@ -203,6 +209,7 @@ impl Element for Screen {
         for (origin, line) in &painted.lines {
             line.paint(*origin, painted.line_height, window, cx).ok();
         }
+        painted.glyphs.paint(window);
         if let Some(cursor) = painted.cursor.take() {
             window.paint_quad(cursor);
         }
@@ -223,14 +230,25 @@ impl Element for Screen {
                 })
                 .flatten();
             if let (Some(cell), Some(cursor)) = (cell, cursor) {
-                let text = cell.character.to_string();
-                let run = text_run(&cell, gpui::rgb(palette::WINDOW), text.len(), &self.font);
-                let line =
-                    window
-                        .text_system()
-                        .shape_line(text.into(), px(FONT_SIZE), &[run], None);
-                line.paint(cursor.origin, painted.line_height, window, cx)
-                    .ok();
+                if glyphs::contains(cell.character) {
+                    let mut glyphs = Glyphs::default();
+                    glyphs.add(
+                        cell.character,
+                        cursor,
+                        gpui::rgb(palette::WINDOW),
+                        window.scale_factor(),
+                    );
+                    glyphs.paint(window);
+                } else {
+                    let text = cell.character.to_string();
+                    let run = text_run(&cell, gpui::rgb(palette::WINDOW), text.len(), &self.font);
+                    let line =
+                        window
+                            .text_system()
+                            .shape_line(text.into(), px(FONT_SIZE), &[run], None);
+                    line.paint(cursor.origin, painted.line_height, window, cx)
+                        .ok();
+                }
             }
         }
         if !preedit.is_empty()
@@ -275,6 +293,7 @@ impl Screen {
             origin: bounds.origin,
             cell_width,
             line_height,
+            scale: window.scale_factor(),
             cols: (bounds.size.width / cell_width).floor() as usize,
             rows: (bounds.size.height / line_height).floor() as usize,
         }
@@ -314,7 +333,7 @@ impl Rows {
             (changed, terminal.cursor())
         };
         for (index, cells) in changed {
-            self.shaped[index] = shape(&cells, &grid, font, window);
+            self.shaped[index] = shape(&cells, &grid, index, font, window);
         }
         let mut painted = Painted {
             line_height: grid.line_height,
@@ -322,6 +341,7 @@ impl Rows {
             ..Painted::default()
         };
         for (index, shaped) in self.shaped.iter().enumerate() {
+            painted.glyphs.append(&shaped.glyphs);
             for (start, end, color) in &shaped.backgrounds {
                 painted
                     .quads
@@ -335,8 +355,8 @@ impl Rows {
     }
 }
 
-fn shape(cells: &[Cell], grid: &Grid, font: &Font, window: &Window) -> Shaped {
-    let row = row(cells, grid.cols, font);
+fn shape(cells: &[Cell], grid: &Grid, index: usize, font: &Font, window: &Window) -> Shaped {
+    let row = row(cells, grid, index, font);
     let line = window.text_system().shape_line(
         row.text.into(),
         px(FONT_SIZE),
@@ -346,14 +366,20 @@ fn shape(cells: &[Cell], grid: &Grid, font: &Font, window: &Window) -> Shaped {
     Shaped {
         line,
         backgrounds: row.backgrounds,
+        glyphs: row.glyphs,
     }
 }
 
-fn row(cells: &[Cell], cols: usize, font: &Font) -> Row {
+fn row(cells: &[Cell], grid: &Grid, index: usize, font: &Font) -> Row {
     let mut row = Row::default();
-    for (column, cell) in cells.iter().take(cols).enumerate() {
+    for (column, cell) in cells.iter().take(grid.cols).enumerate() {
         let (fg, bg) = palette::cell_colors(cell);
-        let character = if cell.character.is_control() {
+        let builtin = glyphs::contains(cell.character);
+        if builtin && !cell.hidden {
+            row.glyphs
+                .add(cell.character, grid.cell(column, index, 1), fg, grid.scale);
+        }
+        let character = if builtin || cell.character.is_control() {
             ' '
         } else {
             cell.character
