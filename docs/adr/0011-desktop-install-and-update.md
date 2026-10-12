@@ -65,9 +65,16 @@ The installed version record also detects a missing or older app when the
 CLI version is already current. SEER_UPDATE_URL supports a local release
 mirror, like SEER_INSTALL_URL.
 
-The installer checks required payload files before it replaces anything.
-It stages new files beside their destinations, keeps the old files until
-registration succeeds, and restores them on a failure. Each executable
+The installer requires non-empty regular executable payload files before
+it replaces anything. It stages new files beside their destinations and
+copies the old files for rollback before replacement. Files are renamed
+directly over the installed paths. A non-empty Mac bundle uses the new
+CLI's internal --install-exchange operation with renamex_np RENAME_SWAP.
+The installed path stays present during replacement and rollback. A file
+system without atomic bundle exchange fails without removing the app.
+The installer keeps rollback copies until registration succeeds and
+restores them on a failure. An untrappable stop can leave staging files;
+the installed paths still exist. Each executable
 gets a new inode, as issue 362 requires. Existing windows, brokers,
 runtimes, and shells keep running on their old binaries.
 

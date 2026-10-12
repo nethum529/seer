@@ -7,6 +7,19 @@ fail() {
     exit 1
 }
 
+require_executable() {
+    [ -f "$1" ] && [ -s "$1" ] && [ -x "$1" ] || fail "The release has an invalid executable: $1. Ask the owner to publish it again."
+}
+
+rename_into_place() {
+    if [ "$os" = darwin ] && [ -d "$1" ] && [ -d "$2" ]; then
+        "$unpacked/seer" --install-exchange "$1" "$2"
+    else
+        [ ! -d "$2" ] || return 1
+        mv -f "$1" "$2"
+    fi
+}
+
 os_name=$(uname -s 2>/dev/null) || fail "Cannot detect the operating system. Use macOS or Linux."
 case "$os_name" in
     Darwin) os=darwin ;;
@@ -34,15 +47,21 @@ cleanup() {
         record="$temp_dir/$change_count"
         destination=$(cat "$record/destination")
         stage=$(cat "$record/stage")
+        restored=true
         if [ "$committed" = false ]; then
-            if [ -e "$stage/old" ] || [ -L "$stage/old" ]; then
-                rm -rf "$destination"
-                mv "$stage/old" "$destination"
-            elif [ -f "$record/changed" ]; then
-                rm -rf "$destination"
+            if [ -f "$record/changed" ]; then
+                if [ -f "$record/backed-up" ]; then
+                    rename_into_place "$stage/old" "$destination" || restored=false
+                else
+                    rm -rf "$destination"
+                fi
             fi
         fi
-        rm -rf "$stage"
+        if [ "$restored" = true ]; then
+            rm -rf "$stage"
+        else
+            printf 'Cannot restore %s. Its backup remains at %s/old.\n' "$destination" "$stage" >&2
+        fi
         change_count=$((change_count - 1))
     done
     rm -rf "$temp_dir"
@@ -71,12 +90,13 @@ replace_files() {
         destination=$(cat "$record/destination")
         stage=$(cat "$record/stage")
         if [ -e "$destination" ] || [ -L "$destination" ]; then
-            mv "$destination" "$stage/old" || fail "Cannot replace $destination. Check its permissions."
+            cp -Rp "$destination" "$stage/old" || fail "Cannot back up $destination. Check disk space and permissions."
+            touch "$record/backed-up" || fail "Cannot record the backup."
         fi
         touch "$record/changed" || fail "Cannot record the install."
         # Issue 362: macOS keeps code signatures by inode. Rename a new file
         # into place so a running binary keeps its old inode and signature.
-        mv "$stage/new" "$destination" || fail "Cannot install $destination. Check its permissions."
+        rename_into_place "$stage/new" "$destination" || fail "Cannot install $destination. Check its permissions."
         index=$((index + 1))
     done
 }
@@ -89,7 +109,7 @@ if [ -z "${SEER_INSTALL_SOURCE:-}" ]; then
 fi
 
 for binary in seer seer-broker seer-runtime; do
-    [ -s "$unpacked/$binary" ] || fail "The release is incomplete. Ask the owner to publish all Seer binaries."
+    require_executable "$unpacked/$binary"
 done
 
 legacy_release=false
@@ -103,12 +123,12 @@ if [ "$legacy_release" = true ]; then
 elif [ "$os" = darwin ]; then
     app="$unpacked/Seer.app"
     for binary in seer seer-broker seer-runtime seer-desktop; do
-        [ -x "$app/Contents/MacOS/$binary" ] || fail "The release is missing the desktop app. Ask the owner to publish it."
+        require_executable "$app/Contents/MacOS/$binary"
     done
     [ -s "$app/Contents/Info.plist" ] && [ -s "$app/Contents/Resources/Seer.icns" ] || fail "The release is missing the app metadata or icon."
     prepare "$app" "$HOME/Applications/Seer.app"
 else
-    [ -x "$unpacked/seer-desktop" ] || fail "The release is missing the desktop app. Ask the owner to publish it."
+    require_executable "$unpacked/seer-desktop"
     icon="$unpacked/share/icons/hicolor/scalable/apps/seer.svg"
     [ -s "$icon" ] || fail "The release is missing the Seer icon."
     command -v xdg-mime >/dev/null 2>&1 || fail "Install xdg-utils, then run the install command again."

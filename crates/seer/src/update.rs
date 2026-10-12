@@ -29,6 +29,35 @@ pub(crate) fn run() -> ExitCode {
     }
 }
 
+#[cfg(target_os = "macos")]
+pub(crate) fn exchange(arguments: impl Iterator<Item = String>) -> ExitCode {
+    let paths = arguments.collect::<Vec<_>>();
+    if paths.len() != 2 {
+        eprintln!("The installer needs two paths to exchange.");
+        return ExitCode::from(2);
+    }
+    match exchange_paths(&paths[0], &paths[1]) {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("Cannot exchange the installed app: {error}");
+            ExitCode::from(1)
+        }
+    }
+}
+
+#[cfg(target_os = "macos")]
+fn exchange_paths(from: &str, to: &str) -> io::Result<()> {
+    let from = std::ffi::CString::new(from)?;
+    let to = std::ffi::CString::new(to)?;
+    // SAFETY: both pointers refer to live, NUL-terminated paths for this call.
+    let status = unsafe { libc::renamex_np(from.as_ptr(), to.as_ptr(), libc::RENAME_SWAP) };
+    if status == 0 {
+        Ok(())
+    } else {
+        Err(io::Error::last_os_error())
+    }
+}
+
 fn update() -> Result<UpdateResult, UpdateError> {
     let asset = asset_name().ok_or(UpdateError::Install)?;
     let base_url = std::env::var("SEER_UPDATE_URL").unwrap_or_else(|_| RELEASE_BASE_URL.to_owned());
