@@ -9,6 +9,15 @@ use crate::palette;
 const GAP: f32 = 4.;
 const MAX_WIDTH: f32 = 280.;
 
+pub(crate) fn terminal_help(name: &str) -> SharedString {
+    let shortcut = if cfg!(target_os = "macos") {
+        "Cmd+Shift+B"
+    } else {
+        "Ctrl+Shift+B"
+    };
+    format!("{name}\n{shortcut} to go to the sidebar").into()
+}
+
 struct Tip {
     text: SharedString,
     font: SharedString,
@@ -73,5 +82,6 @@ fn tip(text: SharedString, font: SharedString) -> Div {
         .font_family(font)
         .text_size(px(12.))
         .line_height(relative(16. / 12.))
+        .whitespace_normal()
         .child(text)
 }

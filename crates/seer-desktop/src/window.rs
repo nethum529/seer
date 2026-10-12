@@ -10,6 +10,7 @@ use gpui::{
 use seer::ServerStore;
 
 use crate::chrome;
+use crate::input::Input;
 use crate::link::{Event, Link, Messages, Terminal};
 use crate::palette;
 use crate::screen::{self, Rows, Screen};
@@ -21,16 +22,17 @@ const LINK_LOST: &str = "The link to your terminals stopped. Open Seer again.";
 // The design's narrow layout starts below this window width.
 const NARROW: f32 = 720.;
 
-enum Content {
+pub(crate) enum Content {
     Message(SharedString),
     Terminal(Box<Link>, SharedString),
 }
 
 pub(crate) struct SeerWindow {
-    content: Content,
+    pub(crate) content: Content,
     font: Font,
     ui_font: SharedString,
-    keys: Keys,
+    pub(crate) keys: Keys,
+    pub(crate) input: Input,
     rows: Rows,
     _messages: Option<Task<()>>,
 }
@@ -67,12 +69,14 @@ impl SeerWindow {
             scroll: ScrollHandle::new(),
             mode: Mode::Pointer,
         };
-        window.focus(&keys.tabs);
+        let input = Input::new(window, cx);
+        window.focus(&input.focus);
         Self {
             content,
             font,
             ui_font: "Inter".into(),
             keys,
+            input,
             rows: Rows::default(),
             _messages: messages,
         }
@@ -94,6 +98,7 @@ impl SeerWindow {
     }
 
     pub(crate) fn select(&mut self, pane: &str, cx: &mut Context<Self>) {
+        self.input.reset();
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.select(pane),
             Content::Message(_) => Ok(()),
@@ -139,9 +144,27 @@ impl SeerWindow {
     }
 
     fn travel(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+        let held = keystroke.modifiers;
+        let secondary = if cfg!(target_os = "macos") {
+            held.platform
+        } else {
+            held.control
+        };
+        if secondary && held.shift && !held.alt && keystroke.key == "b" {
+            self.focus_tabs(window, cx);
+            cx.stop_propagation();
+            return;
+        }
+        if self.input.focus.is_focused(window) {
+            return;
+        }
         self.keys.mode = match keystroke.key.as_str() {
             "tab" if keystroke.modifiers.shift => {
                 window.focus_prev();
+                Mode::Keyboard
+            }
+            "tab" if self.keys.tabs.is_focused(window) => {
+                window.focus(&self.input.focus);
                 Mode::Keyboard
             }
             "tab" => {
@@ -151,19 +174,29 @@ impl SeerWindow {
             "escape" => Mode::Quiet,
             _ => return,
         };
+        cx.stop_propagation();
         cx.notify();
     }
 
     fn receive(&mut self, event: io::Result<Event>, cx: &mut Context<Self>) {
+        #[cfg(target_os = "macos")]
+        let echo = matches!(event, Ok(Event::Screen)) && self.input.waiting_echo;
         let result = match &mut self.content {
             Content::Terminal(link, _) => event.and_then(|event| link.receive(event)),
             Content::Message(_) => Ok(()),
         };
         self.check(result, cx);
         cx.notify();
+        #[cfg(target_os = "macos")]
+        if echo {
+            self.input.waiting_echo = false;
+            if let Some(frame) = &self.input.frame {
+                frame.request(cx);
+            }
+        }
     }
 
-    fn check(&mut self, result: io::Result<()>, cx: &mut Context<Self>) {
+    pub(crate) fn check(&mut self, result: io::Result<()>, cx: &mut Context<Self>) {
         if result.is_err() {
             self.content = Content::Message(LINK_LOST.into());
             cx.notify();
@@ -218,7 +251,7 @@ impl Render for SeerWindow {
                     cx.notify();
                 }),
             )
-            .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
+            .capture_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                 view.travel(&event.keystroke, window, cx)
             }));
         let (link, name) = match &self.content {
@@ -236,7 +269,7 @@ impl Render for SeerWindow {
         let name: SharedString = chrome::capitalize(name).into();
         let terminals = link.terminals();
         let shown = link.shown();
-        let terminal = terminal(Screen::new(cx.entity(), self.font.clone()));
+        let terminal = self.terminal(Screen::new(cx.entity(), self.font.clone()), cx);
         if window.viewport_size().width < px(NARROW) {
             return root.child(
                 div()
@@ -312,23 +345,21 @@ fn heading(terminal: Option<String>, font: &SharedString, hover: bool) -> Statef
         .map(|name| chrome::capitalize(&name))
         .unwrap_or_default()
         .into();
-    tip::on_hover(div().id("title"), title.clone(), font.clone(), hover)
-        .max_w(px(520.))
-        .h(px(28.))
-        .px(px(8.))
-        .rounded(px(6.))
-        .flex()
-        .items_center()
-        .font_weight(FontWeight::MEDIUM)
-        .child(sidebar::one_line(div()).child(title))
+    tip::on_hover(
+        div().id("title"),
+        tip::terminal_help(&title),
+        font.clone(),
+        hover,
+    )
+    .max_w(px(520.))
+    .h(px(28.))
+    .px(px(8.))
+    .rounded(px(6.))
+    .flex()
+    .items_center()
+    .font_weight(FontWeight::MEDIUM)
+    .child(sidebar::one_line(div()).child(title))
 }
 
-fn terminal(screen: Screen) -> Div {
-    div()
-        .flex_1()
-        .min_h_0()
-        .overflow_hidden()
-        .py(px(8.))
-        .px(px(12.))
-        .child(screen)
-}
+#[cfg(test)]
+mod input_e2e;
