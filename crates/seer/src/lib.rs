@@ -36,6 +36,8 @@ pub fn run() -> ExitCode {
     match arguments.next() {
         None => cli::run_bare(),
         Some(command) if command == "update" && arguments.next().is_none() => update::run(),
+        #[cfg(target_os = "macos")]
+        Some(command) if command == "--install-exchange" => update::exchange(arguments),
         Some(command) => cli::run(std::iter::once(command).chain(arguments)),
     }
 }
