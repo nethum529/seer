@@ -106,48 +106,62 @@ fn room(user: &str, credential: &str) -> String {
     let user = user.to_owned();
     let credential = credential.to_owned();
     thread::spawn(move || {
-        for _ in 0..5 {
-            let (mut stream, _) = listener.accept().unwrap();
-            stream
-                .set_read_timeout(Some(Duration::from_secs(5)))
-                .unwrap();
-            let message: ClientMsg = codec::decode(&mut stream).unwrap();
-            let reply = match message {
-                ClientMsg::Hello { user_id, .. } if user_id.is_empty() => ServerMsg::Refused {
-                    reason: "credentials required".into(),
-                },
-                ClientMsg::Join { name, .. } => ServerMsg::Joined {
-                    user_id: user.clone(),
-                    credential: credential.clone(),
-                    name,
-                },
-                ClientMsg::Hello {
-                    user_id,
-                    credential: found,
-                    ..
-                } => {
-                    assert_eq!(user_id, user);
-                    assert_eq!(found, credential);
-                    ServerMsg::Welcome {
-                        user_id: user.clone(),
-                        name: "Host".into(),
-                        client_id: "client".into(),
-                        tree: Tree::new(),
-                    }
-                }
-                _ => panic!("unexpected room request"),
-            };
-            codec::encode(&mut stream, &reply).unwrap();
-            if let Ok(ClientMsg::Invite { hours: Some(24) }) = codec::decode(&mut stream) {
-                codec::encode(
-                    &mut stream,
-                    &ServerMsg::Seat {
-                        capsule: issued.clone(),
-                        expires_in_secs: 86400,
+        for connection in listener.incoming() {
+            let mut stream = connection.unwrap();
+            let user = user.clone();
+            let credential = credential.clone();
+            let issued = issued.clone();
+            thread::spawn(move || {
+                stream
+                    .set_read_timeout(Some(Duration::from_secs(5)))
+                    .unwrap();
+                let message: ClientMsg = codec::decode(&mut stream).unwrap();
+                let reply = match message {
+                    ClientMsg::Hello { user_id, .. } if user_id.is_empty() => ServerMsg::Refused {
+                        reason: "credentials required".into(),
                     },
-                )
-                .unwrap();
-            }
+                    ClientMsg::Join { name, .. } => ServerMsg::Joined {
+                        user_id: user.clone(),
+                        credential: credential.clone(),
+                        name,
+                    },
+                    ClientMsg::Hello {
+                        user_id,
+                        credential: found,
+                        ..
+                    } => {
+                        assert_eq!(user_id, user);
+                        assert_eq!(found, credential);
+                        ServerMsg::Welcome {
+                            user_id: user.clone(),
+                            name: "Host".into(),
+                            client_id: "client".into(),
+                            tree: Tree::new(),
+                        }
+                    }
+                    _ => panic!("unexpected room request"),
+                };
+                codec::encode(&mut stream, &reply).unwrap();
+                while let Ok(message) = codec::decode(&mut stream) {
+                    let reply = match message {
+                        ClientMsg::ListPeople => ServerMsg::People {
+                            people: vec![
+                                serde_json::from_value(serde_json::json!({
+                                    "user_id": user, "name": "Host", "host": true,
+                                    "online": true, "attached_clients": 1, "peekable": true
+                                }))
+                                .unwrap(),
+                            ],
+                        },
+                        ClientMsg::Invite { hours: Some(24) } => ServerMsg::Seat {
+                            capsule: issued.clone(),
+                            expires_in_secs: 86400,
+                        },
+                        _ => panic!("unexpected room request"),
+                    };
+                    codec::encode(&mut stream, &reply).unwrap();
+                }
+            });
         }
     });
     capsule
