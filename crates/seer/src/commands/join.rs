@@ -16,6 +16,7 @@ pub enum JoinError {
     NameInUse,
     InvalidName,
     Unreachable,
+    Refused(String),
     Other(String),
 }
 
@@ -29,7 +30,7 @@ impl fmt::Display for JoinError {
             Self::Unreachable => {
                 "Seer cannot reach the room. Check that it is running, then try again."
             }
-            Self::Other(message) => message,
+            Self::Refused(message) | Self::Other(message) => message,
         })
     }
 }
@@ -61,7 +62,7 @@ impl Invitation {
     fn check_version(&self) -> Result<(), JoinError> {
         let endpoint = self.0.endpoint.to_string();
         match handshake::probe_room_version(&endpoint).map_err(|_| JoinError::Unreachable)? {
-            Some(message) => Err(JoinError::Other(message)),
+            Some(message) => Err(JoinError::Refused(message)),
             None => Ok(()),
         }
     }
@@ -88,7 +89,7 @@ impl Invitation {
                 "invalid seat" => JoinError::InvalidSeat,
                 "name is in use" => JoinError::NameInUse,
                 "invalid name" => JoinError::InvalidName,
-                _ => JoinError::Other("The room refused the join. Ask the host for help.".into()),
+                _ => JoinError::Refused("The room refused the join. Ask the host for help.".into()),
             }),
             _ => Err(JoinError::Other(
                 "The room sent an unexpected reply.".into(),
@@ -127,20 +128,30 @@ fn save_error() -> JoinError {
     JoinError::Other("Joined, but Seer could not save the room on this computer.".into())
 }
 
+fn command_error(error: JoinError) -> CommandError {
+    match error {
+        JoinError::InvalidSeat
+        | JoinError::NameInUse
+        | JoinError::InvalidName
+        | JoinError::Refused(_) => CommandError::usage(error.to_string()),
+        _ => CommandError::system(error),
+    }
+}
+
 pub(crate) fn run(invitation: Option<&str>) -> Result<(), CommandError> {
     let line = match invitation {
         Some(line) => line.to_owned(),
         None => crate::prompt::hidden("Invitation: ").map_err(CommandError::system)?,
     };
     let invitation = Invitation::parse(&line).map_err(CommandError::system)?;
-    invitation.check_version().map_err(CommandError::system)?;
+    invitation.check_version().map_err(command_error)?;
     let default = system_user_name();
     loop {
         let name = crate::prompt::visible_with_default("Name", default.as_deref())
             .map_err(CommandError::system)?;
         match invitation.exchange(&name) {
             Err(JoinError::NameInUse) => println!("That name is in use."),
-            Err(error) => return Err(CommandError::system(error)),
+            Err(error) => return Err(command_error(error)),
             Ok(server) => {
                 println!("Joined as {}. Attaching...", server.name);
                 let (stream, _) = super::authenticate(&server)?;

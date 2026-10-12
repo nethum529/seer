@@ -1,7 +1,7 @@
 use gpui::prelude::*;
 use gpui::{
     Context, Entity, EventEmitter, FocusHandle, FontWeight, IntoElement, KeyDownEvent, Render,
-    Subscription, Task, Window, div, px, rgb,
+    StatefulInteractiveElement, Subscription, Task, Window, div, px, rgb,
 };
 use seer::{Invitation, JoinError, ServerEntry};
 
@@ -184,7 +184,7 @@ impl Render for Join {
             .mt(px(20.))
             .when(name, |row| {
                 row.child(
-                    button("join-back", "Back", &self.back, false, window)
+                    button("join-back", "Back", &self.back, false, busy, window)
                         .on_click(cx.listener(|view, _, window, cx| view.back(window, cx)))
                         .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                             if event.keystroke.key == "enter" || event.keystroke.key == "space" {
@@ -195,7 +195,7 @@ impl Render for Join {
                 )
             })
             .child(
-                button("join-submit", label, &self.submit, true, window)
+                button("join-submit", label, &self.submit, true, busy, window)
                     .when(busy, |button| button.opacity(0.6))
                     .on_click(cx.listener(|view, _, window, cx| view.submit(window, cx)))
                     .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
@@ -298,6 +298,7 @@ fn button(
     label: &'static str,
     focus: &FocusHandle,
     primary: bool,
+    disabled: bool,
     window: &Window,
 ) -> gpui::Stateful<gpui::Div> {
     div()
@@ -321,7 +322,11 @@ fn button(
         } else {
             palette::TEXT
         }))
-        .hover(move |button| button.bg(rgb(if primary { 0xe5e5e5 } else { palette::CHIP_2 })))
+        .when(!disabled, |button| {
+            button
+                .hover(|button| button.opacity(0.92))
+                .active(|button| button.opacity(0.84))
+        })
         .border_1()
         .border_color(if focus.is_focused(window) {
             rgb(palette::FAINT).into()
