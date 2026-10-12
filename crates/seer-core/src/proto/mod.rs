@@ -308,6 +308,8 @@ pub struct ClientInfo {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalInfo {
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub agent_state: Option<AgentState>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default)]
     pub last_typist: Option<String>,
@@ -316,6 +318,14 @@ pub struct TerminalInfo {
     pub state: String,
     pub cols: u16,
     pub rows: u16,
+}
+
+#[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum AgentState {
+    Working,
+    Idle,
+    Waiting,
 }
 
 impl TerminalInfo {

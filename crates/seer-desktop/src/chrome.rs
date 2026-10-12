@@ -2,6 +2,7 @@ use gpui::{Div, ParentElement, Styled, Svg, WindowControlArea, div, px, rgb, svg
 
 use crate::cap_icon::cap_icon;
 use crate::palette;
+use seer_core::proto::AgentState;
 
 pub(crate) fn capitalize(name: &str) -> String {
     let mut chars = name.chars();
@@ -19,14 +20,15 @@ pub(crate) fn icon(name: &'static str, color: u32) -> Svg {
         .text_color(rgb(color))
 }
 
-pub(crate) fn status(state: &str) -> Svg {
-    let (name, color) = match state {
-        "busy" | "working" => ("working", palette::MUTED),
-        "waiting" => ("waiting", palette::WAITING),
-        _ => ("idle", palette::FAINTER),
-    };
-    // The runtime cannot distinguish working from waiting yet (T-481).
-    icon(name, color).invisible()
+pub(crate) fn status(state: Option<AgentState>) -> Div {
+    div().flex_none().size(px(16.)).children(state.map(|state| {
+        let (name, color) = match state {
+            AgentState::Working => ("working", palette::MUTED),
+            AgentState::Waiting => ("waiting", palette::WAITING),
+            AgentState::Idle => ("idle", palette::FAINTER),
+        };
+        icon(name, color)
+    }))
 }
 
 pub(crate) fn bar() -> Div {

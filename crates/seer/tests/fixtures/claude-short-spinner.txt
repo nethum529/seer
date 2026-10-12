@@ -1,0 +1,40 @@
+▝▜██████▀  Opus 5.5 (1M context) with high effort · Claude Max
+ ▝▝   ▝▝   /private/tmp/sol481/seer-live
+
+▎ [✻] [✻] [✻] · Share Claude Code and earn $10 in usage credits · /passes
+
+❯ Use the AskUserQuestion tool to ask me to pick Red or Blue. Do not change files.
+
+⏺ User answered Claude's questions:
+  ⎿  · Which color do you pick? → Red
+
+⏺ You picked Red. I did not change any files.
+
+✻ Crunched for 3s · done 11:34 PM
+
+❯ Use Bash to run sleep 8. Wait for it to finish. Do not change files.
+
+  Ran 1 shell command
+
+⏺ sleep 8 is running in the background, because this environment blocks sleep in the foreground. I'll get a notice when it finishes and confirm
+  then. I have not changed any files.
+
+✻ Brewed for 7s · done 11:34 PM
+
+⏺ Background command "Wait 8 seconds" completed (exit code 0)
+
+⏺ sleep 8 finished with exit code 0. I did not change any files.
+
+✻ Baked for 1s · done 11:34 PM
+
+❯ Use Bash to create /tmp/sol481/permission-check with touch. Do not use another tool.
+
+· Gesticulating…
+  ⎿  Tip: You can control how big a workflow is just by prompting. Ask for a small workflow, cap it with "use at most 5 agents", or set a default
+     with Dynamic workflow size in /config.
+
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+❯
+────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────
+  Opus 5.5 (1M context)  high  Context: 3%
+  ⏸ manual mode on · ← for agents

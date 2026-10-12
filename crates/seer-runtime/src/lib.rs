@@ -4,6 +4,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicPtr, Ordering};
 
+mod agent_state;
 mod input;
 mod login_shell;
 mod outbox;
