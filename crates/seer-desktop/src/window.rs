@@ -3,12 +3,13 @@ use std::io;
 use futures::StreamExt;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    App, Context, Div, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
+    Context, Div, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
     MouseButton, ParentElement, Render, ScrollHandle, SharedString, Stateful, Styled, Task, Window,
     div, px, relative, rgb,
 };
 use seer::ServerStore;
 
+use crate::chrome;
 use crate::link::{Event, Link, Messages, Terminal};
 use crate::palette;
 use crate::screen::{self, Rows, Screen};
@@ -19,9 +20,6 @@ const NO_ROOM: &str = "To join a room, paste the line from the host into your te
 const LINK_LOST: &str = "The link to your terminals stopped. Open Seer again.";
 // The design's narrow layout starts below this window width.
 const NARROW: f32 = 720.;
-// gpui has no system UI font name on Linux. These follow the design font
-// stack, then common Linux default sans fonts.
-const UI_FAMILIES: [&str; 4] = ["Inter", "Noto Sans", "Cantarell", "DejaVu Sans"];
 
 enum Content {
     Message(SharedString),
@@ -39,7 +37,7 @@ pub(crate) struct SeerWindow {
 
 impl SeerWindow {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let font = screen::terminal_font(cx);
+        let font = screen::terminal_font();
         let (content, messages) = match open() {
             Ok(Some((link, name, messages))) => {
                 (Content::Terminal(Box::new(link), name), Some(messages))
@@ -65,6 +63,7 @@ impl SeerWindow {
         let keys = Keys {
             tabs: cx.focus_handle().tab_stop(true),
             who: cx.focus_handle().tab_stop(true),
+            new_terminal: cx.focus_handle().tab_stop(true),
             scroll: ScrollHandle::new(),
             mode: Mode::Pointer,
         };
@@ -72,7 +71,7 @@ impl SeerWindow {
         Self {
             content,
             font,
-            ui_font: ui_font(cx),
+            ui_font: "Inter".into(),
             keys,
             rows: Rows::default(),
             _messages: messages,
@@ -106,6 +105,14 @@ impl SeerWindow {
     pub(crate) fn press(&mut self, pane: &str, window: &mut Window, cx: &mut Context<Self>) {
         window.focus(&self.keys.tabs);
         self.select(pane, cx);
+    }
+
+    pub(crate) fn new_terminal(&mut self, cx: &mut Context<Self>) {
+        let result = match &mut self.content {
+            Content::Terminal(link, _) => link.new_terminal(),
+            Content::Message(_) => Ok(()),
+        };
+        self.check(result, cx);
     }
 
     pub(crate) fn key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
@@ -170,18 +177,18 @@ fn open() -> io::Result<Option<(Link, SharedString, Messages)>> {
         return Ok(None);
     };
     let (socket, tree, _notice) = seer::attach(server)?;
-    let (link, messages) = Link::open(socket, &tree, server.user_id.clone())?;
+    let metadata = serde_json::to_value(server).map_err(io::Error::other)?;
+    let room = metadata
+        .get("alias")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Room");
+    let (link, messages) = Link::open(
+        socket,
+        &tree,
+        server.user_id.clone(),
+        chrome::capitalize(room),
+    )?;
     Ok(Some((link, server.name.clone().into(), messages)))
-}
-
-fn ui_font(cx: &App) -> SharedString {
-    let system = ".SystemUIFont";
-    if cfg!(target_os = "macos") {
-        return system.into();
-    }
-    screen::first_installed(cx, &UI_FAMILIES)
-        .unwrap_or(system)
-        .into()
 }
 
 impl Render for SeerWindow {
@@ -202,7 +209,7 @@ impl Render for SeerWindow {
             .bg(rgb(palette::WINDOW))
             .font_family(self.ui_font.clone())
             .text_size(px(13.))
-            .line_height(relative(1.4))
+            .line_height(relative(18. / 13.))
             .text_color(rgb(palette::TEXT))
             .on_mouse_down(
                 MouseButton::Left,
@@ -226,6 +233,7 @@ impl Render for SeerWindow {
             }
             Content::Terminal(link, name) => (link, name),
         };
+        let name: SharedString = chrome::capitalize(name).into();
         let terminals = link.terminals();
         let shown = link.shown();
         let terminal = terminal(Screen::new(cx.entity(), self.font.clone()));
@@ -237,13 +245,41 @@ impl Render for SeerWindow {
                     .flex()
                     .flex_col()
                     .child(
-                        bar().gap(px(10.)).pl(px(14.)).pr(px(8.)).child(
-                            sidebar::who(name, 18., 10., &self.ui_font, &self.keys, window)
+                        chrome::bar()
+                            .gap(px(8.))
+                            .pl(px(14.))
+                            .pr(px(8.))
+                            .child(chrome::lights())
+                            .child(
+                                sidebar::who(
+                                    &name,
+                                    20.,
+                                    11.,
+                                    window.viewport_size().width >= px(480.),
+                                    &self.ui_font,
+                                    &self.keys,
+                                    window,
+                                )
                                 .min_w_0()
                                 .h(px(32.))
-                                .pl(px(6.))
-                                .pr(px(8.)),
-                        ),
+                                .pl(px(5.))
+                                .pr(px(6.)),
+                            )
+                            .child(div().flex_1())
+                            .child(
+                                div()
+                                    .min_w_0()
+                                    .flex()
+                                    .items_center()
+                                    .gap(px(2.))
+                                    .child(chrome::room(
+                                        link.room(),
+                                        true,
+                                        window.viewport_size().width < px(480.),
+                                    ))
+                                    .child(sidebar::new_terminal(&self.keys, true, window, cx))
+                                    .child(chrome::settings()),
+                            ),
                     )
                     .when(!terminals.is_empty(), |main| {
                         main.child(sidebar::strip(terminals, shown, &self.keys, window, cx))
@@ -255,64 +291,36 @@ impl Render for SeerWindow {
             .iter()
             .find(|terminal| Some(terminal.pane.as_str()) == shown)
             .map(|terminal| terminal.name.clone());
-        let who = sidebar::who(name, 22., 11., &self.ui_font, &self.keys, window);
-        let side = sidebar::sidebar(who, terminals, shown, &self.keys, window, cx);
-        let title = heading(name, title, &self.ui_font, self.keys.hover());
+        let who = sidebar::who(&name, 22., 11., true, &self.ui_font, &self.keys, window);
+        let side = sidebar::sidebar(who, terminals, shown, &self.keys, window, cx)
+            .child(chrome::footer(link.room()));
+        let title = heading(title, &self.ui_font, self.keys.hover());
         root.child(side).child(
             div()
                 .flex_1()
                 .min_w_0()
                 .flex()
                 .flex_col()
-                .child(bar().justify_center().px(px(14.)).child(title))
+                .child(chrome::bar().justify_center().px(px(14.)).child(title))
                 .child(terminal),
         )
     }
 }
 
-fn bar() -> Div {
-    div()
-        .flex_none()
-        .h(px(44.))
+fn heading(terminal: Option<String>, font: &SharedString, hover: bool) -> Stateful<Div> {
+    let title: SharedString = terminal
+        .map(|name| chrome::capitalize(&name))
+        .unwrap_or_default()
+        .into();
+    tip::on_hover(div().id("title"), title.clone(), font.clone(), hover)
+        .max_w(px(520.))
+        .h(px(28.))
+        .px(px(8.))
+        .rounded(px(6.))
         .flex()
         .items_center()
-        .bg(rgb(palette::WINDOW))
-        .border_b_1()
-        .border_color(rgb(palette::LINE))
-}
-
-fn heading(
-    name: &SharedString,
-    terminal: Option<String>,
-    font: &SharedString,
-    hover: bool,
-) -> Stateful<Div> {
-    let full = match &terminal {
-        Some(terminal) => format!("{name} / {terminal}").into(),
-        None => name.clone(),
-    };
-    let title = tip::on_hover(div().id("title"), full, font.clone(), hover)
-        .min_w_0()
-        .flex()
         .font_weight(FontWeight::MEDIUM)
-        .child(sidebar::one_line(div()).child(name.clone()));
-    let Some(terminal) = terminal else {
-        return title;
-    };
-    title
-        .child(
-            div()
-                .flex_none()
-                .mx(px(4.))
-                .text_color(rgb(palette::FAINTER))
-                .child("/"),
-        )
-        .child(
-            sidebar::one_line(div())
-                .font_weight(FontWeight::NORMAL)
-                .text_color(rgb(palette::MUTED))
-                .child(terminal),
-        )
+        .child(sidebar::one_line(div()).child(title))
 }
 
 fn terminal(screen: Screen) -> Div {

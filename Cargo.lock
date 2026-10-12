@@ -6801,6 +6801,7 @@ dependencies = [
  "seer-core",
  "seer-net",
  "seer-runtime",
+ "serde_json",
 ]
 
 [[package]]

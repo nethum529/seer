@@ -65,13 +65,13 @@ pub(crate) fn below(text: SharedString, font: SharedString) -> Div {
 fn tip(text: SharedString, font: SharedString) -> Div {
     div()
         .max_w(px(MAX_WIDTH))
-        .py(px(4.6))
+        .py(px(5.))
         .px(px(10.))
         .rounded(px(8.))
         .bg(rgb(palette::ACCENT))
         .text_color(rgb(palette::ON_ACCENT))
         .font_family(font)
         .text_size(px(12.))
-        .line_height(relative(1.4))
+        .line_height(relative(16. / 12.))
         .child(text)
 }

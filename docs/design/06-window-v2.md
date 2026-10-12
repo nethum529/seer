@@ -87,6 +87,7 @@ crates/seer-desktop/src/palette.rs and from 05:
   Radius 8.
 - One grid for the sidebar: icon center at x=26, text at x=44. The window
   lights, avatars, plus, status glyphs, and the room dot use it.
+- Native macOS window controls keep their OS size and spacing.
 - Status glyphs on a 16 px grid. The glyph shows state, not kind, so agents
   and shells use the same glyphs:
   - Idle: empty ring.

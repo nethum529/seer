@@ -6,6 +6,7 @@ use gpui::{
 };
 use seer_core::proto::TerminalInfo;
 
+use crate::chrome;
 use crate::palette;
 use crate::tip;
 use crate::window::SeerWindow;
@@ -16,6 +17,7 @@ const STRIP_PAD: f32 = 8.;
 pub(crate) struct Keys {
     pub(crate) tabs: FocusHandle,
     pub(crate) who: FocusHandle,
+    pub(crate) new_terminal: FocusHandle,
     pub(crate) scroll: ScrollHandle,
     pub(crate) mode: Mode,
 }
@@ -92,17 +94,25 @@ pub(crate) fn sidebar(
         .h_full()
         .flex()
         .flex_col()
-        .px(px(10.))
+        .px(px(8.))
         .bg(rgb(palette::WINDOW))
         .border_r_1()
         .border_color(rgb(palette::LINE))
-        .child(who.w_full().h(px(40.)).mt(px(2.)).pl(px(8.)).pr(px(10.)))
+        .child(
+            div()
+                .flex_none()
+                .h(px(44.))
+                .pl(px(12.))
+                .child(chrome::lights()),
+        )
+        .child(who.w_full().h(px(36.)).pl(px(7.)).pr(px(8.)))
         .child(
             list(div().id("tabs"), keys, cx)
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
-                .mt(px(10.))
+                .mt(px(12.))
+                .pb(px(8.))
                 .flex()
                 .flex_col()
                 .gap(px(2.))
@@ -110,14 +120,60 @@ pub(crate) fn sidebar(
                     terminals
                         .iter()
                         .map(|terminal| tab(terminal, shown, ring, cx)),
-                ),
+                )
+                .child(new_terminal(keys, false, window, cx)),
         )
+}
+
+pub(crate) fn new_terminal(
+    keys: &Keys,
+    compact: bool,
+    window: &Window,
+    cx: &mut Context<SeerWindow>,
+) -> Stateful<Div> {
+    let label: SharedString = "New terminal".into();
+    let ring = keys.ring(&keys.new_terminal, window);
+    tip::on_hover(
+        div().id("new-terminal"),
+        label.clone(),
+        "Inter".into(),
+        keys.hover() && !ring,
+    )
+    .track_focus(&keys.new_terminal)
+    .group("new-terminal")
+    .relative()
+    .flex_none()
+    .w_full()
+    .h(px(32.))
+    .mt(px(4.))
+    .px(px(10.))
+    .rounded(px(8.))
+    .flex()
+    .items_center()
+    .gap(px(10.))
+    .font_weight(FontWeight::MEDIUM)
+    .text_color(rgb(palette::MUTED))
+    .hover(|style| style.bg(rgb(palette::HOVER)).text_color(rgb(palette::TEXT)))
+    .on_click(cx.listener(|view, _, _, cx| view.new_terminal(cx)))
+    .child(
+        chrome::icon("plus", palette::MUTED)
+            .group_hover("new-terminal", |style| style.text_color(rgb(palette::TEXT))),
+    )
+    .when(!compact, |row| row.child("New terminal"))
+    .when(compact, |row| {
+        row.w(px(32.)).mt(px(0.)).px(px(0.)).justify_center()
+    })
+    .when(ring, |row| {
+        row.child(outline())
+            .child(tip::below(label, "Inter".into()))
+    })
 }
 
 pub(crate) fn who(
     name: &SharedString,
     avatar: f32,
     initial: f32,
+    show_name: bool,
     font: &SharedString,
     keys: &Keys,
     window: &Window,
@@ -138,7 +194,7 @@ pub(crate) fn who(
     .relative()
     .flex()
     .items_center()
-    .gap(px(9.))
+    .gap(px(7.))
     .rounded(px(8.))
     .child(
         div()
@@ -152,15 +208,16 @@ pub(crate) fn who(
             .text_size(px(initial))
             .line_height(relative(1.))
             .font_weight(FontWeight::SEMIBOLD)
-            // gpui draws this letter 1 px higher than the browser does in
-            // the design, measured by ink rows at both avatar sizes.
-            .child(div().relative().top(px(1.)).child(letter)),
+            .child(letter),
     )
-    .child(
-        one_line(div().flex_1())
-            .font_weight(FontWeight::SEMIBOLD)
-            .child(name.clone()),
-    )
+    .when(show_name, |who| {
+        who.child(
+            one_line(div().flex_1())
+                .font_weight(FontWeight::SEMIBOLD)
+                .child(name.clone()),
+        )
+    })
+    .child(chrome::icon("selector", palette::FAINT))
     .when(ring, |who| {
         who.child(outline())
             .child(tip::below(name.clone(), font.clone()))
@@ -188,7 +245,7 @@ pub(crate) fn strip(
     list(div().id("strip"), keys, cx)
         .flex_none()
         .flex()
-        .gap(px(4.))
+        .gap(px(2.))
         .py(px(6.))
         .px(px(STRIP_PAD))
         .overflow_x_scroll()
@@ -200,14 +257,16 @@ pub(crate) fn strip(
             selectable(terminal, cx)
                 .flex_none()
                 .h(px(32.))
-                .px(px(12.))
-                .gap(px(7.))
+                .pl(px(8.))
+                .pr(px(12.))
+                .gap(px(8.))
+                .font_weight(FontWeight::MEDIUM)
                 .whitespace_nowrap()
                 .text_color(rgb(if on { palette::TEXT } else { palette::TEXT_2 }))
-                .when(on, |tab| tab.bg(rgb(palette::PILL)))
+                .when(on, |tab| tab.bg(rgb(palette::SELECTED)))
                 .when(on && ring, |tab| tab.child(outline()))
-                .child(dot())
-                .child(terminal.name.clone())
+                .child(chrome::status(&terminal.state))
+                .child(chrome::capitalize(&terminal.name))
         }))
 }
 
@@ -238,31 +297,45 @@ fn tab(
     shown: Option<&str>,
     ring: bool,
     cx: &mut Context<SeerWindow>,
-) -> Div {
-    let row = selectable(terminal, cx)
-        .w_full()
-        .pt(px(7.))
-        .pr(px(10.))
-        .pb(px(8.))
-        .pl(px(12.))
-        .gap(px(10.))
-        .child(dot())
-        .child(
-            one_line(div().flex_1())
-                .font_weight(FontWeight::MEDIUM)
-                .child(terminal.name.clone()),
-        );
+) -> Stateful<Div> {
+    let on = shown == Some(terminal.pane.as_str());
+    let name: SharedString = chrome::capitalize(&terminal.name).into();
+    let row = tip::on_hover(
+        selectable(terminal, cx),
+        name.clone(),
+        "Inter".into(),
+        !(on && ring),
+    )
+    .w_full()
+    .pt(px(7.))
+    .pr(px(10.))
+    .pb(px(8.))
+    .pl(px(10.))
+    .gap(px(10.))
+    .text_color(rgb(if shown == Some(terminal.pane.as_str()) {
+        palette::TEXT
+    } else {
+        palette::TEXT_2
+    }))
+    .child(chrome::status(&terminal.state))
+    .child(
+        one_line(div().flex_1())
+            .font_weight(FontWeight::MEDIUM)
+            .child(name.clone()),
+    );
     if shown == Some(terminal.pane.as_str()) {
-        row.bg(rgb(palette::PILL))
-            .when(ring, |row| row.child(outline()))
+        row.bg(rgb(palette::SELECTED)).when(ring, |row| {
+            row.child(outline()).child(tip::below(name, "Inter".into()))
+        })
     } else {
         row.hover(|style| style.bg(rgb(palette::HOVER)))
     }
 }
 
-fn selectable(terminal: &TerminalInfo, cx: &mut Context<SeerWindow>) -> Div {
+fn selectable(terminal: &TerminalInfo, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
     let pane = terminal.pane.clone();
     div()
+        .id(SharedString::from(terminal.pane.clone()))
         .relative()
         .flex()
         .items_center()
@@ -282,14 +355,4 @@ fn outline() -> Div {
         .rounded(px(8.))
         .border_1()
         .border_color(rgb(palette::ACCENT))
-}
-
-// The design draws a ring for a terminal whose agent state is not known.
-fn dot() -> Div {
-    div()
-        .flex_none()
-        .size(px(7.))
-        .rounded_full()
-        .border_1()
-        .border_color(rgb(palette::FAINTER))
 }
