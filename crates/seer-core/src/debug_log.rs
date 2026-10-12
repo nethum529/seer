@@ -79,7 +79,39 @@ pub fn client_summary(message: &ClientMsg) -> String {
         ClientMsg::Invite { hours } => format!("Invite hours={hours:?}"),
         ClientMsg::DetachClient { client_id } => format!("DetachClient client={client_id}"),
         ClientMsg::ExitClient { pane } => format!("ExitClient pane={pane}"),
+        ClientMsg::PublishRuntime {
+            user_id,
+            generation,
+            ..
+        } => format!("PublishRuntime user={user_id} generation={generation}"),
+        ClientMsg::RuntimeStream { user_id, .. } => format!("RuntimeStream user={user_id}"),
+        ClientMsg::QueryTargets { user } => format!("QueryTargets user={user}"),
+        ClientMsg::Terminals { user } => format!("Terminals user={user}"),
+        ClientMsg::TypeInto { user, pane, bytes } => {
+            format!("TypeInto user={user} pane={pane} bytes={}", bytes.len())
+        }
+        ClientMsg::Stop => "Stop".to_owned(),
+        ClientMsg::Leave => "Leave".to_owned(),
+        ClientMsg::SetAllGrants { can_type } => format!("SetAllGrants can_type={can_type}"),
+        ClientMsg::MouseInto { user, pane, mouse } => {
+            format!("MouseInto user={user} pane={pane} kind={:?}", mouse.kind)
+        }
+        ClientMsg::SetGrant { user, can_type } => {
+            format!("SetGrant user={user} can_type={can_type}")
+        }
+        ClientMsg::ListPeople => "ListPeople".to_owned(),
+        ClientMsg::QueryStatus => "QueryStatus".to_owned(),
+        ClientMsg::AttachRuntime => "AttachRuntime".to_owned(),
+        ClientMsg::ObserveRuntime => "ObserveRuntime".to_owned(),
+        ClientMsg::Detach => "Detach".to_owned(),
+        _ => terminal_summary(message),
+    }
+}
+
+fn terminal_summary(message: &ClientMsg) -> String {
+    match message {
         ClientMsg::CreateTab { workspace } => format!("CreateTab workspace={workspace}"),
+        ClientMsg::RenameTab { tab, .. } => format!("RenameTab tab={tab}"),
         ClientMsg::SplitPane { tab, direction, .. } => {
             format!("SplitPane tab={tab} direction={direction:?}")
         }
@@ -109,14 +141,6 @@ pub fn client_summary(message: &ClientMsg) -> String {
             "GrantedInput pane={pane} bytes={} sender={sender}",
             bytes.len()
         ),
-        ClientMsg::PublishRuntime {
-            user_id,
-            generation,
-            ..
-        } => format!("PublishRuntime user={user_id} generation={generation}"),
-        ClientMsg::RuntimeStream { user_id, .. } => format!("RuntimeStream user={user_id}"),
-        ClientMsg::QueryTargets { user } => format!("QueryTargets user={user}"),
-        ClientMsg::Terminals { user } => format!("Terminals user={user}"),
         ClientMsg::Watch {
             user,
             pane,
@@ -127,15 +151,6 @@ pub fn client_summary(message: &ClientMsg) -> String {
         ClientMsg::Unwatch { user, pane } => format!("Unwatch user={user} pane={pane}"),
         ClientMsg::Resync { user, pane } => format!("Resync user={user} pane={pane}"),
         ClientMsg::Parsed { mark } => format!("Parsed mark={mark}"),
-        ClientMsg::TypeInto { user, pane, bytes } => {
-            format!("TypeInto user={user} pane={pane} bytes={}", bytes.len())
-        }
-        ClientMsg::Stop => "Stop".to_owned(),
-        ClientMsg::Leave => "Leave".to_owned(),
-        ClientMsg::SetAllGrants { can_type } => format!("SetAllGrants can_type={can_type}"),
-        ClientMsg::MouseInto { user, pane, mouse } => {
-            format!("MouseInto user={user} pane={pane} kind={:?}", mouse.kind)
-        }
         ClientMsg::GrantedMouse {
             pane,
             sender,
@@ -145,14 +160,7 @@ pub fn client_summary(message: &ClientMsg) -> String {
             "GrantedMouse pane={pane} sender={sender} kind={:?}",
             mouse.kind
         ),
-        ClientMsg::SetGrant { user, can_type } => {
-            format!("SetGrant user={user} can_type={can_type}")
-        }
-        ClientMsg::ListPeople => "ListPeople".to_owned(),
-        ClientMsg::QueryStatus => "QueryStatus".to_owned(),
-        ClientMsg::AttachRuntime => "AttachRuntime".to_owned(),
-        ClientMsg::ObserveRuntime => "ObserveRuntime".to_owned(),
-        ClientMsg::Detach => "Detach".to_owned(),
+        _ => "ClientMsg".to_owned(),
     }
 }
 

@@ -123,6 +123,7 @@ mod tests {
             panes
                 .iter()
                 .map(|pane| TerminalInfo {
+                    title: None,
                     pane: pane.clone(),
                     name: "shell".into(),
                     state: "idle".into(),

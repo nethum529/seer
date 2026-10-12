@@ -2,9 +2,12 @@ use gpui::{Rgba, rgb};
 use seer_core::{Cell, Color};
 
 pub(crate) const WINDOW: u32 = 0x0a0a0a;
+pub(crate) const LINE_2: u32 = 0x2a2a2a;
+pub(crate) const RAISED: u32 = 0x171717;
 pub(crate) const LINE: u32 = 0x1f1f1f;
 pub(crate) const HOVER: u32 = 0x131313;
 pub(crate) const SELECTED: u32 = 0x1c1c1c;
+pub(crate) const CHIP: u32 = 0x262626;
 pub(crate) const CHIP_2: u32 = 0x303030;
 pub(crate) const TEXT: u32 = 0xfafafa;
 pub(crate) const ACCENT: u32 = 0xfafafa;

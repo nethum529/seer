@@ -88,7 +88,7 @@ fn tile(
         let palette = Palette::default();
         let block = palette
             .block(state.chrome.grid_focus && index == state.focus)
-            .title(format!(" {} {} ", index + 1, terminal.name));
+            .title(format!(" {} {} ", index + 1, terminal.label()));
         let inner = block.inner(rect);
         frame.render_widget(block, rect);
         inner

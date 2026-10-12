@@ -100,7 +100,7 @@ fn label(state: &ClientState, row: Row) -> String {
             .selected_terminals()
             .get(index)
             .map_or_else(String::new, |terminal| {
-                format!("{} {}", index + 1, terminal.name)
+                format!("{} {}", index + 1, terminal.label())
             }),
         Row::New => "n new terminal".into(),
         Row::Close => "x close terminal".into(),
