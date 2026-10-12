@@ -40,45 +40,60 @@ fn reconnect_restores_large_watch_sets_and_closes_failed_observers() {
     let mut resumed = ready_target(&room, &mut publisher, &tree);
     std::thread::sleep(Duration::from_millis(100));
     resumed.set_read_timeout(Some(WAIT)).unwrap();
-    let mut restored = BTreeSet::new();
-    for _ in 0..=panes.len() {
-        let message: ClientMsg = codec::decode(&mut resumed)
-            .expect("all saved watches must return after the target resumes");
-        let ClientMsg::Watch {
-            user,
-            pane,
-            cols,
-            rows,
-            viewer,
-        } = message
-        else {
-            panic!("the runtime must receive a watch");
-        };
-        assert_eq!(user, "alice");
-        assert_eq!((cols, rows, viewer), (80, 24, true));
-        restored.insert(pane);
-    }
-    assert!(restored == panes.iter().cloned().collect());
+    resumed.set_write_timeout(Some(WAIT)).unwrap();
+    std::thread::scope(|scope| {
+        let shown = scope.spawn(|| {
+            let mut shown = BTreeSet::new();
+            while shown.len() < panes.len() {
+                match decode(&mut bob) {
+                    ServerMsg::Cells {
+                        user, pane, seq: 1, ..
+                    } => {
+                        assert_eq!(user, "alice");
+                        shown.insert(pane);
+                    }
+                    ServerMsg::Refused { reason } => panic!("restore refused: {reason}"),
+                    _ => {}
+                }
+            }
+            assert!(shown == panes.iter().cloned().collect());
+        });
+        let mut restored = BTreeSet::new();
+        for _ in 0..=panes.len() {
+            let message: ClientMsg = codec::decode(&mut resumed)
+                .expect("all saved watches must return after the target resumes");
+            let ClientMsg::Watch {
+                user,
+                pane,
+                cols,
+                rows,
+                viewer,
+            } = message
+            else {
+                panic!("the runtime must receive a watch");
+            };
+            assert_eq!(user, "alice");
+            assert_eq!((cols, rows, viewer), (80, 24, true));
+            restored.insert(pane.clone());
+            codec::encode(
+                &mut resumed,
+                &ServerMsg::Cells {
+                    user: "alice".into(),
+                    pane,
+                    frame: TerminalFrame {
+                        rows: Vec::new(),
+                        cursor: Cursor::default(),
+                        modes: TerminalModes::default(),
+                    },
+                    seq: 1,
+                },
+            )
+            .expect("each restored watch must accept its screen reply");
+        }
+        assert!(restored == panes.iter().cloned().collect());
+        shown.join().unwrap();
+    });
     client_barrier(&mut bob);
-    let pane = panes.last().unwrap();
-    codec::encode(
-        &mut resumed,
-        &ServerMsg::Cells {
-            user: "alice".into(),
-            pane: pane.clone(),
-            frame: TerminalFrame {
-                rows: Vec::new(),
-                cursor: Cursor::default(),
-                modes: TerminalModes::default(),
-            },
-            seq: 1,
-        },
-    )
-    .unwrap();
-    wait_for(
-        &mut bob,
-        |m| matches!(m, ServerMsg::Cells { pane: shown, seq: 1, .. } if shown == pane),
-    );
 }
 
 fn watched_tree() -> (Tree, Vec<String>) {

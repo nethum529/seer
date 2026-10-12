@@ -27,7 +27,7 @@ struct Frame {
     permit: Option<Arc<Permit>>,
     deadline: Instant,
     pending: Arc<AtomicUsize>,
-    sent: Option<SyncSender<io::Result<()>>>,
+    restore: bool,
 }
 
 impl Drop for Frame {
@@ -58,21 +58,18 @@ impl RuntimeWriter {
     }
 
     pub(super) fn send(&self, message: &ClientMsg, permit: Option<Arc<Permit>>) -> io::Result<()> {
-        self.enqueue(message, permit, None)
+        self.enqueue(message, permit, false)
     }
 
     pub(super) fn restore_watch(&self, message: &ClientMsg) -> io::Result<()> {
-        let (reply, sent) = mpsc::sync_channel(1);
-        self.enqueue(message, None, Some(reply))?;
-        sent.recv_timeout(SEND_TIMEOUT)
-            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "watch restore timed out"))?
+        self.enqueue(message, None, true)
     }
 
     fn enqueue(
         &self,
         message: &ClientMsg,
         permit: Option<Arc<Permit>>,
-        sent: Option<SyncSender<io::Result<()>>>,
+        restore: bool,
     ) -> io::Result<()> {
         let mut bytes = Vec::new();
         codec::encode(&mut bytes, message)?;
@@ -87,7 +84,7 @@ impl RuntimeWriter {
             permit,
             deadline: Instant::now() + SEND_TIMEOUT,
             pending: Arc::clone(&self.pending),
-            sent,
+            restore,
         };
         self.queue
             .try_send(frame)
@@ -116,13 +113,14 @@ fn run(
             break;
         }
         let result = write_frame(&mut stream, &frame);
-        if let Some(reply) = &frame.sent {
-            let _ = reply.try_send(
-                result
-                    .as_ref()
-                    .map(|_| ())
-                    .map_err(|error| io::Error::new(error.kind(), error.to_string())),
-            );
+        if matches!(result, Ok(true)) && frame.restore {
+            let event = Event::WatchSent {
+                user: user.into(),
+                identity: Arc::clone(identity),
+            };
+            if !send_event(events, event, cancelled) {
+                break;
+            }
         }
         let message = match result {
             Ok(true) => continue,

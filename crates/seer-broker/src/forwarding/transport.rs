@@ -4,7 +4,7 @@ use crate::server::BrokerState;
 use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
 use seer_core::{TerminalFrame, Tree};
 use seer_net::{Socket, Stream};
-use std::collections::HashMap;
+use std::collections::{HashMap, VecDeque};
 use std::io;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -18,6 +18,7 @@ pub(super) struct RuntimeConnection {
     pub(super) tree: Tree,
     pub(super) frames: HashMap<String, TerminalFrame>,
     pub(super) terminals: Vec<TerminalInfo>,
+    pub(super) restoring: Option<VecDeque<String>>,
     reader: Option<ReaderTask>,
     writer: Option<RuntimeWriter>,
 }
@@ -63,6 +64,7 @@ impl RuntimeConnection {
             tree,
             frames: HashMap::new(),
             terminals,
+            restoring: None,
             reader: None,
             writer: None,
         };
@@ -137,6 +139,10 @@ impl Drop for RuntimeConnection {
 
 pub(super) enum Event {
     Client(io::Result<ClientMsg>),
+    WatchSent {
+        user: String,
+        identity: Arc<()>,
+    },
     Runtime {
         user: String,
         identity: Arc<()>,
