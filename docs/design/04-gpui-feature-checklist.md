@@ -35,15 +35,15 @@ When a PR decides or builds a row, it updates the row.
 | seer and seer attach open the people and terminals screen | README Commands, help | Placed: the desktop window. The commands stay. | T-448 |
 | Your own terminal shows live, with the colors that the program sets | README Open Seer | Placed: the main area. The terminal fills the main area. The owner removed the card. | T-448, T-464 |
 | Your terminals use your own files, tools, shell, and logins | README intro | No control. The shell starts as your login shell, also when the app starts from the Dock or a desktop launcher. | T-448 |
-| Type or paste into the selected terminal | README Open Seer, help Main screen | Placed: the selected terminal and the floating input bar. | R-449 |
-| All keys go to the terminal. Seer has no prefix key | README Open Seer, help Main screen | Placed: keyboard focus in the terminal area. R-449 decides which keys the window keeps for itself. The mockup uses Ctrl T, or Cmd T on macOS, for New terminal, and shells also use Ctrl T. | R-449 |
-| Select a terminal: click it, or j, k, and Enter in the session panel | README Open Seer, help | Placed: the vertical tabs in the sidebar. A press on a tab selects it. R-449 decides the keys. | T-464 for own terminals, R-450 for others |
-| Drag to select and copy text | README Open Seer | Placed: text selection in the terminal area. The terminal has no card, so R-449 decides where Copy and More go. R-449 decides how a drag shares the mouse with the program. | R-449 |
+| Type or paste into the selected terminal | README Open Seer, help Main screen | Placed: type in the selected own terminal. Paste uses Cmd V on macOS or Ctrl Shift V on Linux. The program can request bracketed paste. | R-449 |
+| All keys go to the terminal. Seer has no prefix key | README Open Seer, help Main screen | Placed: keyboard focus in the terminal area. Tab, Escape, and arrows reach the shell. Cmd Shift B on macOS or Ctrl Shift B on Linux focuses the sidebar; the title tooltip shows the shortcut. Copy, paste, and Shift Page Up/Down/Home/End are local terminal actions. | R-449 |
+| Select a terminal: click it, or j, k, and Enter in the session panel | README Open Seer, help | Placed: the vertical tabs in the sidebar. A press selects a tab. With sidebar focus, arrows select a terminal. Tab returns to terminal input; Shift Tab reaches the person control. | T-464 for own terminals, R-450 for others |
+| Drag to select and copy text | README Open Seer | Placed: drag selects text; Cmd C on macOS or Ctrl Shift C on Linux copies it. Mouse reports go to the program when requested. Shift permits selection and scrollback while mouse reports are active. The terminal has no card. | R-449 |
 | Terminal name from the foreground program. A shell is "shell" and "idle". Other programs are "busy" | README People | Placed: the tab name in the sidebar and the title above the terminal. The state dot in the sidebar. | T-464 for the name, R-450 for the dot |
 | The back row in the session panel returns to the overview | help | Not needed: the sidebar tabs stay on screen, so the window has no separate overview. | none |
 | Quit Seer: the quit row in the session panel, or q | README People, help | Placed: close the window. The shells continue. | T-448 |
 | The session panel: right click the top right control | README People, help | Not needed: each row of the panel has its own row in this list. | none |
-| Panel and menu keys: j, k, Enter, Esc, Space, n, x, q | help | Not needed: the window uses buttons and the dropdown. The dropdown takes the arrow keys, Enter, and Esc. R-449 decides the window shortcuts. | R-449 |
+| Panel and menu keys: j, k, Enter, Esc, Space, n, x, q | help | Not needed: the window uses controls and sidebar tabs. Terminal focus sends these keys to the shell. The title tooltip gives the shortcut to focus tabs; Tab returns. Escape clears sidebar tips. | R-449 |
 
 ## People and grants
 
@@ -57,7 +57,7 @@ When a PR decides or builds a row, it updates the row.
 | The terminals of a person in the person menu. Enter to watch | README People, help | Placed: the vertical tabs after you pick the person. | R-450 |
 | Your typing permission for the person you watch, in the first line of the picker | README People | No place yet. | R-451 |
 | Give or remove the "can type here" grant with Space in the person menu. The box changes when the room server confirms it | README People, help | No place yet. R-451 also decides how the window shows the confirmation. | R-451 |
-| With a grant, type and use the mouse in the terminals of another person | README People | Placed: the terminal area of that person, the same as for your own terminal. R-449 builds keys and mouse. R-451 decides how the window shows that you may type. | R-449, R-451 |
+| With a grant, type and use the mouse in the terminals of another person | README People | Placed: the terminal area of that person, the same as for your own terminal. R-449 builds own terminal keys and mouse. Remote input and its permission display remain for R-451. | R-449, R-451 |
 | seer perms --on: every person in the room can type into your terminals | README Commands, help | No place yet. The command stays. | R-453 |
 | seer perms --off: remove every grant | README People, README Commands, help | No place yet. The command stays. | R-453 |
 | seer peek NAME opens Seer with that person selected | README Commands, help | Placed: the command opens the window with that person picked in the dropdown. The command stays. | R-450 |

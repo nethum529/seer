@@ -20,3 +20,4 @@ Each file breaks one system into components, then compares.
 - 23-screen-data.md
 - 24-version-skew.md
 - 25-terminal-speed.md
+- 26-desktop-input.md

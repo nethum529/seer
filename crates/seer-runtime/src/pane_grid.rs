@@ -20,6 +20,7 @@ use crate::pty::lock_mutex;
 
 mod reflow;
 mod restore;
+mod selection;
 
 const SCROLLBACK_LINES: usize = 1_000;
 
@@ -208,12 +209,19 @@ impl PaneGrid {
         }
     }
 
-    pub(crate) fn modes(&self) -> TerminalModes {
+    pub fn modes(&self) -> TerminalModes {
         let mode = self.terminal.mode();
         TerminalModes {
             mouse_tracking: mouse_tracking(*mode),
             alt_screen: mode.contains(TermMode::ALT_SCREEN),
         }
+    }
+
+    #[must_use]
+    pub fn alternate_scroll(&self) -> bool {
+        self.terminal
+            .mode()
+            .contains(TermMode::ALT_SCREEN | TermMode::ALTERNATE_SCROLL)
     }
 
     fn handle_mouse(&mut self, mouse: seer_core::MouseInput, mode: TermMode) -> Option<Vec<u8>> {
@@ -304,9 +312,10 @@ fn to_u16(value: usize) -> u16 {
 
 fn encode_paste(text: &str, mode: TermMode) -> Vec<u8> {
     if mode.contains(TermMode::BRACKETED_PASTE) {
+        let text = text.replace(['\x1b', '\x03'], "");
         [b"\x1b[200~".as_slice(), text.as_bytes(), b"\x1b[201~"].concat()
     } else {
-        text.as_bytes().to_vec()
+        text.replace("\r\n", "\r").replace('\n', "\r").into_bytes()
     }
 }
 

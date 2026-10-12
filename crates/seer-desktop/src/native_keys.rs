@@ -1,0 +1,131 @@
+use std::ptr::{NonNull, null_mut};
+
+use block2::RcBlock;
+use gpui::{AppContext, Context, Keystroke, Modifiers, Window};
+use objc2::{rc::Retained, runtime::AnyObject};
+use objc2_app_kit::{NSEvent, NSEventMask, NSEventModifierFlags};
+
+use crate::window::SeerWindow;
+
+pub(crate) struct NativeKeys(Retained<AnyObject>);
+
+pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<NativeKeys> {
+    let view = cx.entity().downgrade();
+    let handle = window.window_handle();
+    let app = cx.to_async();
+    let block = RcBlock::new(move |event: NonNull<NSEvent>| {
+        // AppKit supplies a live event for the duration of this main-thread callback.
+        let native = unsafe { event.as_ref() };
+        let Some(key) = key(native) else {
+            return event.as_ptr();
+        };
+        let mut app = app.clone();
+        let handled = app
+            .update_window(handle, |_, window, cx| {
+                view.update(cx, |view, cx| {
+                    if !window.is_window_active() {
+                        return false;
+                    }
+                    if key.modifiers.platform {
+                        view.focus_tabs(window, cx);
+                        return true;
+                    }
+                    if !view.input.focus.is_focused(window) || view.input.composition.marked() {
+                        return false;
+                    }
+                    view.terminal_key(&key, cx);
+                    true
+                })
+                .unwrap_or(false)
+            })
+            .unwrap_or(false);
+        if handled { null_mut() } else { event.as_ptr() }
+    });
+    // The block returns the supplied live event or null; AppKit retains the copied block.
+    unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::KeyDown, &block) }
+        .map(NativeKeys)
+}
+
+impl Drop for NativeKeys {
+    fn drop(&mut self) {
+        // This token came from addLocalMonitor, and the view drops it on the main thread.
+        unsafe { NSEvent::removeMonitor(&self.0) };
+    }
+}
+
+fn key(event: &NSEvent) -> Option<Keystroke> {
+    let flags = event.modifierFlags();
+    let command = flags.contains(NSEventModifierFlags::Command);
+    let shift = flags.contains(NSEventModifierFlags::Shift);
+    let alt = flags.contains(NSEventModifierFlags::Option);
+    let control = flags.contains(NSEventModifierFlags::Control);
+    // GPUI 0.2.2 sends non-printing keys to AppKit first. AppKit consumes
+    // F20 and Option+Shift+Tab as text. Carbon virtual key codes do not vary by layout.
+    let key = if command {
+        // AppKit consumes Command Shift B before GPUI's key callback.
+        if event.keyCode() != 0x0b || !shift || alt {
+            return None;
+        }
+        "b".to_owned()
+    } else if let Some((_, key)) = KEYS.iter().find(|(code, _)| *code == event.keyCode()) {
+        (*key).to_owned()
+    } else if control {
+        event
+            .charactersIgnoringModifiers()?
+            .to_string()
+            .to_lowercase()
+    } else {
+        return None;
+    };
+    Some(Keystroke {
+        key,
+        // Alacritty uses NSEvent.characters after its default key bindings.
+        // GPUI omits this text when Control is held.
+        key_char: event.characters().map(|text| text.to_string()),
+        modifiers: Modifiers {
+            shift,
+            alt,
+            platform: command,
+            control,
+            ..Modifiers::default()
+        },
+    })
+}
+
+const KEYS: &[(u16, &str)] = &[
+    (0x24, "enter"),
+    (0x30, "tab"),
+    (0x33, "backspace"),
+    (0x35, "escape"),
+    (0x4c, "keypadenter"),
+    (0x72, "insert"),
+    (0x73, "home"),
+    (0x74, "pageup"),
+    (0x75, "delete"),
+    (0x77, "end"),
+    (0x79, "pagedown"),
+    (0x7b, "left"),
+    (0x7c, "right"),
+    (0x7d, "down"),
+    (0x7e, "up"),
+    (0x7a, "f1"),
+    (0x78, "f2"),
+    (0x63, "f3"),
+    (0x76, "f4"),
+    (0x60, "f5"),
+    (0x61, "f6"),
+    (0x62, "f7"),
+    (0x64, "f8"),
+    (0x65, "f9"),
+    (0x6d, "f10"),
+    (0x67, "f11"),
+    (0x6f, "f12"),
+    (0x69, "f13"),
+    (0x6b, "f14"),
+    (0x71, "f15"),
+    (0x6a, "f16"),
+    (0x40, "f17"),
+    (0x4f, "f18"),
+    (0x50, "f19"),
+    (0x5a, "f20"),
+];

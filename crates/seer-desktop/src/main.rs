@@ -5,7 +5,14 @@ use gpui::{
 
 mod assets;
 mod chrome;
+mod composition;
+mod input;
+mod keyboard;
 mod link;
+#[cfg(target_os = "macos")]
+mod native_frame;
+#[cfg(target_os = "macos")]
+mod native_keys;
 mod palette;
 mod screen;
 mod sidebar;
@@ -48,7 +55,13 @@ fn main() {
         // gpui on Wayland does not send the title from TitlebarOptions.
         let opened = cx.open_window(options, |window, cx| {
             window.set_window_title("Seer");
-            cx.new(|cx| SeerWindow::new(window, cx))
+            let view = cx.new(|cx| SeerWindow::new(window, cx));
+            #[cfg(target_os = "macos")]
+            view.update(cx, |view, cx| {
+                view.input._native_keys = native_keys::install(window, cx);
+                view.input.frame = native_frame::NativeFrame::new(window);
+            });
+            view
         });
         if let Err(error) = opened {
             eprintln!("seer: could not open the window: {error}");
