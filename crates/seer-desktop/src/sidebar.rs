@@ -6,6 +6,7 @@ use gpui::{
 };
 use seer_core::proto::TerminalInfo;
 
+use crate::cap_icon::cap_icon;
 use crate::chrome;
 use crate::palette;
 use crate::tip;
@@ -157,10 +158,10 @@ pub(crate) fn new_terminal(
     .text_color(rgb(palette::MUTED))
     .hover(|style| style.bg(rgb(palette::HOVER)).text_color(rgb(palette::TEXT)))
     .on_click(cx.listener(|view, _, _, cx| view.new_terminal(cx)))
-    .child(
+    .child(cap_icon(
         chrome::icon("plus", palette::MUTED)
             .group_hover("new-terminal", |style| style.text_color(rgb(palette::TEXT))),
-    )
+    ))
     .when(!compact, |row| row.child("New terminal"))
     .when(compact, |row| {
         row.w(px(32.)).mt(px(0.)).px(px(0.)).justify_center()
@@ -198,7 +199,7 @@ pub(crate) fn who(
     .items_center()
     .gap(px(7.))
     .rounded(px(8.))
-    .child(
+    .child(cap_icon(
         div()
             .flex_none()
             .size(px(avatar))
@@ -211,7 +212,7 @@ pub(crate) fn who(
             .line_height(relative(1.))
             .font_weight(FontWeight::SEMIBOLD)
             .child(letter),
-    )
+    ))
     .when(show_name, |who| {
         who.child(
             one_line(div().flex_1())
@@ -219,7 +220,7 @@ pub(crate) fn who(
                 .child(name.clone()),
         )
     })
-    .child(chrome::icon("selector", palette::FAINT))
+    .child(cap_icon(chrome::icon("selector", palette::FAINT)))
     .when(ring, |who| {
         who.child(outline())
             .child(tip::below(name.clone(), font.clone()))
@@ -276,7 +277,7 @@ pub(crate) fn strip(
             .when(on && ring, |tab| {
                 tab.child(outline()).child(tip::below(help, "Inter".into()))
             })
-            .child(chrome::status(&terminal.state))
+            .child(cap_icon(chrome::status(&terminal.state)))
             .child(rename::label(terminal, Surface::Strip, labels))
         }))
 }
@@ -330,7 +331,7 @@ fn tab(
     } else {
         palette::TEXT_2
     }))
-    .child(chrome::status(&terminal.state))
+    .child(cap_icon(chrome::status(&terminal.state)))
     .child(
         div()
             .flex_1()

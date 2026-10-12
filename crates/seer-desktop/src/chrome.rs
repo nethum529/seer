@@ -1,5 +1,6 @@
 use gpui::{Div, ParentElement, Styled, Svg, WindowControlArea, div, px, rgb, svg};
 
+use crate::cap_icon::cap_icon;
 use crate::palette;
 
 pub(crate) fn capitalize(name: &str) -> String {
@@ -24,7 +25,8 @@ pub(crate) fn status(state: &str) -> Svg {
         "waiting" => ("waiting", palette::WAITING),
         _ => ("idle", palette::FAINTER),
     };
-    icon(name, color)
+    // The runtime cannot distinguish working from waiting yet (T-481).
+    icon(name, color).invisible()
 }
 
 pub(crate) fn bar() -> Div {
@@ -80,7 +82,7 @@ pub(crate) fn room(room: &str, narrow: bool, compact: bool) -> Div {
         .items_center()
         .gap(px(if narrow { 8. } else { 10. }))
         .text_color(rgb(palette::MUTED))
-        .child(
+        .child(cap_icon(
             div()
                 .size(px(16.))
                 .when(narrow, |slot| slot.w(px(8.)))
@@ -95,11 +97,11 @@ pub(crate) fn room(room: &str, narrow: bool, compact: bool) -> Div {
                         .border(px(1.5))
                         .border_color(rgb(palette::FAINTER)),
                 ),
-        )
+        ))
         .when(!compact, |row| {
             row.child(crate::sidebar::one_line(div()).child(room.to_owned()))
         })
-        .child(icon("selector", palette::FAINT))
+        .child(cap_icon(icon("selector", palette::FAINT)))
 }
 
 pub(crate) fn settings() -> Div {
@@ -109,7 +111,7 @@ pub(crate) fn settings() -> Div {
         .flex()
         .items_center()
         .justify_center()
-        .child(icon("gear", palette::FAINT))
+        .child(cap_icon(icon("gear", palette::FAINT)))
 }
 
 pub(crate) fn footer(name: &str) -> Div {
