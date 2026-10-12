@@ -1,19 +1,19 @@
 use gpui::{Rgba, rgb};
 use seer_core::{Cell, Color};
 
-// The approved design uses gpui-component Default Dark.
 pub(crate) const WINDOW: u32 = 0x0a0a0a;
-pub(crate) const LINE: u32 = 0x262626;
-pub(crate) const HOVER: u32 = 0x171717;
-pub(crate) const PILL: u32 = 0x262626;
-pub(crate) const CHIP_2: u32 = 0x404040;
+pub(crate) const LINE: u32 = 0x1f1f1f;
+pub(crate) const HOVER: u32 = 0x131313;
+pub(crate) const SELECTED: u32 = 0x1c1c1c;
+pub(crate) const CHIP_2: u32 = 0x303030;
 pub(crate) const TEXT: u32 = 0xfafafa;
 pub(crate) const ACCENT: u32 = 0xfafafa;
 pub(crate) const ON_ACCENT: u32 = 0x171717;
 pub(crate) const TEXT_2: u32 = 0xd4d4d4;
 pub(crate) const MUTED: u32 = 0xa3a3a3;
-pub(crate) const FAINT: u32 = 0x737373;
-pub(crate) const FAINTER: u32 = 0x525252;
+pub(crate) const FAINT: u32 = 0x8a8a8a;
+pub(crate) const FAINTER: u32 = 0x6b6b6b;
+pub(crate) const WAITING: u32 = 0xfbbf24;
 
 const ANSI: [u32; 16] = [
     0x262626, 0xf87171, 0x4ade80, 0xfacc15, 0x60a5fa, 0xc084fc, 0x22d3ee, 0xd4d4d4, 0x737373,

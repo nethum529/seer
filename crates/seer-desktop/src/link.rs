@@ -81,10 +81,16 @@ pub(crate) struct Link {
     terminal: Terminal,
     woken: Arc<AtomicBool>,
     resyncing: bool,
+    room: String,
 }
 
 impl Link {
-    pub(crate) fn open(socket: Socket, tree: &Tree, user: String) -> io::Result<(Self, Messages)> {
+    pub(crate) fn open(
+        socket: Socket,
+        tree: &Tree,
+        user: String,
+        room: String,
+    ) -> io::Result<(Self, Messages)> {
         let reader = socket.clone();
         let mut link = Self {
             writer: Arc::new(Mutex::new(socket)),
@@ -96,6 +102,7 @@ impl Link {
             terminal: Terminal::default(),
             woken: Arc::default(),
             resyncing: false,
+            room,
         };
         link.send(&ClientMsg::TerminalCapabilities {
             capabilities: TerminalCapabilities {
@@ -164,6 +171,27 @@ impl Link {
 
     pub(crate) fn terminals(&self) -> &[TerminalInfo] {
         &self.terminals
+    }
+
+    pub(crate) fn room(&self) -> &str {
+        &self.room
+    }
+
+    pub(crate) fn new_terminal(&mut self) -> io::Result<()> {
+        let workspace = self
+            .target
+            .as_ref()
+            .map(|target| target.workspace.clone())
+            .or_else(|| {
+                self.tree
+                    .workspaces
+                    .first()
+                    .map(|workspace| workspace.id.clone())
+            });
+        if let Some(workspace) = workspace {
+            self.send(&ClientMsg::CreateTab { workspace })?;
+        }
+        Ok(())
     }
 
     pub(crate) fn shown(&self) -> Option<&str> {
