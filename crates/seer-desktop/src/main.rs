@@ -4,6 +4,7 @@ use gpui::{
 };
 
 mod assets;
+mod cap_icon;
 mod chrome;
 mod composition;
 mod input;
