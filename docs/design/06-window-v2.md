@@ -59,24 +59,39 @@ use the OFL, so Seer can bundle them.
 
 ## Tokens
 
-The hues stay neutral. Some steps change from
-crates/seer-desktop/src/palette.rs and from 05:
+T-479 replaces the near-black base with opaque charcoal layers. Research,
+measured product crops, and the full contrast matrix are in
+[Dark surface depth](07-surface-depth.md).
 
-| Token | 05 / palette.rs | v2 | Why |
+| Token | Before T-479 | Current | Role |
 | --- | --- | --- | --- |
-| line | #262626 | #1f1f1f | Quieter dividers |
-| line-2 | #404040 | #2a2a2a | Quieter menu and input borders |
-| hover | #171717 | #131313 | Hover is a hint, not a fill |
-| sel | none | #1c1c1c | Only the active row has a fill |
-| faint | #737373 | #8a8a8a | 4.18:1 failed; now 5.73:1 |
-| fainter | #525252 | #6b6b6b | Idle ring and offline dot now 3.72:1 |
-| attn | none | #fbbf24 | The only terminal state color (waiting) |
+| bg / WINDOW | #0a0a0a | #1b1b1b | Window and flush terminal base |
+| surface / SURFACE | #0a0a0a | #222222 | Sidebar, title bar, narrow tab strip |
+| hover | #131313 | #292929 | Quiet hover on chrome |
+| raised | #171717 | #2b2b2b | Menus, tooltips, sheets |
+| sel | #1c1c1c | #333333 | Active row |
+| chip | #262626 | #383838 | Menu hover, secondary controls |
+| chip-2 | #303030 | #404040 | Avatars, secondary control hover |
+| line | #1f1f1f | #3a3a3a | Structural dividers |
+| line-2 | #2a2a2a | #505050 | Menu and input edges |
+| text / accent | #fafafa | #fafafa | Titles and primary action fill |
+| text-2 | #d4d4d4 | #d4d4d4 | Default terminal text and menu labels |
+| muted | #a3a3a3 | #b8b8b8 | Task text |
+| faint | #8a8a8a | #adadad | Small metadata and hints |
+| fainter | #6b6b6b | #939393 | Idle rings and offline dots |
+| on-accent | #171717 | #171717 | Text on primary action fill |
+| attn | #fbbf24 | #fbbf24 | Waiting status |
 
-- All text pairs pass 4.5:1. Faint text is 5.73:1 on the window, 4.94:1 on
-  the active row, and 5.19:1 on menus. The full list of measured pairs is
-  in the skill log for this task.
-- Known gap (WCAG 1.4.11): input borders (#2a2a2a) are 1.38:1. We keep them.
-  A 3:1 border is about #626262, which is too heavy for this window.
+- Semantic text passes 4.5:1 on every fill it uses. The lowest pair is
+  faint on chip-2, 4.62:1. Default terminal text is 11.62:1.
+- Idle rings are 5.18:1 on chrome and 4.11:1 on the active row.
+- Structural dividers are 1.40:1 on chrome. Input edges are 2.14:1 on
+  bg; menu edges are 1.76:1 on raised. These improve the old levels.
+- The known WCAG 1.4.11 border exception remains: borders are below 3:1.
+- Tooltips use raised and text-2. Program-supplied terminal colors and
+  dim, hidden, and inverse attributes remain under the program's control.
+- No surface transparency, blur, or light appearance. The terminal stays
+  flush with no card, border, radius, margin, or second fill around it.
 
 ## Sidebar tab row
 

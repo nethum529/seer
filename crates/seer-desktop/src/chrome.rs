@@ -36,7 +36,7 @@ pub(crate) fn bar() -> Div {
         .h(px(44.))
         .flex()
         .items_center()
-        .bg(rgb(palette::WINDOW))
+        .bg(rgb(palette::SURFACE))
         .border_b_1()
         .border_color(rgb(palette::LINE))
         .window_control_area(WindowControlArea::Drag)
