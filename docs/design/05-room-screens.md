@@ -71,9 +71,8 @@ seer invite, join, list, leave, stop, start, and start --restore.
     terminals on this computer stop too."
   - Leave: "Your terminals on this computer stop. The room stays open for
     the others."
-  - Start a new room: "The 4 people of seer-dev are removed. You get a new
-    invite to send." After it, the invite sheet opens with the new invite,
-    like the CLI prints one on the first start.
+  - Start a new room: "The 4 people of seer-dev are removed."
+    The invite sheet belongs to R-454.
 - How Stop shows to the others: their own terminals keep running. The
   terminals of other people go away. A bar says "Room offline. Your
   terminals keep running." When the room comes back it says "Room back."

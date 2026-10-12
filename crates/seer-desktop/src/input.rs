@@ -80,6 +80,7 @@ impl SeerWindow {
     pub(crate) fn terminal(&self, screen: Screen, cx: &mut Context<Self>) -> Stateful<Div> {
         let mut area = div()
             .id("terminal")
+            .debug_selector(|| "terminal".into())
             .track_focus(&self.input.focus)
             .flex_1()
             .min_h_0()
@@ -211,6 +212,10 @@ impl SeerWindow {
     }
 
     fn mouse_down(&mut self, event: &MouseDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.room_blocks_terminal_pointer() {
+            cx.stop_propagation();
+            return;
+        }
         window.focus(&self.input.focus);
         self.keys.mode = Mode::Pointer;
         self.input.dragging = Some(event.button);
@@ -232,6 +237,9 @@ impl SeerWindow {
     }
 
     pub(crate) fn mouse_move(&mut self, event: &MouseMoveEvent, cx: &mut Context<Self>) {
+        if self.room_blocks_terminal_pointer() {
+            return;
+        }
         if self.input.dragging.is_none()
             && !self
                 .input
@@ -262,6 +270,9 @@ impl SeerWindow {
     }
 
     fn mouse_up(&mut self, event: &MouseUpEvent, cx: &mut Context<Self>) {
+        if self.room_blocks_terminal_pointer() {
+            return;
+        }
         let dragging = self.input.dragging.take();
         if dragging.is_some() && self.reporting(event.modifiers.shift) {
             self.mouse_report(
@@ -280,6 +291,10 @@ impl SeerWindow {
     }
 
     fn wheel(&mut self, event: &ScrollWheelEvent, cx: &mut Context<Self>) {
+        if self.room_blocks_terminal_pointer() {
+            cx.stop_propagation();
+            return;
+        }
         let Some(grid) = self.input.grid else {
             return;
         };

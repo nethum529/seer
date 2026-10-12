@@ -220,32 +220,11 @@ impl SeerWindow {
             .y
             .clamp(px(8.), (viewport.height - px(50.)).max(px(8.)));
         Some(
-            div()
-                .id("name-menu")
+            crate::menu::panel("name-menu", 184.)
                 .absolute()
                 .left(x)
                 .top(y)
-                .w(px(184.))
-                .p(px(4.))
                 .track_focus(&menu.focus)
-                .rounded(px(11.))
-                .border_1()
-                .border_color(rgb(palette::LINE_2))
-                .bg(rgb(palette::RAISED))
-                .shadow(vec![
-                    gpui::BoxShadow {
-                        color: gpui::rgba(0x00000080).into(),
-                        offset: point(px(0.), px(16.)),
-                        blur_radius: px(40.),
-                        spread_radius: px(0.),
-                    },
-                    gpui::BoxShadow {
-                        color: gpui::rgba(0x00000080).into(),
-                        offset: point(px(0.), px(2.)),
-                        blur_radius: px(8.),
-                        spread_radius: px(0.),
-                    },
-                ])
                 .on_mouse_down_out(cx.listener(|view, _, window, cx| view.dismiss_menu(window, cx)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_key_down(cx.listener(move |view, event: &KeyDownEvent, window, cx| {
@@ -265,19 +244,15 @@ impl SeerWindow {
 fn menu_item(menu: &Menu, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
     let pane = menu.pane.clone();
     let surface = menu.surface;
-    div()
-        .id("rename")
-        .h(px(32.))
-        .px(px(8.))
-        .rounded(px(6.))
-        .flex()
-        .items_center()
-        .gap(px(10.))
+    crate::menu::item("rename", 32.)
         .bg(rgb(palette::CHIP))
         .text_color(rgb(palette::TEXT))
         .font_weight(FontWeight::MEDIUM)
         .on_click(cx.listener(move |view, _, window, cx| view.rename(&pane, surface, window, cx)))
-        .child(chrome::icon("pencil", palette::TEXT_2))
+        .child(crate::cap_icon::cap_icon(chrome::icon(
+            "pencil",
+            palette::TEXT_2,
+        )))
         .child("Rename")
 }
 

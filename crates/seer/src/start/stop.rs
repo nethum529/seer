@@ -22,6 +22,13 @@ pub(crate) fn hosts_room(endpoint: &str) -> bool {
         .is_some_and(|config| serves(&config, endpoint) && live_broker(&config).is_some())
 }
 
+pub(crate) fn configured_room(endpoint: &str, name: &str) -> bool {
+    read_config()
+        .ok()
+        .flatten()
+        .is_some_and(|config| serves(&config, endpoint) && config.owner_name == name)
+}
+
 fn serves(config: &BrokerConfig, endpoint: &str) -> bool {
     config.published_addr == endpoint || config.listen.to_string() == endpoint
 }

@@ -159,17 +159,18 @@ measured product crops, and the full contrast matrix are in
 | What | Duration | Notes |
 | --- | --- | --- |
 | Tab switch, hover, rename | none | Instant |
-| Menu open | 150 ms | Opacity, scale .97 from the trigger |
-| Menu close | 80 ms | Same properties |
-| Sheet open | 200 ms | Centered, scale .97 |
-| Sheet close | 140 ms | |
-| Button press | 150 ms | Scale .96 |
+| Menu open | 150 ms | Opacity only |
+| Menu close | 80 ms | Opacity only |
+| Sheet open | 200 ms | Centered, opacity only |
+| Sheet close | 140 ms | Opacity only |
+| Button press | none | Immediate feedback, no scale |
 | Copy icon | 300 ms | Cross-fade, cubic-bezier(0.2, 0, 0, 1) |
 
 - Curve for all other motion: cubic-bezier(0.23, 1, 0.32, 1).
 - A menu or sheet that opens or closes from the keyboard has no motion.
   People use these keys many times a day.
-- Reduced motion: no scale. Opacity stays.
+- Scale is not used because GPUI 0.2.2 has no subtree transform.
+- Reduced motion: opacity stays. No layout, text size, or position animates.
 
 ## Owner decisions
 
