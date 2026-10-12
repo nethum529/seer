@@ -265,7 +265,7 @@ impl<'a> Coordinator<'a> {
             let mut runtime = self.connect_runtime(user)?;
             for ((target, pane), (size, viewer)) in &self.watches {
                 if target == user {
-                    runtime.send(&ClientMsg::Watch {
+                    runtime.restore_watch(&ClientMsg::Watch {
                         user: user.into(),
                         pane: pane.clone(),
                         cols: size.cols,

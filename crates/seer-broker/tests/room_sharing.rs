@@ -10,6 +10,8 @@ use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
 mod backpressure;
 #[path = "support/binary.rs"]
 mod binary;
+#[path = "room/reconnect.rs"]
+mod reconnect;
 #[path = "room/revocation.rs"]
 mod revocation;
 mod room;

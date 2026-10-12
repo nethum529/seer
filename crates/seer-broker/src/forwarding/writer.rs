@@ -27,6 +27,7 @@ struct Frame {
     permit: Option<Arc<Permit>>,
     deadline: Instant,
     pending: Arc<AtomicUsize>,
+    sent: Option<SyncSender<io::Result<()>>>,
 }
 
 impl Drop for Frame {
@@ -57,6 +58,22 @@ impl RuntimeWriter {
     }
 
     pub(super) fn send(&self, message: &ClientMsg, permit: Option<Arc<Permit>>) -> io::Result<()> {
+        self.enqueue(message, permit, None)
+    }
+
+    pub(super) fn restore_watch(&self, message: &ClientMsg) -> io::Result<()> {
+        let (reply, sent) = mpsc::sync_channel(1);
+        self.enqueue(message, None, Some(reply))?;
+        sent.recv_timeout(SEND_TIMEOUT)
+            .map_err(|_| io::Error::new(io::ErrorKind::TimedOut, "watch restore timed out"))?
+    }
+
+    fn enqueue(
+        &self,
+        message: &ClientMsg,
+        permit: Option<Arc<Permit>>,
+        sent: Option<SyncSender<io::Result<()>>>,
+    ) -> io::Result<()> {
         let mut bytes = Vec::new();
         codec::encode(&mut bytes, message)?;
         let size = bytes.len();
@@ -70,6 +87,7 @@ impl RuntimeWriter {
             permit,
             deadline: Instant::now() + SEND_TIMEOUT,
             pending: Arc::clone(&self.pending),
+            sent,
         };
         self.queue
             .try_send(frame)
@@ -98,6 +116,14 @@ fn run(
             break;
         }
         let result = write_frame(&mut stream, &frame);
+        if let Some(reply) = &frame.sent {
+            let _ = reply.try_send(
+                result
+                    .as_ref()
+                    .map(|_| ())
+                    .map_err(|error| io::Error::new(error.kind(), error.to_string())),
+            );
+        }
         let message = match result {
             Ok(true) => continue,
             Ok(false) => Ok(ServerMsg::Refused {

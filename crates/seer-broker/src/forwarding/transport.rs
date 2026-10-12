@@ -18,8 +18,8 @@ pub(super) struct RuntimeConnection {
     pub(super) tree: Tree,
     pub(super) frames: HashMap<String, TerminalFrame>,
     pub(super) terminals: Vec<TerminalInfo>,
-    reader: ReaderTask,
-    writer: RuntimeWriter,
+    reader: Option<ReaderTask>,
+    writer: Option<RuntimeWriter>,
 }
 
 impl RuntimeConnection {
@@ -30,7 +30,19 @@ impl RuntimeConnection {
         person: &PersonRecord,
         sender: &SyncSender<Event>,
     ) -> io::Result<Self> {
-        let mut stream = broker.runtimes().open(&person.user_id)?;
+        let stream = broker.runtimes().open(&person.user_id)?;
+        let result = Self::setup(stream.clone(), person, sender);
+        if result.is_err() {
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+        }
+        result
+    }
+
+    fn setup(
+        mut stream: Socket,
+        person: &PersonRecord,
+        sender: &SyncSender<Event>,
+    ) -> io::Result<Self> {
         stream.set_read_timeout(Some(Duration::from_secs(5)))?;
         stream.set_write_timeout(Some(Duration::from_secs(2)))?;
         codec::encode(&mut stream, &ClientMsg::ObserveRuntime)?;
@@ -45,31 +57,36 @@ impl RuntimeConnection {
         };
         stream.set_read_timeout(None)?;
         let identity = Arc::new(());
-        let reader = spawn_runtime_reader(
-            stream.clone(),
-            person.user_id.clone(),
-            Arc::clone(&identity),
-            sender.clone(),
-        );
-        let writer = RuntimeWriter::spawn(
-            stream.clone(),
-            person.user_id.clone(),
-            Arc::clone(&identity),
-            sender.clone(),
-        );
-        Ok(Self {
+        let mut connection = Self {
             stream,
             identity,
             tree,
             frames: HashMap::new(),
             terminals,
-            reader,
-            writer,
-        })
+            reader: None,
+            writer: None,
+        };
+        connection.reader = Some(spawn_runtime_reader(
+            connection.stream.clone(),
+            person.user_id.clone(),
+            Arc::clone(&connection.identity),
+            sender.clone(),
+        ));
+        connection.writer = Some(RuntimeWriter::spawn(
+            connection.stream.clone(),
+            person.user_id.clone(),
+            Arc::clone(&connection.identity),
+            sender.clone(),
+        ));
+        Ok(connection)
     }
 
     pub(super) fn send(&mut self, message: &ClientMsg) -> io::Result<()> {
-        self.writer.send(message, None)
+        self.writer()?.send(message, None)
+    }
+
+    pub(super) fn restore_watch(&mut self, message: &ClientMsg) -> io::Result<()> {
+        self.writer()?.restore_watch(message)
     }
 
     pub(super) fn send_granted(
@@ -77,7 +94,7 @@ impl RuntimeConnection {
         message: &ClientMsg,
         permit: Arc<crate::grants::Permit>,
     ) -> io::Result<()> {
-        self.writer.send(message, Some(permit))
+        self.writer()?.send(message, Some(permit))
     }
     pub(super) fn location(&self, pane: &str) -> io::Result<(String, String)> {
         self.tree
@@ -91,11 +108,30 @@ impl RuntimeConnection {
             })
             .ok_or_else(|| io::Error::other("terminal not found"))
     }
-    pub(super) fn close(self) -> io::Result<()> {
-        self.reader.cancel();
+    pub(super) fn close(mut self) -> io::Result<()> {
+        self.stop()
+    }
+
+    fn writer(&self) -> io::Result<&RuntimeWriter> {
+        self.writer
+            .as_ref()
+            .ok_or_else(|| io::Error::other("runtime connection is closed"))
+    }
+
+    fn stop(&mut self) -> io::Result<()> {
+        if let Some(reader) = &self.reader {
+            reader.cancel();
+        }
         let _ = self.stream.shutdown(std::net::Shutdown::Both);
-        self.writer.close()?;
-        self.reader.join()
+        let written = self.writer.take().map_or(Ok(()), RuntimeWriter::close);
+        let read = self.reader.take().map_or(Ok(()), ReaderTask::join);
+        written.and(read)
+    }
+}
+
+impl Drop for RuntimeConnection {
+    fn drop(&mut self) {
+        let _ = self.stop();
     }
 }
 
