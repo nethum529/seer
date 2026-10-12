@@ -124,6 +124,7 @@ mod tests {
                 .iter()
                 .map(|pane| TerminalInfo {
                     agent_state: None,
+                    agent_state_since: None,
                     title: None,
                     pane: pane.clone(),
                     name: "shell".into(),

@@ -15,6 +15,7 @@ use crate::link::{Event, Link, Messages, Terminal};
 use crate::palette;
 use crate::screen::{self, Rows, Screen};
 use crate::sidebar::{self, Keys, Mode};
+use crate::tab_time;
 use crate::tip;
 
 mod join;
@@ -42,6 +43,7 @@ pub(crate) struct SeerWindow {
     menu: Option<rename::Menu>,
     _messages: Option<Task<()>>,
     _join: Option<Subscription>,
+    _tab_time: Option<Task<()>>,
 }
 
 impl SeerWindow {
@@ -104,6 +106,7 @@ impl SeerWindow {
             menu: None,
             _messages: messages,
             _join: subscription,
+            _tab_time: Some(tab_time::refresh(cx)),
         }
     }
 

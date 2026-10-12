@@ -19,6 +19,7 @@ mod native_keys;
 mod palette;
 mod screen;
 mod sidebar;
+mod tab_time;
 mod tip;
 mod urls;
 mod window;

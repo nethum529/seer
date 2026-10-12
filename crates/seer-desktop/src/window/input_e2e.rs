@@ -106,6 +106,7 @@ fn desktop_keys_reach_the_local_shell(cx: &mut TestAppContext) {
             editing: None,
             _join: None,
             menu: None,
+            _tab_time: None,
             _messages: Some(cx.spawn(async move |view, cx| {
                 while let Some(event) = messages.next().await {
                     view.update(cx, |view, cx| view.receive(event, cx)).unwrap();
