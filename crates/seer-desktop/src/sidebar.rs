@@ -98,7 +98,7 @@ pub(crate) fn sidebar(
         .flex()
         .flex_col()
         .px(px(8.))
-        .bg(rgb(palette::WINDOW))
+        .bg(rgb(palette::SURFACE))
         .border_r_1()
         .border_color(rgb(palette::LINE))
         .child(
@@ -253,7 +253,7 @@ pub(crate) fn strip(
         .py(px(6.))
         .px(px(STRIP_PAD))
         .overflow_x_scroll()
-        .bg(rgb(palette::WINDOW))
+        .bg(rgb(palette::SURFACE))
         .border_b_1()
         .border_color(rgb(palette::LINE))
         .children(terminals.iter().map(|terminal| {
