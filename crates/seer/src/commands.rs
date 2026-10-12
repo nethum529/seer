@@ -15,6 +15,7 @@ pub(crate) use handshake::{Welcome, authenticate, hello};
 pub(crate) use selection::{attach_bare, peek, selected_server};
 mod exit;
 mod handshake;
+pub(crate) mod invitation;
 pub(crate) mod join;
 pub(crate) use join::run as join;
 mod lifecycle;
@@ -26,8 +27,6 @@ pub(crate) use restart::restart;
 mod selection;
 use selection::select_client;
 const NETWORK_TIMEOUT: Duration = Duration::from_secs(5);
-const INSTALL_URL: &str =
-    "https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh";
 
 #[derive(Debug)]
 pub(crate) struct CommandError {
@@ -93,28 +92,18 @@ pub(crate) fn invite(hours: Option<&str>) -> Result<(), CommandError> {
         })
         .transpose()?;
     let server = selected_server()?;
-    let (mut stream, _) = authenticate(&server)?;
-    send(&mut stream, &ClientMsg::Invite { hours })?;
-    match receive_reply(&mut stream)? {
-        ServerMsg::Seat {
-            capsule,
-            expires_in_secs,
-        } => {
-            let hours = expires_in_secs / 3_600;
-            let unit = if hours == 1 { "hour" } else { "hours" };
-            println!("Seat ready. It works once and expires in {hours} {unit}.");
-            println!("Send this to a friend:");
-            println!();
-            println!("Has Seer? Paste this in Terminal:");
-            println!("{}", join_line(&capsule));
-            println!();
-            println!("No Seer yet? Paste this instead:");
-            println!("curl -fsSL {INSTALL_URL} | sh -s -- {capsule}");
-            Ok(())
-        }
-        ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
-        _ => Err(unexpected_reply()),
-    }
+    let invitation = invitation::create(&server, hours)?;
+    let hours = invitation.expires_in_secs / 3_600;
+    let unit = if hours == 1 { "hour" } else { "hours" };
+    println!("Seat ready. It works once and expires in {hours} {unit}.");
+    println!("Send this to a friend:");
+    println!();
+    println!("Has Seer? Paste this in Terminal:");
+    println!("{}", invitation.join_line());
+    println!();
+    println!("No Seer yet? Paste this instead:");
+    println!("{}", invitation.install_line());
+    Ok(())
 }
 
 #[cfg(target_os = "linux")]

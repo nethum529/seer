@@ -70,7 +70,7 @@ When a PR decides or builds a row, it updates the row.
 | --- | --- | --- | --- |
 | Open a new terminal: the session panel, or n | README People, help | Placed: the New terminal button in the sidebar. | R-452 |
 | Close a terminal: the session panel, or x | README People, help | No place yet. The approved design has no close control. | R-452 |
-| Copy the join line from the session panel, and the first run hint that points to it | README People, help First run | No place yet. | R-454 |
+| Copy the join line from the session panel, and the first run hint that points to it | README People, help First run | Built: invite sheet with join and install lines, full clipboard copy, and copy feedback. Room menu entry waits for R-456. The first run hint stays separate. | R-454 |
 | The terminal app must permit clipboard access to copy the join line | README Good to know | Not needed: the window writes to the clipboard itself. | R-454 |
 
 ## Rooms
@@ -82,7 +82,7 @@ only. Linux action execution needs coordinator QA. Invites belong to R-454.
 | --- | --- | --- | --- |
 | seer start opens a new room on Linux and prints a join line. The people of the old room are removed | README Host a room, README Commands, help | Placed: Start a new room in the stopped host room menu, with a confirm sheet. Linux execution needs coordinator QA. The sheet does not promise a new invite. Invites belong to R-454. The command stays. | R-456, R-454 |
 | seer start --restore reopens the old room with its people | README Commands, help | Placed: Restore room in the stopped host room menu. It uses the CLI start path. Linux execution needs QA. The command stays. | R-456 |
-| seer invite --hours N makes a one use join line that lasts 1 to 168 hours | README Host a room, README Commands, help | No place yet. The command stays. | R-454 |
+| seer invite --hours N makes a one use join line that lasts 1 to 168 hours | README Host a room, README Commands, help | Built: invite sheet with 1 hour, 1 day, 7 days, and custom 1 to 168 hours. The sheet and CLI use the same invite request and line builder. Room menu entry waits for R-456. | R-454 |
 | seer join LINE, or seer join with no line to paste it at a prompt | README Join a room, README Commands, help | Placed: the first-run Join screen accepts an invite line or capsule. A seer://join/CAPSULE link opens the name step. The command stays. | T-455 |
 | The name prompt at join. Enter accepts the system user name | README Join a room | Placed: the Join screen selects the system user name. Enter accepts it; typing replaces it. | T-455 |
 | The install line that installs Seer and joins in one step | README Join a room | Placed: paste the install line into the Join screen. The command stays. | T-455 |

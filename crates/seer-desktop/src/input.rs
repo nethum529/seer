@@ -147,7 +147,7 @@ impl SeerWindow {
     }
 
     pub(crate) fn focus_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if !matches!(self.content, Content::Terminal(_, _)) {
+        if self.invite_open() || !matches!(self.content, Content::Terminal(_, _)) {
             return;
         }
         self.keys.mode = Mode::Keyboard;

@@ -24,6 +24,7 @@ impl SeerWindow {
                 }),
             );
         self._messages = None;
+        self.invite = None;
         self.content = Content::Join(join);
         self.room = RoomUi::new(None, cx);
         self.people_menu = None;

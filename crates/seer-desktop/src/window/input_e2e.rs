@@ -337,6 +337,7 @@ fn open_view<'a>(
             editing: None,
             menu: None,
             people_menu: None,
+            invite: None,
             _join: None,
             _tab_time: None,
             _messages: Some(cx.spawn(async move |view, cx| {

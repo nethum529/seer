@@ -7,6 +7,7 @@ mod commands;
 mod debug;
 mod desktop;
 mod input;
+mod invitation;
 mod local;
 mod panels;
 mod person_menu;
@@ -30,6 +31,7 @@ mod version_skew;
 mod viewer;
 
 pub use commands::join::{Invitation, JoinError, system_user_name};
+pub use invitation::{IssuedInvite, create_invite};
 pub use local::attach;
 pub use store::{ServerEntry, ServerStore};
 

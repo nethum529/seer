@@ -18,6 +18,7 @@ use crate::sidebar::{self, Keys, Mode};
 use crate::tab_time;
 use crate::tip;
 
+mod invite;
 mod join;
 mod paint;
 mod people;
@@ -47,6 +48,7 @@ pub(crate) struct SeerWindow {
     editing: Option<rename::Editing>,
     menu: Option<rename::Menu>,
     people_menu: Option<people::Menu>,
+    invite: Option<invite::OpenSheet>,
     _messages: Option<Task<()>>,
     _join: Option<Subscription>,
     _tab_time: Option<Task<()>>,
@@ -106,6 +108,7 @@ impl SeerWindow {
             editing: None,
             menu: None,
             people_menu: None,
+            invite: None,
             _messages: None,
             _join: subscription,
             _tab_time: Some(tab_time::refresh(cx)),
@@ -210,6 +213,9 @@ impl SeerWindow {
     }
 
     fn travel(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+        if self.invite.is_some() {
+            return;
+        }
         if matches!(self.content, Content::Join(_)) {
             if keystroke.key == "tab" {
                 if keystroke.modifiers.shift {
