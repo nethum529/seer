@@ -8,8 +8,11 @@ use seer_core::proto::{ClientMsg, ServerMsg};
 use std::io;
 
 pub(crate) fn leave() -> Result<(), CommandError> {
-    let server = selected_server()?;
-    let (mut stream, _) = authenticate(&server)?;
+    leave_room(&selected_server()?)
+}
+
+pub(crate) fn leave_room(server: &ServerEntry) -> Result<(), CommandError> {
+    let (mut stream, _) = authenticate(server)?;
     send(&mut stream, &ClientMsg::Leave)?;
     wait_for_completion(&mut stream, |reply| matches!(reply, ServerMsg::Bye { .. }))?;
     let mut store = ServerStore::load().map_err(CommandError::system)?;
@@ -33,8 +36,11 @@ pub(crate) fn stop() -> Result<(), CommandError> {
         println!("Room server stopped.");
         return Ok(());
     }
-    let server = selected_server()?;
-    match stop_room(&server) {
+    stop_selected_room(&selected_server()?)
+}
+
+pub(crate) fn stop_selected_room(server: &ServerEntry) -> Result<(), CommandError> {
+    match stop_room(server) {
         Ok(()) => {}
         // Issues 419 and 436: a room server from before seer update refuses
         // the new Seer or closes the link with no answer to Stop. When this

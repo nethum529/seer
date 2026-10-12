@@ -73,7 +73,7 @@ pub(crate) fn lights() -> Div {
     lights
 }
 
-pub(crate) fn room(room: &str, narrow: bool, compact: bool) -> Div {
+pub(crate) fn room(room: &str, narrow: bool, compact: bool, up: bool) -> Div {
     use gpui::prelude::FluentBuilder;
     div()
         .h(px(32.))
@@ -92,13 +92,7 @@ pub(crate) fn room(room: &str, narrow: bool, compact: bool) -> Div {
                 .flex()
                 .items_center()
                 .justify_center()
-                .child(
-                    div()
-                        .size(px(8.))
-                        .rounded_full()
-                        .border(px(1.5))
-                        .border_color(rgb(palette::FAINTER)),
-                ),
+                .child(room_dot(up)),
         ))
         .when(!compact, |row| {
             row.child(crate::sidebar::one_line(div()).child(room.to_owned()))
@@ -116,7 +110,7 @@ pub(crate) fn settings() -> Div {
         .child(cap_icon(icon("gear", palette::FAINT)))
 }
 
-pub(crate) fn footer(name: &str) -> Div {
+pub(crate) fn footer(room: impl gpui::IntoElement) -> Div {
     div()
         .flex_none()
         .h(px(44.))
@@ -128,6 +122,17 @@ pub(crate) fn footer(name: &str) -> Div {
         .border_t_1()
         .border_color(rgb(palette::LINE))
         .text_color(rgb(palette::MUTED))
-        .child(room(name, false, false).flex_1())
+        .child(div().flex_1().min_w_0().flex().items_center().child(room))
         .child(settings())
+}
+
+pub(crate) fn room_dot(up: bool) -> Div {
+    use gpui::prelude::FluentBuilder;
+    div()
+        .size(px(if up { 6. } else { 8. }))
+        .rounded_full()
+        .when(up, |dot| dot.bg(rgb(palette::ONLINE)))
+        .when(!up, |dot| {
+            dot.border(px(1.5)).border_color(rgb(palette::FAINTER))
+        })
 }

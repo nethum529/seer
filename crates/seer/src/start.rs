@@ -8,7 +8,7 @@ mod stop;
 #[cfg(target_os = "linux")]
 pub(crate) use restore::restore_owner;
 #[cfg(target_os = "linux")]
-pub(crate) use stop::{hosts_room, stop_hosted_broker, stop_hosted_room};
+pub(crate) use stop::{configured_room, hosts_room, stop_hosted_broker, stop_hosted_room};
 #[cfg(target_os = "macos")]
 pub(crate) fn hosts_room(_endpoint: &str) -> bool {
     false
@@ -66,7 +66,7 @@ pub fn run(restore: bool) -> ExitCode {
 }
 
 #[cfg(target_os = "linux")]
-fn run_linux(restore: bool) -> io::Result<()> {
+pub(crate) fn run_linux(restore: bool) -> io::Result<()> {
     let config_dir = config_dir()?;
     secure_directory(&config_dir)?;
     let config_path = config_dir.join("broker.toml");

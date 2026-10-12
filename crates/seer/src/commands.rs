@@ -18,7 +18,7 @@ mod handshake;
 pub(crate) mod join;
 pub(crate) use join::run as join;
 mod lifecycle;
-pub(crate) use lifecycle::{leave, perms, stop};
+pub(crate) use lifecycle::{leave, leave_room, perms, stop, stop_selected_room};
 mod ps;
 pub(crate) use ps::{PsAction, ps};
 mod restart;
@@ -132,27 +132,18 @@ pub(crate) fn list() -> Result<(), CommandError> {
 }
 
 fn list_server(server: &ServerEntry) -> Vec<String> {
-    let (state, people) = match people(server) {
-        Ok(people) => {
-            let attached = people
-                .iter()
-                .find(|person| person.user_id == server.user_id)
-                .is_some_and(|person| person.attached_clients > 1);
-            let mut sorted: Vec<&Person> = people.iter().collect();
-            sorted.sort_unstable_by_key(|person| person.name.to_ascii_lowercase());
-            let entries: Vec<String> = sorted.into_iter().map(describe_person).collect();
-            (
-                if attached { "attached" } else { "detached" },
-                entries.join(", "),
-            )
-        }
-        Err(_) => ("unreachable", String::new()),
-    };
+    let room = crate::rooms::inspect_room(server.clone());
+    let mut people: Vec<_> = room.people.iter().collect();
+    people.sort_unstable_by_key(|person| person.name.to_ascii_lowercase());
     vec![
         server.alias.clone(),
         server.name.clone(),
-        state.to_owned(),
-        people,
+        room.state.label().to_owned(),
+        people
+            .into_iter()
+            .map(describe_person)
+            .collect::<Vec<_>>()
+            .join(", "),
     ]
 }
 
@@ -235,7 +226,7 @@ fn edit_distance_at_most_one(left: &[u8], right: &[u8]) -> bool {
     differences == 0 || long_index == longer.len()
 }
 
-fn people(server: &ServerEntry) -> Result<Vec<Person>, CommandError> {
+pub(crate) fn people(server: &ServerEntry) -> Result<Vec<Person>, CommandError> {
     let (mut stream, _) = authenticate(server)?;
     send(&mut stream, &ClientMsg::ListPeople)?;
     people_reply(receive_reply(&mut stream)?)

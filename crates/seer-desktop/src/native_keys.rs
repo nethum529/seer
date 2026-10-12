@@ -26,6 +26,9 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                     if !window.is_window_active() {
                         return false;
                     }
+                    if view.room_key(&key, window, cx) {
+                        return true;
+                    }
                     if key.modifiers.platform {
                         view.focus_tabs(window, cx);
                         return true;

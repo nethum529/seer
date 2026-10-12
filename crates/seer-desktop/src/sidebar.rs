@@ -398,7 +398,7 @@ fn selectable(
 
 // The design draws the focus ring as a 1 px outline with a -1 px offset, so
 // the ring sits on the inner edge of the tab.
-fn outline() -> Div {
+pub(crate) fn outline() -> Div {
     div()
         .absolute()
         .inset_0()

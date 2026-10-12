@@ -18,6 +18,11 @@ pub(crate) const MUTED: u32 = 0xb8b8b8;
 pub(crate) const FAINT: u32 = 0xadadad;
 pub(crate) const FAINTER: u32 = 0x939393;
 pub(crate) const WAITING: u32 = 0xfbbf24;
+pub(crate) const ONLINE: u32 = 0x4ade80;
+pub(crate) const DANGER: u32 = 0xf87171;
+pub(crate) const DANGER_HOVER: u32 = 0x393030;
+pub(crate) const SHADOW: u32 = 0x00000080;
+pub(crate) const SCRIM: u32 = 0x0000008c;
 
 const ANSI: [u32; 16] = [
     0x262626, 0xf87171, 0x4ade80, 0xfacc15, 0x60a5fa, 0xc084fc, 0x22d3ee, 0xd4d4d4, 0x737373,
