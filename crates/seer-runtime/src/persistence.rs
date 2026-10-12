@@ -40,8 +40,21 @@ fn restore_session(
     user: String,
     shell: String,
     path: std::path::PathBuf,
-    snapshot: Snapshot,
+    mut snapshot: Snapshot,
 ) -> io::Result<UserSession> {
+    // Older runtimes used "shell" as the default title, not a custom name.
+    if !snapshot.named_terminals {
+        for tab in snapshot
+            .tree
+            .workspaces
+            .iter_mut()
+            .flat_map(|workspace| &mut workspace.tabs)
+        {
+            if tab.title == "shell" {
+                tab.title.clear();
+            }
+        }
+    }
     let mut session = UserSession {
         published_terminals: Vec::new(),
         user,

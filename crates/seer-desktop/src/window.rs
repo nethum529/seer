@@ -17,6 +17,9 @@ use crate::screen::{self, Rows, Screen};
 use crate::sidebar::{self, Keys, Mode};
 use crate::tip;
 
+pub(crate) mod rename;
+use rename::Surface;
+
 const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";
 const LINK_LOST: &str = "The link to your terminals stopped. Open Seer again.";
 // The design's narrow layout starts below this window width.
@@ -34,6 +37,8 @@ pub(crate) struct SeerWindow {
     pub(crate) keys: Keys,
     pub(crate) input: Input,
     rows: Rows,
+    editing: Option<rename::Editing>,
+    menu: Option<rename::Menu>,
     _messages: Option<Task<()>>,
 }
 
@@ -78,8 +83,14 @@ impl SeerWindow {
             keys,
             input,
             rows: Rows::default(),
+            editing: None,
+            menu: None,
             _messages: messages,
         }
+    }
+
+    pub(crate) fn keys_mode_pointer(&mut self) {
+        self.keys.mode = Mode::Pointer;
     }
 
     pub(crate) fn screen(&mut self) -> Option<(&Terminal, &mut Rows)> {
@@ -120,7 +131,19 @@ impl SeerWindow {
         self.check(result, cx);
     }
 
-    pub(crate) fn key(&mut self, keystroke: &Keystroke, cx: &mut Context<Self>) {
+    pub(crate) fn key(
+        &mut self,
+        keystroke: &Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        if self.rename_key(keystroke, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
+        if !self.keys.tabs.is_focused(window) {
+            return;
+        }
         let Content::Terminal(link, _) = &self.content else {
             return;
         };
@@ -155,7 +178,7 @@ impl SeerWindow {
             cx.stop_propagation();
             return;
         }
-        if self.input.focus.is_focused(window) {
+        if self.input.focus.is_focused(window) || self.editing.is_some() || self.menu.is_some() {
             return;
         }
         self.keys.mode = match keystroke.key.as_str() {
@@ -238,6 +261,7 @@ impl Render for SeerWindow {
         }
         let root = div()
             .size_full()
+            .relative()
             .flex()
             .bg(rgb(palette::WINDOW))
             .font_family(self.ui_font.clone())
@@ -267,89 +291,103 @@ impl Render for SeerWindow {
             Content::Terminal(link, name) => (link, name),
         };
         let name: SharedString = chrome::capitalize(name).into();
+        let labels = rename::Labels::new(self.editing.as_ref(), self.menu.as_ref());
         let terminals = link.terminals();
         let shown = link.shown();
         let terminal = self.terminal(Screen::new(cx.entity(), self.font.clone()), cx);
         if window.viewport_size().width < px(NARROW) {
-            return root.child(
+            return root
+                .child(
+                    div()
+                        .flex_1()
+                        .min_w_0()
+                        .flex()
+                        .flex_col()
+                        .child(
+                            chrome::bar()
+                                .gap(px(8.))
+                                .pl(px(14.))
+                                .pr(px(8.))
+                                .child(chrome::lights())
+                                .child(
+                                    sidebar::who(
+                                        &name,
+                                        20.,
+                                        11.,
+                                        window.viewport_size().width >= px(480.),
+                                        &self.ui_font,
+                                        &self.keys,
+                                        window,
+                                    )
+                                    .min_w_0()
+                                    .h(px(32.))
+                                    .pl(px(5.))
+                                    .pr(px(6.)),
+                                )
+                                .child(div().flex_1())
+                                .child(
+                                    div()
+                                        .min_w_0()
+                                        .flex()
+                                        .items_center()
+                                        .gap(px(2.))
+                                        .child(chrome::room(
+                                            link.room(),
+                                            true,
+                                            window.viewport_size().width < px(480.),
+                                        ))
+                                        .child(sidebar::new_terminal(&self.keys, true, window, cx))
+                                        .child(chrome::settings()),
+                                ),
+                        )
+                        .when(!terminals.is_empty(), |main| {
+                            main.child(sidebar::strip(
+                                terminals, shown, labels, &self.keys, window, cx,
+                            ))
+                        })
+                        .child(terminal),
+                )
+                .children(self.menu(window, cx));
+        }
+        let title = terminals
+            .iter()
+            .find(|terminal| Some(terminal.pane.as_str()) == shown)
+            .cloned();
+        let who = sidebar::who(&name, 22., 11., true, &self.ui_font, &self.keys, window);
+        let side = sidebar::sidebar(who, terminals, shown, labels, &self.keys, window, cx)
+            .child(chrome::footer(link.room()));
+        let title = heading(title.as_ref(), labels, &self.ui_font, self.keys.hover(), cx);
+        root.child(side)
+            .child(
                 div()
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(
-                        chrome::bar()
-                            .gap(px(8.))
-                            .pl(px(14.))
-                            .pr(px(8.))
-                            .child(chrome::lights())
-                            .child(
-                                sidebar::who(
-                                    &name,
-                                    20.,
-                                    11.,
-                                    window.viewport_size().width >= px(480.),
-                                    &self.ui_font,
-                                    &self.keys,
-                                    window,
-                                )
-                                .min_w_0()
-                                .h(px(32.))
-                                .pl(px(5.))
-                                .pr(px(6.)),
-                            )
-                            .child(div().flex_1())
-                            .child(
-                                div()
-                                    .min_w_0()
-                                    .flex()
-                                    .items_center()
-                                    .gap(px(2.))
-                                    .child(chrome::room(
-                                        link.room(),
-                                        true,
-                                        window.viewport_size().width < px(480.),
-                                    ))
-                                    .child(sidebar::new_terminal(&self.keys, true, window, cx))
-                                    .child(chrome::settings()),
-                            ),
-                    )
-                    .when(!terminals.is_empty(), |main| {
-                        main.child(sidebar::strip(terminals, shown, &self.keys, window, cx))
-                    })
+                    .child(chrome::bar().justify_center().px(px(14.)).child(title))
                     .child(terminal),
-            );
-        }
-        let title = terminals
-            .iter()
-            .find(|terminal| Some(terminal.pane.as_str()) == shown)
-            .map(|terminal| terminal.name.clone());
-        let who = sidebar::who(&name, 22., 11., true, &self.ui_font, &self.keys, window);
-        let side = sidebar::sidebar(who, terminals, shown, &self.keys, window, cx)
-            .child(chrome::footer(link.room()));
-        let title = heading(title, &self.ui_font, self.keys.hover());
-        root.child(side).child(
-            div()
-                .flex_1()
-                .min_w_0()
-                .flex()
-                .flex_col()
-                .child(chrome::bar().justify_center().px(px(14.)).child(title))
-                .child(terminal),
-        )
+            )
+            .children(self.menu(window, cx))
     }
 }
 
-fn heading(terminal: Option<String>, font: &SharedString, hover: bool) -> Stateful<Div> {
+fn heading(
+    terminal: Option<&seer_core::proto::TerminalInfo>,
+    labels: rename::Labels<'_>,
+    font: &SharedString,
+    hover: bool,
+    cx: &mut Context<SeerWindow>,
+) -> Stateful<Div> {
     let title: SharedString = terminal
-        .map(|name| chrome::capitalize(&name))
+        .map(rename::display_name)
         .unwrap_or_default()
         .into();
+    let pane = terminal.map(|terminal| terminal.pane.clone());
     tip::on_hover(
         div().id("title"),
         tip::terminal_help(&title),
         font.clone(),
-        hover,
+        hover && !terminal.is_some_and(|terminal| labels.active(terminal)),
     )
     .max_w(px(520.))
     .h(px(28.))
@@ -358,7 +396,18 @@ fn heading(terminal: Option<String>, font: &SharedString, hover: bool) -> Statef
     .flex()
     .items_center()
     .font_weight(FontWeight::MEDIUM)
-    .child(sidebar::one_line(div()).child(title))
+    .on_mouse_down(
+        MouseButton::Left,
+        cx.listener(move |view, event: &gpui::MouseDownEvent, window, cx| {
+            if event.click_count == 2
+                && let Some(pane) = &pane
+            {
+                cx.stop_propagation();
+                view.rename(pane, Surface::Title, window, cx);
+            }
+        }),
+    )
+    .children(terminal.map(|terminal| rename::label(terminal, Surface::Title, labels)))
 }
 
 #[cfg(test)]

@@ -13,7 +13,6 @@ use std::io;
 const DEFAULT_COLS: u16 = 80;
 const DEFAULT_ROWS: u16 = 24;
 const DEFAULT_WORKSPACE: &str = "main";
-const DEFAULT_TAB_TITLE: &str = "shell";
 
 pub struct UserSession {
     pub user: String,
@@ -39,80 +38,6 @@ impl UserSession {
             },
             pane_hosts: BTreeMap::new(),
             store: None,
-        }
-    }
-
-    pub fn apply(&mut self, msg: ClientMsg) -> io::Result<Vec<ServerMsg>> {
-        match msg {
-            ClientMsg::CreateTab { workspace } => self.create_tab(&workspace),
-            ClientMsg::SplitPane {
-                workspace,
-                tab,
-                direction,
-            } => self.split_pane(&workspace, &tab, direction),
-            ClientMsg::ClosePane {
-                workspace,
-                tab,
-                pane,
-            } => self.close_pane(&workspace, &tab, &pane),
-            ClientMsg::FocusPane {
-                workspace,
-                tab,
-                pane,
-            } => self.focus_pane(&workspace, &tab, &pane),
-            ClientMsg::TerminalCapabilities { capabilities } => {
-                validate_capabilities(capabilities).map(|()| Vec::new())
-            }
-            ClientMsg::GrantedMouse {
-                workspace,
-                tab,
-                pane,
-                mouse,
-                sender,
-            } => self.granted_mouse(&workspace, &tab, &pane, mouse, sender),
-            ClientMsg::GrantedInput {
-                workspace,
-                tab,
-                pane,
-                bytes,
-                sender,
-            } => self.granted_input(&workspace, &tab, &pane, &bytes, sender),
-            ClientMsg::TerminalInput {
-                workspace,
-                tab,
-                pane,
-                input,
-            } => self.terminal_input(&workspace, &tab, &pane, &input),
-            ClientMsg::Resize {
-                workspace,
-                tab,
-                cols,
-                rows,
-            } => self.resize(&workspace, &tab, cols, rows),
-            ClientMsg::Hello { .. }
-            | ClientMsg::Join { .. }
-            | ClientMsg::Invite { .. }
-            | ClientMsg::ListPeople
-            | ClientMsg::QueryStatus
-            | ClientMsg::DetachClient { .. }
-            | ClientMsg::ExitClient { .. }
-            | ClientMsg::AttachRuntime
-            | ClientMsg::ObserveRuntime
-            | ClientMsg::PublishRuntime { .. }
-            | ClientMsg::RuntimeStream { .. }
-            | ClientMsg::QueryTargets { .. }
-            | ClientMsg::Watch { .. }
-            | ClientMsg::Unwatch { .. }
-            | ClientMsg::Resync { .. }
-            | ClientMsg::Parsed { .. }
-            | ClientMsg::Terminals { .. }
-            | ClientMsg::SetAllGrants { .. }
-            | ClientMsg::SetGrant { .. }
-            | ClientMsg::MouseInto { .. }
-            | ClientMsg::TypeInto { .. }
-            | ClientMsg::Stop
-            | ClientMsg::Leave
-            | ClientMsg::Detach => Ok(Vec::new()),
         }
     }
 
@@ -227,7 +152,7 @@ impl UserSession {
     fn create_tab(&mut self, workspace: &str) -> io::Result<Vec<ServerMsg>> {
         let tab = self
             .tree
-            .create_tab(workspace, DEFAULT_TAB_TITLE, self.viewport)
+            .create_tab(workspace, "", self.viewport)
             .map_err(tree_error)?;
         let pane = tab
             .layout
@@ -497,3 +422,5 @@ mod tests;
 pub(crate) mod terminals;
 
 mod lifecycle;
+
+mod apply;
