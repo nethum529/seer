@@ -1,3 +1,4 @@
+use super::writer::RuntimeWriter;
 use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
@@ -18,6 +19,7 @@ pub(super) struct RuntimeConnection {
     pub(super) frames: HashMap<String, TerminalFrame>,
     pub(super) terminals: Vec<TerminalInfo>,
     reader: ReaderTask,
+    writer: RuntimeWriter,
 }
 
 impl RuntimeConnection {
@@ -49,6 +51,12 @@ impl RuntimeConnection {
             Arc::clone(&identity),
             sender.clone(),
         );
+        let writer = RuntimeWriter::spawn(
+            stream.clone(),
+            person.user_id.clone(),
+            Arc::clone(&identity),
+            sender.clone(),
+        );
         Ok(Self {
             stream,
             identity,
@@ -56,11 +64,20 @@ impl RuntimeConnection {
             frames: HashMap::new(),
             terminals,
             reader,
+            writer,
         })
     }
 
     pub(super) fn send(&mut self, message: &ClientMsg) -> io::Result<()> {
-        codec::encode(&mut self.stream, message)
+        self.writer.send(message, None)
+    }
+
+    pub(super) fn send_granted(
+        &mut self,
+        message: &ClientMsg,
+        permit: Arc<crate::grants::Permit>,
+    ) -> io::Result<()> {
+        self.writer.send(message, Some(permit))
     }
     pub(super) fn location(&self, pane: &str) -> io::Result<(String, String)> {
         self.tree
@@ -77,6 +94,7 @@ impl RuntimeConnection {
     pub(super) fn close(self) -> io::Result<()> {
         self.reader.cancel();
         let _ = self.stream.shutdown(std::net::Shutdown::Both);
+        self.writer.close()?;
         self.reader.join()
     }
 }
@@ -169,7 +187,7 @@ impl ReaderTask {
     }
 }
 
-fn send_event(sender: &SyncSender<Event>, event: Event, cancelled: &AtomicBool) -> bool {
+pub(super) fn send_event(sender: &SyncSender<Event>, event: Event, cancelled: &AtomicBool) -> bool {
     let mut pending = event;
     loop {
         match sender.try_send(pending) {

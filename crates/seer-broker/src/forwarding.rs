@@ -14,6 +14,7 @@ use crate::server::BrokerState;
 mod input;
 mod transport;
 mod unreadable;
+mod writer;
 use transport::{Event, ReaderTask, RuntimeConnection, spawn_client_reader};
 use unreadable::Unreadable;
 

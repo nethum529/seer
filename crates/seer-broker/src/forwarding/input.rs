@@ -114,16 +114,9 @@ impl Coordinator<'_> {
         let runtime = self.runtime(user)?;
         let (workspace, tab) = runtime.location(pane)?;
         let message = message(workspace, tab, owner.name.clone());
-        if broker
-            .grants
-            .while_permitted(user, &owner.user_id, || runtime.send(&message))?
-        {
-            Ok(())
-        } else {
-            Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "Control was revoked",
-            ))
-        }
+        let permit = broker.grants.permit(user, &owner.user_id)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::PermissionDenied, "Control was revoked")
+        })?;
+        runtime.send_granted(&message, permit)
     }
 }

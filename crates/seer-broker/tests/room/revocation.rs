@@ -41,40 +41,8 @@ fn revoked_during_setup(message: impl FnOnce(String) -> ClientMsg) {
     let mut room = Room::start(false);
     let mut window = room.publish_to("127.0.0.1:0", "alice", ALICE_SECRET);
     let at = first_terminal(&own_tree(&mut window));
-    let capture = room.root.join("input");
-    let script = room.root.join("capture.py");
-    fs::write(
-        &script,
-        format!(
-            "import os,tty\ntty.setraw(0)\nf=open('{}','ab',buffering=0)\nos.write(1,b'\\x1b[?1000;1006hReady451')\nwhile True:\n f.write(os.read(0,4096))\n",
-            capture.display()
-        ),
-    )
-    .unwrap();
-    type_locally(
-        &mut window,
-        &at,
-        &format!("exec python3 -u '{}'\n", script.display()),
-    );
-    loop {
-        if let ServerMsg::Cells { frame, .. } = decode(&mut window)
-            && frame_text(&frame).contains("Ready451")
-        {
-            break;
-        }
-    }
-    let mut publisher = TcpStream::connect(room.address).unwrap();
-    publisher.set_read_timeout(Some(WAIT)).unwrap();
-    send(
-        &mut publisher,
-        &ClientMsg::PublishRuntime {
-            user_id: "alice".into(),
-            credential: ALICE_SECRET.into(),
-            version: env!("CARGO_PKG_VERSION").into(),
-            generation: "delayed".into(),
-        },
-    );
-    wait_for(&mut publisher, |m| matches!(m, ServerMsg::Published { .. }));
+    let capture = start_capture(&room, &mut window, &at, "alice");
+    let mut publisher = publish_delayed(&room);
     let mut alice = join_room(room.address, "alice", ALICE_SECRET);
     let mut bob = join_room(room.address, "bob", BOB_SECRET);
     send(
@@ -124,7 +92,56 @@ fn revoked_during_setup(message: impl FnOnce(String) -> ClientMsg) {
     assert!(fs::read(&capture).unwrap().is_empty());
 }
 
-fn pending_viewer(publisher: &mut TcpStream, address: std::net::SocketAddr) -> TcpStream {
+pub(super) fn start_capture(
+    room: &Room,
+    window: &mut UnixStream,
+    at: &Location,
+    user: &str,
+) -> std::path::PathBuf {
+    let capture = room.root.join(user).join("input");
+    let script = room.root.join(user).join("capture.py");
+    fs::write(
+        &script,
+        format!(
+            "import os,tty\ntty.setraw(0)\nf=open('{}','ab',buffering=0)\nos.write(1,b'\\x1b[?1000;1006hReady451')\nwhile True:\n f.write(os.read(0,4096))\n",
+            capture.display()
+        ),
+    )
+    .unwrap();
+    type_locally(
+        window,
+        at,
+        &format!("exec python3 -u '{}'\n", script.display()),
+    );
+    loop {
+        if let ServerMsg::Cells { frame, .. } = decode(window)
+            && frame_text(&frame).contains("Ready451")
+        {
+            return capture;
+        }
+    }
+}
+
+pub(super) fn publish_delayed(room: &Room) -> TcpStream {
+    let mut publisher = TcpStream::connect(room.address).unwrap();
+    publisher.set_read_timeout(Some(WAIT)).unwrap();
+    send(
+        &mut publisher,
+        &ClientMsg::PublishRuntime {
+            user_id: "alice".into(),
+            credential: ALICE_SECRET.into(),
+            version: env!("CARGO_PKG_VERSION").into(),
+            generation: "delayed".into(),
+        },
+    );
+    wait_for(&mut publisher, |m| matches!(m, ServerMsg::Published { .. }));
+    publisher
+}
+
+pub(super) fn pending_viewer(
+    publisher: &mut TcpStream,
+    address: std::net::SocketAddr,
+) -> TcpStream {
     loop {
         let ServerMsg::OpenStream { token } = decode(publisher) else {
             continue;

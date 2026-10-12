@@ -6,6 +6,8 @@ use std::time::{Duration, Instant};
 use seer_core::frame_diff::apply_next;
 use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
 
+#[path = "room/backpressure.rs"]
+mod backpressure;
 #[path = "support/binary.rs"]
 mod binary;
 #[path = "room/revocation.rs"]
