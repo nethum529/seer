@@ -1,5 +1,10 @@
-use gpui::{AppContext, Application, Bounds, WindowBounds, WindowOptions, px, size};
+use gpui::{
+    AppContext, Application, Bounds, TitlebarOptions, WindowBounds, WindowDecorations,
+    WindowOptions, point, px, size,
+};
 
+mod assets;
+mod chrome;
 mod link;
 mod palette;
 mod screen;
@@ -10,7 +15,12 @@ mod window;
 use window::SeerWindow;
 
 fn main() {
-    Application::new().run(|cx| {
+    Application::new().with_assets(assets::Assets).run(|cx| {
+        if let Err(error) = assets::load_fonts(cx) {
+            eprintln!("seer: could not load the bundled fonts: {error}");
+            cx.quit();
+            return;
+        }
         cx.on_window_closed(|cx| {
             if cx.windows().is_empty() {
                 // gpui 0.2.2 on X11 runs this callback while it holds its
@@ -27,6 +37,12 @@ fn main() {
                 cx,
             ))),
             app_id: Some("seer".into()),
+            titlebar: Some(TitlebarOptions {
+                title: Some("Seer".into()),
+                appears_transparent: true,
+                traffic_light_position: Some(point(px(19.), px(15.))),
+            }),
+            window_decorations: Some(WindowDecorations::Client),
             ..Default::default()
         };
         // gpui on Wayland does not send the title from TitlebarOptions.

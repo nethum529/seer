@@ -11,28 +11,12 @@ use crate::palette;
 use crate::window::SeerWindow;
 
 const FONT_SIZE: f32 = 12.5;
-const LINE_HEIGHT: f32 = 1.55;
-const MONO_FAMILIES: [&str; 8] = [
-    "JetBrains Mono",
-    "JetBrainsMono Nerd Font Mono",
-    "Berkeley Mono",
-    "SF Mono",
-    "Menlo",
-    "DejaVu Sans Mono",
-    "Liberation Mono",
-    "Noto Sans Mono",
-];
+const LINE_HEIGHT: f32 = 19.;
 
-pub(crate) fn terminal_font(cx: &App) -> Font {
-    font(first_installed(cx, &MONO_FAMILIES).unwrap_or("monospace"))
-}
-
-pub(crate) fn first_installed<'a>(cx: &App, families: &[&'a str]) -> Option<&'a str> {
-    let installed = cx.text_system().all_font_names();
-    families
-        .iter()
-        .copied()
-        .find(|family| installed.iter().any(|name| name == family))
+pub(crate) fn terminal_font() -> Font {
+    let mut font = font("JetBrains Mono");
+    font.features = gpui::FontFeatures::disable_ligatures();
+    font
 }
 
 pub(crate) struct Screen {
@@ -180,7 +164,7 @@ impl Screen {
         let cell_width = text_system
             .advance(font_id, font_size, 'm')
             .map_or(font_size * 0.6, |advance| advance.width);
-        let line_height = (font_size * LINE_HEIGHT).round();
+        let line_height = px(LINE_HEIGHT);
         Grid {
             origin: bounds.origin,
             cell_width,
@@ -289,7 +273,7 @@ fn row(cells: &[Cell], cols: usize, font: &Font) -> Row {
 fn text_run(cell: &Cell, color: Rgba, len: usize, font: &Font) -> TextRun {
     let mut font = font.clone();
     if cell.bold {
-        font.weight = FontWeight::BOLD;
+        font.weight = FontWeight::SEMIBOLD;
     }
     if cell.italic {
         font.style = FontStyle::Italic;
