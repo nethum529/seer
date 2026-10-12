@@ -8,7 +8,8 @@ use seer_core::frame_diff::{FrameDiff, apply_next};
 use seer_core::proto::codec::{self, Incoming, RawEvent};
 use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo};
 use seer_core::{
-    Cell, Cursor, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame, Tree,
+    Cell, Cursor, InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalFrame,
+    TerminalInput, Tree,
 };
 use seer_net::Socket;
 use seer_runtime::PaneGrid;
@@ -196,6 +197,18 @@ impl Link {
 
     pub(crate) fn shown(&self) -> Option<&str> {
         self.target.as_ref().map(|target| target.pane.as_str())
+    }
+
+    pub(crate) fn input(&mut self, event: InputEvent) -> io::Result<()> {
+        let Some(target) = self.target.clone() else {
+            return Ok(());
+        };
+        self.send(&ClientMsg::TerminalInput {
+            workspace: target.workspace,
+            tab: target.tab,
+            pane: target.pane,
+            input: TerminalInput::new(event),
+        })
     }
 
     pub(crate) fn select(&mut self, pane: &str) -> io::Result<()> {

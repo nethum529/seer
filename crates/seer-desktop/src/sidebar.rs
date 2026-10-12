@@ -254,19 +254,27 @@ pub(crate) fn strip(
         .border_color(rgb(palette::LINE))
         .children(terminals.iter().map(|terminal| {
             let on = shown == Some(terminal.pane.as_str());
-            selectable(terminal, cx)
-                .flex_none()
-                .h(px(32.))
-                .pl(px(8.))
-                .pr(px(12.))
-                .gap(px(8.))
-                .font_weight(FontWeight::MEDIUM)
-                .whitespace_nowrap()
-                .text_color(rgb(if on { palette::TEXT } else { palette::TEXT_2 }))
-                .when(on, |tab| tab.bg(rgb(palette::SELECTED)))
-                .when(on && ring, |tab| tab.child(outline()))
-                .child(chrome::status(&terminal.state))
-                .child(chrome::capitalize(&terminal.name))
+            let help = tip::terminal_help(&chrome::capitalize(&terminal.name));
+            tip::on_hover(
+                selectable(terminal, cx),
+                help.clone(),
+                "Inter".into(),
+                keys.hover() && !(on && ring),
+            )
+            .flex_none()
+            .h(px(32.))
+            .pl(px(8.))
+            .pr(px(12.))
+            .gap(px(8.))
+            .font_weight(FontWeight::MEDIUM)
+            .whitespace_nowrap()
+            .text_color(rgb(if on { palette::TEXT } else { palette::TEXT_2 }))
+            .when(on, |tab| tab.bg(rgb(palette::SELECTED)))
+            .when(on && ring, |tab| {
+                tab.child(outline()).child(tip::below(help, "Inter".into()))
+            })
+            .child(chrome::status(&terminal.state))
+            .child(chrome::capitalize(&terminal.name))
         }))
 }
 
@@ -300,9 +308,10 @@ fn tab(
 ) -> Stateful<Div> {
     let on = shown == Some(terminal.pane.as_str());
     let name: SharedString = chrome::capitalize(&terminal.name).into();
+    let help = tip::terminal_help(&name);
     let row = tip::on_hover(
         selectable(terminal, cx),
-        name.clone(),
+        help.clone(),
         "Inter".into(),
         !(on && ring),
     )
@@ -325,7 +334,7 @@ fn tab(
     );
     if shown == Some(terminal.pane.as_str()) {
         row.bg(rgb(palette::SELECTED)).when(ring, |row| {
-            row.child(outline()).child(tip::below(name, "Inter".into()))
+            row.child(outline()).child(tip::below(help, "Inter".into()))
         })
     } else {
         row.hover(|style| style.bg(rgb(palette::HOVER)))

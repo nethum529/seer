@@ -1,10 +1,10 @@
 use gpui::{
-    App, BorderStyle, Bounds, Element, ElementId, Entity, Font, FontStyle, FontWeight,
-    GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels, Point, Rgba,
-    ShapedLine, StrikethroughStyle, Style, TextRun, UnderlineStyle, Window, fill, font, outline,
-    point, px, relative, size,
+    App, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity, Font, FontStyle,
+    FontWeight, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
+    Point, Rgba, ShapedLine, StrikethroughStyle, Style, TextRun, UnderlineStyle, Window, fill,
+    font, outline, point, px, relative, size,
 };
-use seer_core::{Cell, Cursor};
+use seer_core::{Cell, Cursor, CursorShape};
 
 use crate::link::{Terminal, lock};
 use crate::palette;
@@ -39,16 +39,26 @@ pub(crate) struct Painted {
 }
 
 #[derive(Clone, Copy, PartialEq)]
-struct Grid {
-    origin: Point<Pixels>,
-    cell_width: Pixels,
-    line_height: Pixels,
-    cols: usize,
-    rows: usize,
+pub(crate) struct Grid {
+    pub(crate) origin: Point<Pixels>,
+    pub(crate) cell_width: Pixels,
+    pub(crate) line_height: Pixels,
+    pub(crate) cols: usize,
+    pub(crate) rows: usize,
 }
 
 impl Grid {
-    fn cell(&self, column: usize, row: usize, width: usize) -> Bounds<Pixels> {
+    pub(crate) fn contains(&self, position: Point<Pixels>) -> bool {
+        Bounds::new(
+            self.origin,
+            size(
+                self.cell_width * self.cols as f32,
+                self.line_height * self.rows as f32,
+            ),
+        )
+        .contains(&position)
+    }
+    pub(crate) fn cell(&self, column: usize, row: usize, width: usize) -> Bounds<Pixels> {
         Bounds::new(
             point(
                 self.origin.x + self.cell_width * column as f32,
@@ -56,6 +66,20 @@ impl Grid {
             ),
             size(self.cell_width * width as f32, self.line_height),
         )
+    }
+
+    pub(crate) fn hit(&self, position: Point<Pixels>) -> Option<(u16, u16, bool)> {
+        if self.cols == 0 || self.rows == 0 {
+            return None;
+        }
+        let x = ((position.x - self.origin.x) / self.cell_width).max(0.);
+        let y = ((position.y - self.origin.y) / self.line_height).max(0.);
+        let column = (x as usize).min(self.cols - 1);
+        Some((
+            to_u16(column),
+            to_u16((y as usize).min(self.rows - 1)),
+            x - column as f32 > 0.5,
+        ))
     }
 }
 
@@ -126,11 +150,13 @@ impl Element for Screen {
         let grid = self.grid(bounds, window);
         let (cols, rows) = (to_u16(grid.cols), to_u16(grid.rows));
         self.view.update(cx, |view, cx| {
+            view.input.grid = Some(grid);
             view.resize(cols, rows, cx);
+            let focused = view.input.focus.is_focused(window) && window.is_window_active();
             let Some((terminal, rows)) = view.screen() else {
                 return Painted::default();
             };
-            rows.paint(terminal, grid, &self.font, window)
+            rows.paint(terminal, grid, &self.font, focused, window)
         })
     }
 
@@ -138,20 +164,100 @@ impl Element for Screen {
         &mut self,
         _id: Option<&GlobalElementId>,
         _inspector_id: Option<&InspectorElementId>,
-        _bounds: Bounds<Pixels>,
+        bounds: Bounds<Pixels>,
         _request_layout: &mut Self::RequestLayoutState,
         painted: &mut Self::PrepaintState,
         window: &mut Window,
         cx: &mut App,
     ) {
+        let view = self.view.read(cx);
+        let focus = view.input.focus.clone();
+        let preedit = view.input.composition.text.clone();
+        let cursor = view.cursor_bounds();
+        let selection = view
+            .with_raw(|grid| grid.selection_spans())
+            .unwrap_or_default();
+        let geometry = view.input.grid;
+        window.handle_input(
+            &focus,
+            ElementInputHandler::new(bounds, self.view.clone()),
+            cx,
+        );
+        let target = self.view.clone();
+        window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _, cx| {
+            if phase == gpui::DispatchPhase::Bubble {
+                target.update(cx, |view, cx| view.mouse_move(event, cx));
+            }
+        });
         for quad in painted.quads.drain(..) {
             window.paint_quad(quad);
+        }
+        if let Some(grid) = geometry {
+            for (row, start, end) in selection {
+                window.paint_quad(fill(
+                    grid.cell(start, row, end - start),
+                    gpui::rgba(0xffffff30),
+                ));
+            }
         }
         for (origin, line) in &painted.lines {
             line.paint(*origin, painted.line_height, window, cx).ok();
         }
         if let Some(cursor) = painted.cursor.take() {
             window.paint_quad(cursor);
+        }
+        if focus.is_focused(window) && window.is_window_active() {
+            let cell = self
+                .view
+                .read(cx)
+                .with_raw(|grid| {
+                    let at = grid.cursor();
+                    (at.visible && at.shape == CursorShape::Block)
+                        .then(|| {
+                            grid.row(usize::from(at.row))
+                                .get(usize::from(at.column))
+                                .filter(|cell| !cell.hidden)
+                                .cloned()
+                        })
+                        .flatten()
+                })
+                .flatten();
+            if let (Some(cell), Some(cursor)) = (cell, cursor) {
+                let text = cell.character.to_string();
+                let run = text_run(&cell, gpui::rgb(palette::WINDOW), text.len(), &self.font);
+                let line =
+                    window
+                        .text_system()
+                        .shape_line(text.into(), px(FONT_SIZE), &[run], None);
+                line.paint(cursor.origin, painted.line_height, window, cx)
+                    .ok();
+            }
+        }
+        if !preedit.is_empty()
+            && let Some(cursor) = cursor
+        {
+            let len = preedit.len();
+            let run = TextRun {
+                len,
+                font: self.font.clone(),
+                color: palette::cursor().into(),
+                background_color: None,
+                underline: Some(UnderlineStyle {
+                    color: None,
+                    thickness: px(1.),
+                    wavy: false,
+                }),
+                strikethrough: None,
+            };
+            let line = window
+                .text_system()
+                .shape_line(preedit.into(), px(FONT_SIZE), &[run], None);
+            window.paint_quad(fill(
+                Bounds::new(cursor.origin, size(line.width, painted.line_height)),
+                gpui::rgb(palette::WINDOW),
+            ));
+            line.paint(cursor.origin, painted.line_height, window, cx)
+                .ok();
         }
     }
 }
@@ -181,6 +287,7 @@ impl Rows {
         terminal: &Terminal,
         grid: Grid,
         font: &Font,
+        focused: bool,
         window: &mut Window,
     ) -> Painted {
         let (changed, at) = {
@@ -211,7 +318,7 @@ impl Rows {
         }
         let mut painted = Painted {
             line_height: grid.line_height,
-            cursor: cursor(at, &grid),
+            cursor: cursor(at, &grid, focused),
             ..Painted::default()
         };
         for (index, shaped) in self.shaped.iter().enumerate() {
@@ -295,17 +402,23 @@ fn text_run(cell: &Cell, color: Rgba, len: usize, font: &Font) -> TextRun {
     }
 }
 
-// The window cannot type into the terminal, so the cursor has the hollow
-// look of a terminal without focus, and it does not blink.
-fn cursor(cursor: Cursor, grid: &Grid) -> Option<PaintQuad> {
+fn cursor(cursor: Cursor, grid: &Grid, focused: bool) -> Option<PaintQuad> {
     let column = usize::from(cursor.column);
     let row = usize::from(cursor.row);
     (cursor.visible && column < grid.cols && row < grid.rows).then(|| {
-        outline(
-            grid.cell(column, row, 1),
-            palette::cursor(),
-            BorderStyle::Solid,
-        )
+        let mut bounds = grid.cell(column, row, 1);
+        if !focused || cursor.shape == CursorShape::HollowBlock {
+            return outline(bounds, palette::cursor(), BorderStyle::Solid);
+        }
+        match cursor.shape {
+            CursorShape::Beam => bounds.size.width = px(1.),
+            CursorShape::Underline => {
+                bounds.origin.y += bounds.size.height - px(1.);
+                bounds.size.height = px(1.);
+            }
+            _ => {}
+        }
+        fill(bounds, palette::cursor())
     })
 }
 

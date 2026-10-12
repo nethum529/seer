@@ -11,3 +11,13 @@ seer = { path = "../seer" }
 seer-core = { path = "../seer-core" }
 seer-net = { path = "../seer-net" }
 seer-runtime = { path = "../seer-runtime" }
+
+[target.'cfg(target_os = "macos")'.dependencies]
+block2 = "0.6"
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSEvent", "NSView", "block2", "objc2-quartz-core"] }
+raw-window-handle = "0.6"
+
+[dev-dependencies]
+gpui = { version = "=0.2.2", features = ["test-support"] }
+tempfile = "3"
