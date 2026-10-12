@@ -1,3 +1,4 @@
+use crate::agent_state::{Detector, Observation};
 use crate::outbox::Outbox;
 use crate::pane_output::{self, Output, PaneOutput};
 use crate::{PaneGrid, PtySession};
@@ -14,6 +15,7 @@ pub struct PaneHost {
     pub(crate) owner_size: seer_core::PaneSize,
     last_typist: Option<(String, Instant)>,
     program: String,
+    detector: Detector,
 }
 
 impl PaneHost {
@@ -27,12 +29,18 @@ impl PaneHost {
         let shared = PaneOutput::shared(PaneGrid::new(cols, rows));
         let reader = pane_output::reader(Arc::clone(&shared));
         let session = PtySession::start(command, cols, rows, reader)?;
+        let detector = Detector::start(
+            session.observation_fd()?,
+            session.process_id(),
+            Arc::downgrade(&shared),
+        )?;
         Ok(Self {
             output: Output::new(shared, session.answers()),
             session,
             owner_size: seer_core::PaneSize { cols, rows },
             last_typist: None,
             program,
+            detector,
         })
     }
 
@@ -126,9 +134,12 @@ impl PaneHost {
     }
 
     pub fn foreground(&self) -> String {
-        self.session.foreground_name()
+        self.detector.observation().name
     }
 
+    pub(crate) fn observation(&self) -> Observation {
+        self.detector.observation()
+    }
     pub(crate) fn started_program(&self) -> &str {
         &self.program
     }

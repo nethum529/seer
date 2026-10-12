@@ -277,7 +277,7 @@ pub(crate) fn strip(
             .when(on && ring, |tab| {
                 tab.child(outline()).child(tip::below(help, "Inter".into()))
             })
-            .child(cap_icon(chrome::status(&terminal.state)))
+            .child(cap_icon(chrome::status(terminal.agent_state)))
             .child(rename::label(terminal, Surface::Strip, labels))
         }))
 }
@@ -331,7 +331,7 @@ fn tab(
     } else {
         palette::TEXT_2
     }))
-    .child(cap_icon(chrome::status(&terminal.state)))
+    .child(cap_icon(chrome::status(terminal.agent_state)))
     .child(
         div()
             .flex_1()

@@ -26,6 +26,7 @@ static MARKS: AtomicU64 = AtomicU64::new(0);
 /// saw them.
 pub(crate) struct PaneOutput {
     pub(crate) grid: PaneGrid,
+    pub(crate) revision: u64,
     sinks: Vec<Sink>,
     changed: bool,
     unfinished: Unfinished,
@@ -88,6 +89,7 @@ impl PaneOutput {
     pub(crate) fn shared(grid: PaneGrid) -> SharedOutput {
         Arc::new(Mutex::new(Self {
             grid,
+            revision: 0,
             sinks: Vec::new(),
             changed: false,
             unfinished: Unfinished::default(),
@@ -217,6 +219,7 @@ pub(crate) fn reader(output: SharedOutput) -> impl FnMut(&[u8], &Answers) + Send
         }
         answer(answers, &output, |pane| {
             let shown = pane.grid.feed(bytes);
+            pane.revision = pane.revision.wrapping_add(1);
             pane.changed |= shown;
             pane.unfinished.follow(bytes);
             for sink in &pane.sinks {

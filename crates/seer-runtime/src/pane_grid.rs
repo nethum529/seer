@@ -18,6 +18,7 @@ use std::time::Instant;
 use crate::input::{encode_key, encode_mouse};
 use crate::pty::lock_mutex;
 
+mod agent_screen;
 mod reflow;
 mod restore;
 mod selection;
@@ -273,17 +274,22 @@ impl PaneGrid {
 #[derive(Clone)]
 struct TerminalReplies {
     bytes: Option<Arc<Mutex<Vec<u8>>>>,
+    title: Arc<Mutex<String>>,
 }
 
 impl TerminalReplies {
     fn keeping() -> Self {
         Self {
             bytes: Some(Arc::default()),
+            title: Arc::default(),
         }
     }
 
     fn discarding() -> Self {
-        Self { bytes: None }
+        Self {
+            bytes: None,
+            title: Arc::default(),
+        }
     }
 
     fn take(&self) -> Vec<u8> {
@@ -296,8 +302,15 @@ impl TerminalReplies {
 
 impl EventListener for TerminalReplies {
     fn send_event(&self, event: Event) {
-        if let (Event::PtyWrite(reply), Some(bytes)) = (event, &self.bytes) {
-            lock_mutex(bytes).extend(reply.into_bytes());
+        match event {
+            Event::PtyWrite(reply) => {
+                if let Some(bytes) = &self.bytes {
+                    lock_mutex(bytes).extend(reply.into_bytes());
+                }
+            }
+            Event::Title(title) => *lock_mutex(&self.title) = title.chars().take(512).collect(),
+            Event::ResetTitle => lock_mutex(&self.title).clear(),
+            _ => {}
         }
     }
 }
