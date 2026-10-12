@@ -68,17 +68,15 @@ pub(crate) fn below(text: SharedString, font: SharedString) -> Div {
     ))
 }
 
-// The design has no tooltip. This one has the size of the design's small
-// buttons and the accent colors. gpui draws a tooltip outside the window
-// root, so it does not get the root font.
+// gpui draws a tooltip outside the window root, so it needs its own font.
 fn tip(text: SharedString, font: SharedString) -> Div {
     div()
         .max_w(px(MAX_WIDTH))
         .py(px(5.))
         .px(px(10.))
         .rounded(px(8.))
-        .bg(rgb(palette::ACCENT))
-        .text_color(rgb(palette::ON_ACCENT))
+        .bg(rgb(palette::RAISED))
+        .text_color(rgb(palette::TEXT_2))
         .font_family(font)
         .text_size(px(12.))
         .line_height(relative(16. / 12.))

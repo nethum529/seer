@@ -1,21 +1,21 @@
 use gpui::{Rgba, rgb};
 use seer_core::{Cell, Color};
 
-pub(crate) const WINDOW: u32 = 0x0a0a0a;
-pub(crate) const LINE_2: u32 = 0x2a2a2a;
-pub(crate) const RAISED: u32 = 0x171717;
-pub(crate) const LINE: u32 = 0x1f1f1f;
-pub(crate) const HOVER: u32 = 0x131313;
-pub(crate) const SELECTED: u32 = 0x1c1c1c;
-pub(crate) const CHIP: u32 = 0x262626;
-pub(crate) const CHIP_2: u32 = 0x303030;
+pub(crate) const WINDOW: u32 = 0x1b1b1b;
+pub(crate) const SURFACE: u32 = 0x222222;
+pub(crate) const LINE_2: u32 = 0x505050;
+pub(crate) const RAISED: u32 = 0x2b2b2b;
+pub(crate) const LINE: u32 = 0x3a3a3a;
+pub(crate) const HOVER: u32 = 0x292929;
+pub(crate) const SELECTED: u32 = 0x333333;
+pub(crate) const CHIP: u32 = 0x383838;
+pub(crate) const CHIP_2: u32 = 0x404040;
 pub(crate) const TEXT: u32 = 0xfafafa;
 pub(crate) const ACCENT: u32 = 0xfafafa;
-pub(crate) const ON_ACCENT: u32 = 0x171717;
 pub(crate) const TEXT_2: u32 = 0xd4d4d4;
-pub(crate) const MUTED: u32 = 0xa3a3a3;
-pub(crate) const FAINT: u32 = 0x8a8a8a;
-pub(crate) const FAINTER: u32 = 0x6b6b6b;
+pub(crate) const MUTED: u32 = 0xb8b8b8;
+pub(crate) const FAINT: u32 = 0xadadad;
+pub(crate) const FAINTER: u32 = 0x939393;
 pub(crate) const WAITING: u32 = 0xfbbf24;
 
 const ANSI: [u32; 16] = [
@@ -28,7 +28,6 @@ pub(crate) fn cursor() -> Rgba {
     rgb(TEXT_2)
 }
 
-// The text color and the background color of one cell. None is the window.
 pub(crate) fn cell_colors(cell: &Cell) -> (Rgba, Option<Rgba>) {
     let mut fg = match cell.fg {
         Color::Default if cell.bold => rgb(TEXT),
