@@ -17,7 +17,12 @@ person runs their own terminals on their own computer.
 
     curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh
 
-- The installer puts the binaries in ~/.local/bin. It does not use sudo.
+- The installer adds the desktop app and the CLI. It does not use sudo.
+- macOS: Seer.app is in ~/Applications. Open it from Launchpad or Spotlight.
+- Linux x86_64: open Seer from the app list. It needs glibc 2.35 or newer,
+  xdg-utils, and a graphics driver that GPUI supports.
+- CLI binaries stay in ~/.local/bin. Bare seer still opens the TUI during
+  the desktop move.
 - You do not need Rust, Git, or a GitHub account.
 - Restart the terminal if the installer asks you to.
 
@@ -102,7 +107,10 @@ quit Seer.
 - `seer ps` shows your Seer processes on this computer. `seer ps
   --clean` stops the windows that have no terminal. `seer ps --stop
   <pid>` stops one runtime with its shells.
-- `seer update` installs the latest release.
+- `seer update` installs the latest app and CLI from one release. Close
+  and open the app to use the new version. Existing shells keep running.
+- `seer restart` asks before it ends local shells. Open Seer again to
+  restore the layout with new shells on the installed runtime.
 - `seer exit` leaves Seer from inside a Seer terminal.
 
 ## Good to know
