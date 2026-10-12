@@ -37,12 +37,8 @@ impl SharedSession {
     }
 
     pub(super) fn record_input(&self, message: &ClientMsg) {
-        if matches!(
-            message,
-            ClientMsg::TerminalInput { .. }
-                | ClientMsg::GrantedInput { .. }
-                | ClientMsg::GrantedMouse { .. }
-        ) && let Ok(mut last_input) = self.last_input.lock()
+        if (matches!(message, ClientMsg::TerminalInput { .. }) || message.is_granted_input())
+            && let Ok(mut last_input) = self.last_input.lock()
         {
             *last_input = Instant::now();
         }

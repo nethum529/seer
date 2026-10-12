@@ -1,6 +1,38 @@
 use super::*;
 
 impl Coordinator<'_> {
+    pub(super) fn handle_control(&mut self, message: ClientMsg) -> io::Result<()> {
+        match message {
+            ClientMsg::MouseInto { user, pane, mouse } => self.mouse_into(&user, &pane, mouse),
+            ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
+            ClientMsg::InputInto { user, pane, input } => self.input_into(&user, &pane, input),
+            ClientMsg::SetAllGrants { can_type } => self.set_all_grants(can_type),
+            ClientMsg::SetGrant { user, can_type } => self.set_grant(&user, can_type),
+            _ => Err(io::Error::other("unsupported control message")),
+        }
+    }
+
+    pub(super) fn input_into(
+        &mut self,
+        user: &str,
+        pane: &str,
+        input: seer_core::TerminalInput,
+    ) -> io::Result<()> {
+        self.require_grant(user)?;
+        if matches!(input.event, seer_core::InputEvent::Scrollback { .. }) {
+            return Err(io::Error::other("scrollback belongs to the viewer"));
+        }
+        let (workspace, tab) = self.runtime(user)?.location(pane)?;
+        let sender = self.owner.name.clone();
+        self.runtime(user)?.send(&ClientMsg::GrantedTerminalInput {
+            workspace,
+            tab,
+            pane: pane.into(),
+            input,
+            sender,
+        })
+    }
+
     pub(super) fn set_all_grants(&self, can_type: bool) -> io::Result<()> {
         let users = if can_type {
             self.broker

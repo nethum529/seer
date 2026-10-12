@@ -235,10 +235,11 @@ impl<'a> Coordinator<'a> {
                 Ok(())
             }
             ClientMsg::Terminals { user } => self.list(&user),
-            ClientMsg::MouseInto { user, pane, mouse } => self.mouse_into(&user, &pane, mouse),
-            ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
-            ClientMsg::SetAllGrants { can_type } => self.set_all_grants(can_type),
-            ClientMsg::SetGrant { user, can_type } => self.set_grant(&user, can_type),
+            ClientMsg::MouseInto { .. }
+            | ClientMsg::TypeInto { .. }
+            | ClientMsg::InputInto { .. }
+            | ClientMsg::SetAllGrants { .. }
+            | ClientMsg::SetGrant { .. } => self.handle_control(message),
             ClientMsg::ListPeople => self.write(&self.broker.people()?),
             ClientMsg::Invite { hours } if self.owner.is_owner => {
                 self.write(&self.broker.invite(hours)?)

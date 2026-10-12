@@ -110,6 +110,10 @@ pub fn client_summary(message: &ClientMsg) -> String {
 
 fn terminal_summary(message: &ClientMsg) -> String {
     match message {
+        ClientMsg::InputInto { user, pane, input } => format!(
+            "InputInto user={user} pane={pane} event={}",
+            input_summary(&input.event)
+        ),
         ClientMsg::CreateTab { workspace } => format!("CreateTab workspace={workspace}"),
         ClientMsg::RenameTab { tab, .. } => format!("RenameTab tab={tab}"),
         ClientMsg::SplitPane { tab, direction, .. } => {
@@ -129,6 +133,15 @@ fn terminal_summary(message: &ClientMsg) -> String {
                 input_summary(&input.event)
             )
         }
+        ClientMsg::GrantedTerminalInput {
+            pane,
+            input,
+            sender,
+            ..
+        } => format!(
+            "GrantedTerminalInput pane={pane} event={} sender={sender}",
+            input_summary(&input.event)
+        ),
         ClientMsg::Resize {
             tab, cols, rows, ..
         } => format!("Resize tab={tab} size={cols}x{rows}"),

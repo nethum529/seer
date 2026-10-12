@@ -82,6 +82,13 @@ pub enum ClientMsg {
         bytes: Vec<u8>,
         sender: String,
     },
+    GrantedTerminalInput {
+        workspace: String,
+        tab: String,
+        pane: String,
+        input: TerminalInput,
+        sender: String,
+    },
     AttachRuntime,
     ObserveRuntime,
     PublishRuntime {
@@ -134,6 +141,11 @@ pub enum ClientMsg {
         user: String,
         pane: String,
         bytes: Vec<u8>,
+    },
+    InputInto {
+        user: String,
+        pane: String,
+        input: TerminalInput,
     },
     SetAllGrants {
         can_type: bool,
@@ -256,6 +268,16 @@ pub struct PeekTarget {
 }
 
 impl ClientMsg {
+    #[must_use]
+    pub fn is_granted_input(&self) -> bool {
+        matches!(
+            self,
+            Self::GrantedInput { .. }
+                | Self::GrantedMouse { .. }
+                | Self::GrantedTerminalInput { .. }
+        )
+    }
+
     #[must_use]
     pub fn is_mutating(&self) -> bool {
         matches!(
