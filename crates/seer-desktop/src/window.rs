@@ -20,8 +20,10 @@ use crate::tip;
 
 mod join;
 pub(crate) mod rename;
+mod room;
 use rename::Surface;
 
+const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";
 const LINK_LOST: &str = "The link to your terminals stopped. Open Seer again.";
 // The design's narrow layout starts below this window width.
 const NARROW: f32 = 720.;
@@ -39,6 +41,7 @@ pub(crate) struct SeerWindow {
     pub(crate) keys: Keys,
     pub(crate) input: Input,
     rows: Rows,
+    room: room::RoomUi,
     editing: Option<rename::Editing>,
     menu: Option<rename::Menu>,
     _messages: Option<Task<()>>,
@@ -49,12 +52,20 @@ pub(crate) struct SeerWindow {
 impl SeerWindow {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let font = screen::terminal_font();
-        let (content, messages) = match open() {
+        let server = ServerStore::load()
+            .ok()
+            .and_then(|store| store.default_server().cloned());
+        let stopped = server.as_ref().and_then(seer::rooms::stopped_host);
+        let (content, messages) = match stopped.as_ref().map_or_else(open, |_| Ok(None)) {
             Ok(Some((link, name, messages))) => {
                 (Content::Terminal(Box::new(link), name), Some(messages))
             }
             Ok(None) => (
-                Content::Join(cx.new(|cx| crate::join::Join::new(window, cx))),
+                if stopped.is_some() {
+                    Content::Message(room::STOPPED.into())
+                } else {
+                    Content::Join(cx.new(|cx| crate::join::Join::new(window, cx)))
+                },
                 None,
             ),
             Err(error) => (
@@ -62,18 +73,6 @@ impl SeerWindow {
                 None,
             ),
         };
-        let messages = messages.map(|mut messages| {
-            cx.spawn(async move |this, cx| {
-                while let Some(message) = messages.next().await {
-                    if this
-                        .update(cx, |view, cx| view.receive(message, cx))
-                        .is_err()
-                    {
-                        break;
-                    }
-                }
-            })
-        });
         let keys = Keys {
             tabs: cx.focus_handle().tab_stop(true),
             who: cx.focus_handle().tab_stop(true),
@@ -95,19 +94,39 @@ impl SeerWindow {
             )),
             _ => None,
         };
-        Self {
+        let mut view = Self {
             content,
             font,
             ui_font: "Inter".into(),
             keys,
             input,
             rows: Rows::default(),
+            room: room::RoomUi::new(server, cx),
             editing: None,
             menu: None,
-            _messages: messages,
+            _messages: None,
             _join: subscription,
             _tab_time: Some(tab_time::refresh(cx)),
+        };
+        view.room.current = stopped;
+        if let Some(messages) = messages {
+            view.listen(messages, cx);
         }
+        view.refresh_room(cx);
+        view
+    }
+
+    fn listen(&mut self, mut messages: Messages, cx: &mut Context<Self>) {
+        self._messages = Some(cx.spawn(async move |this, cx| {
+            while let Some(message) = messages.next().await {
+                if this
+                    .update(cx, |view, cx| view.receive(message, cx))
+                    .is_err()
+                {
+                    break;
+                }
+            }
+        }));
     }
 
     pub(crate) fn keys_mode_pointer(&mut self) {
@@ -198,6 +217,10 @@ impl SeerWindow {
                 cx.stop_propagation();
                 cx.notify();
             }
+            return;
+        }
+        if self.room_key(keystroke, window, cx) {
+            cx.stop_propagation();
             return;
         }
         let held = keystroke.modifiers;
@@ -312,13 +335,20 @@ impl Render for SeerWindow {
         let (link, name) = match &self.content {
             Content::Join(join) => return root.child(join.clone()),
             Content::Message(message) => {
-                return root
-                    .items_center()
-                    .justify_center()
-                    .p(px(24.))
-                    .text_center()
-                    .text_color(rgb(palette::FAINT))
-                    .child(message.clone());
+                let content = if self.room.server.is_some() {
+                    self.empty_room(message, window, cx)
+                } else {
+                    div()
+                        .size_full()
+                        .flex()
+                        .items_center()
+                        .justify_center()
+                        .p(px(24.))
+                        .text_center()
+                        .text_color(rgb(palette::FAINT))
+                        .child(message.clone())
+                };
+                return root.child(content).children(self.room_overlays(window, cx));
             }
             Content::Terminal(link, name) => (link, name),
         };
@@ -363,11 +393,7 @@ impl Render for SeerWindow {
                                         .flex()
                                         .items_center()
                                         .gap(px(2.))
-                                        .child(chrome::room(
-                                            link.room(),
-                                            true,
-                                            window.viewport_size().width < px(480.),
-                                        ))
+                                        .child(self.room_button(link.room(), true, window, cx))
                                         .child(sidebar::new_terminal(&self.keys, true, window, cx))
                                         .child(chrome::settings()),
                                 ),
@@ -379,15 +405,17 @@ impl Render for SeerWindow {
                         })
                         .child(terminal),
                 )
-                .children(self.menu(window, cx));
+                .children(self.menu(window, cx))
+                .children(self.room_overlays(window, cx));
         }
         let title = terminals
             .iter()
             .find(|terminal| Some(terminal.pane.as_str()) == shown)
             .cloned();
         let who = sidebar::who(&name, 22., 11., true, &self.ui_font, &self.keys, window);
-        let side = sidebar::sidebar(who, terminals, shown, labels, &self.keys, window, cx)
-            .child(chrome::footer(link.room()));
+        let side = sidebar::sidebar(who, terminals, shown, labels, &self.keys, window, cx).child(
+            chrome::footer(self.room_button(link.room(), false, window, cx)),
+        );
         let title = heading(title.as_ref(), labels, &self.ui_font, self.keys.hover(), cx);
         root.child(side)
             .child(
@@ -400,6 +428,7 @@ impl Render for SeerWindow {
                     .child(terminal),
             )
             .children(self.menu(window, cx))
+            .children(self.room_overlays(window, cx))
     }
 }
 

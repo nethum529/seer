@@ -68,8 +68,13 @@ role: navigation and title chrome. WINDOW still owns the terminal base.
 
 TEXT and ACCENT stay #fafafa, TEXT_2 stays #d4d4d4, and WAITING stays
 #fbbf24. The mockup's on-accent button text stays #171717. The Rust
-ON_ACCENT constant was removed because the tooltip was its only user.
-Tooltips now use RAISED and TEXT_2 instead of accent colors.
+ON_ACCENT constant was removed in T-479 because the tooltip was its only
+user. T-456 uses it for text on destructive confirmation buttons. Tooltips
+still use RAISED and TEXT_2 instead of accent colors.
+
+Room controls use ONLINE and DANGER for state and destructive actions.
+DANGER_HOVER is #393030, a 7% sRGB mix of DANGER over the new RAISED fill.
+SHADOW and SCRIM keep the mockup's black overlay values in the palette.
 
 ## Contrast
 

@@ -11,6 +11,8 @@ mod input;
 mod join;
 mod keyboard;
 mod link;
+mod menu;
+mod motion;
 mod name_input;
 #[cfg(target_os = "macos")]
 mod native_frame;

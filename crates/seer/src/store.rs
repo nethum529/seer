@@ -13,8 +13,8 @@ const FILE_MODE: u32 = 0o600;
 static NEXT_TEMPORARY: AtomicUsize = AtomicUsize::new(0);
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct ServerEntry {
-    pub(crate) endpoint: String,
-    pub(crate) alias: String,
+    pub endpoint: String,
+    pub alias: String,
     pub user_id: String,
     pub name: String,
     pub(crate) credential: String,

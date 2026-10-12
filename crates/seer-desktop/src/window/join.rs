@@ -1,10 +1,9 @@
 use std::io;
 
-use futures::StreamExt;
 use gpui::{AppContext, Context, SharedString, Window};
 use seer::ServerEntry;
 
-use super::{Content, SeerWindow};
+use super::{Content, SeerWindow, room::RoomUi};
 use crate::{
     chrome,
     join::{Join, Joined},
@@ -26,6 +25,7 @@ impl SeerWindow {
             );
         self._messages = None;
         self.content = Content::Join(join);
+        self.room = RoomUi::new(None, cx);
         self.input.reset();
         window.activate_window();
         cx.activate(true);
@@ -40,6 +40,8 @@ impl SeerWindow {
     ) {
         self.content = Content::Message("Opening your terminals...".into());
         self._join = None;
+        self.room = RoomUi::new(Some(server.clone()), cx);
+        self.refresh_room(cx);
         let opened = cx
             .background_executor()
             .spawn(async move { open_server(&server) });
@@ -47,15 +49,9 @@ impl SeerWindow {
             let result = opened.await;
             let _ = view.update_in(cx, |view, window, cx| {
                 match result {
-                    Ok((link, name, mut messages)) => {
+                    Ok((link, name, messages)) => {
                         view.content = Content::Terminal(Box::new(link), name);
-                        view._messages = Some(cx.spawn(async move |view, cx| {
-                            while let Some(event) = messages.next().await {
-                                if view.update(cx, |view, cx| view.receive(event, cx)).is_err() {
-                                    break;
-                                }
-                            }
-                        }));
+                        view.listen(messages, cx);
                         window.focus(&view.input.focus);
                     }
                     Err(_) => {
@@ -74,16 +70,11 @@ impl SeerWindow {
 
 pub(super) fn open_server(server: &ServerEntry) -> io::Result<(Link, SharedString, Messages)> {
     let (socket, tree, _notice) = seer::attach(server)?;
-    let metadata = serde_json::to_value(server).map_err(io::Error::other)?;
-    let room = metadata
-        .get("alias")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("Room");
     let (link, messages) = Link::open(
         socket,
         &tree,
         server.user_id.clone(),
-        chrome::capitalize(room),
+        chrome::capitalize(&server.alias),
     )?;
     Ok((link, server.name.clone().into(), messages))
 }

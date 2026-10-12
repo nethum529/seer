@@ -12,6 +12,7 @@ mod person_menu;
 mod processes;
 mod prompt;
 mod render;
+pub mod rooms;
 mod routes;
 mod start;
 mod state;
