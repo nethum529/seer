@@ -40,7 +40,7 @@ fn terminal() -> TerminalInfo {
     }
 }
 
-fn frame(text: &str) -> ServerMsg {
+pub(super) fn frame(text: &str) -> ServerMsg {
     ServerMsg::Cells {
         user: "Kyler".into(),
         pane: "remote".into(),
@@ -68,14 +68,14 @@ fn frame(text: &str) -> ServerMsg {
     }
 }
 
-struct Room {
-    server: ServerEntry,
-    messages: mpsc::Sender<ServerMsg>,
-    received: Arc<Mutex<Vec<ClientMsg>>>,
+pub(super) struct Room {
+    pub(super) server: ServerEntry,
+    pub(super) messages: mpsc::Sender<ServerMsg>,
+    pub(super) received: Arc<Mutex<Vec<ClientMsg>>>,
 }
 
 impl Room {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         let server: ServerEntry = serde_json::from_value(serde_json::json!({
             "endpoint": listener.local_addr().unwrap().to_string(), "alias": "E2e",
@@ -95,6 +95,14 @@ impl Room {
                     name: "You".into(),
                     client_id: "window".into(),
                     tree: Tree::new(),
+                },
+            )
+            .unwrap();
+            codec::encode(
+                &mut socket,
+                &ServerMsg::Grants {
+                    can_type_here: Vec::new(),
+                    you_may_type_into: Vec::new(),
                 },
             )
             .unwrap();
@@ -140,41 +148,7 @@ impl Room {
 fn person_menu_watches_read_only_and_returns_to_local_input(cx: &mut TestAppContext) {
     let runtime = Runtime::start();
     let room = Room::start();
-    let (mut link, local) = runtime.connect();
-    let remote = link.join_room(room.server.clone(), None);
-    let mut messages = futures::stream::select(local, remote);
-    let (_, cx) = cx.add_window_view(|window, cx: &mut Context<SeerWindow>| {
-        crate::assets::load_fonts(cx).unwrap();
-        let keys = Keys {
-            tabs: cx.focus_handle().tab_stop(true),
-            who: cx.focus_handle().tab_stop(true),
-            new_terminal: cx.focus_handle().tab_stop(true),
-            scroll: ScrollHandle::new(),
-            mode: Mode::Pointer,
-        };
-        window.focus(&keys.tabs);
-        SeerWindow {
-            content: Content::Terminal(Box::new(link), "You".into()),
-            font: screen::terminal_font(),
-            ui_font: "Inter".into(),
-            keys,
-            input: Input::new(window, cx),
-            rows: Rows::default(),
-            room: room::RoomUi::new(Some(room.server.clone()), cx),
-            _join: None,
-            _tab_time: None,
-            editing: None,
-            menu: None,
-            people_menu: None,
-            invite: None,
-            server: Some(room.server.clone()),
-            _messages: Some(cx.spawn(async move |view, cx| {
-                while let Some(event) = messages.next().await {
-                    view.update(cx, |view, cx| view.receive(event, cx)).unwrap();
-                }
-            })),
-        }
-    });
+    let (_, cx) = open_view(&runtime, &room, cx);
     pump(cx);
     cx.simulate_click(gpui::point(px(90.), px(62.)), gpui::Modifiers::default());
     cx.simulate_keystrokes("down enter");
@@ -224,10 +198,53 @@ fn person_menu_watches_read_only_and_returns_to_local_input(cx: &mut TestAppCont
     );
 }
 
-fn pump(cx: &mut gpui::VisualTestContext) {
+pub(super) fn pump(cx: &mut gpui::VisualTestContext) {
     let end = Instant::now() + Duration::from_millis(250);
     while Instant::now() < end {
         cx.run_until_parked();
         thread::sleep(Duration::from_millis(5));
     }
+}
+
+pub(super) fn open_view<'a>(
+    runtime: &Runtime,
+    room: &Room,
+    cx: &'a mut TestAppContext,
+) -> (gpui::Entity<SeerWindow>, &'a mut gpui::VisualTestContext) {
+    let (mut link, local) = runtime.connect();
+    let remote = link.join_room(room.server.clone(), None);
+    let mut messages = futures::stream::select(local, remote);
+    let (view, cx) = cx.add_window_view(|window, cx: &mut Context<SeerWindow>| {
+        crate::assets::load_fonts(cx).unwrap();
+        let keys = Keys {
+            tabs: cx.focus_handle().tab_stop(true),
+            who: cx.focus_handle().tab_stop(true),
+            new_terminal: cx.focus_handle().tab_stop(true),
+            scroll: ScrollHandle::new(),
+            mode: Mode::Pointer,
+        };
+        window.focus(&keys.tabs);
+        SeerWindow {
+            content: Content::Terminal(Box::new(link), "You".into()),
+            font: screen::terminal_font(),
+            ui_font: "Inter".into(),
+            keys,
+            input: Input::new(window, cx),
+            rows: Rows::default(),
+            room: room::RoomUi::new(Some(room.server.clone()), cx),
+            _join: None,
+            _tab_time: None,
+            editing: None,
+            menu: None,
+            people_menu: None,
+            invite: None,
+            server: Some(room.server.clone()),
+            _messages: Some(cx.spawn(async move |view, cx| {
+                while let Some(event) = messages.next().await {
+                    view.update(cx, |view, cx| view.receive(event, cx)).unwrap();
+                }
+            })),
+        }
+    });
+    (view, cx)
 }

@@ -287,6 +287,7 @@ impl SeerWindow {
             Content::Terminal(link, _) => {
                 let selected = (
                     link.people.selected.clone(),
+                    link.can_input(),
                     link.shown().map(str::to_owned),
                 );
                 let result = event.and_then(|event| link.receive(event));
@@ -302,6 +303,7 @@ impl SeerWindow {
                 if selected
                     != (
                         link.people.selected.clone(),
+                        link.can_input(),
                         link.shown().map(str::to_owned),
                     )
                 {
@@ -364,6 +366,8 @@ fn open() -> io::Result<Option<Opened>> {
 #[cfg(test)]
 mod input_e2e;
 
+#[cfg(test)]
+mod control_e2e;
 #[cfg(test)]
 mod invite_e2e;
 #[cfg(test)]

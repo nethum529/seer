@@ -106,7 +106,17 @@ impl SeerWindow {
         };
         if matches!(key.key.as_str(), "enter" | "space") {
             let user = menu.highlighted.clone();
-            self.choose_person(&user, true, window, cx);
+            if key.key == "space"
+                && !link
+                    .people
+                    .people
+                    .first()
+                    .is_some_and(|person| person.user_id == user)
+            {
+                self.share_control(&user, cx);
+            } else {
+                self.choose_person(&user, true, window, cx);
+            }
         } else {
             let people = &link.people.people;
             let now = people
@@ -160,16 +170,36 @@ impl SeerWindow {
                     .overflow_y_scroll()
                     .track_scroll(&menu.scroll)
                     .children(link.people.people.iter().enumerate().map(|(at, person)| {
-                        person_row(
-                            person,
-                            at == 0,
-                            person.user_id == link.people.selected,
-                            person.user_id == menu.highlighted,
-                            link.people.activity(&person.user_id),
-                            cx,
-                        )
+                        div()
+                            .flex()
+                            .flex_col()
+                            .child(person_row(
+                                person,
+                                at == 0,
+                                person.user_id == link.people.selected,
+                                person.user_id == menu.highlighted,
+                                link.people.activity(&person.user_id),
+                                cx,
+                            ))
+                            .when(at != 0, |row| {
+                                row.child(share_switch(
+                                    person,
+                                    &link.people,
+                                    menu.highlighted == person.user_id
+                                        && self.keys.mode == Mode::Keyboard,
+                                    cx,
+                                ))
+                            })
                     })),
-            );
+            )
+            .children(link.people.control_error.map(|error| {
+                div()
+                    .debug_selector(move || error.into())
+                    .p(px(8.))
+                    .text_size(px(12.))
+                    .text_color(rgb(palette::DANGER))
+                    .child(error)
+            }));
         let closing = menu.motion.closing();
         Some(
             div()
@@ -305,7 +335,7 @@ fn elapsed(seconds: u64) -> String {
     }
 }
 
-pub(super) fn read_only() -> Div {
+pub(super) fn control(can_input: bool) -> Div {
     div()
         .flex_none()
         .flex()
@@ -315,6 +345,83 @@ pub(super) fn read_only() -> Div {
         .line_height(px(16.))
         .font_weight(FontWeight::NORMAL)
         .text_color(rgb(palette::FAINT))
-        .child(chrome::icon("lock", palette::FAINT).size(px(12.)))
-        .child("Read only")
+        .debug_selector(move || {
+            if can_input {
+                "You have control"
+            } else {
+                "Read only"
+            }
+            .into()
+        })
+        .child(chrome::icon(if can_input { "check" } else { "lock" }, palette::FAINT).size(px(12.)))
+        .child(if can_input {
+            "You have control"
+        } else {
+            "Read only"
+        })
+}
+
+impl SeerWindow {
+    fn share_control(&mut self, user: &str, cx: &mut Context<Self>) {
+        if let Content::Terminal(link, _) = &mut self.content {
+            link.people.share_control(user);
+        }
+        self.notify_room(cx);
+    }
+}
+
+fn share_switch(
+    person: &Person,
+    room: &crate::room::Room,
+    keyboard: bool,
+    cx: &mut Context<SeerWindow>,
+) -> Stateful<Div> {
+    let user = person.user_id.clone();
+    let enabled = room.can_share();
+    let on = room.shares_control(&user);
+    let label = format!(
+        "Share control for {}: {}",
+        chrome::capitalize(&person.name),
+        if on { "On" } else { "Off" }
+    );
+    menu::item(SharedString::from(format!("share-control-{user}")), 36.)
+        .debug_selector(move || label.clone())
+        .pl(px(40.))
+        .font_weight(FontWeight::NORMAL)
+        .text_size(px(12.))
+        .text_color(rgb(palette::FAINT))
+        .opacity(if enabled { 1. } else { 0.5 })
+        .when(enabled, |row| {
+            row.cursor_pointer().hover(|row| row.bg(rgb(palette::CHIP)))
+        })
+        .on_mouse_down(
+            MouseButton::Left,
+            cx.listener(move |view, _, _, cx| {
+                cx.stop_propagation();
+                if let Some(menu) = &mut view.people_menu {
+                    menu.highlighted.clone_from(&user);
+                }
+                view.share_control(&user, cx);
+            }),
+        )
+        .child("Share control")
+        .child(div().flex_1())
+        .when(keyboard, |row| row.child("Space"))
+        .child(
+            div()
+                .w(px(32.))
+                .h(px(18.))
+                .flex_none()
+                .rounded(px(9.))
+                .p(px(2.))
+                .bg(rgb(if on { palette::ACCENT } else { palette::LINE_2 }))
+                .flex()
+                .items_center()
+                .when(on, |track| track.justify_end())
+                .child(div().size(px(14.)).rounded(px(7.)).bg(rgb(if on {
+                    palette::ON_ACCENT
+                } else {
+                    palette::TEXT
+                }))),
+        )
 }
