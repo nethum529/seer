@@ -113,7 +113,8 @@ window: layout, spacing, color, type, icons, focus, hover, and motion.
 - Read them before you start a UI surface, before each UI commit, and before
   you report done. The local clones are read only. Pull them for the latest
   copy.
-- The design target is docs/design/03-gpui-window.html.
+- The design target is docs/design/06-window-v2.html, with the spec in
+  docs/design/06-window-v2.md.
 - The terminal fills its area flush to the edges. Never nest it in a card
   (no border, radius, margin, or second fill around it). This wins over
   the design file.
