@@ -44,7 +44,7 @@ impl InviteSheet {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> Self {
-        let input = cx.new(|cx| NameInput::form("48".into(), false, cx));
+        let input = cx.new(|cx| NameInput::form("48".into(), false, "", cx));
         let events = cx.subscribe_in(&input, window, |sheet, _, event, window, cx| {
             if matches!(event, Finished::Save) {
                 sheet.create(window, cx);

@@ -33,10 +33,7 @@ impl SeerWindow {
                 .update(cx, |sheet, cx| sheet.reopen(keyboard, window, cx));
             return;
         }
-        let Ok(store) = ServerStore::load() else {
-            return;
-        };
-        let Some(server) = store.default_server().cloned() else {
+        let Some(server) = self.server.clone() else {
             return;
         };
         let restore = window.focused(cx);

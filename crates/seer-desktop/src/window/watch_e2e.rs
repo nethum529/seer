@@ -167,6 +167,7 @@ fn person_menu_watches_read_only_and_returns_to_local_input(cx: &mut TestAppCont
             menu: None,
             people_menu: None,
             invite: None,
+            server: Some(room.server.clone()),
             _messages: Some(cx.spawn(async move |view, cx| {
                 while let Some(event) = messages.next().await {
                     view.update(cx, |view, cx| view.receive(event, cx)).unwrap();

@@ -62,17 +62,13 @@ impl NameInput {
         }
     }
 
-    pub(crate) fn form(text: String, code: bool, cx: &mut Context<Self>) -> Self {
-        let mut input = Self::new(
-            text,
-            if code {
-                "seer join SEER2-..."
-            } else {
-                "Your name"
-            }
-            .into(),
-            cx,
-        );
+    pub(crate) fn form(
+        text: String,
+        code: bool,
+        placeholder: &str,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut input = Self::new(text, placeholder.into(), cx);
         input.form = true;
         input.code = code;
         input.limit = if code { 4096 } else { 32 };

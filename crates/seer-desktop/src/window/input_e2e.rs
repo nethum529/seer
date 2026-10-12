@@ -14,7 +14,7 @@ use super::*;
 
 pub(super) struct Runtime {
     child: Child,
-    directory: TempDir,
+    pub(super) directory: TempDir,
 }
 
 impl Runtime {
@@ -338,6 +338,7 @@ fn open_view<'a>(
             menu: None,
             people_menu: None,
             invite: None,
+            server: None,
             _join: None,
             _tab_time: None,
             _messages: Some(cx.spawn(async move |view, cx| {

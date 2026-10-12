@@ -357,7 +357,7 @@ impl SeerWindow {
     fn room_action_done(
         &mut self,
         action: RoomAction,
-        opened: Option<(Link, SharedString, Messages)>,
+        opened: Option<(Link, ServerEntry, Messages)>,
         cx: &mut Context<Self>,
     ) {
         if let Some(sheet) = &mut self.room.sheet {
@@ -376,17 +376,17 @@ impl SeerWindow {
             RoomAction::Leave => {
                 self.content = Content::Message(NO_ROOM.into());
                 self._messages = None;
+                self.server = None;
                 self.room.server = None;
                 self.room.current = None;
             }
             RoomAction::Restore | RoomAction::StartNew => {
-                if let Some((link, name, messages)) = opened {
-                    self.content = Content::Terminal(Box::new(link), name);
+                if let Some((link, server, messages)) = opened {
+                    self.content = Content::Terminal(Box::new(link), server.name.clone().into());
+                    self.server = Some(server.clone());
+                    self.room.server = Some(server);
                     self.listen(messages, cx);
                 }
-                self.room.server = ServerStore::load()
-                    .ok()
-                    .and_then(|store| store.default_server().cloned());
                 self.refresh_room(cx);
             }
         }
