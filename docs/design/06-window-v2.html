@@ -1,0 +1,1367 @@
+<!doctype html>
+<html lang="en" data-font="inter">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seer window v2</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Inter:opsz,wght@14..32,400..600&family=Geist:wght@400..600&family=Geist+Mono:wght@400..600&family=IBM+Plex+Sans:wght@400;500;600&family=IBM+Plex+Mono:wght@400;500;600&family=JetBrains+Mono:wght@400;500;600;700&display=swap">
+<style>
+/* PALETTE START */
+:root {
+  /* gpui-component Default Dark (Longbridge), neutral scale. v2 keeps the hues and
+     changes only the steps: softer lines, a softer selected fill, and one attention color. */
+  color-scheme: dark;
+  --desk: #141414;
+  --bg: #0a0a0a;
+  --raised: #171717;
+  --line: #1f1f1f;
+  --line-2: #2a2a2a;
+  --hover: #131313;
+  --sel: #1c1c1c;
+  --chip: #262626;
+  --chip-2: #303030;
+  --text: #fafafa;
+  --text-2: #d4d4d4;
+  --muted: #a3a3a3;
+  --faint: #8a8a8a;
+  --fainter: #6b6b6b;
+  --accent: #fafafa;
+  --on-accent: #171717;
+  --attn: #fbbf24;
+  --ok: #4ade80;
+  --err: #f87171;
+  --a-green: #4ade80;
+  --a-yellow: #facc15;
+  --a-red: #f87171;
+  --a-blue: #60a5fa;
+  --a-magenta: #c084fc;
+  --a-cyan: #22d3ee;
+  --a-orange: #fb923c;
+  --scrim: rgba(0, 0, 0, .55);
+  --shadow: rgba(0, 0, 0, .5);
+}
+/* PALETTE END */
+
+/* Fonts. Each candidate has a UI face and a terminal face. All are OFL. */
+:root[data-font="inter"] { --ui: "Inter", system-ui, sans-serif; --mono: "JetBrains Mono", ui-monospace, monospace; }
+:root[data-font="geist"] { --ui: "Geist", system-ui, sans-serif; --mono: "Geist Mono", ui-monospace, monospace; }
+:root[data-font="plex"] { --ui: "IBM Plex Sans", system-ui, sans-serif; --mono: "IBM Plex Mono", ui-monospace, monospace; }
+
+/* Type scale. Four sizes, three weights (400, 500, 600). gpui has no letter spacing,
+   so every role keeps the tracking of the font. */
+:root {
+  --fs-sm: 12px; --lh-sm: 16px;
+  --fs-md: 13px; --lh-md: 18px;
+  --fs-lg: 15px; --lh-lg: 20px;
+  --fs-xl: 22px; --lh-xl: 28px;
+  --term-fs: 12.5px; --term-lh: 19px;
+  --ease-out: cubic-bezier(0.23, 1, 0.32, 1);
+  --chrome: -apple-system, BlinkMacSystemFont, "Segoe UI", system-ui, sans-serif;
+}
+
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+html { -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale; }
+body {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px;
+  overflow: hidden; background: var(--desk); color: var(--text); cursor: default;
+  font: 400 var(--fs-md)/var(--lh-md) var(--chrome); letter-spacing: 0;
+}
+button, input { font: inherit; color: inherit; letter-spacing: inherit; cursor: default; }
+button { background: none; border: 0; padding: 0; margin: 0; text-align: left; }
+:focus { outline: none; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+.ic { display: block; flex: none; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.ic * { vector-effect: non-scaling-stroke; }
+
+/* Mockup chrome. Not part of the product. */
+.pick {
+  flex: none; display: flex; flex-wrap: wrap; justify-content: center; align-items: center; gap: 8px 16px;
+  max-width: calc(100vw - 48px); font: 12px/1 var(--chrome);
+}
+.pick-row { display: flex; gap: 2px; padding: 2px; border: 1px solid #262626; border-radius: 8px; background: #0a0a0a; }
+.pick button { height: 26px; padding: 0 10px; border-radius: 6px; color: #a3a3a3; white-space: nowrap; }
+.pick button[aria-pressed="true"] { background: #262626; color: #fafafa; }
+.pick .lbl { align-self: center; padding: 0 6px 0 8px; color: #737373; }
+
+/* Window */
+.win {
+  container: win / inline-size;
+  position: relative; flex: none; display: flex; flex-direction: column;
+  width: min(1360px, calc(100vw - 48px)); height: min(860px, calc(100vh - 96px));
+  background: var(--bg); border: 1px solid var(--line-2); border-radius: 12px;
+  box-shadow: 0 40px 100px var(--shadow), 0 10px 30px var(--shadow);
+  overflow: hidden; user-select: none; -webkit-user-select: none;
+  font: 400 var(--fs-md)/var(--lh-md) var(--ui); color: var(--text);
+}
+:root[data-font="inter"] .win { font-optical-sizing: none; }
+.win.narrow { width: min(440px, calc(100vw - 48px)); }
+.body { flex: 1; display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 0; }
+.solo .body { grid-template-columns: minmax(0, 1fr); }
+
+.lights { display: flex; gap: 8px; flex: none; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .25); }
+.lights i:nth-child(1) { background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+
+/* Sidebar. One grid for every row: an 8 px gutter, a 16 px icon slot that
+   starts 10 px in, and text that starts at 44 px. */
+.side {
+  display: flex; flex-direction: column; min-height: 0; padding: 0 8px;
+  background: var(--bg); border-right: 1px solid var(--line);
+}
+.side-top { flex: none; height: 44px; display: flex; align-items: center; padding-left: 12px; }
+
+.who {
+  display: flex; align-items: center; gap: 7px; width: 100%; height: 36px;
+  padding: 0 8px 0 7px; border-radius: 8px; color: var(--text);
+}
+.who-name { flex: 1; min-width: 0; font-weight: 600; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who .sel-ic { color: var(--faint); }
+.who[aria-expanded="true"] { background: var(--sel); }
+.who-m { display: none; width: auto; height: 32px; padding: 0 6px 0 5px; gap: 7px; }
+.who-m .av { width: 20px; height: 20px; font-size: 10px; }
+
+.av {
+  flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--chip-2); color: var(--text); font-size: 11px; line-height: 1; font-weight: 600;
+}
+
+.newt {
+  flex: none; display: flex; align-items: center; gap: 10px; width: 100%; height: 32px;
+  margin-top: 4px; padding: 0 10px; border-radius: 8px; color: var(--muted); font-weight: 500;
+}
+
+.tabs {
+  flex: 1; min-height: 0; overflow-y: auto; margin-top: 12px; padding-bottom: 8px;
+  display: flex; flex-direction: column; gap: 2px; scrollbar-width: none; overscroll-behavior: contain;
+}
+.tabs::-webkit-scrollbar { display: none; }
+.tab {
+  display: grid; grid-template-columns: 16px minmax(0, 1fr) auto; grid-template-rows: var(--lh-md) var(--lh-sm);
+  column-gap: 10px; row-gap: 2px; align-items: center; width: 100%; padding: 7px 10px 8px; border-radius: 8px;
+}
+.tab .st { grid-row: 1; grid-column: 1; }
+.tab-name { grid-row: 1; grid-column: 2; min-width: 0; font-weight: 500; color: var(--text-2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.tab-time { grid-row: 1; grid-column: 3; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--faint); font-variant-numeric: tabular-nums; }
+.tab-task {
+  grid-row: 2; grid-column: 2 / span 2; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--faint);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.tab.on { background: var(--sel); }
+.tab.on .tab-name { color: var(--text); }
+.tab.on .tab-task { color: var(--muted); }
+.tab.waiting .tab-task { color: var(--muted); }
+
+/* Status: an empty ring is idle, a half disc is working, a full amber disc waits for its person. */
+.st { display: block; width: 16px; height: 16px; color: var(--fainter); }
+.st.working { color: var(--muted); }
+.st.waiting { color: var(--attn); }
+
+/* Inline rename. The field sits where the name was drawn, so the text does not move. */
+.rn {
+  display: block; width: calc(100% + 6px); height: 22px; margin: -2px 0 -2px -6px; padding: 0 5px;
+  border: 1px solid var(--line-2); border-radius: 6px; background: var(--bg);
+  color: var(--text); font-weight: 500; line-height: 20px; cursor: text;
+  user-select: text; -webkit-user-select: text;
+}
+.rn:focus-visible { outline: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.rn::placeholder { color: var(--faint); }
+.rn::selection { background: color-mix(in srgb, var(--a-blue) 45%, transparent); }
+
+.side-foot {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 44px;
+  margin: 0 -8px; padding: 0 8px; border-top: 1px solid var(--line);
+}
+.room {
+  display: flex; align-items: center; gap: 10px; min-width: 0; height: 32px;
+  padding: 0 8px 0 10px; border-radius: 8px; color: var(--muted);
+}
+.room-dot { flex: none; display: grid; place-items: center; width: 16px; height: 16px; }
+.room-dot i { width: 6px; height: 6px; border-radius: 50%; background: var(--ok); }
+.room-dot.off i { background: none; box-shadow: inset 0 0 0 1.5px var(--fainter); width: 8px; height: 8px; }
+.room-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room .sel-ic { color: var(--faint); }
+.room[aria-expanded="true"] { background: var(--sel); color: var(--text); }
+.room-m { display: none; }
+.icon-btn {
+  flex: none; display: grid; place-items: center; width: 32px; height: 32px; border-radius: 8px;
+  color: var(--faint);
+}
+.side-foot .icon-btn { margin-left: auto; }
+.icon-btn[aria-expanded="true"] { background: var(--sel); color: var(--text); }
+
+/* Main */
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.mbar {
+  position: relative; flex: none; height: 44px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  padding: 0 14px; border-bottom: 1px solid var(--line);
+}
+.mbar .lights, .mbar-act { display: none; }
+.solo .mbar .lights { display: flex; grid-column: 1; grid-row: 1; padding-left: 6px; }
+.title {
+  grid-column: 2; grid-row: 1; display: flex; align-items: center; gap: 6px; min-width: 0; max-width: 520px;
+  height: 28px; padding: 0 8px; border-radius: 6px; font-weight: 500; color: var(--text); white-space: nowrap;
+}
+.title .who-of { color: var(--muted); font-weight: 400; }
+.title .sep { color: var(--fainter); font-weight: 400; }
+.title .tt { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
+.title .rn { width: 220px; margin: -2px -6px; text-align: center; }
+.ro-mark {
+  grid-column: 3; grid-row: 1; justify-self: end; display: flex; align-items: center; gap: 6px;
+  font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--faint); white-space: nowrap;
+}
+.strip {
+  flex: none; display: flex; align-items: center; gap: 10px; height: 32px; padding: 0 14px;
+  border-bottom: 1px solid var(--line); background: var(--raised);
+  font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted);
+}
+.strip .room-dot { width: auto; }
+
+.term {
+  flex: 1; min-height: 0; display: flex; flex-direction: column; overflow: hidden;
+  padding: 8px 12px; font: 400 var(--term-fs)/var(--term-lh) var(--mono); color: var(--text-2);
+  user-select: text; -webkit-user-select: text; cursor: text; white-space: pre; letter-spacing: 0;
+}
+.term.bottom { justify-content: flex-end; }
+.term pre { margin: 0; font: inherit; white-space: pre-wrap; overflow-wrap: anywhere; }
+.term pre.cut { white-space: pre; overflow: hidden; }
+.cell { display: inline-block; width: 1ch; text-align: center; }
+/* The web mono fonts have no box glyphs, and fallback glyphs do not fill the cell. Draw them like a terminal does. */
+.bx { position: relative; height: var(--term-lh); vertical-align: top; -webkit-text-fill-color: transparent; }
+.bx::before { content: ""; position: absolute; border: 0 solid currentColor; }
+.bx.h::before { left: 0; right: 0; top: 50%; border-top-width: 1px; }
+.bx.v::before { top: 0; bottom: 0; left: 50%; border-left-width: 1px; }
+.bx.tl::before, .bx.tr::before { top: 50%; bottom: 0; border-top-width: 1px; }
+.bx.bl::before, .bx.br::before { top: 0; height: calc(50% + 1px); border-bottom-width: 1px; }
+.bx.tl::before, .bx.bl::before { left: 50%; right: 0; border-left-width: 1px; }
+.bx.tr::before, .bx.br::before { left: 0; width: calc(50% + 1px); border-right-width: 1px; }
+.bx.tl::before { border-top-left-radius: 4px; } .bx.tr::before { border-top-right-radius: 4px; }
+.bx.bl::before { border-bottom-left-radius: 4px; } .bx.br::before { border-bottom-right-radius: 4px; }
+.bx.lb::before { left: 25%; right: 0; top: 2px; bottom: 6px; border-width: 0 0 1px 1px; }
+.term .cur { background: var(--text-2); color: var(--bg); }
+.g { color: var(--a-green); } .y { color: var(--a-yellow); } .r { color: var(--a-red); } .b { color: var(--a-blue); }
+.m { color: var(--a-magenta); } .t { color: var(--a-cyan); } .p { color: var(--a-orange); }
+.d { color: #6b6b6b; } .s { color: var(--muted); } .w { color: var(--text); }
+.k { font-weight: 700; }
+.da { background: rgba(74, 222, 128, .12); } .dr { background: rgba(248, 113, 113, .12); }
+.inv { background: var(--a-green); color: var(--bg); }
+.vsl { background: #1c1c1c; color: var(--text-2); }
+
+.empty { flex: 1; display: grid; place-items: center; padding: 24px; text-align: center; color: var(--faint); }
+.empty b { display: block; margin-bottom: 4px; color: var(--text-2); font-weight: 500; }
+
+/* Menus */
+.menu {
+  position: absolute; z-index: 20; width: 280px; padding: 4px;
+  background: var(--raised); border: 1px solid var(--line-2); border-radius: 11px;
+  box-shadow: 0 16px 40px var(--shadow), 0 2px 8px var(--shadow);
+  opacity: 0; visibility: hidden; transform: scale(.97);
+  transition: opacity 80ms var(--ease-out), transform 80ms var(--ease-out), visibility 0s linear 80ms;
+}
+.menu.open { opacity: 1; visibility: visible; transform: none; transition: opacity 150ms var(--ease-out), transform 150ms var(--ease-out); }
+.menu:focus-visible { outline: none; }
+.mi {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 16px; align-items: center; column-gap: 10px;
+  height: 36px; padding: 0 8px; border-radius: 6px; color: var(--text-2);
+}
+.mi.hi { background: var(--chip); color: var(--text); }
+.mi-ic { display: grid; place-items: center; color: var(--faint); }
+.mi.hi .mi-ic { color: var(--text-2); }
+.mi-name { min-width: 0; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; font-weight: 500; }
+.mi-name small { margin-left: 6px; font-size: var(--fs-sm); font-weight: 400; color: var(--faint); }
+.mi-name code { margin-left: 6px; font: 400 var(--fs-sm) var(--mono); color: var(--faint); }
+.mi-meta { font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--faint); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mi-meta.waiting { color: var(--attn); }
+.mi-check { display: grid; place-items: center; color: var(--text); }
+.mi.cur .mi-name { color: var(--text); }
+.mi[aria-disabled="true"] { cursor: default; }
+.mi.away .av, .mi.away .mi-name > span:first-child { opacity: .6; }
+.mi.offline .av { opacity: .4; }
+.mi.offline .mi-name > span:first-child { color: var(--faint); }
+.mi.bad, .mi.bad .mi-ic { color: var(--err); }
+.mi.bad.hi { background: color-mix(in srgb, var(--err) 14%, var(--raised)); }
+.mi-sep { height: 1px; margin: 4px -4px; background: var(--line-2); }
+.menu.ctx { width: 184px; }
+.menu.ctx .mi { grid-template-columns: 16px minmax(0, 1fr) auto; height: 32px; }
+
+/* Sheets */
+.scrim {
+  position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px;
+  background: var(--scrim);
+  opacity: 0; visibility: hidden; transition: opacity 140ms var(--ease-out), visibility 0s linear 140ms;
+}
+.scrim.open { opacity: 1; visibility: visible; transition: opacity 200ms var(--ease-out); }
+.sheet {
+  position: relative; width: min(400px, 100%); padding: 20px;
+  background: var(--raised); border: 1px solid var(--line-2); border-radius: 14px;
+  box-shadow: 0 24px 64px var(--shadow), 0 2px 8px var(--shadow);
+  transform: scale(.97); transition: transform 140ms var(--ease-out);
+}
+.scrim.open .sheet { transform: none; transition: transform 200ms var(--ease-out); }
+.sheet.wide { width: min(460px, 100%); }
+.sheet h2 { margin: 0; padding-right: 36px; font-size: var(--fs-lg); line-height: var(--lh-lg); font-weight: 600; color: var(--text); }
+.sheet p { margin: 8px 0 0; color: var(--muted); text-wrap: pretty; }
+.sheet .x { position: absolute; top: 14px; right: 14px; width: 32px; height: 32px; }
+.sheet-body { display: flex; flex-direction: column; gap: 16px; margin-top: 16px; }
+
+.fl { display: block; margin-bottom: 8px; font-size: var(--fs-sm); line-height: var(--lh-sm); font-weight: 500; color: var(--muted); }
+.inp {
+  display: block; width: 100%; min-width: 0; height: 36px; padding: 0 11px;
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg);
+  color: var(--text); text-overflow: ellipsis; cursor: text;
+  user-select: text; -webkit-user-select: text;
+}
+.inp.code { font: 400 var(--fs-sm)/1 var(--mono); }
+.inp::placeholder { color: var(--faint); }
+.inp:focus-visible { outline: none; border-color: color-mix(in srgb, var(--accent) 45%, transparent); }
+.inp[aria-invalid="true"] { border-color: color-mix(in srgb, var(--err) 55%, transparent); }
+.inp[readonly] { color: var(--text-2); }
+.inp[type="number"] { appearance: textfield; -moz-appearance: textfield; font-variant-numeric: tabular-nums; }
+.inp::-webkit-inner-spin-button, .inp::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.msg { margin: 8px 0 0; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--err); text-wrap: balance; }
+.msg:empty { display: none; }
+
+.seg {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 2px;
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg);
+}
+.seg button { height: 30px; border-radius: 5px; color: var(--muted); font-weight: 500; text-align: center; font-variant-numeric: tabular-nums; }
+.seg button[aria-checked="true"] { background: var(--chip); color: var(--text); }
+.hours { display: flex; align-items: center; gap: 10px; margin-top: 8px; }
+.hours .inp { width: 72px; }
+.hours span { font-size: var(--fs-sm); color: var(--muted); }
+
+.copy-row { display: flex; gap: 8px; }
+.copy-row .inp { flex: 1; }
+.btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 8px;
+  height: 32px; padding: 0 14px; border-radius: 8px; font-weight: 500; white-space: nowrap;
+  transition: transform 150ms var(--ease-out);
+}
+.btn:active { transform: scale(.96); }
+.btn.pri { background: var(--accent); color: var(--on-accent); }
+.btn.sec { background: var(--chip); color: var(--text); }
+.btn.bad { background: var(--err); color: var(--on-accent); }
+.btn.pri:focus-visible, .btn.bad:focus-visible { outline: 1px solid var(--text); outline-offset: 2px; }
+.acts { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 20px; }
+.acts-note { margin-right: auto; font-size: var(--fs-sm); line-height: var(--lh-sm); color: var(--muted); }
+.cp { width: 92px; height: 36px; justify-content: flex-start; padding-left: 12px; }
+.cp-ic { display: grid; width: 16px; height: 16px; }
+.cp-ic .ic { grid-area: 1 / 1; transition: opacity 300ms cubic-bezier(.2, 0, 0, 1); }
+.cp-ic .ok { opacity: 0; color: var(--ok); }
+.cp.done .cp-ic .ok { opacity: 1; }
+.cp.done .cp-ic .cpy { opacity: 0; }
+
+.join { position: relative; flex: 1; min-height: 0; }
+/* A fixed top, so the heading and field do not move when an error line shows. */
+.join-form { position: absolute; top: 32%; left: 50%; width: min(360px, 100% - 48px); translate: -50% 0; }
+.join h1 { margin: 0 0 24px; font-size: var(--fs-xl); line-height: var(--lh-xl); font-weight: 600; color: var(--text); }
+:root[data-font="inter"] .join h1 { font-variation-settings: "opsz" 32; }
+
+@media (hover: hover) {
+  .pick button:hover { color: #fafafa; }
+  .who:hover, .newt:hover, .room:hover, .tab:not(.on):hover { background: var(--hover); }
+  .newt:hover { color: var(--text); }
+  .icon-btn:hover { background: var(--hover); color: var(--text); }
+  .title.own:hover { background: var(--hover); }
+  .btn.pri:hover { background: #e5e5e5; }
+  .btn.sec:hover { background: var(--chip-2); }
+  .btn.bad:hover { background: color-mix(in srgb, var(--err) 88%, white); }
+  .seg button:not([aria-checked="true"]):hover { color: var(--text); }
+}
+@media (prefers-reduced-motion: no-preference) {
+  .cp-ic .ic { transition-property: opacity, scale, filter; }
+  .cp-ic .ok, .cp.done .cp-ic .cpy { scale: .25; filter: blur(4px); }
+  .cp.done .cp-ic .ok { scale: 1; filter: blur(0); }
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu, .menu.open, .sheet, .scrim.open .sheet { transform: none; }
+  .btn:active { transform: none; }
+}
+/* Keyboard actions repeat many times a day, so a menu or sheet from a key changes at once. */
+.menu.instant, .scrim.instant, .scrim.instant .sheet { transition: none; }
+
+/* Narrow window: the sidebar folds into a top bar and a tab strip. */
+@container win (width < 720px) {
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .side { display: none; }
+  .mbar { display: flex; gap: 8px; padding: 0 8px 0 14px; }
+  .mbar .lights { display: flex; margin-right: 4px; }
+  .title, .ro-mark { display: none; }
+  .who-m { display: flex; min-width: 0; }
+  .mbar-act { display: flex; align-items: center; gap: 2px; margin-left: auto; }
+  .room-m { display: flex; height: 32px; padding: 0 8px; gap: 8px; }
+  .room-m .room-dot { width: 8px; }
+  .newt-m { width: 32px; height: 32px; margin: 0; padding: 0; justify-content: center; color: var(--muted); }
+  .newt-m span { display: none; }
+  .mtabs {
+    flex: none; display: flex; gap: 2px; padding: 6px 8px; overflow-x: auto;
+    border-bottom: 1px solid var(--line); scrollbar-width: none;
+  }
+  .mtabs::-webkit-scrollbar { display: none; }
+  .mtab {
+    flex: none; display: inline-flex; align-items: center; gap: 8px; height: 32px; padding: 0 12px 0 8px;
+    border-radius: 8px; white-space: nowrap; color: var(--text-2); font-weight: 500;
+  }
+  .mtab.on { background: var(--sel); color: var(--text); }
+  .mtab .rn { width: 140px; margin: -2px -6px -2px -6px; }
+  .term { padding: 8px 10px; }
+}
+@container win (width < 480px) {
+  .who-m .who-name, .room-m .room-name { display: none; }
+}
+@container win (width >= 720px) {
+  .mtabs { display: none; }
+}
+</style>
+</head>
+<body>
+<nav class="pick" id="pick" aria-label="Mockup states"></nav>
+<div class="win" id="win">
+  <div class="body" id="body"></div>
+  <div class="menu" id="menu" role="menu" tabindex="-1"></div>
+  <div class="scrim" id="scrim"><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle"></div></div>
+  <div class="sr" id="live" aria-live="polite"></div>
+</div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const win = $("win"), body = $("body"), menu = $("menu"), scrim = $("scrim"), sheet = $("sheet");
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+  const cap = (s) => (s ? s[0].toUpperCase() + s.slice(1) : s);
+
+  // A terminal shows its name. With no name it shows its program, capitalized.
+  const label = (t) => t.name || cap(t.program);
+
+  const ROOM = { name: "seer-dev", addr: "5e48802f" };
+  const OTHER = [{ name: "tamu-313", state: "Detached" }, { name: "night-shift", state: "Unreachable" }];
+  const P = [
+    { id: "nethum", host: true, machine: "legion", presence: "active", seen: "now", terminals: [
+      { id: "n1", program: "claude", name: "", kind: "agent", state: "working", since: "6m", task: "Fixing the seer stop buffer error" },
+      { id: "n2", program: "codex", name: "PR 441 review", kind: "agent", state: "idle", since: "12m", task: "Found two bugs in PR 441" },
+      { id: "n3", program: "fish", name: "", kind: "shell", state: "idle", since: "3m", task: "~/Projects/seer" }
+    ] },
+    { id: "kyler", machine: "kyler-mbp", presence: "active", seen: "now", terminals: [
+      { id: "k1", program: "claude", name: "Release 0.7", kind: "agent", state: "waiting", since: "2m", task: "Waiting for approval" },
+      { id: "k2", program: "cargo", name: "", kind: "app", state: "working", since: "41m", task: "cargo watch -x check" },
+      { id: "k3", program: "nvim", name: "", kind: "app", state: "working", since: "9m", task: "CHANGELOG.md" }
+    ] },
+    { id: "priya", machine: "priya-fw", presence: "active", seen: "1m", terminals: [
+      { id: "p1", program: "claude", name: "Person dropdown", kind: "agent", state: "working", since: "11m", task: "Wiring the dropdown to the Terminals message" },
+      { id: "p2", program: "codex", name: "", kind: "agent", state: "working", since: "3m", task: "Testing that 0.6 grant files load in 0.7" }
+    ] },
+    { id: "marco", machine: "marco-studio", presence: "away", seen: "18m", terminals: [
+      { id: "m1", program: "claude", name: "ADR 0010", kind: "agent", state: "idle", since: "18m", task: "Drafted ADR 0010 for the GPUI window" },
+      { id: "m2", program: "zsh", name: "", kind: "shell", state: "idle", since: "20m", task: "~/dev/seer" }
+    ] },
+    { id: "ana", machine: "ana-thinkpad", presence: "offline", seen: "3h", terminals: [] }
+  ];
+  const byId = (id) => P.find((p) => p.id === id);
+  const KEY = "9f3c2a7e5b1d48c6a0e2f7b3d9c1e5a89f3c2a7e5b1d48c6a0e2f7b3d9c1e5a8";
+  const TOKEN = "4b8e1f6a2d9c7e3b5a0f8d2c6e1b9a7f4b8e1f6a2d9c7e3b5a0f8d2c6e1b9a7f";
+  const CAPSULE = `SEER2-${KEY}-${TOKEN}`;
+  const JOIN_LINE = `seer join ${CAPSULE}`;
+  const INSTALL_LINE = `curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- ${CAPSULE}`;
+  const PRESETS = [[1, "1 hour"], [24, "1 day"], [168, "7 days"], [0, "Custom"]];
+  const ERR = {
+    bad: "This is not a Seer invite. Paste the full line from the host.",
+    used: "This invite was used or has expired. Ask the host for a new one.",
+    reach: "Seer cannot reach the room. Check that it is running, then try again.",
+    taken: "That name is in use. Choose another.",
+    hours: "Choose 1 to 168 hours."
+  };
+
+  const svg = (vb, inner, size = 16, cls = "") => `<svg class="ic ${cls}" width="${size}" height="${size}" viewBox="0 0 ${vb} ${vb}" aria-hidden="true">${inner}</svg>`;
+  const ICON = {
+    plus: svg(16, '<path d="M8 3.25v9.5M3.25 8h9.5"/>'),
+    sel: svg(16, '<path d="M5.5 6.25 8 3.75l2.5 2.5M5.5 9.75 8 12.25l2.5-2.5"/>', 16, "sel-ic"),
+    check: svg(16, '<path d="m3.75 8.25 2.75 2.75 5.75-6.5"/>'),
+    x: svg(16, '<path d="m4.5 4.5 7 7M11.5 4.5l-7 7"/>'),
+    gear: svg(24, '<path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/>'),
+    lock: svg(24, '<rect x="4" y="11" width="16" height="10" rx="2"/><path d="M8 11V7a4 4 0 0 1 8 0v4"/>', 12),
+    copy: svg(24, '<rect x="8" y="8" width="13" height="13" rx="2"/><path d="M4 16a2 2 0 0 1-2-2V4a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2"/>', 16, "cpy"),
+    ok: svg(16, '<path d="m3.75 8.25 2.75 2.75 5.75-6.5"/>', 16, "ok"),
+    invite: svg(24, '<path d="M16 21v-2a4 4 0 0 0-4-4H6a4 4 0 0 0-4 4v2"/><circle cx="9" cy="7" r="4"/><path d="M19 8v6M22 11h-6"/>'),
+    stop: svg(24, '<rect x="4" y="4" width="16" height="16" rx="3"/>'),
+    leave: svg(24, '<path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9"/>'),
+    restore: svg(24, '<path d="M3 12a9 9 0 1 0 9-9 9.75 9.75 0 0 0-6.74 2.74L3 8"/><path d="M3 3v5h5"/>'),
+    fresh: svg(24, '<path d="M12 5v14M5 12h14"/>'),
+    pencil: svg(24, '<path d="M21.17 6.81a1 1 0 0 0-3.98-3.98L3.84 16.17a2 2 0 0 0-.5.83l-1.32 4.35a.5.5 0 0 0 .62.62l4.35-1.32a2 2 0 0 0 .83-.5z"/><path d="m15 5 4 4"/>')
+  };
+  const ST_WORD = { idle: "Idle", working: "Working", waiting: "Waiting" };
+  const status = (s) => {
+    const ring = '<circle cx="8" cy="8" r="5.25" fill="none" stroke="currentColor" stroke-width="1.5"/>';
+    const fill = s === "working" ? '<path d="M8 5a3 3 0 0 1 0 6z" fill="currentColor"/>' : s === "waiting" ? '<circle cx="8" cy="8" r="3" fill="currentColor"/>' : "";
+    return `<svg class="st ${s}" viewBox="0 0 16 16" aria-hidden="true">${ring}${fill}</svg>`;
+  };
+
+  // ---- Fake terminal screens. A line is a list of [class, text] parts.
+  const L = (...parts) => parts;
+  const plainLen = (line) => line.reduce((n, [, t]) => n + [...t].length, 0);
+  const wide = /[^\x00-\x7f]/u;
+  const BOX = { "─": "h", "│": "v", "╭": "tl", "╮": "tr", "╰": "bl", "╯": "br", "⎿": "lb" };
+  const html = (line) => line.map(([c, t]) => {
+    const inner = [...t].map((ch) => (BOX[ch] ? `<span class="cell bx ${BOX[ch]}">${ch}</span>` : wide.test(ch) ? `<span class="cell">${esc(ch)}</span>` : esc(ch))).join("");
+    return c ? `<span class="${c}">${inner}</span>` : inner;
+  }).join("");
+  const rule = (cols) => L(["d", "─".repeat(cols)]);
+  // Reflow a long line at word breaks, with a hanging indent after the leading bullet or number.
+  const wrap = (line, cols) => {
+    const cells = line.flatMap(([c, t]) => [...t].map((ch) => [c, ch]));
+    if (cells.length <= cols) return [line];
+    const indent = cells.map(([, ch]) => ch).join("").match(/^\s*(?:\d+\s{2,}[-+]?\s*|\d+\.\s+|[^\w\s~/(]+\s+)?/)[0].length;
+    const out = [];
+    let rest = cells, pad = 0;
+    while (pad + rest.length > cols) {
+      const room = cols - pad;
+      const cut = rest.slice(0, room + 1).map(([, ch]) => ch).lastIndexOf(" ");
+      const at = cut > (pad ? 0 : indent - 1) ? cut : room;
+      out.push([...Array(pad)].map(() => ["", " "]).concat(rest.slice(0, at)));
+      rest = rest.slice(at).slice(rest[at] && rest[at][1] === " " ? 1 : 0);
+      pad = indent;
+    }
+    out.push([...Array(pad)].map(() => ["", " "]).concat(rest));
+    return out.map((cs) => cs.reduce((parts, [c, ch]) => {
+      const last = parts[parts.length - 1];
+      if (last && last[0] === c) last[1] += ch; else parts.push([c, ch]);
+      return parts;
+    }, []));
+  };
+  const box = (lines, cols, c = "d") => {
+    const w = Math.max(10, cols - 2);
+    const fit = (line) => {
+      const n = plainLen(line);
+      return n > w - 2 ? line : [...line, ["", " ".repeat(w - 2 - n)]];
+    };
+    return [L([c, "╭" + "─".repeat(w) + "╮"]), ...lines.flatMap((l) => wrap(l, w - 2)).map((l) => [[c, "│ "], ...fit(l), [c, " │"]]), L([c, "╰" + "─".repeat(w) + "╯"])];
+  };
+  const prompt = (who, m, path, br) => [["g", `${who}@${m}`], ["", " "], ["b", path], ["", " "], ["d", `(${br})`], ["", "> "]];
+  const caret = ["cur", " "];
+
+  const SCREENS = {
+    n1: (cols) => ({ lines: [
+      L(["s", "> Run the broker tests and tell me what fails."]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Bash"], ["", "(cargo test -p seer-broker)"]),
+      L(["d", "  ⎿  test result: FAILED. 41 passed; 1 failed; 0 ignored"]),
+      L(["d", "     failures: control::tests::stop_replies_before_exit"]),
+      L(),
+      L(["w", "⏺"], ["", " One test fails: stop_replies_before_exit. The client gets a short reply frame when it sends Stop. I will look at the reply path next."]),
+      L(),
+      L(["s", "> seer stop fails with a buffer error and the broker keeps running. Find the cause and fix it."]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Read"], ["", "(crates/seer-broker/src/server.rs)"]),
+      L(["d", "  ⎿  Read 412 lines"]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Search"], ["", '(pattern: "BufWriter", path: "crates/seer-broker")']),
+      L(["d", "  ⎿  Found 3 files"]),
+      L(),
+      L(["w", "⏺"], ["", " The stop reply goes into a BufWriter that is dropped before it flushes. The client reads a short frame, prints the buffer error, and the broker never leaves its accept loop."]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Update"], ["", "(crates/seer-broker/src/control.rs)"]),
+      L(["d", "  ⎿  Updated crates/seer-broker/src/control.rs with 3 additions and 1 removal"]),
+      L(["d", "       88  "], ["", "   let mut out = BufWriter::new(&stream);"]),
+      L(["d", "       89  "], ["dr", " - write_reply(&mut out, &Reply::Stopping);"]),
+      L(["d", "       89  "], ["da", " + write_reply(&mut out, &Reply::Stopping)?;"]),
+      L(["d", "       90  "], ["da", " + out.flush()?;"]),
+      L(["d", "       91  "], ["da", " + shutdown.notify_all();"]),
+      L(),
+      L(["y", "⏺"], ["", " "], ["w k", "Bash"], ["", "(cargo test -p seer-broker stop_)"]),
+      L(["d", "  ⎿  Running…"]),
+      L(),
+      L(["p", "✻"], ["p", " Compiling seer-broker…"], ["d", " (6m 12s · esc to interrupt)"]),
+      L(),
+      rule(cols),
+      L(["", "> "], caret),
+      rule(cols),
+      L(["d", "  ⏵⏵ accept edits on (shift+tab to cycle)"])
+    ] }),
+    n2: (cols) => ({ lines: [
+      L(["s", "› Review PR 441. List real bugs only, with file and line."]),
+      L(),
+      L(["d", "•"], ["", " Ran "], ["w k", "gh pr diff 441"]),
+      L(["d", "•"], ["", " Explored"]),
+      L(["d", "  └ "], ["", "Read viewer.rs, state.rs"]),
+      L(),
+      L(["", "Two findings:"]),
+      L(),
+      L(["p", "1."], ["", " "], ["b", "viewer.rs:212"], ["", " sends Resize each time an overlay opens. Section 2.2 says opening a panel must not send Watch or Resize."]),
+      L(["p", "2."], ["", " "], ["b", "state.rs:88"], ["", " drops the last owner size when the window loses focus, so a passive viewer can shrink the pane."]),
+      L(),
+      L(["", "No other issues."]),
+      L(),
+      L(["vsl", "› "], ["vsl d", "Ask Codex to do anything".padEnd(Math.max(0, cols - 2))]),
+      L(),
+      L(["d", "  ⏎ send   ⌃J newline   ⌃T transcript   ⌃C quit   82% context left"])
+    ] }),
+    n3: () => {
+      const pr = prompt("nethum", "legion", "~/P/seer", "fix/436-stop-buffer");
+      return { lines: [
+        L(...pr, ["", "git status -sb"]),
+        L(["", "## "], ["g", "fix/436-stop-buffer"], ["", "..."], ["r", "origin/main"], ["", " [ahead 1]"]),
+        L(["r", " M"], ["", " crates/seer-broker/src/control.rs"]),
+        L(...pr, ["", "cargo clippy -p seer-broker -- -D warnings"]),
+        L(["g k", "    Checking"], ["", " seer-core v0.7.0 (/home/nethum/Projects/seer/crates/seer-core)"]),
+        L(["g k", "    Checking"], ["", " seer-broker v0.7.0 (/home/nethum/Projects/seer/crates/seer-broker)"]),
+        L(["g k", "    Finished"], ["", " `dev` profile [unoptimized + debuginfo] target(s) in 18.21s"]),
+        L(...pr, ["", "seer stop"]),
+        L(["r k", "error:"], ["", " broker reply: failed to fill whole buffer"]),
+        L(...pr, caret)
+      ] };
+    },
+    k1: (cols) => ({ lines: [
+      L(["s", "> Get 0.7.0 ready. Bump the versions, update the changelog, then dry run the publish."]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Update"], ["", "(Cargo.toml)"]),
+      L(["d", "  ⎿  version 0.6.0 to 0.7.0 in 5 crates"]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Update"], ["", "(CHANGELOG.md)"]),
+      L(["d", "  ⎿  Added a 0.7.0 section with 9 entries"]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Bash"], ["", "(cargo build --release)"]),
+      L(["d", "  ⎿  Finished `release` profile [optimized] target(s) in 1m 48s"]),
+      L(),
+      ...box([
+        L(["w k", "Bash command"]),
+        L(),
+        L(["", "  cargo publish --dry-run -p seer-core"]),
+        L(["d", "  Dry run the publish of seer-core 0.7.0"]),
+        L(),
+        L(["", "Do you want to proceed?"]),
+        L(["b", "❯ 1. Yes"]),
+        L(["", "  2. Yes, and do not ask again for cargo publish commands"]),
+        L(["", "  3. No, and tell Claude what to do differently "], ["d", "(esc)"])
+      ], cols, "b")
+    ] }),
+    k2: () => ({ lines: [
+      L(["g", "kyler@kyler-mbp"], ["", " "], ["b", "~/code/seer"], ["", " "], ["d", "(release/0.7.0)"], ["", "> cargo watch -x check"]),
+      L(["t", "[Running 'cargo check']"]),
+      L(["g k", "    Checking"], ["", " seer v0.7.0 (/Users/kyler/code/seer/crates/seer)"]),
+      L(["g k", "    Finished"], ["", " `dev` profile [unoptimized + debuginfo] target(s) in 3.84s"]),
+      L(["t", "[Finished running. Exit status: 0]"]),
+      L(["t", "[Running 'cargo check']"]),
+      L(["g k", "    Checking"], ["", " seer v0.7.0 (/Users/kyler/code/seer/crates/seer)"])
+    ] }),
+    k3: (cols, rows) => {
+      const text = [
+        L(["b k", "# Changelog"]), L(), L(["b k", "## 0.7.0"]), L(),
+        L(["p", "-"], ["", " seer stop flushes its reply. The room server stops at once."]),
+        L(["p", "-"], ["", " The picker shows a +N more cue when people do not fit."]),
+        L(["p", "-"], ["", " Watch carries cols and rows. Viewers cannot shrink a pane."]),
+        L(["p", "-"], ["", " seer ps --clean stops windows that have no terminal."]),
+        L(["p", "-"], ["", " Grants written by 0.6 load in 0.7."]), L(),
+        L(["b k", "## 0.6.0"]), L(),
+        L(["p", "-"], ["", " Shells run on the computer of each person."])
+      ];
+      const lines = text.map((l, i) => [["d", String(i + 1).padStart(3) + " "], ...(i === 4 ? [["cur", "-"], ...l.slice(1)] : l)]);
+      while (lines.length < rows - 2) lines.push(L(["b", "~"]));
+      const st = " CHANGELOG.md  markdown  utf-8  5:1 ";
+      lines.push(L(["inv k", " NORMAL "], ["vsl", st.padEnd(Math.max(0, cols - 8))]));
+      lines.push(L());
+      return { cut: true, lines };
+    },
+    p1: (cols) => ({ lines: [
+      L(["s", "> Wire the person dropdown to the Terminals message. Use only seer-core types."]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Read"], ["", "(crates/seer-core/src/proto.rs)"]),
+      L(["d", "  ⎿  Read 388 lines"]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Update"], ["", "(crates/seer-desktop/src/window.rs)"]),
+      L(["d", "  ⎿  Updated window.rs with 24 additions and 6 removals"]),
+      L(),
+      L(["p", "✻"], ["p", " Wiring the person dropdown…"], ["d", " (11m 40s · esc to interrupt)"]),
+      L(),
+      rule(cols), L(["", "> "], caret), rule(cols),
+      L(["d", "  ? for shortcuts"])
+    ] }),
+    p2: (cols) => ({ lines: [
+      L(["s", "› Grant files written by 0.6 must load in 0.7. Add a test, then fix it."]),
+      L(),
+      L(["d", "•"], ["", " Explored"]),
+      L(["d", "  └ "], ["", "Read grants.rs"]),
+      L(["d", "•"], ["", " Ran "], ["w k", "cargo test -p seer-broker grants_upgrade"]),
+      L(["d", "  └ "], ["", "test grants_upgrade::loads_v06_file ... "], ["r", "FAILED"]),
+      L(["d", "•"], ["", ' The 0.6 file uses the key "can_type". 0.7 reads "can_type_here".']),
+      L(),
+      L(["d", "◦ Working (3m 05s · esc to interrupt)"]),
+      L(),
+      L(["vsl", "› "], ["vsl d", "Ask Codex to do anything".padEnd(Math.max(0, cols - 2))]),
+      L(),
+      L(["d", "  ⏎ send   ⌃J newline   ⌃T transcript   ⌃C quit   64% context left"])
+    ] }),
+    m1: (cols) => ({ lines: [
+      L(["s", "> Draft ADR 0010: the GPUI desktop window replaces the TUI. Keep it short."]),
+      L(),
+      L(["g", "⏺"], ["", " "], ["w k", "Write"], ["", "(docs/adr/0010-gpui-window.md)"]),
+      L(["d", "  ⎿  Wrote 61 lines to docs/adr/0010-gpui-window.md"]),
+      L(),
+      L(["w", "⏺"], ["", " ADR 0010 is drafted. It records the move from the TUI to GPUI and lists three open questions about keyboard focus."]),
+      L(),
+      rule(cols), L(["", "> "], caret), rule(cols),
+      L(["d", "  ? for shortcuts"])
+    ] }),
+    m2: () => ({ lines: [
+      L(["g", "marco@marco-studio"], ["", " "], ["b", "~/dev/seer"], ["", " % git log --oneline -4"]),
+      L(["y", "3f9c2e1"], ["", " Flush the stop reply before shutdown"]),
+      L(["y", "a71d0b4"], ["", " Picker shows +N more when people do not fit"]),
+      L(["y", "e2c4498"], ["", " Watch carries cols and rows"]),
+      L(["y", "90be513"], ["", " Release 0.6.0"]),
+      L(["g", "marco@marco-studio"], ["", " "], ["b", "~/dev/seer"], ["", " % "], caret)
+    ] }),
+    fresh: () => ({ lines: [
+      L(["", "Welcome to fish, the friendly interactive shell"]),
+      L(["", "Type "], ["g", "help"], ["", " for instructions on how to use fish"]),
+      L(...prompt("nethum", "legion", "~/P/seer", "main"), caret)
+    ] })
+  };
+
+  // ---- State
+  const STATES = [
+    ["main", "Main", [["own", "Your terminal"], ["watch", "Watching Kyler"], ["offline", "Person offline"]]],
+    ["people", "People", [["open", "Open"]]],
+    ["rename", "Rename", [["edit", "Double click"], ["menu", "Menu"], ["title", "Title"], ["saved", "Saved"], ["clear", "Cleared"]]],
+    ["settings", "Settings", [["open", "Open"]]],
+    ["invite", "Invite", [["pick", "Choose time"], ["custom", "Custom hours"], ["ready", "Invite ready"]]],
+    ["join", "Join", [["paste", "Paste"], ["bad", "Bad invite"], ["used", "Used or expired"], ["reach", "Cannot reach"], ["name", "Name"], ["taken", "Name in use"]]],
+    ["room", "Room menu", [["host", "Host"], ["guest", "Guest"], ["stopped", "Stopped"], ["stop", "Stop"], ["leave", "Leave"], ["fresh", "Start new"], ["after", "Others after Stop"]]]
+  ];
+  const FONTS = [["inter", "Inter"], ["geist", "Geist"], ["plex", "IBM Plex Sans"]];
+
+  let at = ["main", "own"], font = "inter", narrow = false;
+  let M, opener = null, menuKind = null, items = [], hi = -1, sheetOpener = null, viaKey = false;
+  const NAMES = Object.fromEntries(P.flatMap((p) => p.terminals.map((t) => [t.id, t.name])));
+  const reset = () => {
+    P.forEach((p) => { p.terminals = p.terminals.filter((t) => !t.id.startsWith("new-")); p.terminals.forEach((t) => { t.name = NAMES[t.id]; }); });
+    M = { view: "room", me: "nethum", show: "nethum", pick: { nethum: "n1", kyler: "k1", priya: "p1", marco: "m1" },
+      up: true, after: false, rename: null, ctx: null,
+      join: { step: "paste", err: null, line: "", name: "Kyler" },
+      inv: { hours: 24, custom: false, ready: false, err: null }, sheet: null };
+  };
+
+  const fontLabel = (k) => FONTS.find((f) => f[0] === k)[1];
+  function renderPick() {
+    const [scr, sub] = at;
+    const subs = STATES.find((s) => s[0] === scr)[2];
+    const row = (list, attr, cur) => `<div class="pick-row">${list.map(([k, l]) => `<button type="button" data-${attr}="${k}" aria-pressed="${k === cur}">${l}</button>`).join("")}</div>`;
+    $("pick").innerHTML = row(STATES, "scr", scr) + row(subs, "sub", sub) +
+      `<span class="lbl">Font</span>${row(FONTS, "font", font)}${row([["wide", "Wide"], ["narrow", "Narrow"]], "width", narrow ? "narrow" : "wide")}`;
+  }
+  const hashFor = () => `#${at[0]}/${at[1]}${font !== "inter" ? "&font=" + font : ""}${narrow ? "&narrow" : ""}`;
+  const mark = (scr, sub) => { at = [scr, sub]; renderPick(); history.replaceState(null, "", hashFor()); };
+
+  const termOf = (p) => p.terminals.find((t) => t.id === M.pick[p.id]) || p.terminals[0];
+  const mine = () => M.show === M.me;
+  const person = () => byId(M.show);
+
+  // ---- Room view
+  function tabHTML(t, on) {
+    const editing = M.rename && M.rename.id === t.id && M.rename.where === "tab";
+    const name = editing
+      ? `<input class="rn" id="rn" value="${esc(t.name)}" placeholder="${esc(cap(t.program))}" maxlength="40" spellcheck="false" autocomplete="off" aria-label="Terminal name">`
+      : `<span class="tab-name">${esc(label(t))}</span>`;
+    return `<button class="tab${on ? " on" : ""}${t.state === "waiting" ? " waiting" : ""}" type="button" role="tab" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-t="${t.id}">` +
+      `${status(t.state)}${name}<span class="tab-time">${t.since}</span>` +
+      `<span class="tab-task">${esc(t.task)}</span><span class="sr">${ST_WORD[t.state]}</span></button>`;
+  }
+  function stripHTML(t, on) {
+    const editing = M.rename && M.rename.id === t.id && M.rename.where === "strip";
+    const name = editing
+      ? `<input class="rn" id="rn" value="${esc(t.name)}" placeholder="${esc(cap(t.program))}" maxlength="40" spellcheck="false" autocomplete="off" aria-label="Terminal name">`
+      : `<span>${esc(label(t))}</span>`;
+    return `<button class="mtab${on ? " on" : ""}" type="button" role="tab" aria-selected="${on}" tabindex="${on ? 0 : -1}" data-t="${t.id}">${status(t.state)}${name}</button>`;
+  }
+  const avatar = (p) => `<span class="av">${p.id[0].toUpperCase()}</span>`;
+  const roomBtn = (cls) => `<button class="room ${cls}" type="button" data-room aria-haspopup="menu" aria-expanded="false" title="${cap(ROOM.name)}"><span class="room-dot${M.up && !M.after ? "" : " off"}" aria-hidden="true"><i></i></span><span class="room-name">${cap(ROOM.name)}</span>${ICON.sel}</button>`;
+  const gearBtn = `<button class="icon-btn" type="button" data-settings aria-label="Settings" title="Settings" aria-haspopup="dialog" aria-expanded="false">${ICON.gear}</button>`;
+  const newBtn = (cls) => `<button class="newt ${cls}" type="button" data-new title="New terminal (${mac ? "⌘T" : "Ctrl+T"})">${ICON.plus}<span>New terminal</span></button>`;
+
+  function titleHTML(p, t) {
+    if (!t) return `<div class="title" id="title">${esc(cap(p.id))}</div>`;
+    const editing = M.rename && M.rename.id === t.id && M.rename.where === "title";
+    const name = editing
+      ? `<input class="rn" id="rn" value="${esc(t.name)}" placeholder="${esc(cap(t.program))}" maxlength="40" spellcheck="false" autocomplete="off" aria-label="Terminal name">`
+      : `<span class="tt">${esc(label(t))}</span>`;
+    const own = mine();
+    const who = own ? "" : `<span class="who-of">${esc(cap(p.id))}</span><span class="sep">/</span>`;
+    return `<div class="title${own ? " own" : ""}" id="title"${own ? ' data-title title="Double click to rename"' : ""}>${who}${name}</div>`;
+  }
+
+  function screenHTML(t) {
+    const make = SCREENS[t.id] || SCREENS.fresh;
+    const { cols, rows } = measure();
+    const s = make(cols, rows);
+    return `<div class="term" id="term"><pre${s.cut ? ' class="cut"' : ""}>${(s.cut ? s.lines : s.lines.flatMap((l) => wrap(l, cols))).map(html).join("\n")}</pre></div>`;
+  }
+  // An inline TUI or a shell starts at the top and scrolls only when the screen is full.
+  function paintTerm(t) {
+    $("term").outerHTML = screenHTML(t);
+    const term = $("term");
+    term.classList.toggle("bottom", term.firstChild.offsetHeight > term.clientHeight - 16);
+  }
+  let gridCache = null;
+  function measure() {
+    const term = $("term");
+    if (!gridCache || term) {
+      const host = term || body;
+      const probe = document.createElement("span");
+      probe.style.cssText = "position:absolute;visibility:hidden;white-space:pre;font:400 var(--term-fs)/var(--term-lh) var(--mono)";
+      probe.textContent = "0".repeat(100);
+      host.appendChild(probe);
+      const cw = probe.getBoundingClientRect().width / 100;
+      probe.remove();
+      const w = term ? term.clientWidth - 24 : 900, h = term ? term.clientHeight - 16 : 760;
+      gridCache = { cols: Math.max(20, Math.floor(w / cw) - 1), rows: Math.max(8, Math.floor(h / 19)) };
+    }
+    return gridCache;
+  }
+
+  function roomView() {
+    const p = person(), t = termOf(p), live = M.up || M.me !== "nethum";
+    const ts = live ? p.terminals : [];
+    const tt = live ? t : null;
+    const who = `${avatar(p)}<span class="who-name">${esc(cap(p.id))}</span>${ICON.sel}`;
+    const tabs = ts.map((x) => tabHTML(x, x === tt)).join("");
+    const strip = ts.map((x) => stripHTML(x, x === tt)).join("");
+    let main;
+    if (!M.up && M.me === "nethum") main = '<div class="empty"><div><b>The room is stopped</b>Open the room menu to restore it.</div></div>';
+    else if (!tt) main = `<div class="empty"><div><b>${esc(cap(p.id))} is offline</b>Last seen ${p.seen === "3h" ? "3 hours" : p.seen} ago.</div></div>`;
+    else main = '<div class="term" id="term"></div>';
+    const roMark = tt && !mine() ? `<div class="ro-mark">${ICON.lock}<span>Read only</span></div>` : "";
+    const banner = M.after ? `<div class="strip" role="status"><span class="room-dot off" aria-hidden="true"><i></i></span><span>Room offline. Your terminals keep running.</span></div>` : "";
+    body.innerHTML = `
+      <aside class="side">
+        <div class="side-top"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div></div>
+        <button class="who" id="who" type="button" data-people aria-haspopup="menu" aria-expanded="false">${who}</button>
+        ${live && mine() ? newBtn("") : ""}
+        <div class="tabs" id="tabs" role="tablist" aria-label="Terminals of ${esc(cap(p.id))}">${tabs}</div>
+        <div class="side-foot">${roomBtn("")}${gearBtn}</div>
+      </aside>
+      <main class="main">
+        <header class="mbar">
+          <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <button class="who who-m" type="button" data-people aria-haspopup="menu" aria-expanded="false">${who}</button>
+          ${titleHTML(p, tt)}
+          ${roMark}
+          <div class="mbar-act">${roomBtn("room-m")}${live && mine() ? newBtn("newt-m") : ""}${gearBtn}</div>
+        </header>
+        ${strip ? `<nav class="mtabs" role="tablist" aria-label="Terminals">${strip}</nav>` : ""}
+        ${banner}
+        ${main}
+      </main>`;
+    if (tt) paintTerm(tt);
+  }
+
+  // ---- Join view
+  function joinView() {
+    const j = M.join;
+    const msg = j.err ? ERR[j.err] : "";
+    const inv = j.err ? ' aria-invalid="true"' : "";
+    const inner = j.step === "paste" ? `
+        <h1>Join a room</h1>
+        <label class="fl" for="jline">Invite from the host</label>
+        <input class="inp code" id="jline" placeholder="seer join SEER2-…" autocomplete="off" spellcheck="false" value="${esc(j.line)}" aria-describedby="jmsg"${inv}>
+        <p class="msg" id="jmsg">${msg}</p>
+        <div class="acts"><button class="btn pri" type="submit">${j.err === "reach" ? "Try again" : "Continue"}</button></div>` : `
+        <h1 id="jnameL">Choose your name</h1>
+        <input class="inp" id="jname" aria-labelledby="jnameL" autocomplete="username" spellcheck="false" maxlength="32" value="${esc(j.name)}" aria-describedby="jmsg"${inv}>
+        <p class="msg" id="jmsg">${msg}</p>
+        <div class="acts"><button class="btn sec" type="button" data-back>Back</button><button class="btn pri" type="submit">Join room</button></div>`;
+    body.innerHTML = `
+      <main class="main">
+        <header class="mbar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div></header>
+        <div class="join"><form class="join-form" id="jform" novalidate>${inner}</form></div>
+      </main>`;
+  }
+
+  function render() {
+    win.classList.toggle("solo", M.view === "join");
+    win.classList.toggle("narrow", narrow);
+    gridCache = null;
+    if (M.view === "join") joinView(); else roomView();
+    const rn = $("rn");
+    if (rn) { rn.focus({ preventScroll: true }); rn.select(); }
+  }
+
+  // ---- Menus
+  function peopleItems() {
+    return P.map((q) => {
+      const agents = q.terminals.filter((t) => t.kind === "agent");
+      const waiting = agents.some((t) => t.state === "waiting");
+      const working = agents.filter((t) => t.state === "working").length;
+      let meta = "", mcls = "";
+      if (q.presence === "offline") meta = `Offline ${q.seen}`;
+      else if (waiting) { meta = "Waiting"; mcls = "waiting"; }
+      else if (q.presence === "away") meta = `Away ${q.seen}`;
+      else if (working) meta = `${working} working`;
+      const marks = [q.id === M.me ? "You" : "", q.host ? "Host" : ""].filter(Boolean).join(", ");
+      return { id: "p-" + q.id, go: q.id, cls: `${q.presence}${q.id === M.show ? " cur" : ""}`, ic: avatar(q),
+        name: `<span>${esc(cap(q.id))}</span>${marks ? `<small>${marks}</small>` : ""}`, meta, mcls, check: q.id === M.show };
+    });
+  }
+  function roomItems() {
+    const cur = { id: "cur", dis: true, cls: "cur", ic: `<span class="room-dot${M.up ? "" : " off"}"><i></i></span>`, name: `<span>${cap(ROOM.name)}</span><code>${ROOM.addr}</code>`, meta: M.up ? `${P.length} people` : "Stopped", check: true };
+    const others = OTHER.map((r, i) => ({ id: "o" + i, dis: true, ic: '<span class="room-dot off"><i></i></span>', name: `<span>${cap(r.name)}</span>`, meta: r.state }));
+    let acts;
+    if (M.me !== "nethum") acts = [{ id: "leave", cls: "bad", ic: ICON.leave, name: "Leave room" }];
+    else if (M.up) acts = [{ id: "invite", ic: ICON.invite, name: "Invite a person" }, { id: "stop", cls: "bad", ic: ICON.stop, name: "Stop room" }];
+    else acts = [{ id: "restore", ic: ICON.restore, name: "Restore room" }, { id: "fresh", cls: "bad", ic: ICON.fresh, name: "Start a new room" }];
+    return [cur, ...others, null, ...acts];
+  }
+  const ctxItems = () => [{ id: "rename", ic: ICON.pencil, name: "Rename" }];
+
+  function renderMenu() {
+    menu.className = "menu open" + (menuKind === "ctx" ? " ctx" : "");
+    menu.setAttribute("role", menuKind === "people" ? "listbox" : "menu");
+    menu.setAttribute("aria-label", menuKind === "people" ? "People" : menuKind === "room" ? "Room" : "Terminal");
+    const role = menuKind === "people" ? "option" : "menuitem";
+    menu.innerHTML = items.map((it, n) => it
+      ? `<div class="mi${it.cls ? " " + it.cls : ""}${n === hi ? " hi" : ""}" id="mi-${it.id}" role="${role}"${it.dis ? ' aria-disabled="true"' : ""}${role === "option" ? ` aria-selected="${!!it.check}"` : ""} data-n="${n}">` +
+        `<span class="mi-ic">${it.ic}</span><span class="mi-name">${it.name}</span>` +
+        (menuKind === "ctx" ? "" : `<span class="mi-meta${it.mcls ? " " + it.mcls : ""}">${it.meta || ""}</span><span class="mi-check">${it.check ? ICON.check : ""}</span>`) + "</div>"
+      : '<div class="mi-sep" role="separator"></div>').join("");
+    if (hi >= 0) menu.setAttribute("aria-activedescendant", "mi-" + items[hi].id); else menu.removeAttribute("aria-activedescendant");
+  }
+  const actionable = () => items.map((it, n) => (it && !it.dis ? n : -1)).filter((n) => n >= 0);
+  function setHi(n) {
+    hi = n;
+    menu.querySelectorAll(".mi").forEach((el) => el.classList.toggle("hi", +el.dataset.n === hi));
+    menu.setAttribute("aria-activedescendant", "mi-" + items[hi].id);
+  }
+  function step(d) {
+    const a = actionable();
+    setHi(a[(a.indexOf(hi) + d + a.length) % a.length]);
+  }
+  const visible = (sel) => [...document.querySelectorAll(sel)].find((b) => b.offsetParent !== null);
+  function openMenu(kind, trigger, opts = {}) {
+    closeMenu(false);
+    menuKind = kind;
+    opener = trigger;
+    items = kind === "people" ? peopleItems() : kind === "room" ? roomItems() : ctxItems();
+    const a = actionable();
+    hi = kind === "people" ? items.findIndex((it) => it.check) : opts.last ? a[a.length - 1] : a[0];
+    renderMenu();
+    menu.classList.toggle("instant", viaKey);
+    placeMenu(opts.at);
+    if (trigger) trigger.setAttribute("aria-expanded", "true");
+    menu.focus({ preventScroll: true });
+  }
+  function placeMenu(point) {
+    const wr = win.getBoundingClientRect();
+    const w = menu.offsetWidth;
+    menu.style.top = menu.style.bottom = "auto";
+    if (point) {
+      menu.style.transformOrigin = "top left";
+      menu.style.left = Math.min(point.x - wr.left, wr.width - w - 8) + "px";
+      menu.style.top = (point.y - wr.top) + "px";
+      return;
+    }
+    const tr = opener.getBoundingClientRect();
+    const left = Math.max(8, Math.min(tr.left - wr.left, wr.width - w - 8));
+    menu.style.left = left + "px";
+    if (tr.top - wr.top > wr.height / 2) {
+      menu.style.bottom = (wr.bottom - tr.top + 4) + "px";
+      menu.style.transformOrigin = `${tr.left - wr.left - left + 16}px bottom`;
+    } else {
+      menu.style.top = (tr.bottom - wr.top + 4) + "px";
+      menu.style.transformOrigin = `${tr.left - wr.left - left + 16}px top`;
+    }
+  }
+  function closeMenu(refocus) {
+    if (!menuKind) return;
+    menu.classList.toggle("instant", viaKey);
+    menu.classList.remove("open");
+    if (opener) { opener.setAttribute("aria-expanded", "false"); if (refocus) opener.focus({ preventScroll: true }); }
+    opener = null; menuKind = null; M.ctx = null;
+  }
+  function act(n) {
+    const it = items[n];
+    if (!it || it.dis) return;
+    const kind = menuKind, o = opener, ctx = M.ctx;
+    closeMenu(false);
+    if (kind === "people") { M.show = it.go; render(); refocus("[data-people]"); mark("main", it.go === M.me ? "own" : it.go === "kyler" ? "watch" : at[1]); return; }
+    if (kind === "ctx") { startRename(ctx, "tab"); mark("rename", "edit"); return; }
+    if (it.id === "invite") { M.inv = { hours: 24, custom: false, ready: false, err: null }; openSheet("invite", o); mark("invite", "pick"); }
+    else if (it.id === "stop" || it.id === "leave" || it.id === "fresh") { openSheet(it.id, o); mark("room", it.id); }
+    else if (it.id === "restore") { M.up = true; render(); refocus("[data-room]"); mark("room", "host"); }
+  }
+  const refocus = (sel) => { const b = visible(sel); if (b) b.focus({ preventScroll: true }); };
+
+  // ---- Rename
+  function startRename(id, where) {
+    const p = person();
+    if (!mine() || !p.terminals.some((t) => t.id === id)) return;
+    M.pick[p.id] = id;
+    M.rename = { id, where };
+    render();
+  }
+  function endRename(save) {
+    if (!M.rename) return;
+    const rn = $("rn");
+    const t = person().terminals.find((x) => x.id === M.rename.id);
+    const where = M.rename.where;
+    if (save && rn && t) t.name = rn.value.trim();
+    M.rename = null;
+    render();
+    if (where === "title") refocus("[data-title]");
+    else { const tab = visible(`[data-t="${t ? t.id : ""}"]`); if (tab) tab.focus({ preventScroll: true }); }
+    if (save && t) { $("live").textContent = `Renamed to ${label(t)}`; mark("rename", t.name ? "saved" : "clear"); }
+  }
+
+  // ---- Sheets
+  const fmtHours = (h) => (h === 168 ? "7 days" : h === 24 ? "1 day" : h === 1 ? "1 hour" : `${h} hours`);
+  const xBtn = `<button class="icon-btn x" type="button" data-close aria-label="Close">${ICON.x}</button>`;
+  function inviteHTML() {
+    const v = M.inv;
+    if (v.ready) {
+      const row = (id, lab, val) => `<div><label class="fl" for="${id}">${lab}</label><div class="copy-row"><input class="inp code" id="${id}" readonly value="${esc(val)}"><button class="btn sec cp" type="button" data-copy="${id}"><span class="cp-ic">${ICON.copy}${ICON.ok}</span><span class="cp-l">Copy</span></button></div></div>`;
+      return `<h2 id="shTitle">Invite a person</h2>${xBtn}
+        <div class="sheet-body">${row("ln1", "For a friend who has Seer", JOIN_LINE)}${row("ln2", "For a friend who needs Seer", INSTALL_LINE)}</div>
+        <div class="acts"><span class="acts-note">Works once. Expires in ${fmtHours(v.hours)}.</span><button class="btn pri" type="button" data-close>Done</button></div>`;
+    }
+    const sel = v.custom ? 0 : v.hours;
+    const seg = PRESETS.map(([h, l]) => `<button type="button" role="radio" aria-checked="${h === sel}" tabindex="${h === sel ? 0 : -1}" data-h="${h}">${l}</button>`).join("");
+    const custom = v.custom ? `<div class="hours"><input class="inp" id="hrs" type="number" inputmode="numeric" min="1" max="168" value="${v.hours}" aria-label="Hours" aria-describedby="hrsN hrsE"${v.err ? ' aria-invalid="true"' : ""}><span id="hrsN">Hours, 1 to 168</span></div><p class="msg" id="hrsE">${v.err ? ERR.hours : ""}</p>` : "";
+    return `<h2 id="shTitle">Invite a person</h2>${xBtn}
+      <div class="sheet-body"><div><span class="fl" id="durL">Expires after</span><div class="seg" role="radiogroup" aria-labelledby="durL">${seg}</div>${custom}</div></div>
+      <div class="acts"><button class="btn pri" type="button" data-create>Create invite</button></div>`;
+  }
+  const others = () => P.length - 1;
+  const CONFIRM = {
+    stop: () => [`Stop ${cap(ROOM.name)}?`, `${others()} people lose the room. Their own terminals keep running. Your terminals on this computer stop too.`, "Stop room"],
+    leave: () => [`Leave ${cap(ROOM.name)}?`, "Your terminals on this computer stop. The room stays open for the others.", "Leave room"],
+    fresh: () => ["Start a new room?", `The ${others()} people of ${cap(ROOM.name)} are removed. You get a new invite to send.`, "Start a new room"]
+  };
+  function sheetHTML(kind) {
+    if (kind === "invite") return inviteHTML();
+    if (kind === "settings") return `<h2 id="shTitle">Settings</h2>${xBtn}<p id="shDesc">Settings come in a later build.</p>`;
+    const [t, p, b] = CONFIRM[kind]();
+    return `<h2 id="shTitle">${t}</h2><p id="shDesc">${p}</p>
+      <div class="acts"><button class="btn sec" type="button" data-close>Cancel</button><button class="btn bad" type="button" data-confirm="${kind}">${b}</button></div>`;
+  }
+  function paintSheet(focusSel) {
+    sheet.className = "sheet" + (M.sheet === "invite" ? " wide" : "");
+    sheet.innerHTML = sheetHTML(M.sheet);
+    if (M.sheet === "invite") sheet.removeAttribute("aria-describedby"); else sheet.setAttribute("aria-describedby", "shDesc");
+    const f = sheet.querySelector(focusSel);
+    if (f) f.focus({ preventScroll: true });
+  }
+  function openSheet(kind, from) {
+    M.sheet = kind;
+    sheetOpener = from || null;
+    if (sheetOpener) sheetOpener.setAttribute("aria-expanded", "true");
+    scrim.classList.toggle("instant", viaKey);
+    scrim.classList.add("open");
+    body.inert = true;
+    paintSheet(kind === "invite" ? (M.inv.ready ? "[data-copy]" : '[role="radio"][tabindex="0"]') : "[data-close]");
+  }
+  function closeSheet(refocusIt) {
+    if (!M || !M.sheet) return;
+    const kind = M.sheet;
+    M.sheet = null;
+    scrim.classList.toggle("instant", viaKey);
+    scrim.classList.remove("open");
+    body.inert = false;
+    document.querySelectorAll("[data-settings]").forEach((b) => b.setAttribute("aria-expanded", "false"));
+    if (refocusIt) refocus(kind === "settings" ? "[data-settings]" : "[data-room]");
+    sheetOpener = null;
+  }
+  function confirm(kind) {
+    closeSheet(false);
+    if (kind === "stop") { M.up = false; render(); refocus("[data-room]"); mark("room", "stopped"); }
+    else if (kind === "leave") { M.view = "join"; M.join = { step: "paste", err: null, line: "", name: "Kyler" }; render(); $("jline").focus(); mark("join", "paste"); }
+    else if (kind === "fresh") { M.up = true; render(); M.inv = { hours: 1, custom: false, ready: true, err: null }; openSheet("invite"); mark("invite", "ready"); }
+  }
+  function createInvite() {
+    const v = M.inv;
+    if (v.custom) {
+      const h = +$("hrs").value;
+      if (!Number.isInteger(h) || h < 1 || h > 168) { v.err = true; paintSheet("#hrs"); return; }
+      v.hours = h;
+    }
+    v.ready = true; v.err = null;
+    paintSheet("[data-copy]");
+    mark("invite", "ready");
+  }
+  function pickHours(h) {
+    const v = M.inv;
+    v.custom = h === 0; v.err = null;
+    if (h) v.hours = h; else v.hours = v.hours === 24 ? 48 : v.hours;
+    paintSheet(`[data-h="${h}"]`);
+    mark("invite", h ? "pick" : "custom");
+  }
+
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).catch(() => fallbackCopy(text)); return; }
+    fallbackCopy(text);
+  }
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (_) { /* clipboard blocked */ }
+    ta.remove();
+  }
+  function flashCopied(btn) {
+    btn.classList.add("done");
+    btn.querySelector(".cp-l").textContent = "Copied";
+    $("live").textContent = "Copied";
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => { btn.classList.remove("done"); btn.querySelector(".cp-l").textContent = "Copy"; $("live").textContent = ""; }, 1600);
+  }
+
+  function submitJoin() {
+    const j = M.join;
+    if (j.step === "paste") {
+      j.line = $("jline").value.trim();
+      const word = j.line.split(/\s+/).reverse().find((w) => w.startsWith("SEER"));
+      if (!word || !/^SEER2-[0-9a-f]{64}-[0-9a-f]{64}$/.test(word)) { j.err = "bad"; render(); $("jline").focus(); mark("join", "bad"); return; }
+      j.err = null; j.step = "name"; render(); $("jname").select(); mark("join", "name");
+      return;
+    }
+    j.name = $("jname").value.trim() || "Kyler";
+    M.view = "room"; M.me = "kyler"; M.show = "kyler"; M.up = true;
+    render(); refocus("[data-room]"); mark("room", "guest");
+  }
+
+  function newTerminal() {
+    const me = byId(M.me);
+    const t = { id: "new-" + Date.now().toString(36), program: "fish", name: "", kind: "shell", state: "idle", since: "now", task: "~/Projects/seer" };
+    me.terminals.push(t);
+    M.pick[me.id] = t.id;
+    M.show = me.id;
+    closeSheet(false); closeMenu(false);
+    render();
+    const tab = visible(`[data-t="${t.id}"]`);
+    if (tab) tab.focus({ preventScroll: true });
+  }
+
+  // ---- Mockup states
+  function apply(scr, sub) {
+    closeMenu(false); closeSheet(false); reset();
+    mark(scr, sub);
+    if (scr === "join") {
+      M.view = "join";
+      const j = M.join;
+      if (sub === "bad") { j.line = "seer join SEER2-9f3c2a7e5b1d"; j.err = "bad"; }
+      if (sub === "used" || sub === "reach") { j.line = JOIN_LINE; j.err = sub; }
+      if (sub === "name" || sub === "taken") j.step = "name";
+      if (sub === "taken") j.err = "taken";
+      render();
+      return;
+    }
+    if (scr === "main") {
+      if (sub === "watch") M.show = "kyler";
+      if (sub === "offline") M.show = "ana";
+      render();
+      return;
+    }
+    if (scr === "people") { render(); openMenu("people", visible("[data-people]")); return; }
+    if (scr === "settings") { render(); openSheet("settings", visible("[data-settings]")); return; }
+    if (scr === "rename") {
+      if (sub === "saved") { byId("nethum").terminals[0].name = "Stop buffer fix"; render(); return; }
+      if (sub === "clear") { byId("nethum").terminals[1].name = ""; M.pick.nethum = "n2"; render(); return; }
+      if (sub === "edit") { startRename("n1", narrowNow() ? "strip" : "tab"); return; }
+      if (sub === "title") { startRename("n1", narrowNow() ? "strip" : "title"); return; }
+      render();
+      const tab = visible('[data-t="n1"]');
+      const r = tab.getBoundingClientRect();
+      M.ctx = "n1";
+      openMenu("ctx", null, { at: { x: r.left + 72, y: r.top + 18 } });
+      return;
+    }
+    if (scr === "invite") {
+      render();
+      M.inv = { hours: sub === "custom" ? 48 : 24, custom: sub === "custom", ready: sub === "ready", err: null };
+      openSheet("invite", visible("[data-room]"));
+      return;
+    }
+    if (sub === "guest" || sub === "leave" || sub === "after") { M.me = "kyler"; M.show = "kyler"; }
+    if (sub === "stopped" || sub === "fresh") M.up = false;
+    if (sub === "after") M.after = true;
+    render();
+    if (sub === "host" || sub === "guest" || sub === "stopped") openMenu("room", visible("[data-room]"));
+    else if (sub !== "after") openSheet(sub, visible("[data-room]"));
+  }
+  const narrowNow = () => win.getBoundingClientRect().width < 720;
+
+  // ---- Events
+  $("pick").addEventListener("click", (e) => {
+    const s = e.target.closest("[data-scr]");
+    if (s) { const subs = STATES.find((x) => x[0] === s.dataset.scr)[2]; apply(s.dataset.scr, subs[0][0]); return; }
+    const u = e.target.closest("[data-sub]");
+    if (u) { apply(at[0], u.dataset.sub); return; }
+    const f = e.target.closest("[data-font]");
+    if (f) { font = f.dataset.font; document.documentElement.dataset.font = font; document.fonts.ready.then(() => apply(...at)); renderPick(); return; }
+    const w = e.target.closest("[data-width]");
+    if (w) { narrow = w.dataset.width === "narrow"; win.classList.toggle("narrow", narrow); apply(...at); }
+  });
+
+  body.addEventListener("click", (e) => {
+    if (e.detail > 1) return;
+    if (e.target.closest(".rn")) return;
+    const pb = e.target.closest("[data-people]");
+    if (pb) { if (opener === pb) closeMenu(true); else openMenu("people", pb); return; }
+    const rb = e.target.closest("[data-room]");
+    if (rb) { if (opener === rb) closeMenu(true); else openMenu("room", rb); return; }
+    if (e.target.closest("[data-new]")) { newTerminal(); return; }
+    const sb = e.target.closest("[data-settings]");
+    if (sb) { openSheet("settings", sb); mark("settings", "open"); return; }
+    const tab = e.target.closest("[data-t]");
+    if (tab) {
+      if (M.rename) endRename(true);
+      M.pick[M.show] = tab.dataset.t; render();
+      const nt = visible(`[data-t="${tab.dataset.t}"]`); if (nt) nt.focus({ preventScroll: true });
+      return;
+    }
+    if (e.target.closest("[data-back]")) { M.join.step = "paste"; M.join.err = null; render(); $("jline").focus(); mark("join", "paste"); }
+  });
+  body.addEventListener("dblclick", (e) => {
+    if (e.target.closest(".rn")) return;
+    const tab = e.target.closest("[data-t]");
+    if (tab) { startRename(tab.dataset.t, tab.classList.contains("mtab") ? "strip" : "tab"); mark("rename", "edit"); return; }
+    const title = e.target.closest("[data-title]");
+    if (title) { const t = termOf(person()); startRename(t.id, "title"); mark("rename", "title"); }
+  });
+  body.addEventListener("contextmenu", (e) => {
+    const tab = e.target.closest("[data-t]");
+    if (!tab || !mine()) return;
+    e.preventDefault();
+    M.pick[M.show] = tab.dataset.t; render();
+    M.ctx = tab.dataset.t;
+    openMenu("ctx", null, { at: { x: e.clientX, y: e.clientY } });
+    mark("rename", "menu");
+  });
+  body.addEventListener("focusout", (e) => {
+    if (e.target.id === "rn" && M.rename && !e.target._done) { e.target._done = true; setTimeout(() => endRename(true)); }
+  });
+  body.addEventListener("keydown", (e) => {
+    if (e.target.id === "rn") {
+      if (e.key === "Enter") { e.preventDefault(); e.target._done = true; endRename(true); }
+      else if (e.key === "Escape") { e.preventDefault(); e.stopPropagation(); e.target._done = true; endRename(false); }
+      return;
+    }
+    const tab = e.target.closest("[data-t]");
+    if (tab) {
+      const list = [...tab.parentElement.querySelectorAll("[data-t]")];
+      const i = list.indexOf(tab);
+      const go = { ArrowDown: i + 1, ArrowRight: i + 1, ArrowUp: i - 1, ArrowLeft: i - 1, Home: 0, End: list.length - 1 }[e.key];
+      if (go !== undefined) {
+        e.preventDefault();
+        const id = list[(go + list.length) % list.length].dataset.t;
+        M.pick[M.show] = id; render();
+        const nt = visible(`[data-t="${id}"]`); if (nt) nt.focus({ preventScroll: true });
+        return;
+      }
+      if (e.key === "F2") { e.preventDefault(); startRename(tab.dataset.t, tab.classList.contains("mtab") ? "strip" : "tab"); mark("rename", "edit"); return; }
+      if ((e.key === "F10" && e.shiftKey) || e.key === "ContextMenu") {
+        if (!mine()) return;
+        e.preventDefault();
+        const r = tab.getBoundingClientRect();
+        M.ctx = tab.dataset.t;
+        openMenu("ctx", tab, { at: { x: r.left + 72, y: r.top + 18 } });
+        return;
+      }
+    }
+    const trig = e.target.closest("[data-room], [data-people]");
+    if (trig && !menuKind && (e.key === "ArrowDown" || e.key === "ArrowUp")) {
+      e.preventDefault();
+      openMenu(trig.matches("[data-room]") ? "room" : "people", trig, { last: e.key === "ArrowUp" });
+    }
+  });
+  body.addEventListener("submit", (e) => { e.preventDefault(); submitJoin(); });
+  body.addEventListener("input", (e) => {
+    if (!M.join.err || !e.target.matches("#jline, #jname")) return;
+    M.join.err = null;
+    e.target.removeAttribute("aria-invalid");
+    $("jmsg").textContent = "";
+  });
+
+  menu.addEventListener("mousemove", (e) => {
+    const row = e.target.closest(".mi:not([aria-disabled])");
+    if (row && +row.dataset.n !== hi) setHi(+row.dataset.n);
+  });
+  menu.addEventListener("click", (e) => {
+    const row = e.target.closest(".mi:not([aria-disabled])");
+    if (row) act(+row.dataset.n);
+  });
+  sheet.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) { closeSheet(true); return; }
+    const h = e.target.closest("[data-h]");
+    if (h) { pickHours(+h.dataset.h); return; }
+    if (e.target.closest("[data-create]")) { createInvite(); return; }
+    const c = e.target.closest("[data-copy]");
+    if (c) { copyText($(c.dataset.copy).value); flashCopied(c); return; }
+    const k = e.target.closest("[data-confirm]");
+    if (k) confirm(k.dataset.confirm);
+  });
+  sheet.addEventListener("keydown", (e) => {
+    const r = e.target.closest('[role="radio"]');
+    if (r && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+      e.preventDefault();
+      const all = [...sheet.querySelectorAll('[role="radio"]')];
+      const n = all[(all.indexOf(r) + (e.key === "ArrowRight" ? 1 : -1) + all.length) % all.length];
+      pickHours(+n.dataset.h);
+      return;
+    }
+    if (e.key === "Enter" && e.target.id === "hrs") { e.preventDefault(); createInvite(); }
+  });
+  document.addEventListener("mousedown", (e) => {
+    if (menuKind && !menu.contains(e.target) && !(opener && opener.contains(e.target))) closeMenu(false);
+  });
+  scrim.addEventListener("mousedown", (e) => { if (e.target === scrim) closeSheet(true); });
+  window.addEventListener("resize", () => {
+    if (menuKind) closeMenu(false);
+    if (M.view === "room" && $("term")) { gridCache = null; const t = termOf(person()); if (t) paintTerm(t); }
+  });
+  document.addEventListener("keydown", (e) => {
+    if (menuKind) {
+      if (e.key === "ArrowDown") { e.preventDefault(); step(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); step(-1); }
+      else if (e.key === "Home") { e.preventDefault(); setHi(actionable()[0]); }
+      else if (e.key === "End") { e.preventDefault(); setHi(actionable().slice(-1)[0]); }
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(hi); }
+      else if (e.key === "Escape") { e.preventDefault(); closeMenu(true); }
+      else if (e.key === "Tab") closeMenu(false);
+      return;
+    }
+    if (M.sheet) {
+      if (e.key === "Escape") { e.preventDefault(); closeSheet(true); return; }
+      if (e.key === "Tab") {
+        const f = [...sheet.querySelectorAll("button, input")].filter((el) => el.tabIndex >= 0);
+        const first = f[0], last = f[f.length - 1];
+        if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+        else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+      }
+      return;
+    }
+    if ((e.metaKey || e.ctrlKey) && !e.shiftKey && !e.altKey && e.key.toLowerCase() === "t" && M.view === "room") { e.preventDefault(); newTerminal(); }
+  });
+
+  document.addEventListener("keydown", () => { viaKey = true; }, true);
+  document.addEventListener("pointerdown", () => { viaKey = false; }, true);
+
+  // ---- Start
+  const want = location.hash.slice(1).split("&");
+  const [ws, wsub] = (want[0] || "").split("/");
+  want.slice(1).forEach((kv) => {
+    const [k, v] = kv.split("=");
+    if (k === "font" && FONTS.some((f) => f[0] === v)) font = v;
+    if (k === "narrow") narrow = true;
+  });
+  document.documentElement.dataset.font = font;
+  win.classList.toggle("narrow", narrow);
+  const known = STATES.find((x) => x[0] === ws);
+  const start = known && known[2].some((x) => x[0] === wsub) ? [ws, wsub] : at;
+  reset();
+  apply(...start);
+  document.fonts.ready.then(() => { if (!M.sheet && !menuKind && !M.rename) apply(...at); else if (M.view === "room" && $("term")) { gridCache = null; const t = termOf(person()); if (t) paintTerm(t); } });
+})();
+</script>
+</body>
+</html>

@@ -8,7 +8,7 @@ in seer help. It says where the feature goes in the desktop window.
 Every command in seer help stays a command during and after the move.
 See ADR 0010.
 
-The approved design is [03-gpui-window.html](03-gpui-window.html).
+The approved design is [06-window-v2.html](06-window-v2.html).
 
 Each row starts with one of these words:
 

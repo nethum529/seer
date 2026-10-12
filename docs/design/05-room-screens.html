@@ -1,0 +1,751 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Seer room screens</title>
+<style>
+/* PALETTE START */
+:root {
+  /* gpui-component Default Dark (Longbridge), crates/component/src/theme/default-theme.json,
+     Tailwind neutral scale from default-colors.json. Primary is near white, so the accent is monochrome. */
+  color-scheme: dark;
+  --desk: #171717;
+  --win-border: #262626;
+  --side: #0a0a0a;
+  --bg: #0a0a0a;
+  --raised: #171717;
+  --card: rgba(255, 255, 255, .02);
+  --line: #262626;
+  --line-2: #404040;
+  --hover: #171717;
+  --pill: #262626;
+  --chip: #262626;
+  --chip-2: #404040;
+  --text: #fafafa;
+  --text-2: #d4d4d4;
+  --muted: #a3a3a3;
+  --faint: #737373;
+  --fainter: #525252;
+  --accent: #fafafa;
+  --on-accent: #171717;
+  --ok: #4ade80;
+  --warn: #facc15;
+  --err: #f87171;
+  --a-green: #4ade80;
+  --a-yellow: #facc15;
+  --a-red: #f87171;
+  --a-blue: #60a5fa;
+  --a-magenta: #c084fc;
+  --a-cyan: #22d3ee;
+  --a-orange: #fb923c;
+  --scrim: rgba(0, 0, 0, .5);
+  --shadow: rgba(0, 0, 0, .55);
+}
+/* PALETTE END */
+:root {
+  --ui: -apple-system, BlinkMacSystemFont, "Inter", "Segoe UI", system-ui, sans-serif;
+  --mono: "JetBrains Mono", "Berkeley Mono", "SF Mono", ui-monospace, Menlo, monospace;
+}
+* { box-sizing: border-box; }
+html, body { height: 100%; margin: 0; }
+body {
+  display: flex; flex-direction: column; align-items: center; justify-content: center; gap: 12px; overflow: hidden;
+  background: radial-gradient(1100px 700px at 50% 35%, color-mix(in srgb, var(--accent) 4%, transparent), transparent 70%), var(--desk);
+  color: var(--text); font: 13px/1.4 var(--ui); cursor: default;
+  -webkit-font-smoothing: antialiased; -moz-osx-font-smoothing: grayscale;
+}
+button, input { font: inherit; color: inherit; cursor: default; }
+button { background: none; border: 0; padding: 0; margin: 0; text-align: left; }
+:focus { outline: none; }
+:focus-visible { outline: 1px solid var(--accent); outline-offset: -1px; }
+.sr { position: absolute; width: 1px; height: 1px; overflow: hidden; clip-path: inset(50%); white-space: nowrap; }
+
+/* Mockup chrome: the state picker is not part of the product. */
+.pick { flex: none; display: flex; flex-wrap: wrap; justify-content: center; gap: 8px 16px; max-width: calc(100vw - 48px); }
+.pick-row { display: flex; gap: 2px; padding: 2px; border: 1px solid var(--line); border-radius: 8px; background: var(--side); }
+.pick button { height: 26px; padding: 0 10px; border-radius: 5px; color: var(--muted); font-size: 12px; white-space: nowrap; }
+.pick button[aria-pressed="true"] { background: var(--chip); color: var(--text); }
+
+.win {
+  position: relative; flex: none; display: flex; flex-direction: column;
+  width: min(1360px, calc(100vw - 48px)); height: min(860px, calc(100vh - 96px));
+  background: var(--bg); border: 1px solid var(--win-border); border-radius: 14px;
+  box-shadow: 0 40px 100px var(--shadow), 0 10px 30px var(--shadow);
+  overflow: hidden; user-select: none; -webkit-user-select: none;
+}
+.body { flex: 1; display: grid; grid-template-columns: 248px minmax(0, 1fr); min-height: 0; }
+.solo .body { grid-template-columns: minmax(0, 1fr); }
+
+.lights { display: flex; gap: 8px; flex: none; }
+.lights i { width: 12px; height: 12px; border-radius: 50%; box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .25); }
+.lights i:nth-child(1) { background: #ff5f57; }
+.lights i:nth-child(2) { background: #febc2e; }
+.lights i:nth-child(3) { background: #28c840; }
+
+.side {
+  display: flex; flex-direction: column; min-height: 0; padding: 0 10px;
+  background: var(--side); border-right: 1px solid var(--line);
+}
+.side-top { flex: none; height: 44px; display: flex; align-items: center; padding-left: 4px; }
+.who {
+  display: flex; align-items: center; gap: 9px; width: 100%; height: 40px;
+  padding: 0 10px 0 8px; border-radius: 8px;
+}
+.who-name { flex: 1; min-width: 0; font-weight: 600; font-size: 13px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.who .chev { color: var(--faint); flex: none; }
+.who-m { display: none; width: auto; height: 32px; padding: 0 8px 0 6px; }
+.who-m .av { width: 18px; height: 18px; font-size: 10px; }
+.newt {
+  flex: none; display: flex; align-items: center; gap: 8px; width: 100%; height: 32px;
+  margin-top: 6px; padding: 0 10px 0 11px; border-radius: 8px;
+  background: var(--accent); color: var(--on-accent); font-weight: 500;
+  box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 1px 2px var(--shadow);
+}
+.newt svg { flex: none; }
+.newt kbd { margin-left: auto; font: 500 11.5px var(--ui); color: color-mix(in srgb, var(--on-accent) 55%, transparent); }
+.av {
+  flex: none; display: inline-grid; place-items: center; width: 22px; height: 22px; border-radius: 50%;
+  background: var(--chip-2); color: var(--text); font: 600 11px/1 var(--ui);
+}
+.dot { flex: none; display: inline-block; width: 7px; height: 7px; border-radius: 50%; }
+.dot.working { background: var(--warn); }
+.dot.idle, .dot.up { background: var(--ok); }
+.dot.plain { box-shadow: inset 0 0 0 1px var(--fainter); }
+.tabs { flex: 1; min-height: 0; overflow-y: auto; margin-top: 10px; display: flex; flex-direction: column; gap: 2px; scrollbar-width: none; }
+.tab {
+  display: grid; grid-template-columns: 7px minmax(0, 1fr) auto; grid-template-rows: auto auto;
+  column-gap: 10px; row-gap: 1px; align-items: center; width: 100%; padding: 7px 10px 8px 12px; border-radius: 8px;
+}
+.tab.on { background: var(--pill); }
+.tab .dot { grid-row: 1; grid-column: 1; }
+.tab-name { grid-row: 1; grid-column: 2; font-weight: 500; color: var(--text); }
+.tab-since { grid-row: 1; grid-column: 3; font-size: 11.5px; color: var(--fainter); font-variant-numeric: tabular-nums; }
+.tab-task {
+  grid-row: 2; grid-column: 2 / span 2; font-size: 12px; color: var(--muted);
+  overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+}
+.side-gap { flex: 1; }
+
+.side-foot {
+  flex: none; display: flex; align-items: center; gap: 8px; height: 44px;
+  margin: 0 -10px; padding: 0 10px 0 18px; border-top: 1px solid var(--line);
+  color: var(--muted); white-space: nowrap;
+}
+.icon-btn {
+  flex: none; display: grid; place-items: center; width: 28px; height: 28px; border-radius: 8px;
+  color: var(--faint);
+}
+.side-foot .icon-btn { margin-left: auto; }
+.room {
+  display: flex; align-items: center; gap: 8px; min-width: 0; height: 32px;
+  margin-left: -8px; padding: 0 8px; border-radius: 8px; color: var(--muted);
+}
+.room-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.room code { font: 11.5px var(--mono); color: var(--fainter); }
+.room .chev { flex: none; color: var(--faint); }
+.room[aria-expanded="true"] { background: var(--pill); color: var(--text); }
+.room-m { display: none; }
+
+.main { display: flex; flex-direction: column; min-width: 0; min-height: 0; background: var(--bg); }
+.mbar {
+  flex: none; height: 44px; display: grid; grid-template-columns: 1fr auto 1fr; align-items: center;
+  padding: 0 14px; border-bottom: 1px solid var(--line);
+}
+.mbar .lights, .mbar-act { display: none; }
+.solo .mbar .lights { display: flex; grid-column: 1; grid-row: 1; }
+.title { grid-column: 2; grid-row: 1; color: var(--text); font-weight: 500; white-space: nowrap; }
+.title .sep { color: var(--fainter); margin: 0 4px; }
+.title .tt { color: var(--muted); font-weight: 400; }
+
+.term {
+  flex: 1; min-height: 0; margin: 0; padding: 10px 14px; overflow: hidden;
+  font: 12.5px/1.55 var(--mono); color: var(--text-2); white-space: pre-wrap; overflow-wrap: anywhere;
+  user-select: text; -webkit-user-select: text; cursor: text;
+}
+.empty { flex: 1; display: grid; place-items: center; padding: 24px; color: var(--faint); text-align: center; }
+.g { color: var(--a-green); } .b { color: var(--a-blue); } .d { color: var(--fainter); } .y { color: var(--a-yellow); }
+
+.ro {
+  display: flex; align-items: center; gap: 8px; min-height: 48px; margin: 0 14px 14px; padding: 7px 8px 7px 14px;
+  border: 1px solid var(--line-2); border-radius: 12px; background: var(--raised);
+  box-shadow: 0 12px 32px var(--shadow), 0 2px 6px var(--shadow);
+  color: var(--muted); font-size: 12.5px;
+}
+
+.menu {
+  position: absolute; z-index: 20; width: 288px; padding: 4px;
+  background: var(--raised); border: 1px solid var(--line-2); border-radius: 10px;
+  box-shadow: 0 16px 40px var(--shadow), 0 2px 8px var(--shadow);
+  opacity: 0; visibility: hidden; transition: opacity 60ms ease-out, visibility 0s linear 60ms;
+}
+.menu.open { opacity: 1; visibility: visible; transition: opacity 90ms ease-out; }
+.menu:focus-visible { outline: none; }
+.mi {
+  display: grid; grid-template-columns: 22px minmax(0, 1fr) auto 12px; align-items: center; column-gap: 10px;
+  height: 36px; padding: 0 10px 0 8px; border-radius: 7px;
+}
+.mi.hi { background: var(--pill); }
+.mi-name { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.mi.cur .mi-name { font-weight: 600; }
+.mi-name code { margin-left: 6px; font: 400 11.5px var(--mono); color: var(--fainter); }
+.mi-ic { display: grid; place-items: center; color: var(--faint); }
+.mi-meta { font-size: 11.5px; color: var(--fainter); white-space: nowrap; font-variant-numeric: tabular-nums; }
+.mi-check { color: var(--accent); display: grid; place-items: center; }
+.mi[aria-disabled="true"]:not(.cur) { color: var(--muted); }
+.mi.bad, .mi.bad .mi-ic { color: var(--err); }
+.mi-sep { height: 1px; margin: 4px -4px; background: var(--line); }
+
+.scrim {
+  position: absolute; inset: 0; z-index: 30; display: grid; place-items: center; padding: 16px;
+  background: var(--scrim);
+  opacity: 0; visibility: hidden; transition: opacity 80ms ease-out, visibility 0s linear 80ms;
+}
+.scrim.open { opacity: 1; visibility: visible; transition: opacity 110ms ease-out; }
+.sheet {
+  position: relative; width: min(380px, 100%); padding: 16px 18px 18px;
+  background: var(--raised); border: 1px solid var(--line-2); border-radius: 12px;
+  box-shadow: 0 24px 64px var(--shadow), 0 2px 8px var(--shadow);
+}
+.sheet.wide { width: min(440px, 100%); }
+.sheet h2 { margin: 0; padding-right: 28px; font: 600 14px/28px var(--ui); color: var(--text); }
+.sheet p { margin: 6px 0 0; color: var(--muted); text-wrap: pretty; }
+.sheet .x { position: absolute; top: 10px; right: 10px; }
+.sheet-body { display: flex; flex-direction: column; gap: 16px; margin-top: 12px; }
+
+.fl { display: block; margin-bottom: 6px; font-size: 12px; color: var(--muted); }
+.inp {
+  display: block; width: 100%; min-width: 0; height: 32px; padding: 0 10px;
+  border: 1px solid var(--line-2); border-radius: 8px; background: var(--bg);
+  color: var(--text); font: 12.5px var(--mono); text-overflow: ellipsis; cursor: text;
+  user-select: text; -webkit-user-select: text;
+}
+.inp::placeholder { color: var(--fainter); }
+.inp:focus-visible { outline: none; border-color: color-mix(in srgb, var(--accent) 60%, transparent); }
+.inp[aria-invalid="true"] { border-color: color-mix(in srgb, var(--err) 60%, transparent); }
+.inp[readonly] { color: var(--text-2); }
+.inp[type="number"] { appearance: textfield; -moz-appearance: textfield; font-variant-numeric: tabular-nums; }
+.inp::-webkit-inner-spin-button, .inp::-webkit-outer-spin-button { -webkit-appearance: none; margin: 0; }
+.msg { margin: 6px 0 0; font-size: 12px; color: var(--err); text-wrap: pretty; }
+.msg:empty { display: none; }
+
+.seg {
+  display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 2px; padding: 2px;
+  border: 1px solid var(--line); border-radius: 8px; background: var(--bg);
+}
+.seg button { height: 26px; border-radius: 5px; color: var(--muted); font-size: 12px; text-align: center; font-variant-numeric: tabular-nums; }
+.seg button[aria-checked="true"] { background: var(--chip); color: var(--text); }
+.hours { display: flex; align-items: center; gap: 8px; margin-top: 8px; }
+.hours .inp { width: 72px; }
+.hours span { font-size: 12px; color: var(--muted); }
+
+.copy-row { display: flex; gap: 8px; }
+.copy-row .inp { flex: 1; }
+.btn {
+  flex: none; display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  height: 32px; padding: 0 12px; border-radius: 8px; font-weight: 500; white-space: nowrap;
+}
+.btn.pri { background: var(--accent); color: var(--on-accent); box-shadow: inset 0 1px 0 rgba(255, 255, 255, .22), 0 1px 2px var(--shadow); }
+.btn.sec { background: var(--chip); color: var(--text); }
+.btn.bad { background: var(--err); color: var(--on-accent); }
+.btn.pri:focus-visible, .btn.bad:focus-visible { outline: 1px solid var(--text); outline-offset: 1px; }
+.btn.pri:active { background: color-mix(in srgb, var(--accent) 90%, black); }
+.btn.bad:active { background: color-mix(in srgb, var(--err) 90%, black); }
+.acts { display: flex; align-items: center; justify-content: flex-end; gap: 8px; margin-top: 18px; }
+.acts-note { margin-right: auto; font-size: 12px; color: var(--muted); }
+.cp { width: 88px; justify-content: flex-start; padding-left: 11px; }
+.cp-ic { display: grid; width: 13px; height: 13px; }
+.cp-ic svg { grid-area: 1 / 1; transition: opacity 300ms cubic-bezier(.2, 0, 0, 1); }
+.cp-ic .ok { opacity: 0; color: var(--ok); }
+.cp.done .cp-ic .ok { opacity: 1; }
+.cp.done .cp-ic .cpy { opacity: 0; }
+@media (prefers-reduced-motion: no-preference) {
+  .cp-ic svg { transition-property: opacity, scale, filter; }
+  .cp-ic .ok, .cp.done .cp-ic .cpy { scale: .25; filter: blur(4px); }
+  .cp.done .cp-ic .ok { scale: 1; filter: blur(0); }
+}
+
+.join { flex: 1; min-height: 0; display: grid; place-items: center; padding: 24px; }
+.join-form { width: min(340px, 100%); }
+.join h1 { margin: 0; font: 600 14px/28px var(--ui); color: var(--text); }
+.join .field { margin-top: 12px; }
+
+@media (hover: hover) {
+  .pick button:hover { color: var(--text); }
+  .room:hover { background: var(--hover); color: var(--text); }
+  .icon-btn:hover { background: var(--pill); color: var(--text); }
+  .btn.pri:hover { background: color-mix(in srgb, var(--accent) 90%, white); }
+  .btn.sec:hover { background: var(--chip-2); }
+  .btn.bad:hover { background: color-mix(in srgb, var(--err) 90%, white); }
+  .seg button:hover { color: var(--text); }
+}
+@media (max-width: 720px) {
+  body { justify-content: flex-start; gap: 0; }
+  .pick { flex-wrap: nowrap; justify-content: flex-start; max-width: 100vw; padding: 8px; overflow-x: auto; scrollbar-width: none; }
+  .win { flex: 1; width: 100vw; height: auto; min-height: 0; border: 0; border-radius: 0; box-shadow: none; }
+  .body { grid-template-columns: minmax(0, 1fr); }
+  .side { display: none; }
+  .mbar { display: flex; gap: 10px; padding: 0 8px 0 14px; background: var(--side); }
+  .mbar .lights { display: flex; }
+  .title { display: none; }
+  .who-m { display: flex; }
+  .mbar-act { display: flex; align-items: center; gap: 4px; margin-left: auto; }
+  .room-m { display: flex; margin-left: 0; height: 34px; }
+  .room-m code { display: none; }
+  .newt-m { width: auto; height: 30px; margin: 0; padding: 0 12px 0 10px; }
+  .term { padding: 10px; }
+  .ro { margin: 0 10px 10px; padding-left: 12px; }
+  .icon-btn { width: 34px; height: 34px; }
+  .btn, .inp, .seg { min-height: 34px; }
+}
+@media (max-width: 420px) {
+  .newt-m { padding: 0 10px; }
+  .newt-m span { display: none; }
+  .who-m .who-name { display: none; }
+}
+@media (max-width: 360px) {
+  .mbar .lights { display: none; }
+}
+@media (prefers-reduced-motion: reduce) {
+  .menu, .menu.open, .scrim, .scrim.open { transition: none; }
+}
+</style>
+</head>
+<body>
+<nav class="pick" id="pick" aria-label="Mockup states"></nav>
+<div class="win" id="win">
+  <div class="body" id="body"></div>
+  <div class="menu" id="menu" role="menu" tabindex="-1" aria-label="Room"></div>
+  <div class="scrim" id="scrim"><div class="sheet" id="sheet" role="dialog" aria-modal="true" aria-labelledby="shTitle"></div></div>
+  <div class="sr" id="live" aria-live="polite"></div>
+</div>
+<script>
+(() => {
+  const $ = (id) => document.getElementById(id);
+  const win = $("win"), body = $("body"), menu = $("menu"), scrim = $("scrim"), sheet = $("sheet");
+  const mac = /Mac|iPhone|iPad/.test(navigator.platform);
+  const esc = (s) => String(s).replace(/&/g, "&amp;").replace(/</g, "&lt;").replace(/>/g, "&gt;").replace(/"/g, "&quot;");
+
+  const ROOM = { name: "seer-dev", addr: "5e48802f", people: 5 };
+  const OTHER = [{ name: "tamu-313", state: "detached" }, { name: "night-shift", state: "unreachable" }];
+  const KEY = "9f3c2a7e5b1d48c6a0e2f7b3d9c1e5a89f3c2a7e5b1d48c6a0e2f7b3d9c1e5a8";
+  const TOKEN = "4b8e1f6a2d9c7e3b5a0f8d2c6e1b9a7f4b8e1f6a2d9c7e3b5a0f8d2c6e1b9a7f";
+  const CAPSULE = `SEER2-${KEY}-${TOKEN}`;
+  const JOIN_LINE = `seer join ${CAPSULE}`;
+  const INSTALL_LINE = `curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh -s -- ${CAPSULE}`;
+  const PRESETS = [[1, "1 hour"], [24, "1 day"], [168, "7 days"], [0, "Custom"]];
+  const ERR = {
+    bad: "This is not a Seer invite. Paste the full line from the host.",
+    used: "This invite was used or has expired. Ask the host for a new one.",
+    reach: "Seer cannot reach the room. Check that it is running, then try again.",
+    taken: "That name is in use. Choose another.",
+    hours: "Choose 1 to 168 hours."
+  };
+  const PEOPLE = {
+    nethum: { machine: "legion", terminals: [
+      { name: "claude", dot: "working", since: "6m", task: "Fixing the seer stop buffer error" },
+      { name: "shell", dot: "plain", since: "2m", task: "fish" }
+    ] },
+    kyler: { machine: "kyler-mbp", terminals: [
+      { name: "codex", dot: "idle", since: "14m", task: "Review the join flow copy" },
+      { name: "shell", dot: "plain", since: "1m", task: "zsh" }
+    ] }
+  };
+  const prompt = (who, m) => `<span class="g">${who}@${m}</span> <span class="b">~/Projects/seer</span> <span class="d">(main)</span>&gt; `;
+  const termLines = (who, m) => [
+    prompt(who, m) + "cargo build -p seer-desktop",
+    '   <span class="g">Compiling</span> seer-desktop v0.7.0 (/home/' + who + "/Projects/seer/crates/seer-desktop)",
+    '    <span class="g">Finished</span> dev profile [unoptimized + debuginfo] target(s) in 6.42s',
+    prompt(who, m) + "git status --short",
+    ' <span class="y">M</span> crates/seer-desktop/src/window.rs',
+    prompt(who, m)
+  ].join("\n");
+
+  const ICON = {
+    chev: '<svg class="chev" width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M2.5 3.75 5 6.25l2.5-2.5" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    check: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.25 5 8.75l4.5-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    plus: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><path d="M6 2v8M2 6h8" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    x: '<svg width="10" height="10" viewBox="0 0 10 10" aria-hidden="true"><path d="M1.5 1.5l7 7M8.5 1.5l-7 7" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round"/></svg>',
+    gear: '<svg width="16" height="16" viewBox="0 0 24 24" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"><path d="M12.22 2h-.44a2 2 0 0 0-2 2v.18a2 2 0 0 1-1 1.73l-.43.25a2 2 0 0 1-2 0l-.15-.08a2 2 0 0 0-2.73.73l-.22.38a2 2 0 0 0 .73 2.73l.15.1a2 2 0 0 1 1 1.72v.51a2 2 0 0 1-1 1.74l-.15.09a2 2 0 0 0-.73 2.73l.22.38a2 2 0 0 0 2.73.73l.15-.08a2 2 0 0 1 2 0l.43.25a2 2 0 0 1 1 1.73V20a2 2 0 0 0 2 2h.44a2 2 0 0 0 2-2v-.18a2 2 0 0 1 1-1.73l.43-.25a2 2 0 0 1 2 0l.15.08a2 2 0 0 0 2.73-.73l.22-.39a2 2 0 0 0-.73-2.73l-.15-.08a2 2 0 0 1-1-1.74v-.5a2 2 0 0 1 1-1.74l.15-.09a2 2 0 0 0 .73-2.73l-.22-.38a2 2 0 0 0-2.73-.73l-.15.08a2 2 0 0 1-2 0l-.43-.25a2 2 0 0 1-1-1.73V4a2 2 0 0 0-2-2z"/><circle cx="12" cy="12" r="3"/></svg>',
+    copy: '<svg class="cpy" width="13" height="13" viewBox="0 0 13 13" aria-hidden="true" fill="none" stroke="currentColor"><rect x="4.5" y="4.5" width="6" height="6" rx="1"/><path d="M2.5 8.5v-5a1 1 0 0 1 1-1h5"/></svg>',
+    ok: '<svg class="ok" width="13" height="13" viewBox="0 0 12 12" aria-hidden="true"><path d="M2.5 6.25 5 8.75l4.5-5" fill="none" stroke="currentColor" stroke-width="1.5" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+    invite: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round"><circle cx="4.75" cy="3.75" r="2"/><path d="M1.25 10c0-1.9 1.6-3.25 3.5-3.25S8.25 8.1 8.25 10M9.75 3v3M8.25 4.5h3"/></svg>',
+    stop: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true"><rect x="2.5" y="2.5" width="7" height="7" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.25"/></svg>',
+    leave: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M5 2H3a1 1 0 0 0-1 1v6a1 1 0 0 0 1 1h2M7.5 3.75 9.75 6 7.5 8.25M9.5 6H4.5"/></svg>',
+    restore: '<svg width="12" height="12" viewBox="0 0 12 12" aria-hidden="true" fill="none" stroke="currentColor" stroke-width="1.25" stroke-linecap="round" stroke-linejoin="round"><path d="M2.25 6a3.75 3.75 0 1 0 1.1-2.65M2.25 1.75v2h2"/></svg>'
+  };
+
+  const STATES = [
+    ["invite", "Invite", [["pick", "Choose time"], ["custom", "Custom hours"], ["ready", "Invite ready"]]],
+    ["join", "Join", [["paste", "Paste"], ["bad", "Bad invite"], ["used", "Used or expired"], ["reach", "Cannot reach"], ["name", "Name"], ["taken", "Name in use"]]],
+    ["room", "Room menu", [["host", "Host"], ["guest", "Guest"], ["stopped", "Stopped"], ["stop", "Stop"], ["leave", "Leave"], ["fresh", "Start new"], ["after", "Others after Stop"]]]
+  ];
+
+  let M, at = ["room", "host"], opener = null, sheetOpener = null, items = [], hi = -1;
+  const reset = () => {
+    M = { view: "room", role: "host", up: true, after: false,
+      join: { step: "paste", err: null, line: "", name: "kyler" },
+      inv: { hours: 24, custom: false, ready: false, err: null }, sheet: null };
+  };
+
+  function renderPick() {
+    const [scr, sub] = at;
+    const subs = STATES.find((s) => s[0] === scr)[2];
+    $("pick").innerHTML =
+      `<div class="pick-row">${STATES.map(([k, l]) => `<button type="button" data-scr="${k}" aria-pressed="${k === scr}">${l}</button>`).join("")}</div>` +
+      `<div class="pick-row">${subs.map(([k, l]) => `<button type="button" data-sub="${k}" aria-pressed="${k === sub}">${l}</button>`).join("")}</div>`;
+  }
+  const mark = (scr, sub) => { at = [scr, sub]; renderPick(); history.replaceState(null, "", `#${scr}/${sub}`); };
+
+  const me = () => (M.role === "host" ? "nethum" : "kyler");
+  const roomBtn = (cls) => `<button class="room ${cls}" type="button" data-room aria-haspopup="menu" aria-expanded="false"><i class="dot ${M.up && !M.after ? "up" : "plain"}" aria-hidden="true"></i><span class="room-name">${ROOM.name} <code>${ROOM.addr}</code></span>${ICON.chev}</button>`;
+  const settingsBtn = `<button class="icon-btn" type="button" aria-label="Settings" title="Settings">${ICON.gear}</button>`;
+
+  function roomView() {
+    const who = me(), p = PEOPLE[who], live = M.up || M.role === "guest";
+    const ts = live ? p.terminals : [];
+    const t = ts[1];
+    const whoHTML = `<span class="av">${who[0].toUpperCase()}</span><span class="who-name">${who}</span>${ICON.chev}`;
+    const tabs = ts.map((x) => `<div class="tab${x === t ? " on" : ""}"><i class="dot ${x.dot}"></i><span class="tab-name">${x.name}</span><span class="tab-since">${x.since}</span><span class="tab-task">${esc(x.task)}</span></div>`).join("");
+    const main = t
+      ? `<pre class="term">${termLines(who, p.machine)}</pre>`
+      : '<div class="empty">The room is stopped. Open the room menu to restore it.</div>';
+    const foot = M.after ? '<div class="ro" role="status"><i class="dot plain" aria-hidden="true"></i><span>Room offline. Your terminals keep running.</span></div>' : "";
+    body.innerHTML = `
+      <aside class="side">
+        <div class="side-top"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div></div>
+        <div class="who">${whoHTML}</div>
+        ${live ? `<button class="newt" type="button">${ICON.plus}<span>New terminal</span><kbd>${mac ? "&#8984;T" : "Ctrl T"}</kbd></button>` : ""}
+        ${tabs ? `<div class="tabs">${tabs}</div>` : '<div class="side-gap"></div>'}
+        <div class="side-foot">${roomBtn("")}${settingsBtn}</div>
+      </aside>
+      <main class="main">
+        <header class="mbar">
+          <div class="lights" aria-hidden="true"><i></i><i></i><i></i></div>
+          <div class="who who-m">${whoHTML}</div>
+          <div class="title">${t ? `${who}<span class="sep">/</span><span class="tt">${t.name}</span>` : who}</div>
+          <div class="mbar-act">${roomBtn("room-m")}${live ? `<button class="newt newt-m" type="button" aria-label="New terminal">${ICON.plus}<span>New terminal</span></button>` : ""}${settingsBtn}</div>
+        </header>
+        ${main}
+        ${foot}
+      </main>`;
+  }
+
+  function joinView() {
+    const j = M.join;
+    const msg = j.err ? ERR[j.err] : "";
+    const inv = j.err ? ' aria-invalid="true"' : "";
+    if (j.step === "paste") {
+      body.innerHTML = joinShell(`
+        <h1>Join a room</h1>
+        <div class="field">
+          <label class="fl" for="jline">Invite from the host</label>
+          <input class="inp" id="jline" placeholder="seer join SEER2-..." autocomplete="off" spellcheck="false" value="${esc(j.line)}" aria-describedby="jmsg"${inv}>
+          <p class="msg" id="jmsg">${msg}</p>
+        </div>
+        <div class="acts"><button class="btn pri" type="submit">${j.err === "reach" ? "Try again" : "Continue"}</button></div>`);
+    } else {
+      body.innerHTML = joinShell(`
+        <h1 id="jnameL">Choose your name</h1>
+        <div class="field">
+          <input class="inp" id="jname" aria-labelledby="jnameL" autocomplete="username" spellcheck="false" maxlength="32" value="${esc(j.name)}" aria-describedby="jmsg"${inv}>
+          <p class="msg" id="jmsg">${msg}</p>
+        </div>
+        <div class="acts"><button class="btn sec" type="button" data-back>Back</button><button class="btn pri" type="submit">Join room</button></div>`);
+    }
+  }
+  const joinShell = (inner) => `
+    <main class="main">
+      <header class="mbar"><div class="lights" aria-hidden="true"><i></i><i></i><i></i></div><div class="title">Seer</div></header>
+      <div class="join"><form class="join-form" id="jform" novalidate>${inner}</form></div>
+    </main>`;
+
+  function render() {
+    win.classList.toggle("solo", M.view === "join");
+    if (M.view === "join") joinView(); else roomView();
+  }
+
+  function menuItems() {
+    const cur = { id: "cur", dis: true, cls: "cur", ic: `<i class="dot ${M.up ? "up" : "plain"}"></i>`, name: `${ROOM.name}<code>${ROOM.addr}</code>`, meta: M.up ? `${ROOM.people} people` : "stopped", check: true };
+    const others = OTHER.map((r, i) => ({ id: "o" + i, dis: true, ic: '<i class="dot plain"></i>', name: r.name, meta: r.state }));
+    let acts;
+    if (M.role === "guest") acts = [{ id: "leave", cls: "bad", ic: ICON.leave, name: "Leave room" }];
+    else if (M.up) acts = [{ id: "invite", ic: ICON.invite, name: "Invite a person" }, { id: "stop", cls: "bad", ic: ICON.stop, name: "Stop room" }];
+    else acts = [{ id: "restore", ic: ICON.restore, name: "Restore room" }, { id: "fresh", cls: "bad", ic: ICON.plus, name: "Start a new room" }];
+    return [cur, ...others, null, ...acts];
+  }
+  function renderMenu() {
+    menu.innerHTML = items.map((it, n) => it ? `<div class="mi${it.cls ? " " + it.cls : ""}${n === hi ? " hi" : ""}" id="mi-${it.id}" role="menuitem"${it.dis ? ' aria-disabled="true"' : ""} data-n="${n}"><span class="mi-ic">${it.ic}</span><span class="mi-name">${it.name}</span><span class="mi-meta">${it.meta || ""}</span><span class="mi-check">${it.check ? ICON.check : ""}</span></div>` : '<div class="mi-sep" role="separator"></div>').join("");
+    if (hi >= 0) menu.setAttribute("aria-activedescendant", "mi-" + items[hi].id); else menu.removeAttribute("aria-activedescendant");
+  }
+  const actionable = () => items.map((it, n) => (it && !it.dis ? n : -1)).filter((n) => n >= 0);
+  function setHi(n) {
+    hi = n;
+    menu.querySelectorAll(".mi").forEach((el) => el.classList.toggle("hi", +el.dataset.n === hi));
+    menu.setAttribute("aria-activedescendant", "mi-" + items[hi].id);
+  }
+  function step(d) {
+    const a = actionable();
+    const i = a.indexOf(hi);
+    setHi(a[(i + d + a.length) % a.length]);
+  }
+  const visibleRoomBtn = () => [...document.querySelectorAll("[data-room]")].find((b) => b.offsetParent !== null);
+  function openMenu(trigger, last) {
+    if (!trigger) return;
+    opener = trigger;
+    items = menuItems();
+    hi = last ? actionable().slice(-1)[0] : actionable()[0];
+    renderMenu();
+    placeMenu();
+    menu.classList.add("open");
+    trigger.setAttribute("aria-expanded", "true");
+    menu.focus({ preventScroll: true });
+  }
+  function placeMenu() {
+    const wr = win.getBoundingClientRect(), tr = opener.getBoundingClientRect();
+    const w = Math.min(288, wr.width - 16);
+    menu.style.width = w + "px";
+    menu.style.left = Math.max(8, Math.min(tr.left - wr.left, wr.width - w - 8)) + "px";
+    if (tr.top - wr.top > wr.height / 2) { menu.style.top = "auto"; menu.style.bottom = (wr.bottom - tr.top + 4) + "px"; }
+    else { menu.style.bottom = "auto"; menu.style.top = (tr.bottom - wr.top + 4) + "px"; }
+  }
+  function closeMenu(refocus) {
+    if (!opener) return;
+    menu.classList.remove("open");
+    opener.setAttribute("aria-expanded", "false");
+    if (refocus) opener.focus({ preventScroll: true });
+    opener = null;
+  }
+  function act(id) {
+    const o = opener;
+    closeMenu(false);
+    if (id === "invite") { M.inv = { hours: 24, custom: false, ready: false, err: null }; openSheet("invite", o); mark("invite", "pick"); }
+    else if (id === "stop" || id === "leave" || id === "fresh") { openSheet(id, o); mark("room", id); }
+    else if (id === "restore") { M.up = true; render(); refocusRoom(); mark("room", "host"); }
+  }
+  const refocusRoom = () => { const b = visibleRoomBtn(); if (b) b.focus({ preventScroll: true }); };
+
+  const fmtHours = (h) => (h === 168 ? "7 days" : h === 24 ? "1 day" : h === 1 ? "1 hour" : `${h} hours`);
+  function inviteHTML() {
+    const v = M.inv;
+    const xBtn = `<button class="icon-btn x" type="button" data-close aria-label="Close">${ICON.x}</button>`;
+    if (v.ready) {
+      const row = (id, label, val) => `<div><label class="fl" for="${id}">${label}</label><div class="copy-row"><input class="inp" id="${id}" readonly value="${esc(val)}"><button class="btn sec cp" type="button" data-copy="${id}"><span class="cp-ic">${ICON.copy}${ICON.ok}</span><span class="cp-l">Copy</span></button></div></div>`;
+      return `<h2 id="shTitle">Invite a person</h2>${xBtn}
+        <div class="sheet-body">${row("ln1", "For a friend who has Seer", JOIN_LINE)}${row("ln2", "For a friend who needs Seer", INSTALL_LINE)}</div>
+        <div class="acts"><span class="acts-note">Works once. Expires in ${fmtHours(v.hours)}.</span><button class="btn pri" type="button" data-close>Done</button></div>`;
+    }
+    const sel = v.custom ? 0 : v.hours;
+    const seg = PRESETS.map(([h, l]) => `<button type="button" role="radio" aria-checked="${h === sel}" tabindex="${h === sel ? 0 : -1}" data-h="${h}">${l}</button>`).join("");
+    const custom = v.custom ? `<div class="hours"><input class="inp" id="hrs" type="number" inputmode="numeric" min="1" max="168" value="${v.hours}" aria-label="Hours" aria-describedby="hrsN hrsE"${v.err ? ' aria-invalid="true"' : ""}><span id="hrsN">hours, 1 to 168</span></div><p class="msg" id="hrsE">${v.err ? ERR.hours : ""}</p>` : "";
+    return `<h2 id="shTitle">Invite a person</h2>${xBtn}
+      <div class="sheet-body"><div><span class="fl" id="durL">Expires after</span><div class="seg" role="radiogroup" aria-labelledby="durL">${seg}</div>${custom}</div></div>
+      <div class="acts"><button class="btn pri" type="button" data-create>Create invite</button></div>`;
+  }
+  const CONFIRM = {
+    stop: () => [`Stop ${ROOM.name}?`, `${ROOM.people - 1} people lose the room. Their own terminals keep running. Your terminals on this computer stop too.`, "Stop room"],
+    leave: () => [`Leave ${ROOM.name}?`, "Your terminals on this computer stop. The room stays open for the others.", "Leave room"],
+    fresh: () => ["Start a new room?", `The ${ROOM.people - 1} people of ${ROOM.name} are removed. You get a new invite to send.`, "Start new room"]
+  };
+  function sheetHTML(kind) {
+    if (kind === "invite") return inviteHTML();
+    const [t, p, b] = CONFIRM[kind]();
+    return `<h2 id="shTitle">${t}</h2><p id="shDesc">${p}</p>
+      <div class="acts"><button class="btn sec" type="button" data-close>Cancel</button><button class="btn bad" type="button" data-confirm="${kind}">${b}</button></div>`;
+  }
+  function paintSheet(focusSel) {
+    sheet.className = "sheet" + (M.sheet === "invite" ? " wide" : "");
+    sheet.innerHTML = sheetHTML(M.sheet);
+    if (M.sheet === "invite") sheet.removeAttribute("aria-describedby"); else sheet.setAttribute("aria-describedby", "shDesc");
+    const f = sheet.querySelector(focusSel);
+    if (f) f.focus({ preventScroll: true });
+  }
+  function openSheet(kind, from) {
+    M.sheet = kind;
+    sheetOpener = from || visibleRoomBtn();
+    scrim.classList.add("open");
+    body.inert = true;
+    paintSheet(kind === "invite" ? (M.inv.ready ? "[data-copy]" : '[role="radio"][tabindex="0"]') : "[data-close]");
+  }
+  function closeSheet(refocus) {
+    if (!M || !M.sheet) return;
+    M.sheet = null;
+    scrim.classList.remove("open");
+    body.inert = false;
+    if (refocus) refocusRoom();
+    sheetOpener = null;
+  }
+  function confirm(kind) {
+    closeSheet(false);
+    if (kind === "stop") { M.up = false; render(); refocusRoom(); mark("room", "stopped"); }
+    else if (kind === "leave") { M.view = "join"; M.join = { step: "paste", err: null, line: "", name: "kyler" }; render(); $("jline").focus(); mark("join", "paste"); }
+    else if (kind === "fresh") { M.up = true; render(); M.inv = { hours: 1, custom: false, ready: true, err: null }; openSheet("invite"); mark("invite", "ready"); }
+  }
+  function createInvite() {
+    const v = M.inv;
+    if (v.custom) {
+      const h = +$("hrs").value;
+      if (!Number.isInteger(h) || h < 1 || h > 168) { v.err = true; paintSheet("#hrs"); return; }
+      v.hours = h;
+    }
+    v.ready = true; v.err = null;
+    paintSheet("[data-copy]");
+    mark("invite", "ready");
+  }
+  function pickHours(h) {
+    const v = M.inv;
+    v.custom = h === 0; v.err = null;
+    if (h) v.hours = h; else v.hours = v.hours === 24 ? 48 : v.hours;
+    paintSheet(`[data-h="${h}"]`);
+    mark("invite", h ? "pick" : "custom");
+  }
+
+  function fallbackCopy(text) {
+    const ta = document.createElement("textarea");
+    ta.value = text; ta.style.position = "fixed"; ta.style.opacity = "0";
+    document.body.appendChild(ta); ta.select();
+    try { document.execCommand("copy"); } catch (_) { /* clipboard blocked */ }
+    ta.remove();
+  }
+  function copyText(text) {
+    if (navigator.clipboard && window.isSecureContext) { navigator.clipboard.writeText(text).catch(() => fallbackCopy(text)); return; }
+    fallbackCopy(text);
+  }
+  function flashCopied(btn) {
+    btn.classList.add("done");
+    btn.querySelector(".cp-l").textContent = "Copied";
+    $("live").textContent = "Copied";
+    clearTimeout(btn._t);
+    btn._t = setTimeout(() => { btn.classList.remove("done"); btn.querySelector(".cp-l").textContent = "Copy"; $("live").textContent = ""; }, 1600);
+  }
+
+  function submitJoin() {
+    const j = M.join;
+    if (j.step === "paste") {
+      j.line = $("jline").value.trim();
+      const word = j.line.split(/\s+/).reverse().find((w) => w.startsWith("SEER"));
+      if (!word || !/^SEER2-[0-9a-f]{64}-[0-9a-f]{64}$/.test(word)) { j.err = "bad"; render(); $("jline").focus(); mark("join", "bad"); return; }
+      j.err = null; j.step = "name"; render(); $("jname").select(); mark("join", "name");
+      return;
+    }
+    j.name = $("jname").value.trim() || "kyler";
+    M.view = "room"; M.role = "guest"; M.up = true;
+    render(); refocusRoom(); mark("room", "guest");
+  }
+
+  function apply(scr, sub) {
+    closeMenu(false); closeSheet(false); reset();
+    mark(scr, sub);
+    if (scr === "join") {
+      M.view = "join";
+      const j = M.join;
+      if (sub === "bad") { j.line = "seer join SEER2-9f3c2a7e5b1d"; j.err = "bad"; }
+      if (sub === "used" || sub === "reach") { j.line = JOIN_LINE; j.err = sub; }
+      if (sub === "name" || sub === "taken") j.step = "name";
+      if (sub === "taken") j.err = "taken";
+      render();
+      return;
+    }
+    if (scr === "invite") {
+      render();
+      M.inv = { hours: sub === "custom" ? 48 : 24, custom: sub === "custom", ready: sub === "ready", err: null };
+      openSheet("invite");
+      return;
+    }
+    if (sub === "guest" || sub === "leave" || sub === "after") M.role = "guest";
+    if (sub === "stopped" || sub === "fresh") M.up = false;
+    if (sub === "after") M.after = true;
+    render();
+    if (sub === "host" || sub === "guest" || sub === "stopped") openMenu(visibleRoomBtn());
+    else if (sub !== "after") openSheet(sub);
+  }
+
+  $("pick").addEventListener("click", (e) => {
+    const s = e.target.closest("[data-scr]");
+    if (s) { const subs = STATES.find((x) => x[0] === s.dataset.scr)[2]; apply(s.dataset.scr, subs[0][0]); return; }
+    const u = e.target.closest("[data-sub]");
+    if (u) apply(at[0], u.dataset.sub);
+  });
+  body.addEventListener("click", (e) => {
+    const rb = e.target.closest("[data-room]");
+    if (rb) { if (opener === rb) closeMenu(true); else { closeMenu(false); openMenu(rb); } return; }
+    if (e.target.closest("[data-back]")) { M.join.step = "paste"; M.join.err = null; render(); $("jline").focus(); mark("join", "paste"); }
+  });
+  body.addEventListener("keydown", (e) => {
+    const rb = e.target.closest("[data-room]");
+    if (!rb || opener || (e.key !== "ArrowDown" && e.key !== "ArrowUp")) return;
+    e.preventDefault();
+    openMenu(rb, e.key === "ArrowUp");
+  });
+  body.addEventListener("submit", (e) => { e.preventDefault(); submitJoin(); });
+  body.addEventListener("input", (e) => {
+    if (!M.join.err || !e.target.matches("#jline, #jname")) return;
+    M.join.err = null;
+    e.target.removeAttribute("aria-invalid");
+    $("jmsg").textContent = "";
+  });
+  menu.addEventListener("mousemove", (e) => {
+    const row = e.target.closest(".mi:not([aria-disabled])");
+    if (row && +row.dataset.n !== hi) setHi(+row.dataset.n);
+  });
+  menu.addEventListener("click", (e) => {
+    const row = e.target.closest(".mi:not([aria-disabled])");
+    if (row) act(items[+row.dataset.n].id);
+  });
+  sheet.addEventListener("click", (e) => {
+    if (e.target.closest("[data-close]")) { closeSheet(true); return; }
+    const h = e.target.closest("[data-h]");
+    if (h) { pickHours(+h.dataset.h); return; }
+    if (e.target.closest("[data-create]")) { createInvite(); return; }
+    const c = e.target.closest("[data-copy]");
+    if (c) { copyText($(c.dataset.copy).value); flashCopied(c); return; }
+    const k = e.target.closest("[data-confirm]");
+    if (k) confirm(k.dataset.confirm);
+  });
+  sheet.addEventListener("keydown", (e) => {
+    const r = e.target.closest('[role="radio"]');
+    if (r && (e.key === "ArrowRight" || e.key === "ArrowLeft")) {
+      e.preventDefault();
+      const all = [...sheet.querySelectorAll('[role="radio"]')];
+      const n = all[(all.indexOf(r) + (e.key === "ArrowRight" ? 1 : -1) + all.length) % all.length];
+      pickHours(+n.dataset.h);
+      return;
+    }
+    if (e.key === "Enter" && e.target.id === "hrs") { e.preventDefault(); createInvite(); }
+  });
+  document.addEventListener("mousedown", (e) => {
+    if (opener && !menu.contains(e.target) && !opener.contains(e.target)) closeMenu(false);
+  });
+  window.addEventListener("resize", () => {
+    if (!opener) return;
+    if (opener.offsetParent === null) { closeMenu(false); openMenu(visibleRoomBtn()); } else placeMenu();
+  });
+  scrim.addEventListener("mousedown", (e) => { if (e.target === scrim) closeSheet(true); });
+  document.addEventListener("keydown", (e) => {
+    if (opener) {
+      if (e.key === "ArrowDown") { e.preventDefault(); step(1); }
+      else if (e.key === "ArrowUp") { e.preventDefault(); step(-1); }
+      else if (e.key === "Home") { e.preventDefault(); setHi(actionable()[0]); }
+      else if (e.key === "End") { e.preventDefault(); setHi(actionable().slice(-1)[0]); }
+      else if (e.key === "Enter" || e.key === " ") { e.preventDefault(); act(items[hi].id); }
+      else if (e.key === "Escape") { e.preventDefault(); closeMenu(true); }
+      else if (e.key === "Tab") closeMenu(false);
+      return;
+    }
+    if (!M.sheet) return;
+    if (e.key === "Escape") { e.preventDefault(); closeSheet(true); return; }
+    if (e.key === "Tab") {
+      const f = [...sheet.querySelectorAll("button, input")].filter((el) => el.tabIndex >= 0);
+      const first = f[0], last = f[f.length - 1];
+      if (e.shiftKey && document.activeElement === first) { e.preventDefault(); last.focus(); }
+      else if (!e.shiftKey && document.activeElement === last) { e.preventDefault(); first.focus(); }
+    }
+  });
+
+  const want = location.hash.slice(1).split("/");
+  const known = STATES.find((x) => x[0] === want[0]);
+  apply(...(known && known[2].some((x) => x[0] === want[1]) ? want : at));
+})();
+</script>
+</body>
+</html>
