@@ -38,7 +38,7 @@ pub(crate) fn authenticate(server: &ServerEntry) -> Result<(Socket, Tree), Comma
 
 // A Hello with no credentials gets the version verdict from every room
 // server, also one from before the Join version check, and uses no seat.
-pub(crate) fn check_room_version(endpoint: &str) -> Result<(), CommandError> {
+pub(super) fn probe_room_version(endpoint: &str) -> Result<Option<String>, CommandError> {
     let probe = ServerEntry {
         endpoint: endpoint.to_owned(),
         alias: String::new(),
@@ -49,8 +49,8 @@ pub(crate) fn check_room_version(endpoint: &str) -> Result<(), CommandError> {
     };
     match hello(&probe)? {
         Welcome::Refused(reason) if version_refusal(&reason).is_some() => {
-            Err(CommandError::usage(refusal_message(&reason, false)))
+            Ok(Some(refusal_message(&reason, false)))
         }
-        _ => Ok(()),
+        _ => Ok(None),
     }
 }

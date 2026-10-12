@@ -28,10 +28,11 @@ impl AssetSource for Assets {
 }
 
 pub(crate) fn load_fonts(cx: &App) -> Result<()> {
-    let fonts: [&[u8]; 7] = [
+    let fonts: [&[u8]; 8] = [
         include_bytes!("../assets/fonts/inter/Inter-Regular.ttf"),
         include_bytes!("../assets/fonts/inter/Inter-Medium.ttf"),
         include_bytes!("../assets/fonts/inter/Inter-SemiBold.ttf"),
+        include_bytes!("../assets/fonts/inter/InterDisplay-SemiBold.ttf"),
         include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Regular.ttf"),
         include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-Italic.ttf"),
         include_bytes!("../assets/fonts/jetbrains-mono/JetBrainsMono-SemiBold.ttf"),
