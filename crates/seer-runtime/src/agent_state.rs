@@ -2,7 +2,7 @@ use std::io;
 use std::os::fd::OwnedFd;
 use std::sync::{Arc, Mutex, Weak, mpsc};
 use std::thread;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use seer_core::proto::AgentState;
 
@@ -19,6 +19,7 @@ const ACTIVITY_WINDOW: Duration = Duration::from_millis(750);
 pub(crate) struct Observation {
     pub(crate) name: String,
     pub(crate) agent_state: Option<AgentState>,
+    pub(crate) agent_state_since: Option<u64>,
 }
 
 pub(crate) struct Detector {
@@ -108,6 +109,7 @@ impl Sample {
             *lock_mutex(cache) = Observation {
                 name: job.name,
                 agent_state: None,
+                agent_state_since: None,
             };
             return;
         };
@@ -115,6 +117,7 @@ impl Sample {
             *lock_mutex(cache) = Observation {
                 name: agent.name().into(),
                 agent_state: None,
+                agent_state_since: None,
             };
         }
         let Some(output) = output.upgrade() else {
@@ -146,9 +149,19 @@ impl Sample {
                 AgentState::Idle
             }
         });
-        *lock_mutex(cache) = Observation {
+        let mut observation = lock_mutex(cache);
+        let since = if observation.agent_state == Some(state) {
+            observation.agent_state_since
+        } else {
+            SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .ok()
+                .and_then(|time| u64::try_from(time.as_millis()).ok())
+        };
+        *observation = Observation {
             name: agent.name().into(),
             agent_state: Some(state),
+            agent_state_since: since,
         };
     }
 }
