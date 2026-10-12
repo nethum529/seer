@@ -1,57 +1,141 @@
-name: macOS build
+name: Desktop build
+run-name: Desktop ${{ inputs.tag }} from ${{ inputs.ref }}
 
 on:
   workflow_dispatch:
     inputs:
       tag:
-        description: Release tag
+        description: Draft release tag
         required: true
         type: string
       ref:
-        description: Source repository ref
+        description: Source repository commit
         required: true
         type: string
 
+permissions:
+  contents: write
+
+concurrency:
+  group: desktop-release-${{ inputs.tag }}
+  cancel-in-progress: false
+
+env:
+  RELEASE_TAG: ${{ inputs.tag }}
+  MACOSX_DEPLOYMENT_TARGET: '12.0'
+  CARGO_BUILD_JOBS: '3'
+
 jobs:
-  build:
-    runs-on: macos-latest
-    permissions:
-      contents: write
+  linux:
+    runs-on: ubuntu-22.04
     steps:
       - uses: actions/checkout@v4
         with:
           repository: nethum529/seer
           ref: ${{ inputs.ref }}
           ssh-key: ${{ secrets.SEER_SOURCE_DEPLOY_KEY }}
-      - run: rustup target add x86_64-apple-darwin
-      - run: cargo build --release --package seer --target aarch64-apple-darwin
-      - run: cargo build --release --package seer --target x86_64-apple-darwin
-      - name: Sign the binaries
+      - name: Check the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh release view "$RELEASE_TAG" --repo nethum529/seer-releases --json isDraft --jq .isDraft)" = true
+      - name: Install build and desktop dependencies
         run: |
-          for target in aarch64-apple-darwin x86_64-apple-darwin; do
-            for binary in seer seer-broker seer-runtime; do
-              codesign --force --sign - "target/$target/release/$binary"
-            done
-          done
-      - name: Check that the signed runtime starts
+          sudo apt-get update
+          sudo apt-get install -y clang cmake libfontconfig1-dev libfreetype6-dev libssl-dev libxcb1-dev libxkbcommon-dev libxkbcommon-x11-dev libwayland-dev libvulkan-dev libasound2-dev xdg-utils desktop-file-utils
+      - name: Install Rust
+        run: rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt
+      - name: Check and build
+        run: |
+          cargo +1.98.0 fmt --all --check
+          cargo +1.98.0 clippy --workspace --all-targets -- -D warnings
+          cargo +1.98.0 build --locked --release --package seer --package seer-desktop --target x86_64-unknown-linux-gnu
+      - name: Check install and update
+        run: python3 scripts/tests/desktop_install.py --seer target/x86_64-unknown-linux-gnu/release/seer
+      - name: Package Linux
+        run: |
+          test "$RELEASE_TAG" = "v$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "seer") | .version')"
+          scripts/package-desktop.sh linux-x86_64 target/x86_64-unknown-linux-gnu/release assets "${RELEASE_TAG#v}"
+      - name: Upload Linux
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release upload "$RELEASE_TAG" assets/seer-linux-x86_64.tar.gz --repo nethum529/seer-releases --clobber
+
+  macos:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          repository: nethum529/seer
+          ref: ${{ inputs.ref }}
+          ssh-key: ${{ secrets.SEER_SOURCE_DEPLOY_KEY }}
+      - name: Check the draft release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: test "$(gh release view "$RELEASE_TAG" --repo nethum529/seer-releases --json isDraft --jq .isDraft)" = true
+      - name: Import the Developer ID certificate and notary API key
+        env:
+          CERTIFICATE: ${{ secrets.SEER_DEVELOPER_ID_P12_BASE64 }}
+          CERTIFICATE_PASSWORD: ${{ secrets.SEER_DEVELOPER_ID_PASSWORD }}
+          NOTARY_KEY: ${{ secrets.SEER_NOTARY_KEY_P8_BASE64 }}
+          NOTARY_KEY_ID: ${{ secrets.SEER_NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.SEER_NOTARY_ISSUER_ID }}
+        run: |
+          test -n "$CERTIFICATE" && test -n "$CERTIFICATE_PASSWORD"
+          test -n "$NOTARY_KEY" && test -n "$NOTARY_KEY_ID" && test -n "$NOTARY_ISSUER_ID"
+          keychain="$RUNNER_TEMP/seer-signing.keychain-db"
+          password=$(openssl rand -hex 32)
+          echo "::add-mask::$password"
+          printf '%s' "$CERTIFICATE" | base64 --decode > "$RUNNER_TEMP/seer.p12"
+          printf '%s' "$NOTARY_KEY" | base64 --decode > "$RUNNER_TEMP/notary.p8"
+          chmod 600 "$RUNNER_TEMP/seer.p12" "$RUNNER_TEMP/notary.p8"
+          security create-keychain -p "$password" "$keychain"
+          security set-keychain-settings -lut 21600 "$keychain"
+          security unlock-keychain -p "$password" "$keychain"
+          security import "$RUNNER_TEMP/seer.p12" -k "$keychain" -P "$CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$password" "$keychain"
+          security list-keychains -d user -s "$keychain" login.keychain-db
+          identity=$(security find-identity -v -p codesigning "$keychain" | sed -n 's/.*"\(Developer ID Application:.*(NYKPX446L9)\)".*/\1/p' | head -1)
+          test -n "$identity"
+          printf 'SEER_SIGNING_IDENTITY=%s\nSEER_NOTARY_KEY=%s\nSEER_NOTARY_KEY_ID=%s\nSEER_NOTARY_ISSUER_ID=%s\n' "$identity" "$RUNNER_TEMP/notary.p8" "$NOTARY_KEY_ID" "$NOTARY_ISSUER_ID" >> "$GITHUB_ENV"
+          rm "$RUNNER_TEMP/seer.p12"
+      - name: Install Rust and Metal tools
+        run: |
+          rustup toolchain install 1.98.0 --profile minimal --component clippy,rustfmt
+          rustup +1.98.0 target add aarch64-apple-darwin x86_64-apple-darwin
+          xcodebuild -downloadComponent MetalToolchain
+      - name: Check and build
+        run: |
+          cargo +1.98.0 fmt --all --check
+          cargo +1.98.0 clippy --workspace --all-targets -- -D warnings
+          cargo +1.98.0 build --locked --release --package seer --package seer-desktop --target aarch64-apple-darwin
+          cargo +1.98.0 build --locked --release --package seer --package seer-desktop --target x86_64-apple-darwin
+      - name: Check install and update
         run: |
           case "$(uname -m)" in
             arm64) target=aarch64-apple-darwin ;;
             *) target=x86_64-apple-darwin ;;
           esac
-          output="$(./target/$target/release/seer-runtime 2>&1 || true)"
-          case "$output" in
-            *"usage: seer-runtime"*) ;;
-            *)
-              echo "seer-runtime did not reach argument parsing: $output"
-              exit 1
-              ;;
-          esac
-      - name: Create archives
+          python3 scripts/tests/desktop_install.py --seer "target/$target/release/seer"
+      - name: Sign, notarize, staple, and package macOS
         run: |
-          tar -C target/aarch64-apple-darwin/release -czf seer-darwin-arm64.tar.gz seer seer-broker seer-runtime
-          tar -C target/x86_64-apple-darwin/release -czf seer-darwin-x86_64.tar.gz seer seer-broker seer-runtime
-      - name: Upload release assets
+          test "$RELEASE_TAG" = "v$(cargo metadata --no-deps --format-version 1 | jq -r '.packages[] | select(.name == "seer") | .version')"
+          scripts/package-desktop.sh darwin-arm64 target/aarch64-apple-darwin/release assets "${RELEASE_TAG#v}"
+          scripts/package-desktop.sh darwin-x86_64 target/x86_64-apple-darwin/release assets "${RELEASE_TAG#v}"
+      - name: Upload macOS
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh release upload "${{ inputs.tag }}" seer-darwin-arm64.tar.gz seer-darwin-x86_64.tar.gz --repo nethum529/seer-releases --clobber
+        run: gh release upload "$RELEASE_TAG" assets/seer-darwin-arm64.tar.gz assets/seer-darwin-x86_64.tar.gz --repo nethum529/seer-releases --clobber
+      - name: Remove signing credentials
+        if: always()
+        run: |
+          security delete-keychain "$RUNNER_TEMP/seer-signing.keychain-db" || true
+          rm -f "$RUNNER_TEMP/seer.p12" "$RUNNER_TEMP/notary.p8"
+
+  publish:
+    needs: [linux, macos]
+    runs-on: ubuntu-22.04
+    steps:
+      - name: Publish the complete release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh release edit "$RELEASE_TAG" --repo nethum529/seer-releases --draft=false --latest

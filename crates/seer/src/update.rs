@@ -31,9 +31,11 @@ pub(crate) fn run() -> ExitCode {
 
 fn update() -> Result<UpdateResult, UpdateError> {
     let asset = asset_name().ok_or(UpdateError::Install)?;
-    let download_url = format!("{RELEASE_BASE_URL}/{asset}");
+    let base_url = std::env::var("SEER_UPDATE_URL").unwrap_or_else(|_| RELEASE_BASE_URL.to_owned());
+    let download_url = format!("{}/{asset}", base_url.trim_end_matches('/'));
     let (release_url, version) = resolve_release(&download_url)?;
-    if version == env!("CARGO_PKG_VERSION") {
+    let install_directory = install_directory()?;
+    if version == env!("CARGO_PKG_VERSION") && desktop_is_current(&version, &install_directory) {
         return Ok(UpdateResult::Current);
     }
 
@@ -42,8 +44,8 @@ fn update() -> Result<UpdateResult, UpdateError> {
     download(&release_url, &archive)?;
     let unpacked = temporary_directory.path().join("unpacked");
     unpack(&archive, &unpacked)?;
-    verify_binaries(&unpacked)?;
-    replace_binaries(&unpacked)?;
+    verify_release(&unpacked)?;
+    install_release(&unpacked, &install_directory)?;
     Ok(UpdateResult::Updated(version))
 }
 
@@ -106,8 +108,8 @@ fn unpack(archive: &Path, destination: &Path) -> Result<(), UpdateError> {
     Ok(())
 }
 
-fn verify_binaries(directory: &Path) -> Result<(), UpdateError> {
-    for binary in BINARIES {
+fn verify_release(directory: &Path) -> Result<(), UpdateError> {
+    for binary in BINARIES.into_iter().chain(["install.sh", "version"]) {
         let metadata = fs::metadata(directory.join(binary)).map_err(|_| UpdateError::Install)?;
         if !metadata.is_file() || metadata.len() == 0 {
             return Err(UpdateError::Install);
@@ -116,22 +118,46 @@ fn verify_binaries(directory: &Path) -> Result<(), UpdateError> {
     Ok(())
 }
 
-fn replace_binaries(source_directory: &Path) -> Result<(), UpdateError> {
+fn install_directory() -> Result<PathBuf, UpdateError> {
     let executable = std::env::current_exe().map_err(|_| UpdateError::Install)?;
-    let install_directory = executable.parent().ok_or(UpdateError::Install)?;
-    let suffix = unique_suffix()?;
-    let mut staged = Vec::with_capacity(BINARIES.len());
-
-    for binary in BINARIES {
-        let staged_path = install_directory.join(format!(".{binary}-update-{suffix}"));
-        fs::copy(source_directory.join(binary), &staged_path).map_err(|_| UpdateError::Install)?;
-        staged.push((staged_path, install_directory.join(binary)));
+    let directory = executable.parent().ok_or(UpdateError::Install)?;
+    if cfg!(target_os = "macos") && directory.ends_with("Contents/MacOS") {
+        let home = std::env::var_os("HOME").ok_or(UpdateError::Install)?;
+        return Ok(PathBuf::from(home).join(".local/bin"));
     }
+    Ok(directory.to_owned())
+}
 
-    for (staged_path, destination) in &staged {
-        fs::rename(staged_path, destination).map_err(|_| UpdateError::Install)?;
+fn desktop_is_current(version: &str, install_directory: &Path) -> bool {
+    let Some(home) = std::env::var_os("HOME").map(PathBuf::from) else {
+        return false;
+    };
+    let data = std::env::var_os("XDG_DATA_HOME")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| home.join(".local/share"));
+    let launcher = if cfg!(target_os = "macos") {
+        home.join("Applications/Seer.app/Contents/MacOS/seer-desktop")
+    } else {
+        install_directory.join("seer-desktop")
+    };
+    launcher.is_file()
+        && fs::read_to_string(data.join("seer/version"))
+            .is_ok_and(|installed| installed.trim() == version)
+}
+
+fn install_release(source: &Path, install_directory: &Path) -> Result<(), UpdateError> {
+    let status = Command::new("sh")
+        .arg(source.join("install.sh"))
+        .env("SEER_INSTALL_SOURCE", source)
+        .env("SEER_BIN_DIR", install_directory)
+        .env("SEER_INSTALL_NO_PATH", "1")
+        .status()
+        .map_err(|_| UpdateError::Install)?;
+    if status.success() {
+        Ok(())
+    } else {
+        Err(UpdateError::Install)
     }
-    Ok(())
 }
 
 fn unique_suffix() -> Result<String, UpdateError> {
