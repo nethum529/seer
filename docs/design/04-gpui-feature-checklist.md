@@ -79,9 +79,9 @@ When a PR decides or builds a row, it updates the row.
 | seer start opens a new room on Linux and prints a join line. The people of the old room are removed | README Host a room, README Commands, help | No place yet. The command stays. R-456 decides with the room screen. | R-456 |
 | seer start --restore reopens the old room with its people | README Commands, help | No place yet. R-456 plans Restore in the room menu. The command stays. | R-456 |
 | seer invite --hours N makes a one use join line that lasts 1 to 168 hours | README Host a room, README Commands, help | No place yet. The command stays. | R-454 |
-| seer join LINE, or seer join with no line to paste it at a prompt | README Join a room, README Commands, help | No place yet. The command stays. | R-455 |
-| The name prompt at join. Enter accepts the system user name | README Join a room | No place yet. | R-455 |
-| The install line that installs Seer and joins in one step | README Join a room | No place yet. | R-455 |
+| seer join LINE, or seer join with no line to paste it at a prompt | README Join a room, README Commands, help | Placed: the first-run Join screen accepts an invite line or capsule. A seer://join/CAPSULE link opens the name step. The command stays. | T-455 |
+| The name prompt at join. Enter accepts the system user name | README Join a room | Placed: the Join screen selects the system user name. Enter accepts it; typing replaces it. | T-455 |
+| The install line that installs Seer and joins in one step | README Join a room | Placed: paste the install line into the Join screen. The command stays. | T-455 |
 | seer list lists your saved rooms and people | README Commands, help | Placed in part: the sidebar footer shows the current room, and the dropdown shows its people. No place yet for the other saved rooms. The command stays. | R-456 |
 | The room address in the picker | README People | Placed: the sidebar footer shows the room name and address. | R-456 |
 | seer leave removes you from the room and stops your terminals on this computer | README Commands, help | No place yet. R-456 plans Leave in the room menu. The command stays. | R-456 |

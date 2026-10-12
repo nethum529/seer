@@ -12,6 +12,7 @@ pub(crate) const CHIP: u32 = 0x383838;
 pub(crate) const CHIP_2: u32 = 0x404040;
 pub(crate) const TEXT: u32 = 0xfafafa;
 pub(crate) const ACCENT: u32 = 0xfafafa;
+pub(crate) const ON_ACCENT: u32 = 0x171717;
 pub(crate) const TEXT_2: u32 = 0xd4d4d4;
 pub(crate) const MUTED: u32 = 0xb8b8b8;
 pub(crate) const FAINT: u32 = 0xadadad;

@@ -52,7 +52,12 @@ pub(super) fn text(input: Entity<NameInput>) -> impl IntoElement {
             } else {
                 vec![run]
             };
-            let line = window.text_system().shape_line(text, px(13.), &runs, None);
+            let line = window.text_system().shape_line(
+                text,
+                px(if input.code { 12. } else { 13. }),
+                &runs,
+                None,
+            );
             let cursor = line.x_for_index(input.cursor());
             let offset = input
                 .offset

@@ -27,6 +27,7 @@ mod update;
 mod version_skew;
 mod viewer;
 
+pub use commands::join::{Invitation, JoinError, system_user_name};
 pub use local::attach;
 pub use store::{ServerEntry, ServerStore};
 

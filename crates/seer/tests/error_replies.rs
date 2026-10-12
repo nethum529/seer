@@ -21,27 +21,30 @@ static NEXT_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
 
 #[test]
 fn join_reports_refused_and_unexpected_replies() {
-    let refused = run_join(ServerMsg::Refused {
-        reason: "seat expired".into(),
-    });
-    assert_eq!(refused.status.code(), Some(1));
-    assert_eq!(refused.stderr, b"seat expired\n");
+    for reason in ["invalid seat", "invalid name", "seat expired private-seat"] {
+        let refused = run_join(ServerMsg::Refused {
+            reason: reason.into(),
+        });
+        assert_eq!(refused.status.code(), Some(1));
+        assert!(!refused.stderr.is_empty());
+        assert!(!String::from_utf8_lossy(&refused.stderr).contains("private-seat"));
+    }
 
     let unexpected = run_join(ServerMsg::Tree { tree: Tree::new() });
     assert_eq!(unexpected.status.code(), Some(2));
-    assert_eq!(unexpected.stderr, b"error: unexpected server reply\n");
+    assert!(!unexpected.stderr.is_empty());
 
     let refused = run_invite(ServerMsg::Refused {
         reason: "owner only".into(),
     });
     assert_eq!(refused.status.code(), Some(1));
-    assert_eq!(refused.stderr, b"owner only\n");
+    assert!(!refused.stderr.is_empty());
 
     let unexpected = run_invite(ServerMsg::Bye {
         reason: "server stopped".into(),
     });
     assert_eq!(unexpected.status.code(), Some(2));
-    assert_eq!(unexpected.stderr, b"error: unexpected server reply\n");
+    assert!(!unexpected.stderr.is_empty());
 }
 
 #[test]

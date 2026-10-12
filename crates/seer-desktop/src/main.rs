@@ -8,6 +8,7 @@ mod cap_icon;
 mod chrome;
 mod composition;
 mod input;
+mod join;
 mod keyboard;
 mod link;
 mod name_input;
@@ -19,12 +20,20 @@ mod palette;
 mod screen;
 mod sidebar;
 mod tip;
+mod urls;
 mod window;
 
 use window::SeerWindow;
 
+#[cfg(test)]
+mod join_e2e;
+
 fn main() {
-    Application::new().with_assets(assets::Assets).run(|cx| {
+    let links = urls::Links::new();
+    let incoming = links.clone();
+    let application = Application::new().with_assets(assets::Assets);
+    application.on_open_urls(move |urls| incoming.borrow_mut().open(urls));
+    application.run(move |cx| {
         if let Err(error) = assets::load_fonts(cx) {
             eprintln!("seer: could not load the bundled fonts: {error}");
             cx.quit();
@@ -65,9 +74,12 @@ fn main() {
             });
             view
         });
-        if let Err(error) = opened {
-            eprintln!("seer: could not open the window: {error}");
-            cx.quit();
+        match opened {
+            Ok(window) => links.borrow_mut().attach(window, cx),
+            Err(error) => {
+                eprintln!("seer: could not open the window: {error}");
+                cx.quit();
+            }
         }
         cx.activate(true);
     });

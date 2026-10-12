@@ -22,7 +22,7 @@ fn join_stops_before_it_uses_the_seat_of_a_room_of_another_minor_version() {
     let invitation = format!("SEER1-127.0.0.1-{port}-seat-token");
     let joined = run(&config, &["join", &invitation], "");
 
-    assert!(!joined.status.success());
+    assert_eq!(joined.status.code(), Some(1));
     assert!(!text(&joined.stdout).contains("Name"));
     assert!(
         text(&joined.stderr).contains(&format!(

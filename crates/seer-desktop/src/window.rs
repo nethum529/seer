@@ -3,9 +3,9 @@ use std::io;
 use futures::StreamExt;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, Div, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent, Keystroke,
-    MouseButton, ParentElement, Render, ScrollHandle, SharedString, Stateful, Styled, Task, Window,
-    div, px, relative, rgb,
+    AppContext, Context, Div, Entity, Font, FontWeight, InteractiveElement, IntoElement,
+    KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
+    Stateful, Styled, Subscription, Task, Window, div, px, relative, rgb,
 };
 use seer::ServerStore;
 
@@ -17,15 +17,16 @@ use crate::screen::{self, Rows, Screen};
 use crate::sidebar::{self, Keys, Mode};
 use crate::tip;
 
+mod join;
 pub(crate) mod rename;
 use rename::Surface;
 
-const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";
 const LINK_LOST: &str = "The link to your terminals stopped. Open Seer again.";
 // The design's narrow layout starts below this window width.
 const NARROW: f32 = 720.;
 
 pub(crate) enum Content {
+    Join(Entity<crate::join::Join>),
     Message(SharedString),
     Terminal(Box<Link>, SharedString),
 }
@@ -40,6 +41,7 @@ pub(crate) struct SeerWindow {
     editing: Option<rename::Editing>,
     menu: Option<rename::Menu>,
     _messages: Option<Task<()>>,
+    _join: Option<Subscription>,
 }
 
 impl SeerWindow {
@@ -49,7 +51,10 @@ impl SeerWindow {
             Ok(Some((link, name, messages))) => {
                 (Content::Terminal(Box::new(link), name), Some(messages))
             }
-            Ok(None) => (Content::Message(NO_ROOM.into()), None),
+            Ok(None) => (
+                Content::Join(cx.new(|cx| crate::join::Join::new(window, cx))),
+                None,
+            ),
             Err(error) => (
                 Content::Message(format!("Could not open your terminals: {error}").into()),
                 None,
@@ -75,7 +80,19 @@ impl SeerWindow {
             mode: Mode::Pointer,
         };
         let input = Input::new(window, cx);
-        window.focus(&input.focus);
+        if !matches!(content, Content::Join(_)) {
+            window.focus(&input.focus);
+        }
+        let subscription = match &content {
+            Content::Join(join) => Some(cx.subscribe_in(
+                join,
+                window,
+                |view, _, joined: &crate::join::Joined, window, cx| {
+                    view.joined(joined.0.clone(), window, cx)
+                },
+            )),
+            _ => None,
+        };
         Self {
             content,
             font,
@@ -86,6 +103,7 @@ impl SeerWindow {
             editing: None,
             menu: None,
             _messages: messages,
+            _join: subscription,
         }
     }
 
@@ -96,14 +114,14 @@ impl SeerWindow {
     pub(crate) fn screen(&mut self) -> Option<(&Terminal, &mut Rows)> {
         match &self.content {
             Content::Terminal(link, _) => Some((link.terminal(), &mut self.rows)),
-            Content::Message(_) => None,
+            Content::Message(_) | Content::Join(_) => None,
         }
     }
 
     pub(crate) fn resize(&mut self, cols: u16, rows: u16, cx: &mut Context<Self>) {
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.resize(cols, rows),
-            Content::Message(_) => Ok(()),
+            Content::Message(_) | Content::Join(_) => Ok(()),
         };
         self.check(result, cx);
     }
@@ -112,7 +130,7 @@ impl SeerWindow {
         self.input.reset();
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.select(pane),
-            Content::Message(_) => Ok(()),
+            Content::Message(_) | Content::Join(_) => Ok(()),
         };
         self.check(result, cx);
         cx.notify();
@@ -126,7 +144,7 @@ impl SeerWindow {
     pub(crate) fn new_terminal(&mut self, cx: &mut Context<Self>) {
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.new_terminal(),
-            Content::Message(_) => Ok(()),
+            Content::Message(_) | Content::Join(_) => Ok(()),
         };
         self.check(result, cx);
     }
@@ -167,6 +185,18 @@ impl SeerWindow {
     }
 
     fn travel(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+        if matches!(self.content, Content::Join(_)) {
+            if keystroke.key == "tab" {
+                if keystroke.modifiers.shift {
+                    window.focus_prev();
+                } else {
+                    window.focus_next();
+                }
+                cx.stop_propagation();
+                cx.notify();
+            }
+            return;
+        }
         let held = keystroke.modifiers;
         let secondary = if cfg!(target_os = "macos") {
             held.platform
@@ -213,7 +243,7 @@ impl SeerWindow {
         );
         let result = match &mut self.content {
             Content::Terminal(link, _) => event.and_then(|event| link.receive(event)),
-            Content::Message(_) => Ok(()),
+            Content::Message(_) | Content::Join(_) => Ok(()),
         };
         self.check(result, cx);
         cx.notify();
@@ -242,19 +272,7 @@ fn open() -> io::Result<Option<(Link, SharedString, Messages)>> {
     let Some(server) = store.default_server() else {
         return Ok(None);
     };
-    let (socket, tree, _notice) = seer::attach(server)?;
-    let metadata = serde_json::to_value(server).map_err(io::Error::other)?;
-    let room = metadata
-        .get("alias")
-        .and_then(serde_json::Value::as_str)
-        .unwrap_or("Room");
-    let (link, messages) = Link::open(
-        socket,
-        &tree,
-        server.user_id.clone(),
-        chrome::capitalize(room),
-    )?;
-    Ok(Some((link, server.name.clone().into(), messages)))
+    join::open_server(server).map(Some)
 }
 
 impl Render for SeerWindow {
@@ -289,6 +307,7 @@ impl Render for SeerWindow {
                 view.travel(&event.keystroke, window, cx)
             }));
         let (link, name) = match &self.content {
+            Content::Join(join) => return root.child(join.clone()),
             Content::Message(message) => {
                 return root
                     .items_center()

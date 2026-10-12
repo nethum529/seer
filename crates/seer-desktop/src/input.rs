@@ -120,7 +120,7 @@ impl SeerWindow {
         };
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.input(event),
-            Content::Message(_) => Ok(()),
+            Content::Message(_) | Content::Join(_) => Ok(()),
         };
         self.check(result, cx);
         if changed {
@@ -143,6 +143,9 @@ impl SeerWindow {
     }
 
     pub(crate) fn focus_tabs(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if !matches!(self.content, Content::Terminal(_, _)) {
+            return;
+        }
         self.keys.mode = Mode::Keyboard;
         window.focus(&self.keys.tabs);
         cx.notify();
@@ -351,7 +354,7 @@ impl SeerWindow {
                         }
                     })
             }
-            Content::Message(_) => false,
+            Content::Message(_) | Content::Join(_) => false,
         }
     }
 
