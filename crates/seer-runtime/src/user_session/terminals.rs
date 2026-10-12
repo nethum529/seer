@@ -138,14 +138,17 @@ impl UserSession {
             .flat_map(|tab| tab.panes.iter().map(move |pane| (tab, pane)))
             .map(|(tab, pane)| {
                 let host = self.pane_hosts.get(&pane.id);
-                let foreground = host.map(PaneHost::foreground).unwrap_or_default();
-                let shell = foreground.is_empty()
-                    || matches!(
-                        foreground.as_str(),
-                        "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh" | "nu"
-                    )
-                    || host.map(PaneHost::started_program) == Some(foreground.as_str());
+                let observation = host.map(PaneHost::observation).unwrap_or_default();
+                let foreground = observation.name;
+                let shell = observation.agent_state.is_none()
+                    && (foreground.is_empty()
+                        || matches!(
+                            foreground.as_str(),
+                            "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh" | "nu"
+                        )
+                        || host.map(PaneHost::started_program) == Some(foreground.as_str()));
                 TerminalInfo {
+                    agent_state: observation.agent_state,
                     title: Some(tab.title.clone()),
                     last_typist: self
                         .pane_hosts

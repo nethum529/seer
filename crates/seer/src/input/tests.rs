@@ -142,6 +142,7 @@ pub(super) fn one_terminal_state() -> (ClientState, String) {
     state.terminals.insert(
         "alice".into(),
         vec![TerminalInfo {
+            agent_state: None,
             title: None,
             last_typist: None,
             pane: pane.clone(),

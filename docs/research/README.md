@@ -21,3 +21,4 @@ Each file breaks one system into components, then compares.
 - 24-version-skew.md
 - 25-terminal-speed.md
 - 26-desktop-input.md
+- 27-agent-state.md

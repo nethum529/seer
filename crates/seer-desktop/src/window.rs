@@ -204,6 +204,13 @@ impl SeerWindow {
     fn receive(&mut self, event: io::Result<Event>, cx: &mut Context<Self>) {
         #[cfg(target_os = "macos")]
         let echo = matches!(event, Ok(Event::Screen)) && self.input.waiting_echo;
+        #[cfg(target_os = "macos")]
+        let metadata = matches!(
+            event,
+            Ok(Event::Message(
+                seer_core::proto::ServerMsg::Terminals { .. }
+            ))
+        );
         let result = match &mut self.content {
             Content::Terminal(link, _) => event.and_then(|event| link.receive(event)),
             Content::Message(_) => Ok(()),
@@ -213,9 +220,12 @@ impl SeerWindow {
         #[cfg(target_os = "macos")]
         if echo {
             self.input.waiting_echo = false;
-            if let Some(frame) = &self.input.frame {
-                frame.request(cx);
-            }
+        }
+        #[cfg(target_os = "macos")]
+        if (echo || metadata)
+            && let Some(frame) = &self.input.frame
+        {
+            frame.request(cx);
         }
     }
 

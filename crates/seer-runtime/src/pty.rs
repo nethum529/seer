@@ -1,9 +1,9 @@
 use portable_pty::{Child, CommandBuilder, MasterPty, PtySize, native_pty_system};
 use std::fmt::Display;
 use std::io::{self, Read, Write};
-use std::os::fd::RawFd;
 #[cfg(target_os = "linux")]
-use std::os::fd::{AsRawFd, FromRawFd, OwnedFd};
+use std::os::fd::AsRawFd;
+use std::os::fd::{FromRawFd, OwnedFd, RawFd};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
 use std::sync::{Arc, Mutex, MutexGuard};
@@ -109,29 +109,22 @@ impl PtySession {
         self.child.kill()
     }
 
-    pub fn foreground_name(&self) -> String {
+    pub(crate) fn observation_fd(&self) -> io::Result<Option<OwnedFd>> {
         let Some(descriptor) = self.master.as_raw_fd() else {
-            return String::new();
+            return Ok(None);
         };
-        // SAFETY: the descriptor belongs to this session master PTY and stays open for the call.
-        let group = unsafe { libc::tcgetpgrp(descriptor) };
-        if group <= 0 {
-            return String::new();
+        // SAFETY: descriptor is open; fcntl duplicates it without using pointers.
+        let duplicate = unsafe { libc::fcntl(descriptor, libc::F_DUPFD_CLOEXEC, 0) };
+        if duplicate < 0 {
+            return Err(io::Error::last_os_error());
         }
-        process_name(group)
+        // SAFETY: fcntl returned a new descriptor that no other object owns.
+        Ok(Some(unsafe { OwnedFd::from_raw_fd(duplicate) }))
     }
-}
 
-#[cfg(target_os = "linux")]
-fn process_name(group: i32) -> String {
-    std::fs::read_to_string(format!("/proc/{group}/comm"))
-        .map(|name| name.trim().to_owned())
-        .unwrap_or_default()
-}
-
-#[cfg(not(target_os = "linux"))]
-fn process_name(_group: i32) -> String {
-    String::new()
+    pub(crate) fn process_id(&self) -> Option<u32> {
+        self.child.process_id()
+    }
 }
 
 fn pty_size(cols: u16, rows: u16) -> PtySize {
