@@ -178,6 +178,17 @@ impl Link {
         &self.room
     }
 
+    pub(crate) fn rename(&mut self, pane: &str, title: String) -> io::Result<()> {
+        let Some(target) = pane_target(&self.tree, pane) else {
+            return Ok(());
+        };
+        self.send(&ClientMsg::RenameTab {
+            workspace: target.workspace,
+            tab: target.tab,
+            title,
+        })
+    }
+
     pub(crate) fn new_terminal(&mut self) -> io::Result<()> {
         let workspace = self
             .target

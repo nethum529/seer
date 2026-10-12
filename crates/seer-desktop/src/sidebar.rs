@@ -10,6 +10,7 @@ use crate::chrome;
 use crate::palette;
 use crate::tip;
 use crate::window::SeerWindow;
+use crate::window::rename::{self, Surface};
 
 const WIDTH: f32 = 248.;
 const STRIP_PAD: f32 = 8.;
@@ -83,6 +84,7 @@ pub(crate) fn sidebar(
     who: Stateful<Div>,
     terminals: &[TerminalInfo],
     shown: Option<&str>,
+    labels: rename::Labels<'_>,
     keys: &Keys,
     window: &Window,
     cx: &mut Context<SeerWindow>,
@@ -119,7 +121,7 @@ pub(crate) fn sidebar(
                 .children(
                     terminals
                         .iter()
-                        .map(|terminal| tab(terminal, shown, ring, cx)),
+                        .map(|terminal| tab(terminal, shown, labels, ring, cx)),
                 )
                 .child(new_terminal(keys, false, window, cx)),
         )
@@ -237,6 +239,7 @@ pub(crate) fn one_line(text: Div) -> Div {
 pub(crate) fn strip(
     terminals: &[TerminalInfo],
     shown: Option<&str>,
+    labels: rename::Labels<'_>,
     keys: &Keys,
     window: &Window,
     cx: &mut Context<SeerWindow>,
@@ -254,12 +257,12 @@ pub(crate) fn strip(
         .border_color(rgb(palette::LINE))
         .children(terminals.iter().map(|terminal| {
             let on = shown == Some(terminal.pane.as_str());
-            let help = tip::terminal_help(&chrome::capitalize(&terminal.name));
+            let help = tip::terminal_help(&rename::display_name(terminal));
             tip::on_hover(
-                selectable(terminal, cx),
+                selectable(terminal, Surface::Strip, cx),
                 help.clone(),
                 "Inter".into(),
-                keys.hover() && !(on && ring),
+                keys.hover() && !(on && ring) && !labels.active(terminal),
             )
             .flex_none()
             .h(px(32.))
@@ -274,7 +277,7 @@ pub(crate) fn strip(
                 tab.child(outline()).child(tip::below(help, "Inter".into()))
             })
             .child(chrome::status(&terminal.state))
-            .child(chrome::capitalize(&terminal.name))
+            .child(rename::label(terminal, Surface::Strip, labels))
         }))
 }
 
@@ -295,25 +298,26 @@ pub(crate) fn step(key: &str, count: usize, now: Option<usize>) -> Option<usize>
 fn list(list: Stateful<Div>, keys: &Keys, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
     list.track_focus(&keys.tabs)
         .track_scroll(&keys.scroll)
-        .on_key_down(
-            cx.listener(|view, event: &KeyDownEvent, _, cx| view.key(&event.keystroke, cx)),
-        )
+        .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
+            view.key(&event.keystroke, window, cx)
+        }))
 }
 
 fn tab(
     terminal: &TerminalInfo,
     shown: Option<&str>,
+    labels: rename::Labels<'_>,
     ring: bool,
     cx: &mut Context<SeerWindow>,
 ) -> Stateful<Div> {
     let on = shown == Some(terminal.pane.as_str());
-    let name: SharedString = chrome::capitalize(&terminal.name).into();
+    let name: SharedString = rename::display_name(terminal).into();
     let help = tip::terminal_help(&name);
     let row = tip::on_hover(
-        selectable(terminal, cx),
+        selectable(terminal, Surface::Tab, cx),
         help.clone(),
         "Inter".into(),
-        !(on && ring),
+        !(on && ring) && !labels.active(terminal),
     )
     .w_full()
     .pt(px(7.))
@@ -328,9 +332,11 @@ fn tab(
     }))
     .child(chrome::status(&terminal.state))
     .child(
-        one_line(div().flex_1())
+        div()
+            .flex_1()
+            .min_w_0()
             .font_weight(FontWeight::MEDIUM)
-            .child(name.clone()),
+            .child(rename::label(terminal, Surface::Tab, labels)),
     );
     if shown == Some(terminal.pane.as_str()) {
         row.bg(rgb(palette::SELECTED)).when(ring, |row| {
@@ -341,8 +347,13 @@ fn tab(
     }
 }
 
-fn selectable(terminal: &TerminalInfo, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
+fn selectable(
+    terminal: &TerminalInfo,
+    surface: Surface,
+    cx: &mut Context<SeerWindow>,
+) -> Stateful<Div> {
     let pane = terminal.pane.clone();
+    let menu_pane = pane.clone();
     div()
         .id(SharedString::from(terminal.pane.clone()))
         .relative()
@@ -351,7 +362,21 @@ fn selectable(terminal: &TerminalInfo, cx: &mut Context<SeerWindow>) -> Stateful
         .rounded(px(8.))
         .on_mouse_down(
             MouseButton::Left,
-            cx.listener(move |view, _, window, cx| view.press(&pane, window, cx)),
+            cx.listener(move |view, event: &gpui::MouseDownEvent, window, cx| {
+                view.press(&pane, window, cx);
+                if event.click_count == 2 {
+                    cx.stop_propagation();
+                    view.rename(&pane, surface, window, cx);
+                }
+            }),
+        )
+        .on_mouse_down(
+            MouseButton::Right,
+            cx.listener(move |view, event: &gpui::MouseDownEvent, window, cx| {
+                cx.stop_propagation();
+                view.keys_mode_pointer();
+                view.name_menu(&menu_pane, surface, event.position, window, cx);
+            }),
         )
 }
 

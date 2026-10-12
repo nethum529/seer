@@ -18,6 +18,8 @@ pub(crate) struct Snapshot {
     user: String,
     pub(crate) viewport: PaneSize,
     pub(crate) tree: Tree,
+    #[serde(default)]
+    pub(crate) named_terminals: bool,
 }
 
 impl Snapshot {
@@ -30,6 +32,7 @@ impl Snapshot {
             user: user.to_owned(),
             viewport,
             tree: tree.clone(),
+            named_terminals: true,
         }
     }
 

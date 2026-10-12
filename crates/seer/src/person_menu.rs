@@ -218,7 +218,7 @@ fn lines(state: &ClientState, user: &str) -> Vec<Line<'static>> {
     for terminal in terminals {
         lines.push(Line::from(vec![
             Span::styled(
-                format!("{} ", terminal.name),
+                format!("{} ", terminal.label()),
                 palette
                     .style()
                     .bg(palette.surface0)
@@ -246,7 +246,7 @@ fn lines(state: &ClientState, user: &str) -> Vec<Line<'static>> {
         palette.style().bg(palette.surface0).fg(palette.overlay0),
     ));
     for terminal in terminals {
-        lines.push(Line::from(format!("watch {}", terminal.name)));
+        lines.push(Line::from(format!("watch {}", terminal.label())));
     }
     lines.push(Line::styled(
         "--------------------",

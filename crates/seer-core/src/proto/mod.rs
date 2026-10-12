@@ -33,6 +33,11 @@ pub enum ClientMsg {
     CreateTab {
         workspace: String,
     },
+    RenameTab {
+        workspace: String,
+        tab: String,
+        title: String,
+    },
     SplitPane {
         workspace: String,
         tab: String,
@@ -257,6 +262,7 @@ impl ClientMsg {
             self,
             Self::TerminalInput { .. }
                 | Self::CreateTab { .. }
+                | Self::RenameTab { .. }
                 | Self::SplitPane { .. }
                 | Self::ClosePane { .. }
                 | Self::FocusPane { .. }
@@ -301,6 +307,8 @@ pub struct ClientInfo {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub struct TerminalInfo {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
     #[serde(default)]
     pub last_typist: Option<String>,
     pub pane: String,
@@ -308,6 +316,15 @@ pub struct TerminalInfo {
     pub state: String,
     pub cols: u16,
     pub rows: u16,
+}
+
+impl TerminalInfo {
+    pub fn label(&self) -> &str {
+        self.title
+            .as_deref()
+            .filter(|title| !title.is_empty())
+            .unwrap_or(&self.name)
+    }
 }
 
 /// The fewest bytes a Cells of this shape can take on the wire, with this

@@ -6,6 +6,29 @@ pub(crate) struct SizeClaims {
 }
 
 impl UserSession {
+    pub(super) fn rename_tab(
+        &mut self,
+        workspace: &str,
+        tab: &str,
+        title: String,
+    ) -> io::Result<Vec<ServerMsg>> {
+        if title.chars().count() > 40 || title.chars().any(char::is_control) {
+            return Err(invalid_input(
+                "terminal names must have at most 40 printable characters".into(),
+            ));
+        }
+        self.tab_mut(workspace, tab)?.title = title;
+        persistence::persist(self)?;
+        let mut messages = self.tree_message();
+        let terminals = self.terminals();
+        self.published_terminals.clone_from(&terminals);
+        messages.push(ServerMsg::Terminals {
+            user: self.user.clone(),
+            terminals,
+        });
+        Ok(messages)
+    }
+
     // A watcher never shrinks a PTY (issue 371) and gets a wrapped screen
     // (issue 406). A full screen app cannot be wrapped, so in the alt screen
     // the PTY grows on each axis to the largest full viewer watch and goes
@@ -112,8 +135,8 @@ impl UserSession {
             .workspaces
             .iter()
             .flat_map(|workspace| &workspace.tabs)
-            .flat_map(|tab| &tab.panes)
-            .map(|pane| {
+            .flat_map(|tab| tab.panes.iter().map(move |pane| (tab, pane)))
+            .map(|(tab, pane)| {
                 let host = self.pane_hosts.get(&pane.id);
                 let foreground = host.map(PaneHost::foreground).unwrap_or_default();
                 let shell = foreground.is_empty()
@@ -123,6 +146,7 @@ impl UserSession {
                     )
                     || host.map(PaneHost::started_program) == Some(foreground.as_str());
                 TerminalInfo {
+                    title: Some(tab.title.clone()),
                     last_typist: self
                         .pane_hosts
                         .get(&pane.id)

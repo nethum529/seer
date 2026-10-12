@@ -9,6 +9,7 @@ mod composition;
 mod input;
 mod keyboard;
 mod link;
+mod name_input;
 #[cfg(target_os = "macos")]
 mod native_frame;
 #[cfg(target_os = "macos")]
