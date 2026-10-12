@@ -51,18 +51,18 @@ When a PR decides or builds a row, it updates the row.
 
 | Feature | Source | Window place, or reason | Item |
 | --- | --- | --- | --- |
-| The people picker: left click the top right control | README People, help | Placed: the person dropdown at the top of the sidebar. | R-450 |
-| Every person in the room, with the host marked | README People | Placed: the rows of the person dropdown, with "you" and "host" marks. | R-450 |
-| Select a person to see their live terminals | README People, help | Placed: pick the person in the dropdown. Their terminals show as vertical tabs. | R-450 |
-| Watch the terminals of other people, read only | README intro | Placed: the read only bar under the terminal, with a "My terminals" button. | R-450 |
-| Presence and idle time of a person, in the person menu | README People | Placed: the dropdown row shows presence and last seen, for example "away 18m". R-450 decides how agent state shows. | R-450 |
-| The terminals of a person in the person menu. Enter to watch | README People, help | Placed: the vertical tabs after you pick the person. | R-450 |
+| The people picker: left click the top right control | README People, help | Built: the person menu at the top of the sidebar, or the narrow window header. | R-450 |
+| Every person in the room, with the host marked | README People | Built: the person menu puts you first and shows "You" and "Host" marks. | R-450 |
+| Select a person to see their live terminals | README People, help | Built: pick a person to show their live terminals as tabs. | R-450 |
+| Watch the terminals of other people, read only | README intro | Built: the title shows the person and terminal, with a lock and "Read only". Pick yourself in the person menu to return. | R-450 |
+| Presence and idle time of a person, in the person menu | README People | Built: menu rows show presence and elapsed time, for example "Away 18m". Terminal state comes from the runtime; agent detection is R-481. | R-450 |
+| The terminals of a person in the person menu. Enter to watch | README People, help | Built: tabs update when the person opens, closes, or renames a terminal. | R-450 |
 | Your typing permission for the person you watch, in the first line of the picker | README People | No place yet. | R-451 |
 | Give or remove the "can type here" grant with Space in the person menu. The box changes when the room server confirms it | README People, help | No place yet. R-451 also decides how the window shows the confirmation. | R-451 |
 | With a grant, type and use the mouse in the terminals of another person | README People | Placed: the terminal area of that person, the same as for your own terminal. R-449 builds own terminal keys and mouse. Remote input and its permission display remain for R-451. | R-449, R-451 |
 | seer perms --on: every person in the room can type into your terminals | README Commands, help | No place yet. The command stays. | R-453 |
 | seer perms --off: remove every grant | README People, README Commands, help | No place yet. The command stays. | R-453 |
-| seer peek NAME opens Seer with that person selected | README Commands, help | Placed: the command opens the window with that person picked in the dropdown. The command stays. | R-450 |
+| seer peek NAME opens Seer with that person selected | README Commands, help | Built: the command opens the desktop with that room and person selected. | R-450 |
 
 ## Own terminals
 

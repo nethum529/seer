@@ -26,6 +26,7 @@ impl SeerWindow {
         self._messages = None;
         self.content = Content::Join(join);
         self.room = RoomUi::new(None, cx);
+        self.people_menu = None;
         self.input.reset();
         window.activate_window();
         cx.activate(true);
@@ -40,6 +41,7 @@ impl SeerWindow {
     ) {
         self.content = Content::Message("Opening your terminals...".into());
         self._join = None;
+        self.people_menu = None;
         self.room = RoomUi::new(Some(server.clone()), cx);
         self.refresh_room(cx);
         let opened = cx
@@ -70,11 +72,19 @@ impl SeerWindow {
 
 pub(super) fn open_server(server: &ServerEntry) -> io::Result<(Link, SharedString, Messages)> {
     let (socket, tree, _notice) = seer::attach(server)?;
-    let (link, messages) = Link::open(
+    let (mut link, messages) = Link::open(
         socket,
         &tree,
         server.user_id.clone(),
         chrome::capitalize(&server.alias),
     )?;
-    Ok((link, server.name.clone().into(), messages))
+    let room_messages = link.join_room(
+        server.clone(),
+        std::env::args().skip_while(|arg| arg != "--peek").nth(1),
+    );
+    Ok((
+        link,
+        server.name.clone().into(),
+        Box::pin(futures::stream::select(messages, room_messages)),
+    ))
 }

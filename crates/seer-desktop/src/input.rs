@@ -107,6 +107,9 @@ impl SeerWindow {
     }
 
     pub(crate) fn send_input(&mut self, event: InputEvent, cx: &mut Context<Self>) {
+        if matches!(&self.content, Content::Terminal(link, _) if link.readonly()) {
+            return;
+        }
         let changed = if matches!(
             event,
             InputEvent::Text(_) | InputEvent::Key(_) | InputEvent::Paste(_)

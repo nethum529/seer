@@ -14,13 +14,22 @@ pub(crate) enum Surface {
 
 #[derive(Clone, Copy)]
 pub(crate) struct Labels<'a> {
+    pub(crate) readonly: bool,
     editing: Option<&'a Editing>,
     menu: Option<&'a Menu>,
 }
 
 impl<'a> Labels<'a> {
-    pub(super) fn new(editing: Option<&'a Editing>, menu: Option<&'a Menu>) -> Self {
-        Self { editing, menu }
+    pub(super) fn new(
+        editing: Option<&'a Editing>,
+        menu: Option<&'a Menu>,
+        readonly: bool,
+    ) -> Self {
+        Self {
+            editing,
+            menu,
+            readonly,
+        }
     }
 
     pub(crate) fn active(&self, terminal: &TerminalInfo) -> bool {
@@ -63,6 +72,9 @@ impl SeerWindow {
         let Content::Terminal(link, _) = &self.content else {
             return;
         };
+        if link.readonly() {
+            return;
+        }
         let Some(terminal) = link
             .terminals()
             .iter()
@@ -103,7 +115,7 @@ impl SeerWindow {
         cx.notify();
     }
 
-    fn finish_name(
+    pub(super) fn finish_name(
         &mut self,
         save: bool,
         restore_focus: bool,
@@ -139,6 +151,9 @@ impl SeerWindow {
         let Content::Terminal(link, _) = &self.content else {
             return;
         };
+        if link.readonly() {
+            return;
+        }
         if !link
             .terminals()
             .iter()
@@ -247,7 +262,6 @@ fn menu_item(menu: &Menu, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
     crate::menu::item("rename", 32.)
         .bg(rgb(palette::CHIP))
         .text_color(rgb(palette::TEXT))
-        .font_weight(FontWeight::MEDIUM)
         .on_click(cx.listener(move |view, _, window, cx| view.rename(&pane, surface, window, cx)))
         .child(crate::cap_icon::cap_icon(chrome::icon(
             "pencil",
