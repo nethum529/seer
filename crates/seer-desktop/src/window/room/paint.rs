@@ -186,12 +186,12 @@ impl SeerWindow {
                             .child(
                                 sidebar::who(
                                     &person,
-                                    20.,
-                                    11.,
+                                    (20., 11.),
                                     window.viewport_size().width >= px(480.),
                                     &self.ui_font,
                                     &self.keys,
                                     window,
+                                    false,
                                 )
                                 .min_w_0()
                                 .h(px(32.))
@@ -267,11 +267,19 @@ impl SeerWindow {
                             .child(chrome::lights()),
                     )
                     .child(
-                        sidebar::who(&person, 22., 11., true, &self.ui_font, &self.keys, window)
-                            .w_full()
-                            .h(px(36.))
-                            .pl(px(7.))
-                            .pr(px(8.)),
+                        sidebar::who(
+                            &person,
+                            (22., 11.),
+                            true,
+                            &self.ui_font,
+                            &self.keys,
+                            window,
+                            false,
+                        )
+                        .w_full()
+                        .h(px(36.))
+                        .pl(px(7.))
+                        .pr(px(8.)),
                     )
                     .child(div().flex_1())
                     .child(chrome::footer(button)),

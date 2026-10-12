@@ -19,6 +19,8 @@ use crate::tab_time;
 use crate::tip;
 
 mod join;
+mod paint;
+mod people;
 pub(crate) mod rename;
 mod room;
 use rename::Surface;
@@ -44,6 +46,7 @@ pub(crate) struct SeerWindow {
     room: room::RoomUi,
     editing: Option<rename::Editing>,
     menu: Option<rename::Menu>,
+    people_menu: Option<people::Menu>,
     _messages: Option<Task<()>>,
     _join: Option<Subscription>,
     _tab_time: Option<Task<()>>,
@@ -52,9 +55,7 @@ pub(crate) struct SeerWindow {
 impl SeerWindow {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let font = screen::terminal_font();
-        let server = ServerStore::load()
-            .ok()
-            .and_then(|store| store.default_server().cloned());
+        let server = selected_server().ok().flatten();
         let stopped = server.as_ref().and_then(seer::rooms::stopped_host);
         let (content, messages) = match stopped.as_ref().map_or_else(open, |_| Ok(None)) {
             Ok(Some((link, name, messages))) => {
@@ -104,6 +105,7 @@ impl SeerWindow {
             room: room::RoomUi::new(server, cx),
             editing: None,
             menu: None,
+            people_menu: None,
             _messages: None,
             _join: subscription,
             _tab_time: Some(tab_time::refresh(cx)),
@@ -150,12 +152,13 @@ impl SeerWindow {
 
     pub(crate) fn select(&mut self, pane: &str, cx: &mut Context<Self>) {
         self.input.reset();
+        self.rows = Rows::default();
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.select(pane),
             Content::Message(_) | Content::Join(_) => Ok(()),
         };
         self.check(result, cx);
-        cx.notify();
+        self.notify_room(cx);
     }
 
     pub(crate) fn press(&mut self, pane: &str, window: &mut Window, cx: &mut Context<Self>) {
@@ -219,7 +222,7 @@ impl SeerWindow {
             }
             return;
         }
-        if self.room_key(keystroke, window, cx) {
+        if self.room_key(keystroke, window, cx) || self.people_key(keystroke, window, cx) {
             cx.stop_propagation();
             return;
         }
@@ -258,6 +261,7 @@ impl SeerWindow {
     }
 
     fn receive(&mut self, event: io::Result<Event>, cx: &mut Context<Self>) {
+        let room = matches!(event, Ok(Event::Room(_)));
         #[cfg(target_os = "macos")]
         let echo = matches!(event, Ok(Event::Screen)) && self.input.waiting_echo;
         #[cfg(target_os = "macos")]
@@ -268,11 +272,40 @@ impl SeerWindow {
             ))
         );
         let result = match &mut self.content {
-            Content::Terminal(link, _) => event.and_then(|event| link.receive(event)),
+            Content::Terminal(link, _) => {
+                let selected = (
+                    link.people.selected.clone(),
+                    link.shown().map(str::to_owned),
+                );
+                let result = event.and_then(|event| link.receive(event));
+                if let Some(menu) = &mut self.people_menu
+                    && !link
+                        .people
+                        .people
+                        .iter()
+                        .any(|person| person.user_id == menu.highlighted)
+                {
+                    menu.highlighted.clone_from(&link.people.selected);
+                }
+                if selected
+                    != (
+                        link.people.selected.clone(),
+                        link.shown().map(str::to_owned),
+                    )
+                {
+                    self.input.reset();
+                    self.rows = Rows::default();
+                }
+                result
+            }
             Content::Message(_) | Content::Join(_) => Ok(()),
         };
         self.check(result, cx);
-        cx.notify();
+        if room {
+            self.notify_room(cx);
+        } else {
+            cx.notify();
+        }
         #[cfg(target_os = "macos")]
         if echo {
             self.input.waiting_echo = false;
@@ -293,183 +326,31 @@ impl SeerWindow {
     }
 }
 
-fn open() -> io::Result<Option<(Link, SharedString, Messages)>> {
+type Opened = (Link, SharedString, Messages);
+
+fn selected_server() -> io::Result<Option<seer::ServerEntry>> {
     let store = ServerStore::load()?;
-    let Some(server) = store.default_server() else {
-        return Ok(None);
+    let user = std::env::args().skip_while(|arg| arg != "--user").nth(1);
+    let selected = match user {
+        Some(user) => Some(
+            store
+                .server_for_user(&user)
+                .ok_or_else(|| io::Error::other("This room is not saved"))?,
+        ),
+        None => store.default_server(),
     };
-    join::open_server(server).map(Some)
+    Ok(selected.cloned())
 }
 
-impl Render for SeerWindow {
-    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        // gpui starts a tip only on a mouse move that the tooltip listener
-        // gets, so the tips come back in the frame after Escape clears them.
-        if self.keys.mode == Mode::Quiet {
-            cx.on_next_frame(window, |view, _, cx| {
-                if view.keys.mode == Mode::Quiet {
-                    view.keys.mode = Mode::Pointer;
-                    cx.notify();
-                }
-            });
-        }
-        let root = div()
-            .size_full()
-            .relative()
-            .flex()
-            .bg(rgb(palette::WINDOW))
-            .font_family(self.ui_font.clone())
-            .text_size(px(13.))
-            .line_height(relative(18. / 13.))
-            .text_color(rgb(palette::TEXT))
-            .on_mouse_down(
-                MouseButton::Left,
-                cx.listener(|view, _, _, cx| {
-                    view.keys.mode = Mode::Pointer;
-                    cx.notify();
-                }),
-            )
-            .capture_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
-                view.travel(&event.keystroke, window, cx)
-            }));
-        let (link, name) = match &self.content {
-            Content::Join(join) => return root.child(join.clone()),
-            Content::Message(message) => {
-                let content = if self.room.server.is_some() {
-                    self.empty_room(message, window, cx)
-                } else {
-                    div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .p(px(24.))
-                        .text_center()
-                        .text_color(rgb(palette::FAINT))
-                        .child(message.clone())
-                };
-                return root.child(content).children(self.room_overlays(window, cx));
-            }
-            Content::Terminal(link, name) => (link, name),
-        };
-        let name: SharedString = chrome::capitalize(name).into();
-        let labels = rename::Labels::new(self.editing.as_ref(), self.menu.as_ref());
-        let terminals = link.terminals();
-        let shown = link.shown();
-        let terminal = self.terminal(Screen::new(cx.entity(), self.font.clone()), cx);
-        if window.viewport_size().width < px(NARROW) {
-            return root
-                .child(
-                    div()
-                        .flex_1()
-                        .min_w_0()
-                        .flex()
-                        .flex_col()
-                        .child(
-                            chrome::bar()
-                                .gap(px(8.))
-                                .pl(px(14.))
-                                .pr(px(8.))
-                                .child(chrome::lights())
-                                .child(
-                                    sidebar::who(
-                                        &name,
-                                        20.,
-                                        11.,
-                                        window.viewport_size().width >= px(480.),
-                                        &self.ui_font,
-                                        &self.keys,
-                                        window,
-                                    )
-                                    .min_w_0()
-                                    .h(px(32.))
-                                    .pl(px(5.))
-                                    .pr(px(6.)),
-                                )
-                                .child(div().flex_1())
-                                .child(
-                                    div()
-                                        .min_w_0()
-                                        .flex()
-                                        .items_center()
-                                        .gap(px(2.))
-                                        .child(self.room_button(link.room(), true, window, cx))
-                                        .child(sidebar::new_terminal(&self.keys, true, window, cx))
-                                        .child(chrome::settings()),
-                                ),
-                        )
-                        .when(!terminals.is_empty(), |main| {
-                            main.child(sidebar::strip(
-                                terminals, shown, labels, &self.keys, window, cx,
-                            ))
-                        })
-                        .child(terminal),
-                )
-                .children(self.menu(window, cx))
-                .children(self.room_overlays(window, cx));
-        }
-        let title = terminals
-            .iter()
-            .find(|terminal| Some(terminal.pane.as_str()) == shown)
-            .cloned();
-        let who = sidebar::who(&name, 22., 11., true, &self.ui_font, &self.keys, window);
-        let side = sidebar::sidebar(who, terminals, shown, labels, &self.keys, window, cx).child(
-            chrome::footer(self.room_button(link.room(), false, window, cx)),
-        );
-        let title = heading(title.as_ref(), labels, &self.ui_font, self.keys.hover(), cx);
-        root.child(side)
-            .child(
-                div()
-                    .flex_1()
-                    .min_w_0()
-                    .flex()
-                    .flex_col()
-                    .child(chrome::bar().justify_center().px(px(14.)).child(title))
-                    .child(terminal),
-            )
-            .children(self.menu(window, cx))
-            .children(self.room_overlays(window, cx))
-    }
-}
-
-fn heading(
-    terminal: Option<&seer_core::proto::TerminalInfo>,
-    labels: rename::Labels<'_>,
-    font: &SharedString,
-    hover: bool,
-    cx: &mut Context<SeerWindow>,
-) -> Stateful<Div> {
-    let title: SharedString = terminal
-        .map(rename::display_name)
-        .unwrap_or_default()
-        .into();
-    let pane = terminal.map(|terminal| terminal.pane.clone());
-    tip::on_hover(
-        div().id("title"),
-        tip::terminal_help(&title),
-        font.clone(),
-        hover && !terminal.is_some_and(|terminal| labels.active(terminal)),
-    )
-    .max_w(px(520.))
-    .h(px(28.))
-    .px(px(8.))
-    .rounded(px(6.))
-    .flex()
-    .items_center()
-    .font_weight(FontWeight::MEDIUM)
-    .on_mouse_down(
-        MouseButton::Left,
-        cx.listener(move |view, event: &gpui::MouseDownEvent, window, cx| {
-            if event.click_count == 2
-                && let Some(pane) = &pane
-            {
-                cx.stop_propagation();
-                view.rename(pane, Surface::Title, window, cx);
-            }
-        }),
-    )
-    .children(terminal.map(|terminal| rename::label(terminal, Surface::Title, labels)))
+fn open() -> io::Result<Option<Opened>> {
+    selected_server()?
+        .as_ref()
+        .map(join::open_server)
+        .transpose()
 }
 
 #[cfg(test)]
 mod input_e2e;
+
+#[cfg(test)]
+mod watch_e2e;

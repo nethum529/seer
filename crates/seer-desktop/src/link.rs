@@ -1,10 +1,12 @@
 use std::io;
+use std::pin::Pin;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, MutexGuard, PoisonError};
 use std::thread;
 
-use futures::channel::mpsc::{UnboundedReceiver, unbounded};
-use seer_core::frame_diff::{FrameDiff, apply_next};
+use futures::channel::mpsc::unbounded;
+use seer::ServerEntry;
+use seer_core::frame_diff::FrameDiff;
 use seer_core::proto::codec::{self, Incoming, RawEvent};
 use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo};
 use seer_core::{
@@ -14,12 +16,17 @@ use seer_core::{
 use seer_net::Socket;
 use seer_runtime::PaneGrid;
 
+use crate::room::{Room, transport::RoomEvent};
+
+pub(crate) mod frames;
+
 pub(crate) enum Event {
     Message(ServerMsg),
     Screen,
+    Room(RoomEvent),
 }
 
-pub(crate) type Messages = UnboundedReceiver<io::Result<Event>>;
+pub(crate) type Messages = Pin<Box<dyn futures::Stream<Item = io::Result<Event>> + Send>>;
 pub(crate) type Terminal = Arc<Mutex<Option<Shown>>>;
 type Writer = Arc<Mutex<Socket>>;
 
@@ -83,6 +90,7 @@ pub(crate) struct Link {
     woken: Arc<AtomicBool>,
     resyncing: bool,
     room: String,
+    pub(crate) people: Room,
 }
 
 impl Link {
@@ -95,6 +103,7 @@ impl Link {
         let reader = socket.clone();
         let mut link = Self {
             writer: Arc::new(Mutex::new(socket)),
+            people: Room::new(user.clone()),
             user,
             target: first_target(tree),
             tree: tree.clone(),
@@ -121,11 +130,42 @@ impl Link {
     }
 
     pub(crate) fn terminal(&self) -> &Terminal {
-        &self.terminal
+        if self.readonly() {
+            &self.people.terminal
+        } else {
+            &self.terminal
+        }
+    }
+
+    pub(crate) fn join_room(&mut self, server: ServerEntry, person: Option<String>) -> Messages {
+        self.people.join(server, person)
+    }
+
+    pub(crate) fn readonly(&self) -> bool {
+        self.people.readonly()
+    }
+
+    pub(crate) fn select_person(&mut self, user: &str) -> io::Result<()> {
+        self.people.select_person(user);
+        if let Some((cols, rows)) = self.size {
+            self.people.resize(cols, rows);
+        }
+        if !self.readonly() {
+            self.watch()?;
+        }
+        Ok(())
     }
 
     pub(crate) fn receive(&mut self, event: Event) -> io::Result<()> {
         match event {
+            Event::Room(event) => {
+                let remote = self.readonly();
+                self.people.receive(event);
+                if remote && !self.readonly() {
+                    self.watch()?;
+                }
+                Ok(())
+            }
             Event::Message(ServerMsg::Tree { tree }) => {
                 self.retarget(&tree)?;
                 self.tree = tree;
@@ -141,16 +181,7 @@ impl Link {
                 frame,
                 seq,
             }) if self.shows(&user, &pane) => {
-                // The runtime sends frames until it reads the raw ask, and
-                // this thread can get one after the reader got the raw start.
-                let mut shown = lock(&self.terminal);
-                if !matches!(*shown, Some(Shown::Raw(_))) {
-                    *shown = Some(Shown::Frame {
-                        frame,
-                        seq,
-                        fresh: true,
-                    });
-                }
+                frames::replace(&self.terminal, frame, seq);
                 self.resyncing = false;
                 Ok(())
             }
@@ -171,7 +202,11 @@ impl Link {
     }
 
     pub(crate) fn terminals(&self) -> &[TerminalInfo] {
-        &self.terminals
+        if self.readonly() {
+            self.people.terminals()
+        } else {
+            &self.terminals
+        }
     }
 
     pub(crate) fn room(&self) -> &str {
@@ -179,6 +214,9 @@ impl Link {
     }
 
     pub(crate) fn rename(&mut self, pane: &str, title: String) -> io::Result<()> {
+        if self.readonly() {
+            return Ok(());
+        }
         let Some(target) = pane_target(&self.tree, pane) else {
             return Ok(());
         };
@@ -190,6 +228,9 @@ impl Link {
     }
 
     pub(crate) fn new_terminal(&mut self) -> io::Result<()> {
+        if self.readonly() {
+            return Ok(());
+        }
         let workspace = self
             .target
             .as_ref()
@@ -207,10 +248,17 @@ impl Link {
     }
 
     pub(crate) fn shown(&self) -> Option<&str> {
-        self.target.as_ref().map(|target| target.pane.as_str())
+        if self.readonly() {
+            self.people.pane.as_deref()
+        } else {
+            self.target.as_ref().map(|target| target.pane.as_str())
+        }
     }
 
     pub(crate) fn input(&mut self, event: InputEvent) -> io::Result<()> {
+        if self.readonly() {
+            return Ok(());
+        }
         let Some(target) = self.target.clone() else {
             return Ok(());
         };
@@ -223,6 +271,10 @@ impl Link {
     }
 
     pub(crate) fn select(&mut self, pane: &str) -> io::Result<()> {
+        if self.readonly() {
+            self.people.select_pane(pane);
+            return Ok(());
+        }
         let Some(target) = pane_target(&self.tree, pane) else {
             return Ok(());
         };
@@ -237,7 +289,12 @@ impl Link {
             return Ok(());
         }
         self.size = Some((cols, rows));
-        self.watch()
+        self.people.resize(cols, rows);
+        if self.readonly() {
+            Ok(())
+        } else {
+            self.watch()
+        }
     }
 
     fn apply_diff(
@@ -247,25 +304,9 @@ impl Link {
         seq: u64,
         diff: &FrameDiff,
     ) -> io::Result<()> {
-        {
-            let mut shown = lock(&self.terminal);
-            let next = match &*shown {
-                Some(Shown::Frame {
-                    frame, seq: held, ..
-                }) => apply_next(frame, *held, seq, diff),
-                Some(Shown::Raw(_)) => return Ok(()),
-                None => None,
-            };
-            if let Some(frame) = next {
-                *shown = Some(Shown::Frame {
-                    frame,
-                    seq,
-                    fresh: true,
-                });
-                return Ok(());
-            }
+        if frames::apply(&self.terminal, seq, diff) {
+            return Ok(());
         }
-        // One request per gap. Later diffs wait for the whole screen.
         self.resyncing = true;
         self.send(&ClientMsg::Resync { user, pane })
     }
@@ -400,7 +441,7 @@ fn read_in_background(
             }
         }
     });
-    receiver
+    Box::pin(receiver)
 }
 
 // The runtime ends a synchronized update by time and sends SyncEnd. The

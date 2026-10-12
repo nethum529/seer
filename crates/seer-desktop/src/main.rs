@@ -19,6 +19,7 @@ mod native_frame;
 #[cfg(target_os = "macos")]
 mod native_keys;
 mod palette;
+mod room;
 mod screen;
 mod sidebar;
 mod tab_time;

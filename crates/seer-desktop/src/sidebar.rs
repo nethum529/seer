@@ -125,7 +125,9 @@ pub(crate) fn sidebar(
                         .iter()
                         .map(|terminal| tab(terminal, shown, labels, ring, cx)),
                 )
-                .child(new_terminal(keys, false, window, cx)),
+                .when(!labels.readonly, |list| {
+                    list.child(new_terminal(keys, false, window, cx))
+                }),
         )
 }
 
@@ -175,24 +177,20 @@ pub(crate) fn new_terminal(
 
 pub(crate) fn who(
     name: &SharedString,
-    avatar: f32,
-    initial: f32,
+    avatar_size: (f32, f32),
     show_name: bool,
     font: &SharedString,
     keys: &Keys,
     window: &Window,
+    open: bool,
 ) -> Stateful<Div> {
-    let letter: SharedString = name
-        .chars()
-        .next()
-        .map(|first| first.to_uppercase().collect::<String>().into())
-        .unwrap_or_default();
+    let (diameter, initial) = avatar_size;
     let ring = keys.ring(&keys.who, window);
     tip::on_hover(
         div().id("who"),
         name.clone(),
         font.clone(),
-        keys.hover() && !ring,
+        keys.hover() && !ring && !open,
     )
     .track_focus(&keys.who)
     .relative()
@@ -200,20 +198,10 @@ pub(crate) fn who(
     .items_center()
     .gap(px(7.))
     .rounded(px(8.))
-    .child(cap_icon(
-        div()
-            .flex_none()
-            .size(px(avatar))
-            .rounded_full()
-            .flex()
-            .items_center()
-            .justify_center()
-            .bg(rgb(palette::CHIP_2))
-            .text_size(px(initial))
-            .line_height(relative(1.))
-            .font_weight(FontWeight::SEMIBOLD)
-            .child(letter),
-    ))
+    .when(keys.hover() && !open, |who| {
+        who.hover(|style| style.bg(rgb(palette::HOVER)))
+    })
+    .child(cap_icon(avatar(name, diameter, initial)))
     .when(show_name, |who| {
         who.child(
             one_line(div().flex_1())
@@ -226,6 +214,26 @@ pub(crate) fn who(
         who.child(outline())
             .child(tip::below(name.clone(), font.clone()))
     })
+}
+
+pub(crate) fn avatar(name: &str, diameter: f32, initial: f32) -> Div {
+    let letter: SharedString = name
+        .chars()
+        .next()
+        .map(|first| first.to_uppercase().collect::<String>().into())
+        .unwrap_or_default();
+    div()
+        .flex_none()
+        .size(px(diameter))
+        .rounded_full()
+        .flex()
+        .items_center()
+        .justify_center()
+        .bg(rgb(palette::CHIP_2))
+        .text_size(px(initial))
+        .line_height(relative(1.))
+        .font_weight(FontWeight::SEMIBOLD)
+        .child(letter)
 }
 
 // gpui 0.2.2 keeps the first measure of a text that does not wrap. That

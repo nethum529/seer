@@ -1,12 +1,11 @@
-use std::io::{self, BufRead, IsTerminal, Write};
+use std::io::{self, BufRead, Write};
 
 use seer_core::proto::{ClientInfo, ClientMsg};
 
 use crate::store::ServerStore;
 
 use super::{
-    CommandError, ServerEntry, authenticate, finish_session, people_reply, print_close_names,
-    receive_reply, send,
+    CommandError, ServerEntry, authenticate, people_reply, print_close_names, receive_reply, send,
 };
 
 pub(super) fn select_client(clients: &[ClientInfo]) -> Result<ClientInfo, CommandError> {
@@ -130,14 +129,7 @@ pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
         return Err(CommandError::usage(format!("no person named {target}")));
     };
     drop(stream);
-    let name = person.name.clone();
-    let (stream, _) = authenticate(&server)?;
-    finish_session(
-        io::stdout().is_terminal(),
-        Some(stream),
-        Some(&name),
-        &server,
-    )
+    crate::desktop::peek(&server, &person.name).map_err(CommandError::system)
 }
 
 pub(crate) fn attach_bare() -> Result<(), CommandError> {

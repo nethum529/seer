@@ -86,10 +86,10 @@ impl RoomUi {
 
 impl SeerWindow {
     pub(crate) fn room_blocks_terminal_pointer(&self) -> bool {
-        self.room.menu.is_some() || self.room.sheet.is_some()
+        self.room.menu.is_some() || self.room.sheet.is_some() || self.people_menu.is_some()
     }
 
-    fn notify_room(&self, cx: &mut Context<Self>) {
+    pub(super) fn notify_room(&self, cx: &mut Context<Self>) {
         cx.notify();
         #[cfg(target_os = "macos")]
         if let Some(frame) = &self.input.frame {
@@ -137,6 +137,7 @@ impl SeerWindow {
         }
         self.input.reset();
         self.menu = None;
+        self.people_menu = None;
         self.room.error = None;
         self.keys.mode = if keyboard {
             Mode::Keyboard
@@ -326,7 +327,10 @@ impl SeerWindow {
         let work = cx.background_executor().spawn(async move {
             action.run(&server)?;
             if matches!(action, RoomAction::Restore | RoomAction::StartNew) {
-                open()
+                ServerStore::load()?
+                    .default_server()
+                    .map(join::open_server)
+                    .transpose()
             } else {
                 Ok(None)
             }

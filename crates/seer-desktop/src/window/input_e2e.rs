@@ -12,13 +12,13 @@ use tempfile::TempDir;
 
 use super::*;
 
-struct Runtime {
+pub(super) struct Runtime {
     child: Child,
     directory: TempDir,
 }
 
 impl Runtime {
-    fn start() -> Self {
+    pub(super) fn start() -> Self {
         Self::start_with_output("Ready\r\n")
     }
 
@@ -52,7 +52,7 @@ impl Runtime {
         Self { child, directory }
     }
 
-    fn connect(&self) -> (Link, Messages) {
+    pub(super) fn connect(&self) -> (Link, Messages) {
         let deadline = Instant::now() + Duration::from_secs(5);
         let stream = loop {
             if let Ok(stream) = UnixStream::connect(self.directory.path().join("socket")) {
@@ -76,7 +76,7 @@ impl Runtime {
         Link::open(socket, &tree, "e2e".into(), "E2e".into()).unwrap()
     }
 
-    fn input(&self) -> Vec<u8> {
+    pub(super) fn input(&self) -> Vec<u8> {
         fs::read(self.directory.path().join("input")).unwrap_or_default()
     }
 }
@@ -336,6 +336,7 @@ fn open_view<'a>(
             },
             editing: None,
             menu: None,
+            people_menu: None,
             _join: None,
             _tab_time: None,
             _messages: Some(cx.spawn(async move |view, cx| {
