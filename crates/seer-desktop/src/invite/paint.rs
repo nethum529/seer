@@ -148,7 +148,7 @@ impl InviteSheet {
                     .size(px(16.))
                     .flex_none()
                     .child(
-                        chrome::icon("copy", palette::TEXT_2)
+                        chrome::icon("copy", palette::TEXT)
                             .opacity(1. - self.copy_motion[index].value()),
                     )
                     .child(
