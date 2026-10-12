@@ -306,7 +306,7 @@ fn desktop_keys_reach_the_local_shell(cx: &mut TestAppContext) {
     assert_eq!(runtime.input(), expected);
 }
 
-fn open_view<'a>(
+pub(super) fn open_view<'a>(
     runtime: &Runtime,
     cx: &'a mut TestAppContext,
 ) -> (gpui::Entity<SeerWindow>, &'a mut gpui::VisualTestContext) {

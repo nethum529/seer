@@ -4,7 +4,8 @@ use gpui::{App, AssetSource, Result, SharedString};
 
 pub(crate) struct Assets;
 
-const ICONS: [(&str, &[u8]); 15] = [
+const ICONS: [(&str, &[u8]); 16] = [
+    ("invite", include_bytes!("../assets/icons/invite.svg")),
     ("check", include_bytes!("../assets/icons/check.svg")),
     ("stop", include_bytes!("../assets/icons/stop.svg")),
     ("leave", include_bytes!("../assets/icons/leave.svg")),

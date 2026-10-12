@@ -33,6 +33,12 @@ struct Menu {
     motion: Motion,
 }
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+enum MenuAction {
+    Invite,
+    Room(RoomAction),
+}
+
 struct Sheet {
     action: RoomAction,
     room: RoomSummary,
@@ -58,16 +64,19 @@ impl RoomUi {
         }
     }
 
-    fn actions(&self) -> Vec<RoomAction> {
+    fn actions(&self) -> Vec<MenuAction> {
         let Some(room) = &self.current else {
             return Vec::new();
         };
         if !room.host {
-            vec![RoomAction::Leave]
+            vec![MenuAction::Room(RoomAction::Leave)]
         } else if room.state == RoomState::Unreachable {
-            vec![RoomAction::Restore, RoomAction::StartNew]
+            vec![
+                MenuAction::Room(RoomAction::Restore),
+                MenuAction::Room(RoomAction::StartNew),
+            ]
         } else {
-            vec![RoomAction::Stop]
+            vec![MenuAction::Invite, MenuAction::Room(RoomAction::Stop)]
         }
     }
 
@@ -86,7 +95,10 @@ impl RoomUi {
 
 impl SeerWindow {
     pub(crate) fn room_blocks_terminal_pointer(&self) -> bool {
-        self.room.menu.is_some() || self.room.sheet.is_some() || self.people_menu.is_some()
+        self.room.menu.is_some()
+            || self.room.sheet.is_some()
+            || self.people_menu.is_some()
+            || self.invite_open()
     }
 
     pub(super) fn notify_room(&self, cx: &mut Context<Self>) {
@@ -132,7 +144,7 @@ impl SeerWindow {
     }
 
     fn open_room(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
-        if self.room.pending || self.room.modal() {
+        if self.room.pending || self.room.modal() || self.invite_open() {
             return;
         }
         self.input.reset();
@@ -181,7 +193,7 @@ impl SeerWindow {
 
     fn pick_room_action(
         &mut self,
-        action: RoomAction,
+        action: MenuAction,
         keyboard: bool,
         window: &mut Window,
         cx: &mut Context<Self>,
@@ -190,7 +202,17 @@ impl SeerWindow {
             return;
         }
         self.room.error = None;
+        self.keys.mode = if keyboard {
+            Mode::Keyboard
+        } else {
+            Mode::Pointer
+        };
         self.close_room_menu(keyboard, false, window, cx);
+        let MenuAction::Room(action) = action else {
+            window.focus(&self.room.focus);
+            self.show_invite(&super::invite::OpenInvite, window, cx);
+            return;
+        };
         if action == RoomAction::Restore {
             self.run_room_action(action, window, cx);
             return;
@@ -198,11 +220,6 @@ impl SeerWindow {
         let cancel = cx.focus_handle();
         let confirm = cx.focus_handle();
         window.focus(&cancel);
-        self.keys.mode = if keyboard {
-            Mode::Keyboard
-        } else {
-            Mode::Pointer
-        };
         self.room.sheet = Some(Sheet {
             action,
             room: match &self.room.current {

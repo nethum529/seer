@@ -367,4 +367,6 @@ mod input_e2e;
 #[cfg(test)]
 mod invite_e2e;
 #[cfg(test)]
+mod room_invite_e2e;
+#[cfg(test)]
 mod watch_e2e;

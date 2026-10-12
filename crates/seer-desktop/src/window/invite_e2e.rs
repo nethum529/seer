@@ -106,7 +106,7 @@ fn room(user: &str, credential: &str) -> String {
     let user = user.to_owned();
     let credential = credential.to_owned();
     thread::spawn(move || {
-        for _ in 0..4 {
+        for _ in 0..5 {
             let (mut stream, _) = listener.accept().unwrap();
             stream
                 .set_read_timeout(Some(Duration::from_secs(5)))
