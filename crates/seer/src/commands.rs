@@ -7,7 +7,6 @@ use seer_net::{Socket, Stream};
 
 use crate::capsule;
 use crate::capsule::Endpoint;
-use crate::prompt;
 use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
@@ -16,6 +15,8 @@ pub(crate) use handshake::{Welcome, authenticate, hello};
 pub(crate) use selection::{attach_bare, peek, selected_server};
 mod exit;
 mod handshake;
+pub(crate) mod join;
+pub(crate) use join::run as join;
 mod lifecycle;
 pub(crate) use lifecycle::{leave, perms, stop};
 mod ps;
@@ -70,75 +71,6 @@ pub(crate) fn detach() -> Result<(), CommandError> {
     receive_clients(&mut stream)?;
     print_detached(&server.alias);
     Ok(())
-}
-
-pub(crate) fn join(invitation: Option<&str>) -> Result<(), CommandError> {
-    let invitation = match invitation {
-        Some(invitation) => invitation.to_owned(),
-        None => prompt::hidden("Invitation: ").map_err(CommandError::system)?,
-    };
-    let invitation = invitation
-        .split_whitespace()
-        .rfind(|token| token.starts_with("SEER"))
-        .unwrap_or(&invitation);
-    let capsule = capsule::parse(invitation).map_err(CommandError::system)?;
-    let endpoint = capsule.endpoint.to_string();
-    handshake::check_room_version(&endpoint)?;
-
-    let default_name = std::env::var("USER")
-        .ok()
-        .filter(|name| !name.is_empty())
-        .or_else(|| {
-            std::env::var("LOGNAME")
-                .ok()
-                .filter(|name| !name.is_empty())
-        });
-
-    loop {
-        let name = prompt::visible_with_default("Name", default_name.as_deref())
-            .map_err(CommandError::system)?;
-        let mut stream = connect(&endpoint)?;
-        let join = ClientMsg::Join {
-            seat_token: capsule.token.clone(),
-            name,
-            version: Some(env!("CARGO_PKG_VERSION").into()),
-        };
-        send(&mut stream, &join)?;
-        match receive(&mut stream)? {
-            ServerMsg::Refused { reason } if reason == "name is in use" => {
-                println!("That name is in use.");
-            }
-            ServerMsg::Joined {
-                user_id,
-                credential,
-                name,
-            } => return complete_join(&capsule, user_id, credential, name),
-            ServerMsg::Refused { reason } => return Err(CommandError::usage(reason)),
-            _ => return Err(unexpected_reply()),
-        }
-    }
-}
-
-fn complete_join(
-    capsule: &capsule::Capsule,
-    user_id: String,
-    credential: String,
-    name: String,
-) -> Result<(), CommandError> {
-    let mut store = ServerStore::load().map_err(CommandError::system)?;
-    let server = ServerEntry {
-        endpoint: capsule.endpoint.to_string(),
-        alias: capsule.alias.clone(),
-        user_id,
-        name: name.clone(),
-        credential,
-        current: true,
-    };
-    store.make_current(server.clone());
-    store.save().map_err(CommandError::system)?;
-    println!("Joined as {name}. Attaching...");
-    let (stream, _) = authenticate(&server)?;
-    finish_session(io::stdout().is_terminal(), Some(stream), None, &server)
 }
 
 pub(crate) fn attach() -> Result<(), CommandError> {

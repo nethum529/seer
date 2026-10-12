@@ -15,6 +15,7 @@ pub(crate) enum Finished {
     Save,
     Cancel,
     SaveOutside,
+    Changed,
 }
 
 pub(crate) struct NameInput {
@@ -29,6 +30,11 @@ pub(crate) struct NameInput {
     offset: Pixels,
     dragging: bool,
     pub(crate) centered: bool,
+    form: bool,
+    code: bool,
+    limit: usize,
+    pub(crate) invalid: bool,
+    pub(crate) disabled: bool,
 }
 
 impl EventEmitter<Finished> for NameInput {}
@@ -48,7 +54,30 @@ impl NameInput {
             offset: px(0.),
             dragging: false,
             centered: false,
+            form: false,
+            code: false,
+            limit: 40,
+            invalid: false,
+            disabled: false,
         }
+    }
+
+    pub(crate) fn form(text: String, code: bool, cx: &mut Context<Self>) -> Self {
+        let mut input = Self::new(
+            text,
+            if code {
+                "seer join SEER2-..."
+            } else {
+                "Your name"
+            }
+            .into(),
+            cx,
+        );
+        input.form = true;
+        input.code = code;
+        input.limit = if code { 4096 } else { 32 };
+        input.focus = cx.focus_handle().tab_stop(true);
+        input
     }
 
     fn select(&mut self, at: usize, extend: bool) {
@@ -81,6 +110,10 @@ impl NameInput {
     }
 
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
+        if self.disabled {
+            cx.stop_propagation();
+            return;
+        }
         let key = &event.keystroke;
         let command = key.modifiers.platform || key.modifiers.control;
         match key.key.as_str() {
@@ -178,7 +211,8 @@ impl NameInput {
     }
 
     fn replace(&mut self, range: Range<usize>, text: &str) -> usize {
-        let remaining = 40usize
+        let remaining = self
+            .limit
             .saturating_sub(self.text.chars().count() - self.text[range.clone()].chars().count());
         let text: String = text
             .chars()
@@ -232,6 +266,9 @@ impl EntityInputHandler for NameInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.disabled {
+            return;
+        }
         let range = range
             .as_ref()
             .map(|range| self.range_from_utf16(range))
@@ -239,6 +276,9 @@ impl EntityInputHandler for NameInput {
             .unwrap_or(self.selection.clone());
         self.replace(range, text);
         self.marked = None;
+        if self.form {
+            cx.emit(Finished::Changed);
+        }
         cx.notify();
     }
 
@@ -250,6 +290,9 @@ impl EntityInputHandler for NameInput {
         _: &mut Window,
         cx: &mut Context<Self>,
     ) {
+        if self.disabled {
+            return;
+        }
         let range = range
             .as_ref()
             .map(|range| self.range_from_utf16(range))
@@ -257,6 +300,9 @@ impl EntityInputHandler for NameInput {
             .unwrap_or(self.selection.clone());
         let start = range.start;
         let end = self.replace(range, text);
+        if self.form {
+            cx.emit(Finished::Changed);
+        }
         self.marked = Some(start..end);
         if let Some(selected) = selected {
             let base = self.utf16(start);
@@ -299,9 +345,21 @@ impl EntityInputHandler for NameInput {
 }
 
 impl Render for NameInput {
-    fn render(&mut self, _: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+    fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
         div()
-            .id("name-input")
+            .id(if self.form {
+                "join-field"
+            } else {
+                "name-input"
+            })
+            .debug_selector(|| {
+                if self.form {
+                    "join-field"
+                } else {
+                    "name-input"
+                }
+                .into()
+            })
             .track_focus(&self.focus)
             .cursor_text()
             .w_full()
@@ -316,6 +374,26 @@ impl Render for NameInput {
             .bg(rgb(palette::WINDOW))
             .overflow_hidden()
             .line_height(px(20.))
+            .when(self.form, |field| {
+                field
+                    .h(px(36.))
+                    .px(px(11.))
+                    .my(px(0.))
+                    .ml(px(0.))
+                    .rounded(px(8.))
+                    .flex()
+                    .items_center()
+                    .border_color(if self.invalid {
+                        gpui::rgba(0xf871718c)
+                    } else if self.focus.is_focused(window) {
+                        gpui::rgba(0xfafafa73)
+                    } else {
+                        rgb(palette::LINE_2)
+                    })
+            })
+            .when(self.code, |field| {
+                field.font_family("JetBrains Mono").text_size(px(12.))
+            })
             .on_key_down(cx.listener(Self::key))
             .on_mouse_down(
                 MouseButton::Left,

@@ -77,6 +77,9 @@ impl SeerWindow {
         let input = cx.new(|cx| NameInput::new(title, placeholder, cx));
         input.update(cx, |input, _| input.centered = surface == Surface::Title);
         let events = cx.subscribe_in(&input, window, |view, _, event, window, cx| {
+            if matches!(event, Finished::Changed) {
+                return;
+            }
             view.finish_name(
                 !matches!(event, Finished::Cancel),
                 !matches!(event, Finished::SaveOutside),
@@ -114,7 +117,7 @@ impl SeerWindow {
             let title = editing.input.read(cx).text.clone();
             let result = match &mut self.content {
                 Content::Terminal(link, _) => link.rename(&editing.pane, title),
-                Content::Message(_) => Ok(()),
+                Content::Message(_) | Content::Join(_) => Ok(()),
             };
             self.check(result, cx);
         }
