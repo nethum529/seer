@@ -6,8 +6,14 @@ use std::time::{Duration, Instant};
 use seer_core::frame_diff::apply_next;
 use seer_core::proto::{ClientMsg, ServerMsg, TerminalInfo, codec};
 
+#[path = "room/backpressure.rs"]
+mod backpressure;
 #[path = "support/binary.rs"]
 mod binary;
+#[path = "room/reconnect.rs"]
+mod reconnect;
+#[path = "room/revocation.rs"]
+mod revocation;
 mod room;
 #[path = "room/screen.rs"]
 mod screen;
@@ -365,4 +371,99 @@ fn remote_mouse_is_grant_checked_and_encoded_in_the_destination_mode() {
         &at.pane,
         "1b 5b 3c 30 3b 36 3b 33 4d"
     ));
+}
+
+#[test]
+fn shared_terminal_events_follow_confirmed_grants_and_revocation() {
+    let mut room = Room::start(false);
+    let mut window = room.publish("alice", ALICE_SECRET);
+    let at = first_terminal(&own_tree(&mut window));
+    let mut alice = join_room(room.address, "alice", ALICE_SECRET);
+    let mut other_alice = join_room(room.address, "alice", ALICE_SECRET);
+    let mut bob = join_room(room.address, "bob", BOB_SECRET);
+    wait_for_published(&mut alice, "alice");
+    send(
+        &mut bob,
+        &ClientMsg::Terminals {
+            user: "alice".into(),
+        },
+    );
+    terminals(&mut bob, "alice");
+    send(
+        &mut bob,
+        &ClientMsg::Watch {
+            user: "alice".into(),
+            pane: at.pane.clone(),
+            cols: 80,
+            rows: 24,
+            viewer: true,
+        },
+    );
+    let capture = room.root.join("alice/control451");
+    let input = serde_json::json!({"InputInto": {
+        "user": "alice", "pane": at.pane,
+        "input": seer_core::TerminalInput::new(seer_core::InputEvent::Text(format!(
+            "printf shared451 >>'{}'\n", capture.display()
+        )))
+    }});
+    codec::encode(&mut bob, &input).expect("remote input");
+    wait_for(&mut bob, |m| matches!(m, ServerMsg::Refused { .. }));
+    assert!(!capture.exists());
+    send(
+        &mut alice,
+        &ClientMsg::SetGrant {
+            user: "bob".into(),
+            can_type: true,
+        },
+    );
+    wait_for(
+        &mut alice,
+        |m| matches!(m, ServerMsg::Grants { can_type_here, .. } if can_type_here.contains(&"bob".into())),
+    );
+    wait_for(
+        &mut other_alice,
+        |m| matches!(m, ServerMsg::Grants { can_type_here, .. } if can_type_here.contains(&"bob".into())),
+    );
+    wait_for_grant(&mut bob, true);
+    codec::encode(&mut bob, &input).expect("granted input");
+    wait_for_capture(&capture, b"shared451");
+    send(&mut alice, &ClientMsg::SetAllGrants { can_type: false });
+    wait_for(&mut alice, |m| *m == ServerMsg::GrantsUpdated);
+    wait_for(
+        &mut other_alice,
+        |m| matches!(m, ServerMsg::Grants { can_type_here, .. } if can_type_here.is_empty()),
+    );
+    wait_for_grant(&mut bob, false);
+    codec::encode(&mut bob, &input).expect("revoked input");
+    wait_for(&mut bob, |m| matches!(m, ServerMsg::Refused { .. }));
+    assert_eq!(
+        std::fs::read(&capture).expect("input capture"),
+        b"shared451"
+    );
+    send(&mut alice, &ClientMsg::SetAllGrants { can_type: true });
+    wait_for(&mut alice, |m| *m == ServerMsg::GrantsUpdated);
+    wait_for_grant(&mut bob, true);
+    codec::encode(&mut bob, &input).expect("all granted input");
+    wait_for_capture(&capture, b"shared451shared451");
+    send(
+        &mut alice,
+        &ClientMsg::SetGrant {
+            user: "missing".into(),
+            can_type: true,
+        },
+    );
+    wait_for(&mut alice, |m| matches!(m, ServerMsg::Refused { .. }));
+    send(&mut alice, &ClientMsg::ListPeople);
+    wait_for(&mut alice, |m| matches!(m, ServerMsg::People { .. }));
+}
+
+fn wait_for_capture(path: &std::path::Path, expected: &[u8]) {
+    let deadline = Instant::now() + WAIT;
+    while Instant::now() < deadline {
+        if std::fs::read(path).is_ok_and(|bytes| bytes == expected) {
+            return;
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    panic!("granted input did not reach the shell");
 }

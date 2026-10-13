@@ -105,10 +105,12 @@ Own input, create, split, close, focus, and resize go through the local socket.
 PTY output updates the runtime's terminal grid, then subscribed windows.
 
 Remote viewing goes through the broker. A remote stream can watch and list
-terminals. GrantedInput is allowed only after the broker checks the owner's
-can-type-here grant. Revoke blocks subsequent input; it cannot recall bytes
-already written to a PTY. A remote stream cannot create, close, focus, split,
-or resize terminals.
+terminals. The broker checks the owner's Share control grant before it routes
+input. InputInto carries the same TerminalInput events as local input. The
+runtime encodes GrantedTerminalInput with the terminal's current modes. The
+TUI's TypeInto and MouseInto paths stay available. Scrollback stays with the
+viewer. Revoke blocks subsequent input; it cannot recall bytes already written
+to a PTY. A remote stream cannot create, close, focus, split, or resize terminals.
 
 ## Design record
 

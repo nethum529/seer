@@ -12,8 +12,10 @@ use crate::registry::PersonRecord;
 use crate::server::BrokerState;
 
 mod input;
+mod restore;
 mod transport;
 mod unreadable;
+mod writer;
 use transport::{Event, ReaderTask, RuntimeConnection, spawn_client_reader};
 use unreadable::Unreadable;
 
@@ -147,6 +149,7 @@ impl<'a> Coordinator<'a> {
                     }
                 }
             }
+            Event::WatchSent { user, identity } => self.watch_sent(&user, &identity)?,
             Event::Runtime {
                 user,
                 identity,
@@ -159,7 +162,18 @@ impl<'a> Coordinator<'a> {
                 {
                     match result {
                         Ok(message) => self.handle_runtime(&user, message)?,
-                        Err(error) => self.runtime_lost(&user, &error)?,
+                        Err(error) => {
+                            if self
+                                .runtimes
+                                .get(&user)
+                                .is_some_and(|r| r.restoring.is_some())
+                            {
+                                self.write(&ServerMsg::Refused {
+                                    reason: error.to_string(),
+                                })?;
+                            }
+                            self.runtime_lost(&user, &error)?;
+                        }
                     }
                 }
             }
@@ -235,10 +249,11 @@ impl<'a> Coordinator<'a> {
                 Ok(())
             }
             ClientMsg::Terminals { user } => self.list(&user),
-            ClientMsg::MouseInto { user, pane, mouse } => self.mouse_into(&user, &pane, mouse),
-            ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
-            ClientMsg::SetAllGrants { can_type } => self.set_all_grants(can_type),
-            ClientMsg::SetGrant { user, can_type } => self.set_grant(&user, can_type),
+            ClientMsg::MouseInto { .. }
+            | ClientMsg::TypeInto { .. }
+            | ClientMsg::InputInto { .. }
+            | ClientMsg::SetAllGrants { .. }
+            | ClientMsg::SetGrant { .. } => self.handle_control(message),
             ClientMsg::ListPeople => self.write(&self.broker.people()?),
             ClientMsg::Invite { hours } if self.owner.is_owner => {
                 self.write(&self.broker.invite(hours)?)
@@ -256,27 +271,6 @@ impl<'a> Coordinator<'a> {
             }
             _ => Err(io::Error::other("unsupported client message")),
         }
-    }
-
-    fn runtime(&mut self, user: &str) -> io::Result<&mut RuntimeConnection> {
-        if !self.runtimes.contains_key(user) {
-            let mut runtime = self.connect_runtime(user)?;
-            for ((target, pane), (size, viewer)) in &self.watches {
-                if target == user {
-                    runtime.send(&ClientMsg::Watch {
-                        user: user.into(),
-                        pane: pane.clone(),
-                        cols: size.cols,
-                        rows: size.rows,
-                        viewer: *viewer,
-                    })?;
-                }
-            }
-            self.runtimes.insert(user.to_owned(), runtime);
-        }
-        self.runtimes
-            .get_mut(user)
-            .ok_or_else(|| io::Error::other("runtime connection is missing"))
     }
 
     fn person(&self, user: &str) -> io::Result<PersonRecord> {

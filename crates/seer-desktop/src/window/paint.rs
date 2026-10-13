@@ -61,7 +61,8 @@ impl Render for SeerWindow {
                 .map_or(name.as_ref(), |person| &person.name),
         )
         .into();
-        let readonly = link.readonly();
+        let readonly = link.remote();
+        let can_input = link.can_input();
         let person_open = self
             .people_menu
             .as_ref()
@@ -138,10 +139,7 @@ impl Render for SeerWindow {
                                                 &self.keys, true, window, cx,
                                             ))
                                         })
-                                        .when(
-                                            readonly && window.viewport_size().width >= px(480.),
-                                            |bar| bar.child(people::read_only()),
-                                        )
+                                        .when(readonly, |bar| bar.child(people::control(can_input)))
                                         .child(chrome::settings()),
                                 ),
                         )
@@ -200,7 +198,12 @@ impl Render for SeerWindow {
                 ),
             )
             .when(readonly, |bar| {
-                bar.child(people::read_only().absolute().right(px(14.)).top(px(13.)))
+                bar.child(
+                    people::control(can_input)
+                        .absolute()
+                        .right(px(14.))
+                        .top(px(13.)),
+                )
             });
         root.child(side)
             .child(
