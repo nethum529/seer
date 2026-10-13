@@ -39,9 +39,15 @@ enum MenuAction {
     Room(RoomAction),
 }
 
+#[derive(Clone)]
+enum Confirmation {
+    Room(RoomAction, Box<RoomSummary>),
+    Terminal { pane: String, program: String },
+}
+
 struct Sheet {
-    action: RoomAction,
-    room: RoomSummary,
+    action: Confirmation,
+    return_focus: FocusHandle,
     cancel: FocusHandle,
     confirm: FocusHandle,
     motion: Motion,
@@ -221,11 +227,14 @@ impl SeerWindow {
         let confirm = cx.focus_handle();
         window.focus(&cancel);
         self.room.sheet = Some(Sheet {
-            action,
-            room: match &self.room.current {
-                Some(room) => room.clone(),
-                None => return,
-            },
+            action: Confirmation::Room(
+                action,
+                Box::new(match &self.room.current {
+                    Some(room) => room.clone(),
+                    None => return,
+                }),
+            ),
+            return_focus: self.room.focus.clone(),
             cancel,
             confirm,
             motion: Motion::open(keyboard, 200),
@@ -245,7 +254,9 @@ impl SeerWindow {
         } else {
             Mode::Pointer
         };
-        window.focus(&self.room.focus);
+        if let Some(sheet) = &self.room.sheet {
+            window.focus(&sheet.return_focus);
+        }
         self.notify_room(cx);
     }
 
@@ -316,7 +327,7 @@ impl SeerWindow {
             }
             "enter" | "space" if !self.room.pending => {
                 if sheet.confirm.is_focused(window) {
-                    self.run_room_action(sheet.action, window, cx);
+                    self.run_confirmation(window, cx);
                 } else {
                     self.close_room_sheet(true, window, cx);
                 }
@@ -357,7 +368,10 @@ impl SeerWindow {
             let _ = view.update_in(cx, |view, window, cx| {
                 view.room.pending = false;
                 match result {
-                    Ok(opened) => view.room_action_done(action, opened, cx),
+                    Ok(opened) => {
+                        view.room_action_done(action, opened, cx);
+                        window.focus(&view.room.focus);
+                    }
                     Err(error) => {
                         if action == RoomAction::Restore {
                             view.open_room(view.keys.mode == Mode::Keyboard, window, cx);
@@ -425,7 +439,6 @@ impl SeerWindow {
             .is_some_and(|sheet| sheet.motion.gone())
         {
             self.room.sheet = None;
-            window.focus(&self.room.focus);
         }
         let moving = self
             .room

@@ -18,6 +18,13 @@ pub(super) fn handle_status_query(
 }
 
 impl SharedSession {
+    pub(super) fn refresh_observations(&self) -> io::Result<()> {
+        for host in lock(&self.session)?.pane_hosts.values() {
+            host.refresh_observation()?;
+        }
+        Ok(())
+    }
+
     pub(super) fn record_capabilities(
         &self,
         connection_id: u64,

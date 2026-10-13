@@ -111,8 +111,10 @@ measured product crops, and the full contrast matrix are in
 - A long task line is cut with an ellipsis. The full text is in the
   terminal. The GPUI tooltip must also open on keyboard focus, not only on
   hover.
-- New terminal is a quiet row with a plus, at the end of your own list
-  only. Its shortcut is in its tooltip.
+- New terminal is a quiet row with a plus, at the end of the list. It
+  returns to your own terminals and focuses the new terminal, also when
+  you watch another person. Its shortcut is in its tooltip: Cmd N on
+  macOS, Ctrl Shift N on Linux.
 
 ## Terminal names (R-468)
 
@@ -131,7 +133,13 @@ measured product crops, and the full contrast matrix are in
 - How to rename, only on your own terminals:
   - Double click a tab, the title, or a pill in the narrow strip.
   - Right click a tab, then Rename. Shift+F10 opens the same menu. The
-    menu has one item now. R-452 can add Close later.
+    menu has Rename, then Close. Close is only for your own terminals.
+  - Close ends a shell at once and selects the next terminal, or the
+    previous terminal when the closed one was last. Other programs need
+    confirmation in the room menu's shared sheet. The sheet names the
+    program and focuses Cancel first. Cancel keeps the terminal.
+  - After the last terminal closes, the list is empty and New terminal
+    stays available.
   - F2 on the focused tab.
 - In the field: Enter saves, Escape cancels, a click outside saves. An
   empty name goes back to the program name. 40 characters at most.

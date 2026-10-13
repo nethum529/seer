@@ -62,6 +62,18 @@ impl Detector {
     pub(crate) fn observation(&self) -> Observation {
         lock_mutex(&self.observation).clone()
     }
+
+    pub(crate) fn refresh(&self, descriptor: &OwnedFd, shell_pid: Option<u32>) {
+        let job = process::observe(descriptor, shell_pid);
+        let name = job.agent.map_or(job.name, |agent| agent.name().into());
+        let mut observation = lock_mutex(&self.observation);
+        if observation.name != name {
+            *observation = Observation {
+                name,
+                ..Observation::default()
+            };
+        }
+    }
 }
 
 impl Drop for Detector {
