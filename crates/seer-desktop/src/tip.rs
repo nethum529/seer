@@ -1,10 +1,13 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AppContext, Context, Div, IntoElement, ParentElement, Render, SharedString, Stateful,
-    StatefulInteractiveElement, Styled, Window, anchored, deferred, div, point, px, relative, rgb,
+    AppContext, Context, Div, FontWeight, IntoElement, ParentElement, Render, SharedString,
+    Stateful, StatefulInteractiveElement, Styled, Window, anchored, deferred, div, point, px,
+    relative, rgb,
 };
 
 use crate::palette;
+
+mod text;
 
 const GAP: f32 = 4.;
 const MAX_WIDTH: f32 = 280.;
@@ -69,17 +72,21 @@ pub(crate) fn below(text: SharedString, font: SharedString) -> Div {
 }
 
 // gpui draws a tooltip outside the window root, so it needs its own font.
-fn tip(text: SharedString, font: SharedString) -> Div {
-    div()
-        .max_w(px(MAX_WIDTH))
-        .py(px(5.))
-        .px(px(10.))
-        .rounded(px(8.))
-        .bg(rgb(palette::RAISED))
-        .text_color(rgb(palette::TEXT_2))
-        .font_family(font)
-        .text_size(px(12.))
-        .line_height(relative(16. / 12.))
-        .whitespace_normal()
-        .child(text)
+fn tip(text: SharedString, font: SharedString) -> impl IntoElement {
+    text::PixelTip::new(text, |text| {
+        div()
+            .max_w(px(MAX_WIDTH))
+            .py(px(5.))
+            .pb(px(6.))
+            .px(px(10.))
+            .rounded(px(8.))
+            .bg(rgb(palette::RAISED))
+            .text_color(rgb(palette::TEXT_2))
+            .font_family(font)
+            .font_weight(FontWeight::NORMAL)
+            .text_size(px(12.))
+            .line_height(relative(16. / 12.))
+            .whitespace_normal()
+            .child(text)
+    })
 }
