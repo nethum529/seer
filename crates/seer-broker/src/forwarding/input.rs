@@ -1,6 +1,37 @@
 use super::*;
 
 impl Coordinator<'_> {
+    pub(super) fn handle_control(&mut self, message: ClientMsg) -> io::Result<()> {
+        match message {
+            ClientMsg::MouseInto { user, pane, mouse } => self.mouse_into(&user, &pane, mouse),
+            ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
+            ClientMsg::InputInto { user, pane, input } => self.input_into(&user, &pane, input),
+            ClientMsg::SetAllGrants { can_type } => self.set_all_grants(can_type),
+            ClientMsg::SetGrant { user, can_type } => self.set_grant(&user, can_type),
+            _ => Err(io::Error::other("unsupported control message")),
+        }
+    }
+
+    pub(super) fn input_into(
+        &mut self,
+        user: &str,
+        pane: &str,
+        input: seer_core::TerminalInput,
+    ) -> io::Result<()> {
+        if matches!(input.event, seer_core::InputEvent::Scrollback { .. }) {
+            return Err(io::Error::other("scrollback belongs to the viewer"));
+        }
+        self.forward_input(user, pane, |workspace, tab, sender| {
+            ClientMsg::GrantedTerminalInput {
+                workspace,
+                tab,
+                pane: pane.into(),
+                input,
+                sender,
+            }
+        })
+    }
+
     pub(super) fn set_all_grants(&self, can_type: bool) -> io::Result<()> {
         let users = if can_type {
             self.broker
@@ -36,15 +67,14 @@ impl Coordinator<'_> {
         pane: &str,
         mouse: seer_core::MouseInput,
     ) -> io::Result<()> {
-        self.require_grant(user)?;
-        let (workspace, tab) = self.runtime(user)?.location(pane)?;
-        let sender = self.owner.name.clone();
-        self.runtime(user)?.send(&ClientMsg::GrantedMouse {
-            workspace,
-            tab,
-            pane: pane.into(),
-            mouse,
-            sender,
+        self.forward_input(user, pane, |workspace, tab, sender| {
+            ClientMsg::GrantedMouse {
+                workspace,
+                tab,
+                pane: pane.into(),
+                mouse,
+                sender,
+            }
         })
     }
 
@@ -61,20 +91,32 @@ impl Coordinator<'_> {
     }
 
     pub(super) fn type_into(&mut self, user: &str, pane: &str, bytes: Vec<u8>) -> io::Result<()> {
-        self.require_grant(user)?;
-        let (workspace, tab) = self.runtime(user)?.location(pane)?;
-        seer_core::debug_log!(
-            "input forwarded from={} to={user} pane={pane} bytes={}",
-            self.owner.user_id,
-            bytes.len()
-        );
-        let sender = self.owner.name.clone();
-        self.runtime(user)?.send(&ClientMsg::GrantedInput {
-            workspace,
-            tab,
-            pane: pane.into(),
-            bytes,
-            sender,
+        self.forward_input(user, pane, |workspace, tab, sender| {
+            ClientMsg::GrantedInput {
+                workspace,
+                tab,
+                pane: pane.into(),
+                bytes,
+                sender,
+            }
         })
+    }
+
+    fn forward_input(
+        &mut self,
+        user: &str,
+        pane: &str,
+        message: impl FnOnce(String, String, String) -> ClientMsg,
+    ) -> io::Result<()> {
+        self.require_grant(user)?;
+        let broker = self.broker;
+        let owner = self.owner;
+        let runtime = self.runtime(user)?;
+        let (workspace, tab) = runtime.location(pane)?;
+        let message = message(workspace, tab, owner.name.clone());
+        let permit = broker.grants.permit(user, &owner.user_id)?.ok_or_else(|| {
+            io::Error::new(io::ErrorKind::PermissionDenied, "Control was revoked")
+        })?;
+        runtime.send_granted(&message, permit)
     }
 }

@@ -107,7 +107,7 @@ impl SeerWindow {
     }
 
     pub(crate) fn send_input(&mut self, event: InputEvent, cx: &mut Context<Self>) {
-        if matches!(&self.content, Content::Terminal(link, _) if link.readonly()) {
+        if matches!(&self.content, Content::Terminal(link, _) if !link.can_input()) {
             return;
         }
         let changed = if matches!(
@@ -198,7 +198,11 @@ impl SeerWindow {
                 .ok();
             true
         })
-        .unwrap_or(false)
+        .unwrap_or_else(|| {
+            matches!(&self.content, Content::Terminal(link, _) if link.remote()
+                && lock(link.terminal()).as_ref().is_some_and(|shown| matches!(shown,
+                    Shown::Frame { frame, .. } if !frame.modes.alt_screen)))
+        })
     }
 
     fn copy(&self, cx: &mut Context<Self>) {
@@ -311,7 +315,10 @@ impl SeerWindow {
         let x = self.input.wheel.x.trunc() as i32;
         self.input.wheel.y -= y as f32;
         self.input.wheel.x -= x as f32;
-        if self.reporting(event.modifiers.shift) {
+        let remote_alternate = matches!(&self.content, Content::Terminal(link, _) if link.remote()
+            && lock(link.terminal()).as_ref().is_some_and(|shown| matches!(shown,
+                Shown::Frame { frame, .. } if frame.modes.alt_screen)));
+        if self.reporting(event.modifiers.shift) || (remote_alternate && !event.modifiers.shift) {
             self.wheel_reports(event, y, MouseKind::ScrollUp, MouseKind::ScrollDown, cx);
             self.wheel_reports(event, x, MouseKind::ScrollLeft, MouseKind::ScrollRight, cx);
         } else if self

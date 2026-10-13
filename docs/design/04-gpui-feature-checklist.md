@@ -57,9 +57,9 @@ When a PR decides or builds a row, it updates the row.
 | Watch the terminals of other people, read only | README intro | Built: the title shows the person and terminal, with a lock and "Read only". Pick yourself in the person menu to return. | R-450 |
 | Presence and idle time of a person, in the person menu | README People | Built: menu rows show presence and elapsed time, for example "Away 18m". Terminal state comes from the runtime; agent detection is R-481. | R-450 |
 | The terminals of a person in the person menu. Enter to watch | README People, help | Built: tabs update when the person opens, closes, or renames a terminal. | R-450 |
-| Your typing permission for the person you watch, in the first line of the picker | README People | No place yet. | R-451 |
-| Give or remove the "can type here" grant with Space in the person menu. The box changes when the room server confirms it | README People, help | No place yet. R-451 also decides how the window shows the confirmation. | R-451 |
-| With a grant, type and use the mouse in the terminals of another person | README People | Placed: the terminal area of that person, the same as for your own terminal. R-449 builds own terminal keys and mouse. Remote input and its permission display remain for R-451. | R-449, R-451 |
+| Your typing permission for the person you watch, in the first line of the picker | README People | Built: the watched title shows You have control or Read only, including narrow windows. | R-451 |
+| Give or remove the "can type here" grant with Space in the person menu. The box changes when the room server confirms it | README People, help | Built: each other person has a Share control switch. Click or Space sends SetGrant. The switch waits for Grants confirmation and shows a short refusal error. Enter watches the person. | R-451 |
+| With a grant, type and use the mouse in the terminals of another person | README People | Built: the terminal area uses the same input events for local and granted remote terminals. Revoke stops remote input. Viewer scrollback stays local. | R-449, R-451 |
 | seer perms --on: every person in the room can type into your terminals | README Commands, help | No place yet. The command stays. | R-453 |
 | seer perms --off: remove every grant | README People, README Commands, help | No place yet. The command stays. | R-453 |
 | seer peek NAME opens Seer with that person selected | README Commands, help | Built: the command opens the desktop with that room and person selected. | R-450 |

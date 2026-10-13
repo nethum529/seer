@@ -131,7 +131,8 @@ fn send_screen(
 
 pub(super) fn claimed_pane(message: &ClientMsg) -> Option<&str> {
     match message {
-        ClientMsg::TerminalInput { pane, input, .. } => {
+        ClientMsg::TerminalInput { pane, input, .. }
+        | ClientMsg::GrantedTerminalInput { pane, input, .. } => {
             claims_size(&input.event).then_some(pane.as_str())
         }
         ClientMsg::GrantedInput { pane, .. }

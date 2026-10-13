@@ -72,7 +72,7 @@ impl SeerWindow {
         let Content::Terminal(link, _) = &self.content else {
             return;
         };
-        if link.readonly() {
+        if link.remote() {
             return;
         }
         let Some(terminal) = link
@@ -151,7 +151,7 @@ impl SeerWindow {
         let Content::Terminal(link, _) = &self.content else {
             return;
         };
-        if link.readonly() {
+        if link.remote() {
             return;
         }
         if !link

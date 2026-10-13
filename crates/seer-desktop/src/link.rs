@@ -130,7 +130,7 @@ impl Link {
     }
 
     pub(crate) fn terminal(&self) -> &Terminal {
-        if self.readonly() {
+        if self.remote() {
             &self.people.terminal
         } else {
             &self.terminal
@@ -141,8 +141,12 @@ impl Link {
         self.people.join(server, person)
     }
 
-    pub(crate) fn readonly(&self) -> bool {
-        self.people.readonly()
+    pub(crate) fn remote(&self) -> bool {
+        self.people.remote()
+    }
+
+    pub(crate) fn can_input(&self) -> bool {
+        !self.remote() || self.people.can_input()
     }
 
     pub(crate) fn select_person(&mut self, user: &str) -> io::Result<()> {
@@ -150,7 +154,7 @@ impl Link {
         if let Some((cols, rows)) = self.size {
             self.people.resize(cols, rows);
         }
-        if !self.readonly() {
+        if !self.remote() {
             self.watch()?;
         }
         Ok(())
@@ -159,9 +163,9 @@ impl Link {
     pub(crate) fn receive(&mut self, event: Event) -> io::Result<()> {
         match event {
             Event::Room(event) => {
-                let remote = self.readonly();
+                let remote = self.remote();
                 self.people.receive(event);
-                if remote && !self.readonly() {
+                if remote && !self.remote() {
                     self.watch()?;
                 }
                 Ok(())
@@ -202,7 +206,7 @@ impl Link {
     }
 
     pub(crate) fn terminals(&self) -> &[TerminalInfo] {
-        if self.readonly() {
+        if self.remote() {
             self.people.terminals()
         } else {
             &self.terminals
@@ -214,7 +218,7 @@ impl Link {
     }
 
     pub(crate) fn rename(&mut self, pane: &str, title: String) -> io::Result<()> {
-        if self.readonly() {
+        if self.remote() {
             return Ok(());
         }
         let Some(target) = pane_target(&self.tree, pane) else {
@@ -228,7 +232,7 @@ impl Link {
     }
 
     pub(crate) fn new_terminal(&mut self) -> io::Result<()> {
-        if self.readonly() {
+        if self.remote() {
             return Ok(());
         }
         let workspace = self
@@ -248,7 +252,7 @@ impl Link {
     }
 
     pub(crate) fn shown(&self) -> Option<&str> {
-        if self.readonly() {
+        if self.remote() {
             self.people.pane.as_deref()
         } else {
             self.target.as_ref().map(|target| target.pane.as_str())
@@ -256,7 +260,8 @@ impl Link {
     }
 
     pub(crate) fn input(&mut self, event: InputEvent) -> io::Result<()> {
-        if self.readonly() {
+        if self.remote() {
+            self.people.input(event);
             return Ok(());
         }
         let Some(target) = self.target.clone() else {
@@ -271,7 +276,7 @@ impl Link {
     }
 
     pub(crate) fn select(&mut self, pane: &str) -> io::Result<()> {
-        if self.readonly() {
+        if self.remote() {
             self.people.select_pane(pane);
             return Ok(());
         }
@@ -290,11 +295,7 @@ impl Link {
         }
         self.size = Some((cols, rows));
         self.people.resize(cols, rows);
-        if self.readonly() {
-            Ok(())
-        } else {
-            self.watch()
-        }
+        if self.remote() { Ok(()) } else { self.watch() }
     }
 
     fn apply_diff(

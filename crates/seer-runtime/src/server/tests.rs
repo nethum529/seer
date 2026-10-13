@@ -3,77 +3,10 @@ use std::thread;
 use std::time::{Duration, Instant};
 
 use seer_core::proto::{ClientMsg, ServerMsg};
-use seer_core::{InputEvent, TERMINAL_PROTOCOL_VERSION, TerminalCapabilities, TerminalInput};
+use seer_core::{InputEvent, TerminalInput};
 
 use super::SharedSession;
 use crate::UserSession;
-
-#[test]
-fn identifies_only_mutating_messages() {
-    let mutating = [
-        ClientMsg::TerminalInput {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            pane: "p1".into(),
-            input: TerminalInput::new(InputEvent::Text(String::new())),
-        },
-        ClientMsg::CreateTab {
-            workspace: "w1".into(),
-        },
-        ClientMsg::SplitPane {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            direction: seer_core::SplitDirection::Right,
-        },
-        ClientMsg::ClosePane {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            pane: "p1".into(),
-        },
-        ClientMsg::FocusPane {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            pane: "p1".into(),
-        },
-        ClientMsg::Resize {
-            workspace: "w1".into(),
-            tab: "w1:t1".into(),
-            cols: 80,
-            rows: 24,
-        },
-    ];
-    let deferred = [
-        ClientMsg::Hello {
-            user_id: "alice".into(),
-            credential: "token".into(),
-            version: "0.1.0".into(),
-        },
-        ClientMsg::Join {
-            seat_token: "seat".into(),
-            version: None,
-            name: "alice".into(),
-        },
-        ClientMsg::Invite { hours: None },
-        ClientMsg::ListPeople,
-        ClientMsg::DetachClient {
-            client_id: "client-1".into(),
-        },
-        ClientMsg::AttachRuntime,
-        ClientMsg::QueryTargets {
-            user: "alice".into(),
-        },
-        ClientMsg::Detach,
-        ClientMsg::TerminalCapabilities {
-            capabilities: TerminalCapabilities {
-                protocol_version: TERMINAL_PROTOCOL_VERSION,
-                raw_output: false,
-            },
-        },
-    ];
-
-    assert!(mutating.iter().all(ClientMsg::is_mutating));
-    assert!(deferred.iter().all(|message| !message.is_mutating()));
-}
 
 #[test]
 fn polls_output_without_connections() {

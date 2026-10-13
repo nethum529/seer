@@ -108,13 +108,7 @@ fn handle_message(
         ClientMsg::TerminalCapabilities { capabilities } => {
             shared.record_capabilities(connection_id, capabilities)
         }
-        message
-            if message.is_mutating()
-                || matches!(
-                    message,
-                    ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
-                ) =>
-        {
+        message if message.is_mutating() || message.is_granted_input() => {
             shared.record_input(&message);
             shared.dispatch_input(connection_id, message)
         }
@@ -284,12 +278,7 @@ impl SharedSession {
         let Some(read_only) = self.refresh_read_only(connection_id)? else {
             return Ok(true);
         };
-        if read_only
-            && !matches!(
-                message,
-                ClientMsg::GrantedInput { .. } | ClientMsg::GrantedMouse { .. }
-            )
-        {
+        if read_only && !message.is_granted_input() {
             seer_core::debug_log!("input dropped conn={connection_id} reason=read-only");
             eprintln!("runtime dropped read-only message: {message:?}");
             return Ok(false);

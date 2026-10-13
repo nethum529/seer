@@ -59,13 +59,26 @@ impl PaneHost {
     }
 
     pub fn handle_input(&mut self, input: &TerminalInput) -> io::Result<bool> {
+        self.input_from(input, None)
+    }
+
+    fn input_from(&mut self, input: &TerminalInput, sender: Option<String>) -> io::Result<bool> {
         let (bytes, changed) = {
             let mut output = self.output.lock();
+            if sender.is_some() && matches!(input.event, seer_core::InputEvent::Mouse(_)) {
+                let modes = output.grid.modes();
+                if modes.mouse_tracking == seer_core::MouseTracking::None && !modes.alt_screen {
+                    return Ok(false);
+                }
+            }
             let bytes = output.grid.handle_input(input)?;
             (bytes, output.grid.take_input_changed())
         };
         if let Some(bytes) = bytes {
-            self.session.write_input(&bytes)?;
+            match sender {
+                Some(sender) => self.write_granted(&bytes, sender)?,
+                None => self.session.write_input(&bytes)?,
+            }
         }
         Ok(changed)
     }
@@ -78,23 +91,18 @@ impl PaneHost {
         Ok(())
     }
 
-    pub(crate) fn write_granted_mouse(
+    pub(crate) fn write_granted_terminal_input(
         &mut self,
-        mouse: seer_core::MouseInput,
+        input: &TerminalInput,
         sender: String,
     ) -> io::Result<()> {
-        let input = TerminalInput::new(seer_core::InputEvent::Mouse(mouse));
-        let bytes = {
-            let mut output = self.output.lock();
-            if output.grid.modes().mouse_tracking == seer_core::MouseTracking::None {
-                return Ok(());
-            }
-            output.grid.handle_input(&input)?
-        };
-        if let Some(bytes) = bytes {
-            self.write_granted(&bytes, sender)?;
+        if matches!(input.event, seer_core::InputEvent::Scrollback { .. }) {
+            return Err(io::Error::new(
+                io::ErrorKind::InvalidInput,
+                "scrollback belongs to the viewer",
+            ));
         }
-        Ok(())
+        self.input_from(input, Some(sender)).map(|_| ())
     }
 
     pub(crate) fn last_typist(&self) -> Option<String> {

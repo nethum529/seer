@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{BTreeSet, HashMap};
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Sender;
@@ -14,6 +14,11 @@ pub(crate) mod transport;
 
 pub(crate) struct Room {
     own: String,
+    can_type_here: BTreeSet<String>,
+    you_may_type_into: BTreeSet<String>,
+    confirmed: bool,
+    pending: Option<(String, bool)>,
+    pub(crate) control_error: Option<&'static str>,
     pub(crate) people: Vec<Person>,
     pub(crate) selected: String,
     pub(crate) pane: Option<String>,
@@ -43,6 +48,11 @@ impl Room {
         Self {
             selected: own.clone(),
             own,
+            can_type_here: BTreeSet::new(),
+            you_may_type_into: BTreeSet::new(),
+            confirmed: false,
+            pending: None,
+            control_error: None,
             people: vec![person],
             pane: None,
             terminal: Terminal::default(),
@@ -63,8 +73,55 @@ impl Room {
         transport::start(server, Arc::clone(&self.stopped))
     }
 
-    pub(crate) fn readonly(&self) -> bool {
+    pub(crate) fn remote(&self) -> bool {
         self.selected != self.own
+    }
+
+    pub(crate) fn can_input(&self) -> bool {
+        self.writer.is_some()
+            && self.pane.is_some()
+            && self.you_may_type_into.contains(&self.selected)
+    }
+
+    pub(crate) fn shares_control(&self, user: &str) -> bool {
+        self.can_type_here.contains(user)
+    }
+
+    pub(crate) fn can_share(&self) -> bool {
+        self.writer.is_some() && self.confirmed && self.pending.is_none()
+    }
+
+    pub(crate) fn share_control(&mut self, user: &str) {
+        if user == self.own || !self.can_share() {
+            return;
+        }
+        let can_type = !self.shares_control(user);
+        self.control_error = None;
+        if self.writer.as_ref().is_some_and(|writer| {
+            writer
+                .send(ClientMsg::SetGrant {
+                    user: user.into(),
+                    can_type,
+                })
+                .is_ok()
+        }) {
+            self.pending = Some((user.into(), can_type));
+        } else {
+            self.control_error = Some("Room is offline.");
+        }
+    }
+
+    pub(crate) fn input(&self, event: seer_core::InputEvent) {
+        if !self.can_input() || matches!(event, seer_core::InputEvent::Scrollback { .. }) {
+            return;
+        }
+        if let Some(pane) = &self.pane {
+            self.send(ClientMsg::InputInto {
+                user: self.selected.clone(),
+                pane: pane.clone(),
+                input: seer_core::TerminalInput::new(event),
+            });
+        }
     }
 
     pub(crate) fn person(&self) -> Option<&Person> {
@@ -128,11 +185,17 @@ impl Room {
         match event {
             RoomEvent::Connected(writer) => {
                 self.writer = Some(writer);
+                self.control_error = None;
                 self.send(ClientMsg::ListPeople);
             }
             RoomEvent::Message(message) => self.message(message),
             RoomEvent::Lost => {
                 self.writer = None;
+                self.can_type_here.clear();
+                self.you_may_type_into.clear();
+                self.confirmed = false;
+                self.pending = None;
+                self.control_error = Some("Room is offline.");
                 for person in &mut self.people {
                     if person.user_id != self.own {
                         person.online = false;
@@ -149,6 +212,24 @@ impl Room {
     fn message(&mut self, message: ServerMsg) {
         match message {
             ServerMsg::People { people } => self.note_people(people),
+            ServerMsg::Grants {
+                can_type_here,
+                you_may_type_into,
+            } => {
+                self.can_type_here = can_type_here.into_iter().collect();
+                self.you_may_type_into = you_may_type_into.into_iter().collect();
+                self.confirmed = true;
+                if self
+                    .pending
+                    .as_ref()
+                    .is_some_and(|(user, can_type)| self.shares_control(user) == *can_type)
+                {
+                    self.pending = None;
+                }
+            }
+            ServerMsg::Refused { .. } if self.pending.take().is_some() => {
+                self.control_error = Some("Share control was refused.");
+            }
             ServerMsg::Presence {
                 user,
                 online,
@@ -235,7 +316,7 @@ impl Room {
     }
 
     fn retarget(&mut self) {
-        if !self.readonly() {
+        if !self.remote() {
             return;
         }
         if self.pane.as_ref().is_some_and(|pane| {
@@ -255,7 +336,7 @@ impl Room {
     }
 
     fn shows(&self, user: &str, pane: &str) -> bool {
-        self.readonly() && user == self.selected && self.pane.as_deref() == Some(pane)
+        self.remote() && user == self.selected && self.pane.as_deref() == Some(pane)
     }
 
     fn clear(&mut self) {
@@ -273,7 +354,7 @@ impl Room {
     }
 
     fn watch(&self) {
-        if self.readonly()
+        if self.remote()
             && let (Some(pane), Some((cols, rows))) = (&self.pane, self.size)
         {
             self.send(ClientMsg::Watch {

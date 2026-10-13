@@ -33,7 +33,13 @@ impl UserSession {
                 pane,
                 mouse,
                 sender,
-            } => self.granted_mouse(&workspace, &tab, &pane, mouse, sender),
+            } => self.granted_terminal_input(
+                &workspace,
+                &tab,
+                &pane,
+                &TerminalInput::new(seer_core::InputEvent::Mouse(mouse)),
+                sender,
+            ),
             ClientMsg::GrantedInput {
                 workspace,
                 tab,
@@ -41,6 +47,13 @@ impl UserSession {
                 bytes,
                 sender,
             } => self.granted_input(&workspace, &tab, &pane, &bytes, sender),
+            ClientMsg::GrantedTerminalInput {
+                workspace,
+                tab,
+                pane,
+                input,
+                sender,
+            } => self.granted_terminal_input(&workspace, &tab, &pane, &input, sender),
             ClientMsg::TerminalInput {
                 workspace,
                 tab,
@@ -74,6 +87,7 @@ impl UserSession {
             | ClientMsg::SetGrant { .. }
             | ClientMsg::MouseInto { .. }
             | ClientMsg::TypeInto { .. }
+            | ClientMsg::InputInto { .. }
             | ClientMsg::Stop
             | ClientMsg::Leave
             | ClientMsg::Detach => Ok(Vec::new()),
