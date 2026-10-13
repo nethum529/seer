@@ -14,7 +14,7 @@ use super::*;
 
 pub(super) struct Runtime {
     child: Child,
-    directory: TempDir,
+    pub(super) directory: TempDir,
 }
 
 impl Runtime {
@@ -306,7 +306,7 @@ fn desktop_keys_reach_the_local_shell(cx: &mut TestAppContext) {
     assert_eq!(runtime.input(), expected);
 }
 
-fn open_view<'a>(
+pub(super) fn open_view<'a>(
     runtime: &Runtime,
     cx: &'a mut TestAppContext,
 ) -> (gpui::Entity<SeerWindow>, &'a mut gpui::VisualTestContext) {
@@ -337,6 +337,8 @@ fn open_view<'a>(
             editing: None,
             menu: None,
             people_menu: None,
+            invite: None,
+            server: None,
             _join: None,
             _tab_time: None,
             _messages: Some(cx.spawn(async move |view, cx| {

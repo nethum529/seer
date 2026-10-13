@@ -28,6 +28,7 @@ impl Render for SeerWindow {
                     cx.notify();
                 }),
             )
+            .on_action(cx.listener(Self::show_invite))
             .capture_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                 view.travel(&event.keystroke, window, cx)
             }));
@@ -47,7 +48,10 @@ impl Render for SeerWindow {
                         .text_color(rgb(palette::FAINT))
                         .child(message.clone())
                 };
-                return root.child(content).children(self.room_overlays(window, cx));
+                return root
+                    .child(content)
+                    .children(self.room_overlays(window, cx))
+                    .children(self.invite.as_ref().map(|sheet| sheet.view.clone()));
             }
             Content::Terminal(link, name) => (link, name),
         };
@@ -150,7 +154,8 @@ impl Render for SeerWindow {
                 )
                 .children(self.menu(window, cx))
                 .children(self.people_menu(window, cx))
-                .children(self.room_overlays(window, cx));
+                .children(self.room_overlays(window, cx))
+                .children(self.invite.as_ref().map(|sheet| sheet.view.clone()));
         }
         let title = terminals
             .iter()
@@ -210,6 +215,7 @@ impl Render for SeerWindow {
             .children(self.menu(window, cx))
             .children(self.people_menu(window, cx))
             .children(self.room_overlays(window, cx))
+            .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
     }
 }
 

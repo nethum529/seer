@@ -1,6 +1,6 @@
 use std::io;
 
-use gpui::{AppContext, Context, SharedString, Window};
+use gpui::{AppContext, Context, Window};
 use seer::ServerEntry;
 
 use super::{Content, SeerWindow, room::RoomUi};
@@ -24,6 +24,8 @@ impl SeerWindow {
                 }),
             );
         self._messages = None;
+        self.invite = None;
+        self.server = None;
         self.content = Content::Join(join);
         self.room = RoomUi::new(None, cx);
         self.people_menu = None;
@@ -51,8 +53,10 @@ impl SeerWindow {
             let result = opened.await;
             let _ = view.update_in(cx, |view, window, cx| {
                 match result {
-                    Ok((link, name, messages)) => {
-                        view.content = Content::Terminal(Box::new(link), name);
+                    Ok((link, server, messages)) => {
+                        view.content =
+                            Content::Terminal(Box::new(link), server.name.clone().into());
+                        view.server = Some(server);
                         view.listen(messages, cx);
                         window.focus(&view.input.focus);
                     }
@@ -70,7 +74,7 @@ impl SeerWindow {
     }
 }
 
-pub(super) fn open_server(server: &ServerEntry) -> io::Result<(Link, SharedString, Messages)> {
+pub(super) fn open_server(server: &ServerEntry) -> io::Result<(Link, ServerEntry, Messages)> {
     let (socket, tree, _notice) = seer::attach(server)?;
     let (mut link, messages) = Link::open(
         socket,
@@ -84,7 +88,7 @@ pub(super) fn open_server(server: &ServerEntry) -> io::Result<(Link, SharedStrin
     );
     Ok((
         link,
-        server.name.clone().into(),
+        server.clone(),
         Box::pin(futures::stream::select(messages, room_messages)),
     ))
 }
