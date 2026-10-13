@@ -2,7 +2,7 @@ use gpui::{TestAppContext, VisualTestContext, point};
 use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_core::{InputEvent, KeyCode, MouseKind, MouseTracking};
 
-use super::input_e2e::Runtime;
+use super::input_e2e::{Runtime, paste_shortcut};
 use super::watch_e2e::{Room, frame, open_view, pump};
 use super::*;
 
@@ -59,7 +59,7 @@ fn share_control_waits_for_confirmation_and_remote_input_stops_on_revoke(cx: &mu
     cx.simulate_click(position, gpui::Modifiers::default());
     cx.simulate_keystrokes("a enter up");
     cx.write_to_clipboard(gpui::ClipboardItem::new_string("Shared paste".into()));
-    cx.simulate_keystrokes("secondary-v");
+    cx.simulate_keystrokes(paste_shortcut());
     wheel(cx, position);
     pump(cx);
     let events = inputs(&room);

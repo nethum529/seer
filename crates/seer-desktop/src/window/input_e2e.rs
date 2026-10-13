@@ -291,11 +291,7 @@ fn desktop_keys_reach_the_local_shell(cx: &mut TestAppContext) {
     );
 
     cx.write_to_clipboard(ClipboardItem::new_string("paste\ntext".into()));
-    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
-        "cmd-v"
-    } else {
-        "ctrl-shift-v"
-    });
+    cx.simulate_keystrokes(paste_shortcut());
     thread::sleep(Duration::from_millis(30));
     assert!(runtime.input().ends_with(b"paste\rtext"));
 
@@ -304,6 +300,14 @@ fn desktop_keys_reach_the_local_shell(cx: &mut TestAppContext) {
     thread::sleep(Duration::from_millis(30));
     expected.extend_from_slice(b"paste\rtextz");
     assert_eq!(runtime.input(), expected);
+}
+
+pub(super) fn paste_shortcut() -> &'static str {
+    if cfg!(target_os = "macos") {
+        "cmd-v"
+    } else {
+        "ctrl-shift-v"
+    }
 }
 
 pub(super) fn open_view<'a>(
