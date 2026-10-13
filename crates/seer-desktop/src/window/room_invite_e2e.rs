@@ -19,12 +19,6 @@ fn host_room_menu_opens_invite_and_restores_trigger_focus(cx: &mut TestAppContex
     let room = Room::start();
     let runtime = Runtime::start();
     let (view, cx) = open_view(&runtime, cx);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !runtime.directory.path().join("input").exists() {
-        draw(cx);
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(10));
-    }
     let expected = runtime.input();
     for width in [960., 680.] {
         cx.simulate_resize(size(px(width), px(640.)));
