@@ -72,6 +72,11 @@ impl Runtime {
                 break tree;
             }
         };
+        // tty.setraw flushes queued input. The fixture opens this file after raw mode is ready.
+        while !self.directory.path().join("input").exists() {
+            assert!(Instant::now() < deadline, "shell did not become ready");
+            thread::sleep(Duration::from_millis(10));
+        }
         seer_net::Stream::set_read_timeout(&socket, None).unwrap();
         Link::open(socket, &tree, "e2e".into(), "E2e".into()).unwrap()
     }
@@ -87,12 +92,6 @@ fn room_overlays_block_terminal_pointer_input(cx: &mut TestAppContext) {
     let (view, cx) = open_view(&runtime, cx);
     cx.simulate_resize(size(px(960.), px(640.)));
     let layout = cx.replace_root_view(|_, _| PointerLayout { view, width: 960. });
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !runtime.directory.path().join("input").exists() {
-        cx.run_until_parked();
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(10));
-    }
     thread::sleep(Duration::from_millis(30));
     cx.run_until_parked();
     let terminal = point(px(300.), px(100.));
@@ -230,12 +229,6 @@ impl Drop for Runtime {
 fn desktop_keys_reach_the_local_shell(cx: &mut TestAppContext) {
     let runtime = Runtime::start();
     let (_, cx) = open_view(&runtime, cx);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !runtime.directory.path().join("input").exists() {
-        cx.run_until_parked();
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(10));
-    }
     cx.simulate_click(point(px(300.), px(100.)), gpui::Modifiers::default());
     thread::sleep(Duration::from_millis(30));
     cx.run_until_parked();
@@ -359,12 +352,6 @@ pub(super) fn open_view<'a>(
 fn room_menu_escape_and_leave_cancel_keep_the_shell(cx: &mut TestAppContext) {
     let runtime = Runtime::start();
     let (_, cx) = open_view(&runtime, cx);
-    let deadline = Instant::now() + Duration::from_secs(5);
-    while !runtime.directory.path().join("input").exists() {
-        cx.run_until_parked();
-        assert!(Instant::now() < deadline);
-        thread::sleep(Duration::from_millis(10));
-    }
     cx.run_until_parked();
     let trigger = cx
         .debug_bounds("room-trigger")
