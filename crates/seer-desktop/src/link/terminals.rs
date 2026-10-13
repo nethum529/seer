@@ -3,7 +3,7 @@ use super::*;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-async fn inspect(writer: Writer, user: String, pane: String) -> io::Result<String> {
+async fn inspect(writer: Writer, pane: String) -> io::Result<Vec<String>> {
     let path = match &*lock(&writer) {
         Socket::Iroh(stream) => stream
             .peer_addr()?
@@ -16,16 +16,10 @@ async fn inspect(writer: Writer, user: String, pane: String) -> io::Result<Strin
     stream.set_read_timeout(Some(Duration::from_secs(5)))?;
     stream.set_write_timeout(Some(Duration::from_secs(5)))?;
     let _: ServerMsg = codec::decode(&mut stream)?;
-    codec::encode(&mut stream, &ClientMsg::Terminals { user })?;
+    codec::encode(&mut stream, &ClientMsg::InspectTerminal { pane })?;
     loop {
         match codec::decode(&mut stream)? {
-            ServerMsg::Terminals { terminals, .. } => {
-                return terminals
-                    .into_iter()
-                    .find(|terminal| terminal.pane == pane)
-                    .map(|terminal| terminal.name)
-                    .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "terminal closed"));
-            }
+            ServerMsg::TerminalPrograms { programs } => return Ok(programs),
             ServerMsg::Refused { reason } | ServerMsg::Bye { reason } => {
                 return Err(io::Error::other(reason));
             }
@@ -38,8 +32,8 @@ impl Link {
     pub(crate) fn inspect_terminal(
         &self,
         pane: String,
-    ) -> impl Future<Output = io::Result<String>> + Send + use<> {
-        inspect(Arc::clone(&self.writer), self.user.clone(), pane)
+    ) -> impl Future<Output = io::Result<Vec<String>>> + Send + use<> {
+        inspect(Arc::clone(&self.writer), pane)
     }
     pub(crate) fn rename(&mut self, pane: &str, title: String) -> io::Result<()> {
         if self.remote() {

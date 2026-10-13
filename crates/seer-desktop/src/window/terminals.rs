@@ -84,7 +84,7 @@ impl SeerWindow {
         cx.spawn_in(window, async move |view, cx| {
             let result = inspected.await;
             let _ = view.update_in(cx, |view, window, cx| match result {
-                Ok(program) => view.finish_close(&pane, &program, window, cx),
+                Ok(programs) => view.finish_close(&pane, &programs, window, cx),
                 Err(error) if error.kind() == io::ErrorKind::NotFound => {}
                 Err(error) => view.check(Err(error), cx),
             });
@@ -96,7 +96,7 @@ impl SeerWindow {
     fn finish_close(
         &mut self,
         pane: &str,
-        program: &str,
+        programs: &[String],
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
@@ -114,11 +114,15 @@ impl SeerWindow {
         {
             return;
         }
-        if program == "shell" {
+        if programs.is_empty() {
             self.send_close(pane, cx);
             window.focus(&self.keys.tabs);
         } else {
-            self.confirm_terminal(pane, program, window, cx);
+            let names = programs
+                .iter()
+                .map(|name| chrome::capitalize(name))
+                .collect::<Vec<_>>();
+            self.confirm_terminal(pane, &names.join(", "), window, cx);
         }
         self.notify_room(cx);
     }

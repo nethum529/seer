@@ -71,6 +71,7 @@ impl UserSession {
             | ClientMsg::Invite { .. }
             | ClientMsg::ListPeople
             | ClientMsg::QueryStatus
+            | ClientMsg::InspectTerminal { .. }
             | ClientMsg::DetachClient { .. }
             | ClientMsg::ExitClient { .. }
             | ClientMsg::AttachRuntime

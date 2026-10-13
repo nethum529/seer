@@ -3,6 +3,17 @@ use std::path::Path;
 
 use super::rules::Agent;
 
+#[path = "jobs.rs"]
+mod jobs;
+pub(crate) use jobs::programs;
+
+pub(crate) fn is_shell(name: &str) -> bool {
+    matches!(
+        name,
+        "" | "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh" | "nu"
+    )
+}
+
 #[cfg(target_os = "linux")]
 #[path = "linux.rs"]
 mod linux;

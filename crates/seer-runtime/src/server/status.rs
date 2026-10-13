@@ -17,14 +17,21 @@ pub(super) fn handle_status_query(
     codec::encode(stream, &status)
 }
 
-impl SharedSession {
-    pub(super) fn refresh_observations(&self) -> io::Result<()> {
-        for host in lock(&self.session)?.pane_hosts.values() {
-            host.refresh_observation()?;
-        }
-        Ok(())
-    }
+pub(super) fn handle_terminal_query(
+    stream: &mut UnixStream,
+    shared: &SharedSession,
+    pane: &str,
+) -> io::Result<()> {
+    let session = lock(&shared.session)?;
+    let host = session
+        .pane_hosts
+        .get(pane)
+        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "terminal closed"))?;
+    let programs = host.programs()?;
+    codec::encode(stream, &ServerMsg::TerminalPrograms { programs })
+}
 
+impl SharedSession {
     pub(super) fn record_capabilities(
         &self,
         connection_id: u64,

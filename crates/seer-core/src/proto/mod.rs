@@ -24,6 +24,9 @@ pub enum ClientMsg {
     },
     ListPeople,
     QueryStatus,
+    InspectTerminal {
+        pane: String,
+    },
     DetachClient {
         client_id: String,
     },
@@ -161,6 +164,9 @@ pub enum ClientMsg {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ServerMsg {
+    TerminalPrograms {
+        programs: Vec<String>,
+    },
     GrantsUpdated,
     Terminals {
         user: String,

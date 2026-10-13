@@ -109,3 +109,39 @@ fn close_after_starting_program_checks_the_live_process(cx: &mut TestAppContext)
     assert!(cx.debug_bounds("room-confirm").is_some());
     assert_eq!(count(&view, cx), 1);
 }
+
+#[gpui::test]
+fn close_background_program_asks_and_cancel_keeps_the_job(cx: &mut TestAppContext) {
+    let runtime = Runtime::start_shell();
+    let (view, cx) = open_view(&runtime, cx);
+    pump(cx);
+    let pid_file = runtime.directory.path().join("background-pid");
+    cx.simulate_keystrokes("tab");
+    cx.simulate_input(&format!("sleep 600 & echo $! > {}", pid_file.display()));
+    cx.simulate_keystrokes("enter");
+    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    while !pid_file.exists() && std::time::Instant::now() < deadline {
+        pump(cx);
+    }
+    let pid = std::fs::read_to_string(pid_file).unwrap();
+    cx.simulate_keystrokes("secondary-shift-b shift-f10 down enter");
+    pump(cx);
+    assert!(cx.debug_bounds("room-confirm").is_some());
+    assert_eq!(count(&view, cx), 1);
+    cx.simulate_keystrokes("enter");
+    pump(cx);
+    assert!(cx.debug_bounds("room-confirm").is_none());
+    assert_eq!(count(&view, cx), 1);
+    assert!(
+        std::process::Command::new("kill")
+            .args(["-0", pid.trim()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    cx.simulate_keystrokes("shift-f10 down enter");
+    pump(cx);
+    cx.simulate_keystrokes("tab enter");
+    pump(cx);
+    assert_eq!(count(&view, cx), 0);
+}

@@ -60,7 +60,6 @@ pub(super) fn handle_connection(
         }
 
         ClientMsg::Terminals { .. } => {
-            shared.refresh_observations()?;
             shared.add_view_connection(connection_id, stream.try_clone()?, None, false)?
         }
         _ => {
@@ -92,6 +91,9 @@ fn handle_query(
         }
         ClientMsg::QueryTargets { .. } => handle_target_query(stream, shared, connection_id),
         ClientMsg::QueryStatus => super::status::handle_status_query(stream, shared),
+        ClientMsg::InspectTerminal { pane } if !remote => {
+            super::status::handle_terminal_query(stream, shared, pane)
+        }
         ClientMsg::ExitClient { pane } if !remote => {
             super::size_lease::handle_exit_client(stream, shared, pane)
         }

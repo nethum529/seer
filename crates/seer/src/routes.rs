@@ -69,6 +69,7 @@ impl Routes {
             | ClientMsg::CreateTab { .. }
             | ClientMsg::SplitPane { .. }
             | ClientMsg::ClosePane { .. }
+            | ClientMsg::InspectTerminal { .. }
             | ClientMsg::FocusPane { .. }
             | ClientMsg::Resize { .. }
             | ClientMsg::TerminalCapabilities { .. } => true,

@@ -42,6 +42,7 @@ impl Runtime {
             .prefix("s452")
             .tempdir_in("/tmp")
             .unwrap();
+        fs::write(directory.path().join("input"), []).unwrap();
         Self::start_in(directory, PathBuf::from("/bin/sh"))
     }
 

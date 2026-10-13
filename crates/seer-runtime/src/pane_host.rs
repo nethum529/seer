@@ -149,17 +149,10 @@ impl PaneHost {
         self.detector.observation()
     }
 
-    pub(crate) fn refresh_observation(&self) -> io::Result<()> {
-        let descriptor = self.session.observation_fd()?.ok_or_else(|| {
-            io::Error::new(
-                io::ErrorKind::Unsupported,
-                "cannot inspect the foreground program",
-            )
-        })?;
-        self.detector
-            .refresh(&descriptor, self.session.process_id());
-        Ok(())
+    pub(crate) fn programs(&self) -> io::Result<Vec<String>> {
+        crate::agent_state::programs(self.session.process_id(), &self.program)
     }
+
     pub(crate) fn started_program(&self) -> &str {
         &self.program
     }
