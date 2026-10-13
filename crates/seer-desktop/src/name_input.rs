@@ -62,22 +62,32 @@ impl NameInput {
         }
     }
 
-    pub(crate) fn form(text: String, code: bool, cx: &mut Context<Self>) -> Self {
-        let mut input = Self::new(
-            text,
-            if code {
-                "seer join SEER2-..."
-            } else {
-                "Your name"
-            }
-            .into(),
-            cx,
-        );
+    pub(crate) fn form(
+        text: String,
+        code: bool,
+        placeholder: &str,
+        cx: &mut Context<Self>,
+    ) -> Self {
+        let mut input = Self::new(text, placeholder.into(), cx);
         input.form = true;
         input.code = code;
         input.limit = if code { 4096 } else { 32 };
         input.focus = cx.focus_handle().tab_stop(true);
         input
+    }
+
+    pub(crate) fn set_text(&mut self, text: String, cx: &mut Context<Self>) {
+        self.text = text;
+        self.anchor = 0;
+        self.selection = 0..self.text.len();
+        self.marked = None;
+        self.offset = px(0.);
+        cx.notify();
+    }
+
+    pub(crate) fn invalid(&mut self, invalid: bool, cx: &mut Context<Self>) {
+        self.invalid = invalid;
+        cx.notify();
     }
 
     fn select(&mut self, at: usize, extend: bool) {

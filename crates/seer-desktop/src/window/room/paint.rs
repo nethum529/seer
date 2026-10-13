@@ -113,7 +113,7 @@ impl SeerWindow {
                             .debug_selector(move || action_id(action).into())
                             .text_color(rgb(action_color(action)))
                             .when(selected, |item| {
-                                item.bg(rgb(if action == RoomAction::Restore {
+                                item.bg(rgb(if action_color(action) == palette::TEXT_2 {
                                     palette::CHIP
                                 } else {
                                     palette::DANGER_HOVER
@@ -131,7 +131,10 @@ impl SeerWindow {
                             .child(cap_icon(div().w(px(22.)).flex().justify_center().child(
                                 chrome::icon(action_icon(action), action_color(action)),
                             )))
-                            .child(action_label(action))
+                            .child(match action {
+                                MenuAction::Invite => "Invite a person",
+                                MenuAction::Room(action) => action_label(action),
+                            })
                     }),
             )
             .children(self.room.error.as_ref().map(|error| {
@@ -362,26 +365,31 @@ pub(super) fn action_label(action: RoomAction) -> &'static str {
     }
 }
 
-fn action_icon(action: RoomAction) -> &'static str {
+fn action_icon(action: MenuAction) -> &'static str {
     match action {
-        RoomAction::Stop => "stop",
-        RoomAction::Leave => "leave",
-        RoomAction::Restore => "restore",
-        RoomAction::StartNew => "fresh",
+        MenuAction::Invite => "invite",
+        MenuAction::Room(RoomAction::Stop) => "stop",
+        MenuAction::Room(RoomAction::Leave) => "leave",
+        MenuAction::Room(RoomAction::Restore) => "restore",
+        MenuAction::Room(RoomAction::StartNew) => "fresh",
     }
 }
 
-fn action_id(action: RoomAction) -> &'static str {
+fn action_id(action: MenuAction) -> &'static str {
     match action {
-        RoomAction::Stop => "room-stop",
-        RoomAction::Leave => "room-leave",
-        RoomAction::Restore => "room-restore",
-        RoomAction::StartNew => "room-start-new",
+        MenuAction::Invite => "room-invite",
+        MenuAction::Room(RoomAction::Stop) => "room-stop",
+        MenuAction::Room(RoomAction::Leave) => "room-leave",
+        MenuAction::Room(RoomAction::Restore) => "room-restore",
+        MenuAction::Room(RoomAction::StartNew) => "room-start-new",
     }
 }
 
-fn action_color(action: RoomAction) -> u32 {
-    if action == RoomAction::Restore {
+fn action_color(action: MenuAction) -> u32 {
+    if matches!(
+        action,
+        MenuAction::Invite | MenuAction::Room(RoomAction::Restore)
+    ) {
         palette::TEXT_2
     } else {
         palette::DANGER

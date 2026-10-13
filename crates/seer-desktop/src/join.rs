@@ -28,7 +28,7 @@ impl EventEmitter<Joined> for Join {}
 
 impl Join {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let field = cx.new(|cx| NameInput::form(String::new(), true, cx));
+        let field = cx.new(|cx| NameInput::form(String::new(), true, "seer join SEER2-...", cx));
         window.focus(&field.read(cx).focus);
         let subscription = cx.subscribe_in(&field, window, Self::finished);
         Self {
@@ -52,7 +52,12 @@ impl Join {
     }
 
     fn field(&mut self, text: String, code: bool, window: &mut Window, cx: &mut Context<Self>) {
-        self.field = cx.new(|cx| NameInput::form(text, code, cx));
+        let placeholder = if code {
+            "seer join SEER2-..."
+        } else {
+            "Your name"
+        };
+        self.field = cx.new(|cx| NameInput::form(text, code, placeholder, cx));
         self._field = cx.subscribe_in(&self.field, window, Self::finished);
         window.focus(&self.field.read(cx).focus);
     }

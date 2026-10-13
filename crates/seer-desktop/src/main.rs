@@ -8,6 +8,9 @@ mod cap_icon;
 mod chrome;
 mod composition;
 mod input;
+mod invite;
+#[cfg(test)]
+mod invite_e2e;
 mod join;
 mod keyboard;
 mod link;
