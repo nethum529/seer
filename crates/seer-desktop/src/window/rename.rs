@@ -15,6 +15,7 @@ pub(crate) enum Surface {
 #[derive(Clone, Copy)]
 pub(crate) struct Labels<'a> {
     pub(crate) readonly: bool,
+    pub(crate) tips: bool,
     editing: Option<&'a Editing>,
     menu: Option<&'a Menu>,
 }
@@ -24,11 +25,13 @@ impl<'a> Labels<'a> {
         editing: Option<&'a Editing>,
         menu: Option<&'a Menu>,
         readonly: bool,
+        tips: bool,
     ) -> Self {
         Self {
             editing,
             menu,
             readonly,
+            tips,
         }
     }
 
@@ -58,6 +61,8 @@ pub(super) struct Menu {
     surface: Surface,
     position: Point<Pixels>,
     focus: FocusHandle,
+    selected: usize,
+    motion: crate::motion::Motion,
 }
 
 impl SeerWindow {
@@ -168,8 +173,10 @@ impl SeerWindow {
             surface,
             position,
             focus,
+            selected: 0,
+            motion: crate::motion::Motion::open(self.keys.mode == Mode::Keyboard, 150),
         });
-        cx.notify();
+        self.notify_room(cx);
     }
 
     pub(super) fn rename_key(
@@ -216,15 +223,25 @@ impl SeerWindow {
     }
 
     fn dismiss_menu(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.menu = None;
+        if let Some(menu) = &mut self.menu {
+            menu.motion.close(self.keys.mode == Mode::Keyboard, 80);
+        }
         window.focus(&self.keys.tabs);
-        cx.notify();
+        self.notify_room(cx);
     }
 
-    pub(super) fn menu(&self, window: &mut Window, cx: &mut Context<Self>) -> Option<AnyElement> {
+    pub(super) fn menu(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if self.menu.as_ref().is_some_and(|menu| menu.motion.gone()) {
+            self.menu = None;
+        }
         let menu = self.menu.as_ref()?;
-        let pane = menu.pane.clone();
-        let surface = menu.surface;
+        if menu.motion.animating() {
+            cx.on_next_frame(window, |view, _, cx| view.notify_room(cx));
+        }
         let viewport = window.viewport_size();
         let x = menu
             .position
@@ -233,41 +250,86 @@ impl SeerWindow {
         let y = menu
             .position
             .y
-            .clamp(px(8.), (viewport.height - px(50.)).max(px(8.)));
+            .clamp(px(8.), (viewport.height - px(82.)).max(px(8.)));
         Some(
             crate::menu::panel("name-menu", 184.)
+                .debug_selector(|| "name-menu".into())
                 .absolute()
                 .left(x)
                 .top(y)
+                .opacity(menu.motion.value())
                 .track_focus(&menu.focus)
                 .on_mouse_down_out(cx.listener(|view, _, window, cx| view.dismiss_menu(window, cx)))
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                .on_key_down(cx.listener(move |view, event: &KeyDownEvent, window, cx| {
+                .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
+                    view.keys.mode = Mode::Keyboard;
                     match event.keystroke.key.as_str() {
-                        "enter" | "space" => view.rename(&pane, surface, window, cx),
+                        "enter" | "space" => view.pick_tab_action(window, cx),
                         "escape" | "tab" => view.dismiss_menu(window, cx),
+                        "up" | "down" | "home" | "end" => {
+                            if let Some(menu) = &mut view.menu {
+                                menu.selected =
+                                    sidebar::step(&event.keystroke.key, 2, Some(menu.selected))
+                                        .unwrap_or(0);
+                                view.notify_room(cx);
+                            }
+                        }
                         _ => {}
                     }
                     cx.stop_propagation();
                 }))
-                .child(menu_item(menu, cx))
+                .child(menu_item(menu, 0, cx))
+                .child(menu_item(menu, 1, cx))
                 .into_any_element(),
         )
     }
+
+    fn pick_tab_action(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(menu) = &self.menu else {
+            return;
+        };
+        if menu.motion.closing() {
+            return;
+        }
+        let pane = menu.pane.clone();
+        let surface = menu.surface;
+        if menu.selected == 0 {
+            self.rename(&pane, surface, window, cx);
+        } else {
+            self.close_terminal(&pane, window, cx);
+        }
+    }
 }
 
-fn menu_item(menu: &Menu, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
-    let pane = menu.pane.clone();
-    let surface = menu.surface;
-    crate::menu::item("rename", 32.)
-        .bg(rgb(palette::CHIP))
-        .text_color(rgb(palette::TEXT))
-        .on_click(cx.listener(move |view, _, window, cx| view.rename(&pane, surface, window, cx)))
-        .child(crate::cap_icon::cap_icon(chrome::icon(
-            "pencil",
-            palette::TEXT_2,
-        )))
-        .child("Rename")
+fn menu_item(menu: &Menu, index: usize, cx: &mut Context<SeerWindow>) -> Stateful<Div> {
+    let (id, label, icon, color) = if index == 0 {
+        ("rename", "Rename", "pencil", palette::TEXT_2)
+    } else {
+        ("close-terminal", "Close", "close", palette::DANGER)
+    };
+    crate::menu::item(id, 32.)
+        .debug_selector(move || id.into())
+        .when(menu.selected == index, |row| row.bg(rgb(palette::CHIP)))
+        .text_color(rgb(if index == 0 {
+            palette::TEXT
+        } else {
+            palette::DANGER
+        }))
+        .active(|row| row.opacity(0.84))
+        .on_hover(cx.listener(move |view, hovered, _, cx| {
+            if *hovered && let Some(menu) = &mut view.menu {
+                menu.selected = index;
+                view.notify_room(cx);
+            }
+        }))
+        .on_click(cx.listener(move |view, _, window, cx| {
+            if let Some(menu) = &mut view.menu {
+                menu.selected = index;
+            }
+            view.pick_tab_action(window, cx);
+        }))
+        .child(crate::cap_icon::cap_icon(chrome::icon(icon, color)))
+        .child(label)
 }
 
 pub(crate) fn label(terminal: &TerminalInfo, surface: Surface, labels: Labels<'_>) -> AnyElement {

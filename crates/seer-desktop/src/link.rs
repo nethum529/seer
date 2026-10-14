@@ -19,6 +19,7 @@ use seer_runtime::PaneGrid;
 use crate::room::{Room, transport::RoomEvent};
 
 pub(crate) mod frames;
+mod terminals;
 
 pub(crate) enum Event {
     Message(ServerMsg),
@@ -89,6 +90,8 @@ pub(crate) struct Link {
     terminal: Terminal,
     woken: Arc<AtomicBool>,
     resyncing: bool,
+    pending_new: Option<Vec<String>>,
+    pending_input: Vec<InputEvent>,
     room: String,
     pub(crate) people: Room,
 }
@@ -112,6 +115,8 @@ impl Link {
             terminal: Terminal::default(),
             woken: Arc::default(),
             resyncing: false,
+            pending_new: None,
+            pending_input: Vec::new(),
             room,
         };
         link.send(&ClientMsg::TerminalCapabilities {
@@ -217,40 +222,6 @@ impl Link {
         &self.room
     }
 
-    pub(crate) fn rename(&mut self, pane: &str, title: String) -> io::Result<()> {
-        if self.remote() {
-            return Ok(());
-        }
-        let Some(target) = pane_target(&self.tree, pane) else {
-            return Ok(());
-        };
-        self.send(&ClientMsg::RenameTab {
-            workspace: target.workspace,
-            tab: target.tab,
-            title,
-        })
-    }
-
-    pub(crate) fn new_terminal(&mut self) -> io::Result<()> {
-        if self.remote() {
-            return Ok(());
-        }
-        let workspace = self
-            .target
-            .as_ref()
-            .map(|target| target.workspace.clone())
-            .or_else(|| {
-                self.tree
-                    .workspaces
-                    .first()
-                    .map(|workspace| workspace.id.clone())
-            });
-        if let Some(workspace) = workspace {
-            self.send(&ClientMsg::CreateTab { workspace })?;
-        }
-        Ok(())
-    }
-
     pub(crate) fn shown(&self) -> Option<&str> {
         if self.remote() {
             self.people.pane.as_deref()
@@ -264,6 +235,14 @@ impl Link {
             self.people.input(event);
             return Ok(());
         }
+        if self.pending_new.is_some() {
+            self.pending_input.push(event);
+            return Ok(());
+        }
+        self.input_local(event)
+    }
+
+    fn input_local(&mut self, event: InputEvent) -> io::Result<()> {
         let Some(target) = self.target.clone() else {
             return Ok(());
         };
@@ -310,21 +289,6 @@ impl Link {
         }
         self.resyncing = true;
         self.send(&ClientMsg::Resync { user, pane })
-    }
-
-    fn retarget(&mut self, tree: &Tree) -> io::Result<()> {
-        let still_there = self.target.as_ref().is_some_and(|target| {
-            tree.workspaces.iter().any(|workspace| {
-                workspace.id == target.workspace
-                    && workspace.tabs.iter().any(|tab| {
-                        tab.id == target.tab && tab.panes.iter().any(|pane| pane.id == target.pane)
-                    })
-            })
-        });
-        if still_there {
-            return Ok(());
-        }
-        self.show(first_target(tree))
     }
 
     fn show(&mut self, target: Option<Target>) -> io::Result<()> {

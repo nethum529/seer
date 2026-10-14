@@ -11,6 +11,27 @@ use crate::{
 };
 
 impl SeerWindow {
+    pub(super) fn join_travel(
+        &self,
+        key: &gpui::Keystroke,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> bool {
+        if !matches!(self.content, Content::Join(_)) {
+            return false;
+        }
+        if key.key == "tab" {
+            if key.modifiers.shift {
+                window.focus_prev();
+            } else {
+                window.focus_next();
+            }
+            cx.stop_propagation();
+            cx.notify();
+        }
+        true
+    }
+
     pub(crate) fn open_invite(&mut self, url: &str, window: &mut Window, cx: &mut Context<Self>) {
         if matches!(&self.content, Content::Join(join) if join.read(cx).joining()) {
             return;

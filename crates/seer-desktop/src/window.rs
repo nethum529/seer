@@ -24,6 +24,7 @@ mod paint;
 mod people;
 pub(crate) mod rename;
 mod room;
+pub(crate) mod terminals;
 use rename::Surface;
 
 const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";
@@ -175,14 +176,6 @@ impl SeerWindow {
         self.select(pane, cx);
     }
 
-    pub(crate) fn new_terminal(&mut self, cx: &mut Context<Self>) {
-        let result = match &mut self.content {
-            Content::Terminal(link, _) => link.new_terminal(),
-            Content::Message(_) | Content::Join(_) => Ok(()),
-        };
-        self.check(result, cx);
-    }
-
     pub(crate) fn key(
         &mut self,
         keystroke: &Keystroke,
@@ -222,16 +215,7 @@ impl SeerWindow {
         if self.invite.is_some() {
             return;
         }
-        if matches!(self.content, Content::Join(_)) {
-            if keystroke.key == "tab" {
-                if keystroke.modifiers.shift {
-                    window.focus_prev();
-                } else {
-                    window.focus_next();
-                }
-                cx.stop_propagation();
-                cx.notify();
-            }
+        if self.join_travel(keystroke, window, cx) {
             return;
         }
         if self.room_key(keystroke, window, cx) || self.people_key(keystroke, window, cx) {
@@ -244,6 +228,10 @@ impl SeerWindow {
         } else {
             held.control
         };
+        if self.new_terminal_key(keystroke, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if secondary && held.shift && !held.alt && keystroke.key == "b" {
             self.focus_tabs(window, cx);
             cx.stop_propagation();
@@ -374,3 +362,6 @@ mod invite_e2e;
 mod room_invite_e2e;
 #[cfg(test)]
 mod watch_e2e;
+
+#[cfg(test)]
+mod terminals_e2e;

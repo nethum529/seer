@@ -10,6 +10,7 @@ use crate::pane_output::PaneOutput;
 use crate::pty::lock_mutex;
 
 mod process;
+pub(crate) use process::{is_shell, programs};
 mod rules;
 
 const INTERVAL: Duration = Duration::from_millis(250);

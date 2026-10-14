@@ -180,18 +180,14 @@ fn terminal_summary(message: &ClientMsg) -> String {
 #[must_use]
 pub fn server_summary(message: &ServerMsg) -> String {
     match message {
-        ServerMsg::GrantsUpdated => "GrantsUpdated".to_owned(),
-        ServerMsg::Terminals { user, terminals } => {
-            let mut summary = format!("Terminals user={user}");
-            for terminal in terminals {
-                let _ = write!(
-                    summary,
-                    " {}={}x{}:{}",
-                    terminal.pane, terminal.cols, terminal.rows, terminal.state
-                );
-            }
-            summary
+        ServerMsg::TerminalPrograms { programs } => {
+            format!(
+                "TerminalPrograms count={}",
+                programs.as_ref().map_or(0, Vec::len)
+            )
         }
+        ServerMsg::GrantsUpdated => "GrantsUpdated".to_owned(),
+        ServerMsg::Terminals { user, terminals } => terminals_summary(user, terminals),
         ServerMsg::Presence {
             user,
             online,
@@ -259,6 +255,18 @@ pub fn server_summary(message: &ServerMsg) -> String {
         ),
         ServerMsg::OpenStream { .. } => "OpenStream".to_owned(),
     }
+}
+
+fn terminals_summary(user: &str, terminals: &[crate::proto::TerminalInfo]) -> String {
+    let mut summary = format!("Terminals user={user}");
+    for terminal in terminals {
+        let _ = write!(
+            summary,
+            " {}={}x{}:{}",
+            terminal.pane, terminal.cols, terminal.rows, terminal.state
+        );
+    }
+    summary
 }
 
 fn input_summary(event: &InputEvent) -> String {

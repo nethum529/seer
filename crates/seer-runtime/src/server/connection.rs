@@ -28,13 +28,10 @@ pub(super) fn handle_connection(
     let Some(first) = greet(&mut stream, &ready, remote)? else {
         return Ok(());
     };
+    if handle_query(&mut stream, shared, connection_id, &first, remote)? {
+        return Ok(());
+    }
     match first {
-        ClientMsg::AttachRuntime if remote => {
-            return Err(io::Error::new(
-                io::ErrorKind::PermissionDenied,
-                "a room stream cannot own this runtime",
-            ));
-        }
         ClientMsg::AttachRuntime => {
             shared.add_connection(connection_id, stream.try_clone()?)?;
             shared.resend_room_refusal(connection_id, &generation, &greeted)?;
@@ -49,32 +46,21 @@ pub(super) fn handle_connection(
             viewer,
             ..
         } => {
-            shared.add_view_connection(connection_id, stream.try_clone()?, Some(&pane), false)?;
-            match shared.watch_size(connection_id, &pane, Some(PaneSize { cols, rows }), viewer) {
-                Ok(false) => {}
-                Ok(true) => {
-                    shared.remove_connection(connection_id)?;
-                    let _ = stream.shutdown(std::net::Shutdown::Both);
-                    return Ok(());
-                }
-                Err(error) => {
-                    shared.remove_connection(connection_id)?;
-                    return Err(error);
-                }
+            if attach_watch(
+                &mut stream,
+                shared,
+                connection_id,
+                &pane,
+                cols,
+                rows,
+                viewer,
+            )? {
+                return Ok(());
             }
         }
+
         ClientMsg::Terminals { .. } => {
             shared.add_view_connection(connection_id, stream.try_clone()?, None, false)?
-        }
-        ClientMsg::QueryTargets { .. } => {
-            return handle_target_query(&mut stream, shared, connection_id);
-        }
-        ClientMsg::QueryStatus => return super::status::handle_status_query(&mut stream, shared),
-        ClientMsg::ExitClient { pane } if !remote => {
-            return super::size_lease::handle_exit_client(&mut stream, shared, &pane);
-        }
-        ClientMsg::Stop if !remote => {
-            return super::restart::handle_restart(&mut stream, shared);
         }
         _ => {
             return Err(io::Error::new(
@@ -87,6 +73,54 @@ pub(super) fn handle_connection(
     shared.remove_connection(connection_id)?;
     let _ = stream.shutdown(std::net::Shutdown::Both);
     result
+}
+
+fn handle_query(
+    stream: &mut UnixStream,
+    shared: &SharedSession,
+    connection_id: u64,
+    first: &ClientMsg,
+    remote: bool,
+) -> io::Result<bool> {
+    let result = match first {
+        ClientMsg::AttachRuntime if remote => {
+            return Err(io::Error::new(
+                io::ErrorKind::PermissionDenied,
+                "a room stream cannot own this runtime",
+            ));
+        }
+        ClientMsg::QueryTargets { .. } => handle_target_query(stream, shared, connection_id),
+        ClientMsg::QueryStatus => super::status::handle_status_query(stream, shared),
+        ClientMsg::InspectTerminal { pane } if !remote => {
+            super::status::handle_terminal_query(stream, shared, pane)
+        }
+        ClientMsg::ExitClient { pane } if !remote => {
+            super::size_lease::handle_exit_client(stream, shared, pane)
+        }
+        ClientMsg::Stop if !remote => super::restart::handle_restart(stream, shared),
+        _ => return Ok(false),
+    };
+    result.map(|()| true)
+}
+
+fn attach_watch(
+    stream: &mut UnixStream,
+    shared: &SharedSession,
+    connection_id: u64,
+    pane: &str,
+    cols: u16,
+    rows: u16,
+    viewer: bool,
+) -> io::Result<bool> {
+    shared.add_view_connection(connection_id, stream.try_clone()?, Some(pane), false)?;
+    match shared.watch_size(connection_id, pane, Some(PaneSize { cols, rows }), viewer) {
+        Ok(false) => Ok(false),
+        result => {
+            shared.remove_connection(connection_id)?;
+            let _ = stream.shutdown(std::net::Shutdown::Both);
+            result
+        }
+    }
 }
 
 /// The local socket sends readiness first. A room stream is opened by this

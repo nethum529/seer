@@ -125,25 +125,30 @@ pub(crate) fn sidebar(
                         .iter()
                         .map(|terminal| tab(terminal, shown, labels, ring, cx)),
                 )
-                .when(!labels.readonly, |list| {
-                    list.child(new_terminal(keys, false, window, cx))
-                }),
+                .child(new_terminal(keys, false, labels.tips, window, cx)),
         )
 }
 
 pub(crate) fn new_terminal(
     keys: &Keys,
     compact: bool,
+    tips: bool,
     window: &Window,
     cx: &mut Context<SeerWindow>,
 ) -> Stateful<Div> {
-    let label: SharedString = "New terminal".into();
+    let help: SharedString = format!(
+        "New terminal ({})",
+        crate::window::terminals::new_shortcut_label()
+    )
+    .into();
     let ring = keys.ring(&keys.new_terminal, window);
     tip::on_hover(
-        div().id("new-terminal"),
-        label.clone(),
+        div()
+            .id("new-terminal")
+            .debug_selector(|| "new-terminal".into()),
+        help.clone(),
         "Inter".into(),
-        keys.hover() && !ring,
+        tips && keys.mode == Mode::Pointer && !ring,
     )
     .track_focus(&keys.new_terminal)
     .group("new-terminal")
@@ -160,7 +165,8 @@ pub(crate) fn new_terminal(
     .font_weight(FontWeight::MEDIUM)
     .text_color(rgb(palette::MUTED))
     .hover(|style| style.bg(rgb(palette::HOVER)).text_color(rgb(palette::TEXT)))
-    .on_click(cx.listener(|view, _, _, cx| view.new_terminal(cx)))
+    .active(|style| style.opacity(0.84))
+    .on_click(cx.listener(|view, _, window, cx| view.new_terminal(window, cx)))
     .child(cap_icon(
         chrome::icon("plus", palette::MUTED)
             .group_hover("new-terminal", |style| style.text_color(rgb(palette::TEXT))),
@@ -171,7 +177,7 @@ pub(crate) fn new_terminal(
     })
     .when(ring, |row| {
         row.child(outline())
-            .child(tip::below(label, "Inter".into()))
+            .when(tips, |row| row.child(tip::below(help, "Inter".into())))
     })
 }
 

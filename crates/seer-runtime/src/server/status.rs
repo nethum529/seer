@@ -17,6 +17,20 @@ pub(super) fn handle_status_query(
     codec::encode(stream, &status)
 }
 
+pub(super) fn handle_terminal_query(
+    stream: &mut UnixStream,
+    shared: &SharedSession,
+    pane: &str,
+) -> io::Result<()> {
+    let session = lock(&shared.session)?;
+    let programs = session
+        .pane_hosts
+        .get(pane)
+        .map(|host| host.programs())
+        .transpose()?;
+    codec::encode(stream, &ServerMsg::TerminalPrograms { programs })
+}
+
 impl SharedSession {
     pub(super) fn record_capabilities(
         &self,

@@ -68,8 +68,8 @@ When a PR decides or builds a row, it updates the row.
 
 | Feature | Source | Window place, or reason | Item |
 | --- | --- | --- | --- |
-| Open a new terminal: the session panel, or n | README People, help | Placed: the New terminal button in the sidebar. | R-452 |
-| Close a terminal: the session panel, or x | README People, help | No place yet. The approved design has no close control. | R-452 |
+| Open a new terminal: the session panel, or n | README People, help | Built: New terminal in the sidebar or narrow header, Cmd N on macOS or Ctrl Shift N on Linux. It returns to your own list, selects the new terminal, and focuses input. | T-452 |
+| Close a terminal: the session panel, or x | README People, help | Built: Close below Rename in the own tab menu, opened by right click or Shift F10. A shell closes at once. Other programs need confirmation in the shared sheet. Cancel keeps the terminal. The last close shows the empty own list with New terminal. | T-452 |
 | Copy the join line from the session panel, and the first run hint that points to it | README People, help First run | Built: invite sheet with join and install lines, full clipboard copy, and copy feedback. Invite a person opens the sheet from the connected host room menu. Closing returns focus to the room trigger. The first run hint stays separate. | R-454 |
 | The terminal app must permit clipboard access to copy the join line | README Good to know | Not needed: the window writes to the clipboard itself. | R-454 |
 

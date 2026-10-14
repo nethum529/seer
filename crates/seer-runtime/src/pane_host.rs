@@ -148,6 +148,11 @@ impl PaneHost {
     pub(crate) fn observation(&self) -> Observation {
         self.detector.observation()
     }
+
+    pub(crate) fn programs(&self) -> io::Result<Vec<String>> {
+        crate::agent_state::programs(self.session.process_id(), &self.program)
+    }
+
     pub(crate) fn started_program(&self) -> &str {
         &self.program
     }

@@ -141,11 +141,7 @@ impl UserSession {
                 let observation = host.map(PaneHost::observation).unwrap_or_default();
                 let foreground = observation.name;
                 let shell = observation.agent_state.is_none()
-                    && (foreground.is_empty()
-                        || matches!(
-                            foreground.as_str(),
-                            "sh" | "bash" | "zsh" | "fish" | "dash" | "ksh" | "nu"
-                        )
+                    && (crate::agent_state::is_shell(&foreground)
                         || host.map(PaneHost::started_program) == Some(foreground.as_str()));
                 TerminalInfo {
                     agent_state: observation.agent_state,
