@@ -72,16 +72,33 @@ impl SeerWindow {
                     .child(detail("A soft picture behind the window.")),
             )
             .child(
-                button(
-                    "glass-toggle",
-                    if enabled { "On" } else { "Off" },
-                    &self.appearance.toggle,
-                    enabled.then_some(palette::ACCENT),
-                    self.keys.mode,
-                    window,
-                )
-                .w(px(56.))
-                .on_click(cx.listener(|view, _, _, cx| view.toggle_glass(cx))),
+                div()
+                    .id("glass-toggle")
+                    .debug_selector(|| "glass-toggle".into())
+                    .track_focus(&self.appearance.toggle)
+                    .relative()
+                    .h(px(32.))
+                    .px(px(6.))
+                    .rounded(px(8.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .cursor_pointer()
+                    .hover(|control| control.opacity(0.92))
+                    .active(|control| control.opacity(0.84))
+                    .when(self.keys.ring(&self.appearance.toggle, window), |control| {
+                        control.child(sidebar::outline())
+                    })
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .w(px(24.))
+                            .text_color(rgb(palette::MUTED))
+                            .child(if enabled { "On" } else { "Off" }),
+                    )
+                    .child(crate::menu::switch_track(enabled))
+                    .on_click(cx.listener(|view, _, _, cx| view.toggle_glass(cx))),
             )
     }
 
@@ -134,20 +151,22 @@ impl SeerWindow {
                             cx.listener(|view, _, window, cx| view.choose_picture(window, cx)),
                         ),
                     )
-                    .child(
-                        button(
-                            "default-picture",
-                            "Use default",
-                            &appearance.reset,
-                            None,
-                            self.keys.mode,
-                            window,
+                    .when(appearance.settings.picture.is_some(), |actions| {
+                        actions.child(
+                            button(
+                                "default-picture",
+                                "Use default",
+                                &appearance.reset,
+                                None,
+                                self.keys.mode,
+                                window,
+                            )
+                            .when(appearance.busy, |button| button.opacity(0.6))
+                            .on_click(
+                                cx.listener(|view, _, window, cx| view.reset_picture(window, cx)),
+                            ),
                         )
-                        .when(appearance.busy, |button| button.opacity(0.6))
-                        .on_click(
-                            cx.listener(|view, _, window, cx| view.reset_picture(window, cx)),
-                        ),
-                    ),
+                    }),
             )
     }
 }

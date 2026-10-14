@@ -72,12 +72,14 @@ impl SeerWindow {
         match key.key.as_str() {
             "escape" => self.close_settings(window, cx),
             "tab" => {
-                let controls = [
+                let mut controls = vec![
                     &self.appearance.back,
                     &self.appearance.toggle,
                     &self.appearance.choose,
-                    &self.appearance.reset,
                 ];
+                if self.appearance.settings.picture.is_some() {
+                    controls.push(&self.appearance.reset);
+                }
                 let at = controls
                     .iter()
                     .position(|focus| focus.is_focused(window))
@@ -98,20 +100,33 @@ impl SeerWindow {
     fn toggle_glass(&mut self, cx: &mut Context<Self>) {
         let mut settings = self.appearance.settings.clone();
         settings.glass = !settings.glass;
-        self.appearance.save(settings);
+        if self.appearance.save(settings)
+            && self.appearance.settings.glass
+            && self.appearance.picture.is_none()
+        {
+            self.appearance.load_picture();
+        }
         cx.notify();
     }
 
     fn reset_picture(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.appearance.busy {
+        if self.appearance.busy || self.appearance.settings.picture.is_none() {
             return;
         }
         let mut settings = self.appearance.settings.clone();
         settings.picture = None;
         if self.appearance.save(settings) {
-            self.appearance
-                .replace_picture(backdrop::default_picture(), window);
+            let picture = self
+                .appearance
+                .settings
+                .glass
+                .then(backdrop::default_picture)
+                .flatten();
+            self.appearance.replace_picture(picture, window);
             self.appearance.fallback = false;
+            if self.appearance.reset.is_focused(window) {
+                window.focus(&self.appearance.choose);
+            }
         }
         cx.notify();
     }

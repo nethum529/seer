@@ -51,6 +51,24 @@ pub(crate) fn separator() -> Div {
         .bg(rgb(palette::LINE_2))
 }
 
+pub(crate) fn switch_track(on: bool) -> Div {
+    div()
+        .w(px(32.))
+        .h(px(18.))
+        .flex_none()
+        .rounded(px(9.))
+        .p(px(2.))
+        .bg(rgb(if on { palette::ACCENT } else { palette::LINE_2 }))
+        .flex()
+        .items_center()
+        .when(on, |track| track.justify_end())
+        .child(div().size(px(14.)).rounded(px(7.)).bg(rgb(if on {
+            palette::ON_ACCENT
+        } else {
+            palette::TEXT
+        })))
+}
+
 pub(crate) fn button(
     id: &'static str,
     text: &'static str,

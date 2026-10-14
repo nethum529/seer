@@ -6,7 +6,7 @@ use std::{
 };
 
 use gpui::RenderImage;
-use image::{DynamicImage, Frame, ImageReader, Limits};
+use image::{DynamicImage, Frame, ImageDecoder, ImageReader, Limits};
 
 static DEFAULT: OnceLock<Option<Arc<RenderImage>>> = OnceLock::new();
 
@@ -31,8 +31,15 @@ fn decode(bytes: &[u8]) -> io::Result<Arc<RenderImage>> {
     let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
     let mut limits = Limits::default();
     limits.max_alloc = Some(64 * 1024 * 1024);
-    reader.limits(limits);
-    let image = reader.decode().map_err(io::Error::other)?;
+    reader.limits(limits.clone());
+    let mut decoder = reader.into_decoder().map_err(io::Error::other)?;
+    limits
+        .reserve(decoder.total_bytes())
+        .map_err(io::Error::other)?;
+    decoder.set_limits(limits).map_err(io::Error::other)?;
+    let orientation = decoder.orientation().map_err(io::Error::other)?;
+    let mut image = DynamicImage::from_decoder(decoder).map_err(io::Error::other)?;
+    image.apply_orientation(orientation);
     Ok(prepare(image))
 }
 

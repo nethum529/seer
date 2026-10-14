@@ -44,17 +44,12 @@ impl Appearance {
                 Some(format!("Could not read settings: {error}")),
             ),
         };
-        let custom = settings
-            .picture
-            .as_deref()
-            .and_then(|path| backdrop::read(path).ok());
-        let fallback = settings.picture.is_some() && custom.is_none();
-        Self {
+        let mut appearance = Self {
             settings,
             path,
-            fallback,
+            fallback: false,
             error,
-            picture: custom.or_else(backdrop::default_picture),
+            picture: None,
             open: false,
             busy: false,
             trigger: cx.focus_handle().tab_stop(true),
@@ -63,7 +58,21 @@ impl Appearance {
             choose: cx.focus_handle().tab_stop(true),
             reset: cx.focus_handle().tab_stop(true),
             return_focus: None,
+        };
+        if appearance.settings.glass {
+            appearance.load_picture();
         }
+        appearance
+    }
+
+    pub(crate) fn load_picture(&mut self) {
+        let custom = self
+            .settings
+            .picture
+            .as_deref()
+            .and_then(|path| backdrop::read(path).ok());
+        self.fallback = self.settings.picture.is_some() && custom.is_none();
+        self.picture = custom.or_else(backdrop::default_picture);
     }
 
     pub(crate) fn save(&mut self, settings: Settings) -> bool {

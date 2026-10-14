@@ -13,6 +13,7 @@ fn appearance_survives_reopen_and_missing_picture_keeps_the_window(cx: &mut Test
         cx.run_until_parked();
     };
     click(cx, "settings-trigger");
+    assert!(cx.debug_bounds("default-picture").is_none());
     click(cx, "glass-toggle");
     let picture = runtime.directory.path().join("picture.jpg");
     std::fs::write(&picture, include_bytes!("../../assets/backdrop.jpg")).unwrap();
@@ -28,7 +29,7 @@ fn appearance_survives_reopen_and_missing_picture_keeps_the_window(cx: &mut Test
     assert_eq!(settings.picture.as_ref(), Some(&picture));
     std::fs::remove_file(picture).unwrap();
     view.update(cx, |view, cx| {
-        view.appearance = crate::appearance::Appearance::load(Some(path), cx);
+        view.appearance = crate::appearance::Appearance::load(Some(path.clone()), cx);
         cx.notify();
     });
     click(cx, "settings-trigger");
@@ -36,6 +37,7 @@ fn appearance_survives_reopen_and_missing_picture_keeps_the_window(cx: &mut Test
     assert!(cx.debug_bounds("settings-page").is_some());
     assert!(cx.debug_bounds("picture-fallback").is_some());
     click(cx, "default-picture");
+    assert!(seer::Settings::load_from(&path).unwrap().picture.is_none());
     click(cx, "settings-back");
     assert!(cx.debug_bounds("terminal").is_some());
     cx.simulate_keystrokes("k");
