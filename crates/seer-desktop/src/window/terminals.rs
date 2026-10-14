@@ -84,9 +84,9 @@ impl SeerWindow {
         cx.spawn_in(window, async move |view, cx| {
             let result = inspected.await;
             let _ = view.update_in(cx, |view, window, cx| match result {
-                Ok(programs) => view.finish_close(&pane, &programs, window, cx),
-                Err(error) if error.kind() == io::ErrorKind::NotFound => {}
-                Err(error) => view.check(Err(error), cx),
+                Ok(Some(programs)) => view.finish_close(&pane, &programs, window, cx),
+                Ok(None) => {}
+                Err(error) => eprintln!("seer: could not inspect terminal: {error}"),
             });
         })
         .detach();

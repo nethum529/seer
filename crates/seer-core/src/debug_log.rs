@@ -181,7 +181,10 @@ fn terminal_summary(message: &ClientMsg) -> String {
 pub fn server_summary(message: &ServerMsg) -> String {
     match message {
         ServerMsg::TerminalPrograms { programs } => {
-            format!("TerminalPrograms count={}", programs.len())
+            format!(
+                "TerminalPrograms count={}",
+                programs.as_ref().map_or(0, Vec::len)
+            )
         }
         ServerMsg::GrantsUpdated => "GrantsUpdated".to_owned(),
         ServerMsg::Terminals { user, terminals } => terminals_summary(user, terminals),

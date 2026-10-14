@@ -165,7 +165,7 @@ pub enum ClientMsg {
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ServerMsg {
     TerminalPrograms {
-        programs: Vec<String>,
+        programs: Option<Vec<String>>,
     },
     GrantsUpdated,
     Terminals {

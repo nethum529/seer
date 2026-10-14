@@ -23,11 +23,11 @@ pub(super) fn handle_terminal_query(
     pane: &str,
 ) -> io::Result<()> {
     let session = lock(&shared.session)?;
-    let host = session
+    let programs = session
         .pane_hosts
         .get(pane)
-        .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "terminal closed"))?;
-    let programs = host.programs()?;
+        .map(|host| host.programs())
+        .transpose()?;
     codec::encode(stream, &ServerMsg::TerminalPrograms { programs })
 }
 

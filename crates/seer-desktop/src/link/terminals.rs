@@ -3,7 +3,7 @@ use super::*;
 use std::os::unix::net::UnixStream;
 use std::time::Duration;
 
-async fn inspect(writer: Writer, pane: String) -> io::Result<Vec<String>> {
+async fn inspect(writer: Writer, pane: String) -> io::Result<Option<Vec<String>>> {
     let path = match &*lock(&writer) {
         Socket::Iroh(stream) => stream
             .peer_addr()?
@@ -32,7 +32,7 @@ impl Link {
     pub(crate) fn inspect_terminal(
         &self,
         pane: String,
-    ) -> impl Future<Output = io::Result<Vec<String>>> + Send + use<> {
+    ) -> impl Future<Output = io::Result<Option<Vec<String>>>> + Send + use<> {
         inspect(Arc::clone(&self.writer), pane)
     }
     pub(crate) fn rename(&mut self, pane: &str, title: String) -> io::Result<()> {
