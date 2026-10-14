@@ -179,7 +179,7 @@ impl SeerWindow {
         self.notify_room(cx);
     }
 
-    fn close_room_menu(
+    pub(super) fn close_room_menu(
         &mut self,
         keyboard: bool,
         focus: bool,

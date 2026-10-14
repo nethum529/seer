@@ -57,11 +57,8 @@ impl ServerStore {
     }
 
     pub(crate) fn save_to(&self, path: &Path) -> io::Result<()> {
-        let directory = parent_directory(path)?;
-        fs::create_dir_all(directory)?;
-        fs::set_permissions(directory, Permissions::from_mode(DIRECTORY_MODE))?;
         let contents = toml::to_string(self).map_err(invalid_data)?;
-        replace_atomically(path, contents.as_bytes())
+        save_config(path, contents.as_bytes())
     }
 
     pub(crate) fn load_or_create_device_key(path: &Path) -> io::Result<SecretKey> {
@@ -137,8 +134,10 @@ fn temporary_path(path: &Path) -> io::Result<PathBuf> {
     )))
 }
 
-fn replace_atomically(path: &Path, contents: &[u8]) -> io::Result<()> {
+pub(crate) fn save_config(path: &Path, contents: &[u8]) -> io::Result<()> {
     let directory = parent_directory(path)?;
+    fs::create_dir_all(directory)?;
+    fs::set_permissions(directory, Permissions::from_mode(DIRECTORY_MODE))?;
     let temporary = temporary_path(path)?;
     let result = write_temporary(&temporary, contents).and_then(|()| fs::rename(&temporary, path));
     if result.is_err() {

@@ -24,6 +24,7 @@ mod paint;
 mod people;
 pub(crate) mod rename;
 mod room;
+mod settings;
 pub(crate) mod terminals;
 use rename::Surface;
 
@@ -45,6 +46,7 @@ pub(crate) struct SeerWindow {
     pub(crate) keys: Keys,
     pub(crate) input: Input,
     rows: Rows,
+    appearance: crate::appearance::Appearance,
     room: room::RoomUi,
     editing: Option<rename::Editing>,
     menu: Option<rename::Menu>,
@@ -110,6 +112,7 @@ impl SeerWindow {
             keys,
             input,
             rows: Rows::default(),
+            appearance: crate::appearance::Appearance::load(seer::Settings::path().ok(), cx),
             room: room::RoomUi::new(server.clone().or(saved), cx),
             editing: None,
             menu: None,
@@ -212,6 +215,10 @@ impl SeerWindow {
     }
 
     fn travel(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
+        if self.settings_key(keystroke, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.invite.is_some() {
             return;
         }
@@ -363,5 +370,7 @@ mod room_invite_e2e;
 #[cfg(test)]
 mod watch_e2e;
 
+#[cfg(test)]
+mod settings_e2e;
 #[cfg(test)]
 mod terminals_e2e;

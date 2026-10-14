@@ -16,6 +16,7 @@ mod prompt;
 mod render;
 pub mod rooms;
 mod routes;
+mod settings;
 mod start;
 mod state;
 mod store;
@@ -33,6 +34,7 @@ mod viewer;
 pub use commands::join::{Invitation, JoinError, system_user_name};
 pub use invitation::{IssuedInvite, create_invite};
 pub use local::attach;
+pub use settings::Settings;
 pub use store::{ServerEntry, ServerStore};
 
 pub fn connect_room(server: &ServerEntry) -> std::io::Result<seer_net::Socket> {

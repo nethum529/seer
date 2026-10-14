@@ -31,16 +31,16 @@ pub(crate) fn status(state: Option<AgentState>) -> Div {
     }))
 }
 
-pub(crate) fn bar() -> Div {
+pub(crate) fn bar(cx: &gpui::App) -> Div {
     use gpui::InteractiveElement;
     div()
         .flex_none()
         .h(px(44.))
         .flex()
         .items_center()
-        .bg(rgb(palette::SURFACE))
+        .bg(crate::appearance::fill(palette::SURFACE, cx))
         .border_b_1()
-        .border_color(rgb(palette::LINE))
+        .border_color(crate::appearance::fill(palette::LINE, cx))
         .window_control_area(WindowControlArea::Drag)
 }
 
@@ -110,7 +110,11 @@ pub(crate) fn settings() -> Div {
         .child(cap_icon(icon("gear", palette::FAINT)))
 }
 
-pub(crate) fn footer(room: impl gpui::IntoElement) -> Div {
+pub(crate) fn footer(
+    room: impl gpui::IntoElement,
+    settings: impl gpui::IntoElement,
+    cx: &gpui::App,
+) -> Div {
     div()
         .flex_none()
         .h(px(44.))
@@ -120,10 +124,10 @@ pub(crate) fn footer(room: impl gpui::IntoElement) -> Div {
         .items_center()
         .gap(px(8.))
         .border_t_1()
-        .border_color(rgb(palette::LINE))
+        .border_color(crate::appearance::fill(palette::LINE, cx))
         .text_color(rgb(palette::MUTED))
         .child(div().flex_1().min_w_0().flex().items_center().child(room))
-        .child(settings())
+        .child(settings)
 }
 
 pub(crate) fn room_dot(up: bool) -> Div {

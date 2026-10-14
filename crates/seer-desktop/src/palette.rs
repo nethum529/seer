@@ -51,7 +51,7 @@ pub(crate) fn cell_colors(cell: &Cell) -> (Rgba, Option<Rgba>) {
     }
     let behind = bg.unwrap_or(rgb(WINDOW));
     if cell.hidden {
-        fg = behind;
+        fg.a = 0.;
     } else if cell.dim {
         fg = halfway(fg, behind);
     }

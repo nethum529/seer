@@ -6885,6 +6885,7 @@ dependencies = [
  "block2",
  "futures",
  "gpui",
+ "image",
  "objc2",
  "objc2-app-kit",
  "raw-window-handle",

@@ -252,7 +252,7 @@ impl SeerWindow {
             .y
             .clamp(px(8.), (viewport.height - px(82.)).max(px(8.)));
         Some(
-            crate::menu::panel("name-menu", 184.)
+            crate::menu::panel("name-menu", 184., cx)
                 .debug_selector(|| "name-menu".into())
                 .absolute()
                 .left(x)

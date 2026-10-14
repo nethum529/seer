@@ -231,6 +231,10 @@ pub(super) fn open_view<'a>(
             keys,
             input: Input::new(window, cx),
             rows: Rows::default(),
+            appearance: crate::appearance::Appearance::load(
+                Some(runtime.directory.path().join("settings.toml")),
+                cx,
+            ),
             room: room::RoomUi::new(Some(room.server.clone()), cx),
             _join: None,
             _tab_time: None,
