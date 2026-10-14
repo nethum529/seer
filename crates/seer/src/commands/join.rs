@@ -1,4 +1,7 @@
 use std::fmt;
+use std::fs::OpenOptions;
+use std::io::{self, IsTerminal, Write};
+use std::os::fd::AsRawFd;
 
 use seer_core::proto::{ClientMsg, ServerMsg};
 
@@ -156,7 +159,7 @@ pub(crate) fn run(invitation: Option<&str>) -> Result<(), CommandError> {
                 println!("Joined as {}. Attaching...", server.name);
                 let (stream, _) = super::authenticate(&server)?;
                 return super::finish_session(
-                    std::io::IsTerminal::is_terminal(&std::io::stdout()),
+                    interactive_output().map_err(CommandError::system)?,
                     Some(stream),
                     None,
                     &server,
@@ -164,4 +167,21 @@ pub(crate) fn run(invitation: Option<&str>) -> Result<(), CommandError> {
             }
         }
     }
+}
+
+fn interactive_output() -> io::Result<bool> {
+    let mut stdout = io::stdout();
+    if stdout.is_terminal() {
+        return Ok(true);
+    }
+    if !io::stdin().is_terminal() {
+        return Ok(false);
+    }
+    let terminal = OpenOptions::new().write(true).open("/dev/tty")?;
+    stdout.flush()?;
+    // SAFETY: both descriptors are live. dup2 replaces stdout with the terminal.
+    if unsafe { libc::dup2(terminal.as_raw_fd(), stdout.as_raw_fd()) } < 0 {
+        return Err(io::Error::last_os_error());
+    }
+    Ok(true)
 }
