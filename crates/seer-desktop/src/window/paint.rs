@@ -67,26 +67,29 @@ impl Render for SeerWindow {
             .people_menu
             .as_ref()
             .is_some_and(|menu| !menu.motion.closing());
-        let labels = rename::Labels::new(self.editing.as_ref(), self.menu.as_ref(), readonly);
+        let labels = rename::Labels::new(
+            self.editing.as_ref(),
+            self.menu.as_ref(),
+            readonly,
+            !self.room_blocks_terminal_pointer() && self.menu.is_none(),
+        );
         let terminals = link.terminals();
         let shown = link.shown();
         let terminal = if readonly && shown.is_none() {
-            div()
-                .flex_1()
-                .flex()
-                .items_center()
-                .justify_center()
-                .text_color(rgb(palette::FAINT))
-                .child(
-                    if link.people.person().is_some_and(|person| person.peekable) {
-                        "No terminals"
-                    } else {
-                        "Offline"
-                    },
-                )
-                .into_any_element()
+            empty_terminal(
+                if link.people.person().is_some_and(|person| person.peekable) {
+                    "No terminals"
+                } else {
+                    "Offline"
+                },
+            )
+            .into_any_element()
         } else {
             self.terminal(Screen::new(cx.entity(), self.font.clone()), cx)
+                .relative()
+                .when(shown.is_none(), |terminal| {
+                    terminal.child(empty_terminal("No terminals").absolute().inset_0())
+                })
                 .into_any_element()
         };
         if window.viewport_size().width < px(NARROW) {
@@ -134,11 +137,13 @@ impl Render for SeerWindow {
                                         .items_center()
                                         .gap(px(2.))
                                         .child(self.room_button(link.room(), true, window, cx))
-                                        .when(!readonly, |bar| {
-                                            bar.child(sidebar::new_terminal(
-                                                &self.keys, true, window, cx,
-                                            ))
-                                        })
+                                        .child(sidebar::new_terminal(
+                                            &self.keys,
+                                            true,
+                                            labels.tips,
+                                            window,
+                                            cx,
+                                        ))
                                         .when(readonly, |bar| bar.child(people::control(can_input)))
                                         .child(chrome::settings()),
                                 ),
@@ -278,4 +283,14 @@ fn heading(
         }),
     )
     .children(terminal.map(|terminal| rename::label(terminal, Surface::Title, labels)))
+}
+
+fn empty_terminal(text: &'static str) -> Div {
+    div()
+        .flex_1()
+        .flex()
+        .items_center()
+        .justify_center()
+        .text_color(rgb(palette::FAINT))
+        .child(text)
 }

@@ -7,10 +7,21 @@ use crate::menu;
 impl SeerWindow {
     pub(super) fn room_sheet(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sheet = self.room.sheet.as_ref()?;
-        let room = &sheet.room;
-        let (title, body) = confirm_copy(sheet.action, room);
+        let (title, body) = match &sheet.action {
+            Confirmation::Room(action, room) => confirm_copy(*action, room),
+            Confirmation::Terminal { program, .. } => (
+                "Close terminal?".into(),
+                format!(
+                    "Closing this terminal stops {}.",
+                    chrome::capitalize(program)
+                ),
+            ),
+        };
         let width = 400_f32.min(f32::from(window.viewport_size().width) - 32.);
-        let action = sheet.action;
+        let label = match &sheet.action {
+            Confirmation::Room(action, _) => action_label(*action),
+            Confirmation::Terminal { .. } => "Close terminal",
+        };
         let card = div()
             .id("room-confirm")
             .debug_selector(|| "room-confirm".into())
@@ -69,7 +80,7 @@ impl SeerWindow {
                             if self.room.pending {
                                 "Working..."
                             } else {
-                                action_label(action)
+                                label
                             },
                             &sheet.confirm,
                             true,
@@ -78,10 +89,10 @@ impl SeerWindow {
                         )
                         .when(self.room.pending, |button| button.opacity(0.6))
                         .on_click(cx.listener(
-                            move |view, event, window, cx| {
+                            |view, event, window, cx| {
                                 if matches!(event, gpui::ClickEvent::Mouse(_)) && view.room.modal()
                                 {
-                                    view.run_room_action(action, window, cx);
+                                    view.run_confirmation(window, cx);
                                 }
                             },
                         )),
@@ -108,6 +119,42 @@ impl SeerWindow {
                 .child(card)
                 .into_any_element(),
         )
+    }
+
+    pub(in crate::window) fn confirm_terminal(
+        &mut self,
+        pane: &str,
+        program: &str,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let cancel = cx.focus_handle();
+        let confirm = cx.focus_handle();
+        window.focus(&cancel);
+        self.room.error = None;
+        self.room.sheet = Some(Sheet {
+            action: Confirmation::Terminal {
+                pane: pane.into(),
+                program: program.into(),
+            },
+            return_focus: self.keys.tabs.clone(),
+            cancel,
+            confirm,
+            motion: Motion::open(self.keys.mode == Mode::Keyboard, 200),
+        });
+    }
+
+    pub(super) fn run_confirmation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        let Some(sheet) = &self.room.sheet else {
+            return;
+        };
+        match sheet.action.clone() {
+            Confirmation::Room(action, _) => self.run_room_action(action, window, cx),
+            Confirmation::Terminal { pane, .. } => {
+                self.send_close(&pane, cx);
+                self.close_room_sheet(self.keys.mode == Mode::Keyboard, window, cx);
+            }
+        }
     }
 }
 

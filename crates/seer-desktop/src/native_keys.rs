@@ -29,6 +29,10 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                     if view.room_key(&key, window, cx) {
                         return true;
                     }
+                    if crate::window::terminals::new_shortcut(&key) {
+                        view.new_terminal(window, cx);
+                        return true;
+                    }
                     if key.modifiers.platform {
                         view.focus_tabs(window, cx);
                         return true;
@@ -66,10 +70,11 @@ fn key(event: &NSEvent) -> Option<Keystroke> {
     // F20 and Option+Shift+Tab as text. Carbon virtual key codes do not vary by layout.
     let key = if command {
         // AppKit consumes Command Shift B before GPUI's key callback.
-        if event.keyCode() != 0x0b || !shift || alt {
-            return None;
+        match (event.keyCode(), shift, alt, control) {
+            (0x0b, true, false, false) => "b".to_owned(),
+            (0x2d, false, false, false) => "n".to_owned(),
+            _ => return None,
         }
-        "b".to_owned()
     } else if let Some((_, key)) = KEYS.iter().find(|(code, _)| *code == event.keyCode()) {
         (*key).to_owned()
     } else if control {

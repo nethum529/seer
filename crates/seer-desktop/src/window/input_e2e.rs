@@ -34,6 +34,19 @@ impl Runtime {
             directory.path().display()
         )).unwrap();
         fs::set_permissions(&shell, fs::Permissions::from_mode(0o700)).unwrap();
+        Self::start_in(directory, shell)
+    }
+
+    pub(super) fn start_shell() -> Self {
+        let directory = tempfile::Builder::new()
+            .prefix("s452")
+            .tempdir_in("/tmp")
+            .unwrap();
+        fs::write(directory.path().join("input"), []).unwrap();
+        Self::start_in(directory, PathBuf::from("/bin/sh"))
+    }
+
+    fn start_in(directory: TempDir, shell: PathBuf) -> Self {
         let binary = std::env::var_os("SEER_RUNTIME_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
