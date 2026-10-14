@@ -10,6 +10,16 @@ fn install_join_opens_the_overlay_in_the_same_terminal() {
     check("install");
 }
 
+#[test]
+fn join_succeeds_with_tty_input_without_a_controlling_terminal() {
+    check("no-terminal");
+}
+
+#[test]
+fn join_succeeds_with_piped_input_and_output() {
+    check("piped");
+}
+
 fn check(path: &str) {
     let output = Command::new("python3")
         .arg(concat!(

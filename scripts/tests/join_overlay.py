@@ -146,7 +146,7 @@ def check(cli, runtime, path, captured, refused):
                         if error.errno != errno.EIO:
                             raise
                 output = bytes(terminal) + (log.read_bytes() if log.exists() else b"")
-                if b"Name" in output and not prompted:
+                if b"Name" in terminal and not prompted:
                     os.write(master, b"Alice\n")
                     prompted = True
                 opened = b"\x1b[?1049h" in terminal
@@ -199,7 +199,56 @@ def check(cli, runtime, path, captured, refused):
             assert not broker.is_alive(), "room fixture must stop"
 
 
+def check_noninteractive(cli, path):
+    with tempfile.TemporaryDirectory(prefix="s401-", dir="/tmp") as directory:
+        root = Path(directory)
+        environment = dict(os.environ, HOME=str(root), XDG_CONFIG_HOME=str(root / "config"),
+                           XDG_STATE_HOME=str(root / "state"), XDG_DATA_HOME=str(root / "data"))
+        listener = socket.socket()
+        listener.bind(("127.0.0.1", 0))
+        listener.listen()
+        invite = f"SEER1-127.0.0.1-{listener.getsockname()[1]}-seat401"
+        stopped = threading.Event()
+        broker = threading.Thread(target=room, args=(listener, stopped, False))
+        broker.start()
+        master = slave = process = None
+        try:
+            if path == "no-terminal":
+                master, slave = pty.openpty()
+                assert os.isatty(slave)
+            process = subprocess.Popen(
+                [cli, "join", invite], cwd=root, env=environment,
+                stdin=slave if slave is not None else subprocess.PIPE,
+                stdout=subprocess.PIPE, stderr=subprocess.STDOUT, start_new_session=True,
+            )
+            if master is not None:
+                os.write(master, b"Alice\n")
+            output, _ = process.communicate(
+                input=b"Alice\n" if slave is None else None, timeout=12,
+            )
+            assert process.returncode == 0, (path, process.returncode, output)
+            assert b"\x1b[?1049h" not in output, output
+            saved = (root / "config/seer/servers.toml").read_text()
+            assert 'name = "Alice"' in saved and 'credential = "secret"' in saved, saved
+            assert not (root / "state/seer/runtimes").exists()
+            print(f"PASS: {path}", flush=True)
+        finally:
+            if process is not None and process.poll() is None:
+                process.kill()
+                process.communicate(timeout=5)
+            for descriptor in (master, slave):
+                if descriptor is not None:
+                    os.close(descriptor)
+            stopped.set()
+            broker.join(timeout=3)
+            listener.close()
+            assert not broker.is_alive(), "room fixture must stop"
+
+
 if __name__ == "__main__":
     cli, runtime, path = sys.argv[1:]
-    for captured, refused in ((False, False), (True, False), (False, True), (True, True)):
-        check(Path(cli).resolve(), Path(runtime).resolve(), path, captured, refused)
+    if path in ("no-terminal", "piped"):
+        check_noninteractive(Path(cli).resolve(), path)
+    else:
+        for captured, refused in ((False, False), (True, False), (False, True), (True, True)):
+            check(Path(cli).resolve(), Path(runtime).resolve(), path, captured, refused)
