@@ -1,6 +1,6 @@
 use std::fmt;
 use std::fs::OpenOptions;
-use std::io::{self, Write};
+use std::io::{self, IsTerminal, Write};
 use std::os::fd::AsRawFd;
 
 use seer_core::proto::{ClientMsg, ServerMsg};
@@ -166,6 +166,9 @@ pub(crate) fn run(invitation: Option<&str>) -> Result<(), CommandError> {
 }
 
 fn interactive_terminal() -> io::Result<bool> {
+    if !io::stdin().is_terminal() {
+        return Ok(io::stdout().is_terminal());
+    }
     let Ok(terminal) = OpenOptions::new().read(true).write(true).open("/dev/tty") else {
         return Ok(false);
     };

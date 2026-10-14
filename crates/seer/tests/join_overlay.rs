@@ -20,6 +20,11 @@ fn join_succeeds_with_piped_input_and_output() {
     check("piped");
 }
 
+#[test]
+fn join_keeps_piped_input_with_a_controlling_terminal() {
+    check("piped-terminal");
+}
+
 fn check(path: &str) {
     let output = Command::new("python3")
         .arg(concat!(

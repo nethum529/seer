@@ -47,7 +47,8 @@ def room(listener, stopped, refused):
                 message = receive(connection)
                 if "Join" in message:
                     reply = {"Refused": {"reason": "invalid seat"}} if refused else {
-                        "Joined": {"user_id": "u-401", "credential": "secret", "name": "Alice"}
+                        "Joined": {"user_id": "u-401", "credential": "secret",
+                                   "name": message["Join"]["name"]}
                     }
                 elif "Hello" in message and message["Hello"]["credential"]:
                     reply = {"Welcome": {
@@ -80,6 +81,7 @@ def room(listener, stopped, refused):
 
 
 def check(cli, runtime, path, captured, refused):
+    scripted = path == "piped-terminal"
     with tempfile.TemporaryDirectory(prefix="s401-", dir="/tmp") as directory:
         root = Path(directory)
         release = root / "release"
@@ -110,7 +112,7 @@ def check(cli, runtime, path, captured, refused):
                            SEER_BIN_DIR=str(root / "bin"), SEER_INSTALL_URL=root.as_uri(),
                            SEER_INSTALL_NO_PATH="1", TERM="xterm-256color", SHELL="/bin/sh")
         local = None
-        if not refused:
+        if not refused and not scripted:
             state = root / "state/seer/runtimes/u-401"
             state.mkdir(parents=True)
             local = subprocess.Popen(
@@ -124,6 +126,15 @@ def check(cli, runtime, path, captured, refused):
         pid, master = pty.fork()
         if pid == 0:
             os.chdir(root)
+            if scripted:
+                read, write = os.pipe()
+                os.write(write, b"Alice\n")
+                os.close(write)
+                os.dup2(read, 0)
+                os.close(read)
+                with log.open("wb") as output:
+                    os.dup2(output.fileno(), 1)
+                os.execve(str(release / "seer"), ["seer", "join", invite], environment)
             os.execve("/bin/sh", ["sh", "-c", command], environment)
         fcntl.ioctl(master, termios.TIOCSWINSZ, struct.pack("HHHH", 30, 100, 0, 0))
         broker = threading.Thread(target=room, args=(listener, stopped, refused))
@@ -146,7 +157,7 @@ def check(cli, runtime, path, captured, refused):
                         if error.errno != errno.EIO:
                             raise
                 output = bytes(terminal) + (log.read_bytes() if log.exists() else b"")
-                if b"Name" in terminal and not prompted:
+                if b"Name" in terminal and not prompted and not scripted:
                     os.write(master, b"Alice\n")
                     prompted = True
                 opened = b"\x1b[?1049h" in terminal
@@ -157,7 +168,14 @@ def check(cli, runtime, path, captured, refused):
                     break
                 if finished:
                     break
-            if refused:
+            if scripted:
+                assert pid is None, f"piped join must finish without terminal input: {output!r}"
+                assert os.waitstatus_to_exitcode(status) == 0, output
+                assert b"\x1b[?1049h" not in output, output
+                saved = (root / "config/seer/servers.toml").read_text()
+                assert 'name = "Alice"' in saved and 'credential = "secret"' in saved, saved
+                assert not (root / "state/seer/runtimes").exists()
+            elif refused:
                 assert pid is None and os.waitstatus_to_exitcode(status) != 0, output
                 assert not opened and b"expired" in output, output
                 assert not (root / "config/seer/servers.toml").exists()
@@ -249,6 +267,8 @@ if __name__ == "__main__":
     cli, runtime, path = sys.argv[1:]
     if path in ("no-terminal", "piped"):
         check_noninteractive(Path(cli).resolve(), path)
+    elif path == "piped-terminal":
+        check(Path(cli).resolve(), Path(runtime).resolve(), path, True, False)
     else:
         for captured, refused in ((False, False), (True, False), (False, True), (True, True)):
             check(Path(cli).resolve(), Path(runtime).resolve(), path, captured, refused)
