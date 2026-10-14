@@ -1,4 +1,7 @@
 use std::fmt;
+use std::fs::OpenOptions;
+use std::io::{self, IsTerminal, Write};
+use std::os::fd::AsRawFd;
 
 use seer_core::proto::{ClientMsg, ServerMsg};
 
@@ -145,6 +148,7 @@ pub(crate) fn run(invitation: Option<&str>) -> Result<(), CommandError> {
     };
     let invitation = Invitation::parse(&line).map_err(CommandError::system)?;
     invitation.check_version().map_err(command_error)?;
+    let terminal = interactive_terminal().map_err(CommandError::system)?;
     let default = system_user_name();
     loop {
         let name = crate::prompt::visible_with_default("Name", default.as_deref())
@@ -155,13 +159,25 @@ pub(crate) fn run(invitation: Option<&str>) -> Result<(), CommandError> {
             Ok(server) => {
                 println!("Joined as {}. Attaching...", server.name);
                 let (stream, _) = super::authenticate(&server)?;
-                return super::finish_session(
-                    std::io::IsTerminal::is_terminal(&std::io::stdout()),
-                    Some(stream),
-                    None,
-                    &server,
-                );
+                return super::finish_session(terminal, Some(stream), None, &server);
             }
         }
     }
+}
+
+fn interactive_terminal() -> io::Result<bool> {
+    if !io::stdin().is_terminal() {
+        return Ok(io::stdout().is_terminal());
+    }
+    let Ok(terminal) = OpenOptions::new().read(true).write(true).open("/dev/tty") else {
+        return Ok(false);
+    };
+    io::stdout().flush()?;
+    for descriptor in [libc::STDIN_FILENO, libc::STDOUT_FILENO] {
+        // SAFETY: the terminal is live and dup2 replaces only stdin or stdout.
+        if unsafe { libc::dup2(terminal.as_raw_fd(), descriptor) } < 0 {
+            return Err(io::Error::last_os_error());
+        }
+    }
+    Ok(true)
 }
