@@ -108,6 +108,11 @@ impl SeerWindow {
                     (at + 1) % controls.len()
                 };
                 window.focus(controls[next]);
+                match next {
+                    1 => self.appearance.scroll.scroll_to_item(0),
+                    2 | 3 => self.appearance.scroll.scroll_to_item(2),
+                    _ => {}
+                }
             }
             _ => {}
         }
@@ -144,6 +149,7 @@ impl SeerWindow {
             self.appearance.fallback = false;
             if self.appearance.reset.is_focused(window) {
                 window.focus(&self.appearance.choose);
+                self.appearance.scroll.scroll_to_item(2);
             }
         }
         cx.notify();

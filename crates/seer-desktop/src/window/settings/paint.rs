@@ -22,6 +22,7 @@ impl SeerWindow {
         }
         let opacity = motion.value();
         let compact = window.viewport_size().width < px(600.);
+        let narrow = window.viewport_size().width < px(480.);
         let inset = if compact { 20. } else { 24. };
         let width = 720_f32.min(f32::from(window.viewport_size().width) - 32.);
         let height = 400_f32.min(f32::from(window.viewport_size().height) - 48.);
@@ -75,6 +76,7 @@ impl SeerWindow {
                             .flex()
                             .items_center()
                             .gap(px(16.))
+                            .when(narrow, |header| header.gap(px(12.)))
                             .child(
                                 div()
                                     .flex_1()
@@ -109,17 +111,20 @@ impl SeerWindow {
                     .child(
                         div()
                             .id("settings-content")
+                            .debug_selector(|| "settings-content".into())
                             .mt(px(20.))
                             .mx(px(-4.))
                             .p(px(4.))
                             .flex_1()
                             .min_h_0()
                             .overflow_y_scroll()
+                            .track_scroll(&self.appearance.scroll)
                             .flex()
                             .flex_col()
-                            .gap(px(24.))
-                            .child(self.glass_control(window, cx))
-                            .child(self.picture_control(window, cx))
+                            .gap(px(12.))
+                            .child(self.glass_control(window, cx).mb(px(12.)))
+                            .child(self.picture_control())
+                            .child(self.picture_actions(window, cx))
                             .children(
                                 self.appearance
                                     .error
@@ -145,15 +150,18 @@ impl SeerWindow {
 
     fn glass_control(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let enabled = self.appearance.settings.glass;
+        let narrow = window.viewport_size().width < px(480.);
         div()
             .flex_none()
             .flex()
             .items_center()
             .gap(px(16.))
+            .when(narrow, |row| row.flex_col().items_start().gap(px(12.)))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
+                    .when(narrow, |text| text.flex_none().w_full())
                     .child(div().font_weight(FontWeight::MEDIUM).child("Dark glass"))
                     .child(detail("A soft picture behind the window.")),
             )
@@ -188,7 +196,7 @@ impl SeerWindow {
             )
     }
 
-    fn picture_control(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+    fn picture_control(&self) -> Div {
         let appearance = &self.appearance;
         let picture = appearance
             .settings
@@ -214,47 +222,48 @@ impl SeerWindow {
                         .debug_selector(|| "picture-fallback".into()),
                 )
             })
+    }
+
+    fn picture_actions(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let appearance = &self.appearance;
+        let narrow = window.viewport_size().width < px(480.);
+        div()
+            .flex_none()
+            .flex()
+            .flex_wrap()
+            .gap(px(8.))
             .child(
-                div()
-                    .mt(px(12.))
-                    .flex()
-                    .flex_wrap()
-                    .gap(px(8.))
-                    .child(
-                        button(
-                            "choose-picture",
-                            if appearance.busy {
-                                "Loading..."
-                            } else {
-                                "Choose picture"
-                            },
-                            &appearance.choose,
-                            None,
-                            self.keys.mode,
-                            window,
-                        )
-                        .when(appearance.busy, |button| button.opacity(0.6))
-                        .on_click(
-                            cx.listener(|view, _, window, cx| view.choose_picture(window, cx)),
-                        ),
-                    )
-                    .when(appearance.settings.picture.is_some(), |actions| {
-                        actions.child(
-                            button(
-                                "default-picture",
-                                "Use default",
-                                &appearance.reset,
-                                None,
-                                self.keys.mode,
-                                window,
-                            )
-                            .when(appearance.busy, |button| button.opacity(0.6))
-                            .on_click(
-                                cx.listener(|view, _, window, cx| view.reset_picture(window, cx)),
-                            ),
-                        )
-                    }),
+                button(
+                    "choose-picture",
+                    if appearance.busy {
+                        "Loading..."
+                    } else {
+                        "Choose picture"
+                    },
+                    &appearance.choose,
+                    None,
+                    self.keys.mode,
+                    window,
+                )
+                .when(narrow, |button| button.px(px(8.)))
+                .when(appearance.busy, |button| button.opacity(0.6))
+                .on_click(cx.listener(|view, _, window, cx| view.choose_picture(window, cx))),
             )
+            .when(appearance.settings.picture.is_some(), |actions| {
+                actions.child(
+                    button(
+                        "default-picture",
+                        "Use default",
+                        &appearance.reset,
+                        None,
+                        self.keys.mode,
+                        window,
+                    )
+                    .when(narrow, |button| button.px(px(8.)))
+                    .when(appearance.busy, |button| button.opacity(0.6))
+                    .on_click(cx.listener(|view, _, window, cx| view.reset_picture(window, cx))),
+                )
+            })
     }
 }
 

@@ -82,6 +82,36 @@ fn settings_dialog_dismissal_returns_input_to_the_terminal(cx: &mut TestAppConte
     }
 }
 
+#[gpui::test]
+fn narrow_settings_keeps_each_keyboard_control_in_view(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    std::fs::write(
+        runtime.directory.path().join("settings.toml"),
+        "glass = true\npicture = '/missing/a-long-missing-background-picture.jpg'\n",
+    )
+    .unwrap();
+    let (_, cx) = open_view(&runtime, cx);
+    cx.simulate_resize(size(px(321.), px(484.)));
+    cx.run_until_parked();
+    click(cx, "settings-trigger");
+    for (key, id) in [
+        ("tab", "glass-toggle"),
+        ("tab", "choose-picture"),
+        ("tab", "default-picture"),
+        ("shift-tab", "choose-picture"),
+        ("shift-tab", "glass-toggle"),
+    ] {
+        cx.simulate_keystrokes(key);
+        cx.run_until_parked();
+        let viewport = cx.debug_bounds("settings-content").unwrap();
+        let control = cx.debug_bounds(id).unwrap();
+        assert!(
+            viewport.contains(&control.origin) && viewport.contains(&control.bottom_right()),
+            "{id} must be fully visible: {control:?} inside {viewport:?}"
+        );
+    }
+}
+
 fn click(cx: &mut VisualTestContext, id: &'static str) {
     let bounds = cx.debug_bounds(id).expect("control must be visible");
     cx.simulate_click(bounds.center(), Modifiers::default());

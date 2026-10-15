@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use gpui::{App, FocusHandle, Global, RenderImage, Window};
+use gpui::{App, FocusHandle, Global, RenderImage, ScrollHandle, Window};
 use seer::Settings;
 
 use crate::{backdrop, motion::Motion};
@@ -22,6 +22,7 @@ pub(crate) struct Appearance {
     pub(crate) choose: FocusHandle,
     pub(crate) reset: FocusHandle,
     pub(crate) return_focus: Option<FocusHandle>,
+    pub(crate) scroll: ScrollHandle,
 }
 
 impl Appearance {
@@ -58,6 +59,7 @@ impl Appearance {
             choose: cx.focus_handle().tab_stop(true),
             reset: cx.focus_handle().tab_stop(true),
             return_focus: None,
+            scroll: ScrollHandle::new(),
         };
         if appearance.settings.glass {
             appearance.load_picture();
