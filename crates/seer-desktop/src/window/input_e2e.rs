@@ -22,7 +22,7 @@ impl Runtime {
         Self::start_with_output("Ready\r\n")
     }
 
-    fn start_with_output(output: &str) -> Self {
+    pub(super) fn start_with_output(output: &str) -> Self {
         let directory = tempfile::Builder::new()
             .prefix("s449")
             .tempdir_in("/tmp")
@@ -188,7 +188,7 @@ fn click_overlay_action(cx: &mut gpui::VisualTestContext, selector: &'static str
     cx.simulate_click(position, gpui::Modifiers::default());
 }
 
-fn exercise_overlay_pointer(
+pub(super) fn exercise_overlay_pointer(
     cx: &mut gpui::VisualTestContext,
     overlay: &'static str,
     terminal: gpui::Point<gpui::Pixels>,
@@ -339,6 +339,7 @@ pub(super) fn open_view<'a>(
             keys,
             input: Input::new(window, cx),
             rows: Rows::default(),
+            appearance: crate::appearance::Appearance::load(Some(runtime.directory.path().join("settings.toml")), cx),
             room: {
                 let server: seer::ServerEntry = serde_json::from_value(serde_json::json!({"endpoint":"localhost:1", "alias":"E2e", "user_id":"e2e", "name":"E2e", "credential":"e2e", "current":true})).unwrap();
                 let mut room = room::RoomUi::new(Some(server.clone()), cx);

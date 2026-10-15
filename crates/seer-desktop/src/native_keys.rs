@@ -23,7 +23,7 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
         let handled = app
             .update_window(handle, |_, window, cx| {
                 view.update(cx, |view, cx| {
-                    if !window.is_window_active() || view.invite_open() {
+                    if !window.is_window_active() || view.invite_open() || view.settings_open() {
                         return false;
                     }
                     if view.room_key(&key, window, cx) {

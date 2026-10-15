@@ -6,6 +6,7 @@ edition.workspace = true
 [dependencies]
 futures = "0.3"
 gpui = "=0.2.2"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 serde_json = "1"
 seer = { path = "../seer" }
 seer-core = { path = "../seer-core" }

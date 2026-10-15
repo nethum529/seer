@@ -214,7 +214,7 @@ impl Render for Join {
             .size_full()
             .flex()
             .flex_col()
-            .child(chrome::bar().pl(px(20.)).child(chrome::lights()))
+            .child(chrome::bar(cx).pl(px(20.)).child(chrome::lights()))
             .child(
                 div()
                     .flex_1()

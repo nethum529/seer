@@ -99,9 +99,9 @@ pub(crate) fn sidebar(
         .flex()
         .flex_col()
         .px(px(8.))
-        .bg(rgb(palette::SURFACE))
+        .bg(crate::appearance::fill(palette::SURFACE, cx))
         .border_r_1()
-        .border_color(rgb(palette::LINE))
+        .border_color(crate::appearance::fill(palette::LINE, cx))
         .child(
             div()
                 .flex_none()
@@ -268,9 +268,9 @@ pub(crate) fn strip(
         .py(px(6.))
         .px(px(STRIP_PAD))
         .overflow_x_scroll()
-        .bg(rgb(palette::SURFACE))
+        .bg(crate::appearance::fill(palette::SURFACE, cx))
         .border_b_1()
-        .border_color(rgb(palette::LINE))
+        .border_color(crate::appearance::fill(palette::LINE, cx))
         .children(terminals.iter().map(|terminal| {
             let on = shown == Some(terminal.pane.as_str());
             let help = tip::terminal_help(&rename::display_name(terminal));

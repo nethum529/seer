@@ -156,7 +156,7 @@ impl SeerWindow {
         let left = if narrow { 74. } else { 8. };
         let top = if narrow { 48. } else { 84. };
         let left = px(left).min((window.viewport_size().width - px(288.)).max(px(8.)));
-        let panel = menu::panel("people-menu", 280.)
+        let panel = menu::panel("people-menu", 280., cx)
             .absolute()
             .left(left)
             .top(px(top))
@@ -407,21 +407,5 @@ fn share_switch(
         .child("Share control")
         .child(div().flex_1())
         .when(keyboard, |row| row.child("Space"))
-        .child(
-            div()
-                .w(px(32.))
-                .h(px(18.))
-                .flex_none()
-                .rounded(px(9.))
-                .p(px(2.))
-                .bg(rgb(if on { palette::ACCENT } else { palette::LINE_2 }))
-                .flex()
-                .items_center()
-                .when(on, |track| track.justify_end())
-                .child(div().size(px(14.)).rounded(px(7.)).bg(rgb(if on {
-                    palette::ON_ACCENT
-                } else {
-                    palette::TEXT
-                }))),
-        )
+        .child(menu::switch_track(on))
 }

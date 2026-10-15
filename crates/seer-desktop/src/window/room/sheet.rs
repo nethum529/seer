@@ -22,19 +22,8 @@ impl SeerWindow {
             Confirmation::Room(action, _) => action_label(*action),
             Confirmation::Terminal { .. } => "Close terminal",
         };
-        let card = div()
-            .id("room-confirm")
-            .debug_selector(|| "room-confirm".into())
-            .relative()
-            .w(px(width))
+        let card = menu::sheet("room-confirm", width, cx)
             .p(px(20.))
-            .rounded(px(14.))
-            .border_1()
-            .border_color(rgb(palette::LINE_2))
-            .bg(rgb(palette::RAISED))
-            .shadow(menu::shadow(24., 64.))
-            .text_size(px(13.))
-            .line_height(px(18.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
@@ -58,11 +47,11 @@ impl SeerWindow {
                     .justify_end()
                     .gap(px(8.))
                     .child(
-                        button(
+                        menu::button(
                             "room-cancel",
                             "Cancel",
                             &sheet.cancel,
-                            false,
+                            None,
                             self.keys.mode,
                             window,
                         )
@@ -75,7 +64,7 @@ impl SeerWindow {
                         )),
                     )
                     .child(
-                        button(
+                        menu::button(
                             "room-confirm-action",
                             if self.room.pending {
                                 "Working..."
@@ -83,7 +72,7 @@ impl SeerWindow {
                                 label
                             },
                             &sheet.confirm,
-                            true,
+                            Some(palette::DANGER),
                             self.keys.mode,
                             window,
                         )
@@ -99,15 +88,7 @@ impl SeerWindow {
                     ),
             );
         Some(
-            div()
-                .id("room-scrim")
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(16.))
-                .bg(gpui::rgba(palette::SCRIM))
+            menu::scrim("room-scrim")
                 .opacity(sheet.motion.value())
                 .on_mouse_down(
                     MouseButton::Left,
@@ -156,53 +137,6 @@ impl SeerWindow {
             }
         }
     }
-}
-
-fn button(
-    id: &'static str,
-    text: &'static str,
-    focus: &FocusHandle,
-    destructive: bool,
-    mode: Mode,
-    window: &Window,
-) -> Stateful<Div> {
-    let ring = mode == Mode::Keyboard && focus.is_focused(window);
-    div()
-        .id(id)
-        .debug_selector(move || id.into())
-        .relative()
-        .track_focus(focus)
-        .h(px(32.))
-        .px(px(14.))
-        .rounded(px(8.))
-        .flex()
-        .items_center()
-        .justify_center()
-        .font_weight(FontWeight::MEDIUM)
-        .bg(rgb(if destructive {
-            palette::DANGER
-        } else {
-            palette::CHIP
-        }))
-        .text_color(rgb(if destructive {
-            palette::ON_ACCENT
-        } else {
-            palette::TEXT
-        }))
-        .when(ring, |button| {
-            button.child(sidebar::outline().when(destructive, |outline| {
-                outline
-                    .top(px(-3.))
-                    .bottom(px(-3.))
-                    .left(px(-3.))
-                    .right(px(-3.))
-                    .rounded(px(11.))
-            }))
-        })
-        .hover(|button| button.opacity(0.92))
-        .active(|button| button.opacity(0.84))
-        .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(text)
 }
 
 fn confirm_copy(action: RoomAction, room: &RoomSummary) -> (String, String) {

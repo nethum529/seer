@@ -1,0 +1,64 @@
+use std::{
+    fs::File,
+    io::{self, Cursor, Read},
+    path::Path,
+    sync::{Arc, OnceLock},
+};
+
+use gpui::RenderImage;
+use image::{DynamicImage, Frame, ImageDecoder, ImageReader, Limits, imageops::FilterType};
+
+static DEFAULT: OnceLock<Option<Arc<RenderImage>>> = OnceLock::new();
+
+pub(crate) fn default_picture() -> Option<Arc<RenderImage>> {
+    DEFAULT
+        .get_or_init(|| decode(include_bytes!("../assets/backdrop.jpg")).ok())
+        .clone()
+}
+
+pub(crate) fn read(path: &Path) -> io::Result<Arc<RenderImage>> {
+    let mut bytes = Vec::new();
+    File::open(path)?
+        .take(32 * 1024 * 1024 + 1)
+        .read_to_end(&mut bytes)?;
+    if bytes.len() > 32 * 1024 * 1024 {
+        return Err(io::Error::other("Picture is too large"));
+    }
+    decode(&bytes)
+}
+
+fn decode(bytes: &[u8]) -> io::Result<Arc<RenderImage>> {
+    let mut reader = ImageReader::new(Cursor::new(bytes)).with_guessed_format()?;
+    let mut limits = Limits::default();
+    limits.max_alloc = Some(64 * 1024 * 1024);
+    reader.limits(limits.clone());
+    let mut decoder = reader.into_decoder().map_err(io::Error::other)?;
+    limits
+        .reserve(decoder.total_bytes())
+        .map_err(io::Error::other)?;
+    decoder.set_limits(limits).map_err(io::Error::other)?;
+    let orientation = decoder.orientation().map_err(io::Error::other)?;
+    let mut image = DynamicImage::from_decoder(decoder).map_err(io::Error::other)?;
+    image.apply_orientation(orientation);
+    Ok(prepare(image))
+}
+
+fn prepare(image: DynamicImage) -> Arc<RenderImage> {
+    // GPUI 0.2.2 has no backdrop filter. Prepare the glass once, before upload.
+    let mut pixels = image
+        .resize(2560, 2160, FilterType::Triangle)
+        .fast_blur(12.)
+        .to_rgba8();
+    for pixel in pixels.pixels_mut() {
+        let [r, g, b, alpha] = pixel.0.map(f32::from);
+        let gray = r * 0.2126 + g * 0.7152 + b * 0.0722;
+        for channel in &mut pixel.0[..3] {
+            let saturated = gray + (f32::from(*channel) - gray) * 1.17;
+            let contrasted = (saturated - 127.5) * 0.89 + 127.5;
+            *channel = (contrasted * alpha / 255. * 0.18).clamp(0., 255.) as u8;
+        }
+        pixel.0[3] = 255;
+        pixel.0.swap(0, 2);
+    }
+    Arc::new(RenderImage::new(vec![Frame::new(pixels)]))
+}

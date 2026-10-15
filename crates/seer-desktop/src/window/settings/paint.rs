@@ -1,0 +1,275 @@
+use super::*;
+use crate::menu::{self, button};
+use gpui::AnyElement;
+
+impl SeerWindow {
+    pub(in crate::window) fn settings_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if self
+            .appearance
+            .motion
+            .as_ref()
+            .is_some_and(|motion| motion.gone())
+        {
+            self.appearance.motion = None;
+        }
+        let motion = self.appearance.motion.as_ref()?;
+        if motion.animating() {
+            cx.on_next_frame(window, |_, _, cx| cx.notify());
+        }
+        let opacity = motion.value();
+        let compact = window.viewport_size().width < px(600.);
+        let narrow = window.viewport_size().width < px(480.);
+        let inset = if compact { 20. } else { 24. };
+        let width = 720_f32.min(f32::from(window.viewport_size().width) - 32.);
+        let height = 400_f32.min(f32::from(window.viewport_size().height) - 48.);
+        let card = menu::sheet("settings-dialog", width, cx)
+            .h(px(height))
+            .flex()
+            .overflow_hidden()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .child(
+                div()
+                    .flex_none()
+                    .w(px(if compact { 120. } else { 176. }))
+                    .py(px(inset))
+                    .px(px(if compact { 12. } else { 16. }))
+                    .border_r_1()
+                    .border_color(crate::appearance::fill(palette::LINE_2, cx))
+                    .child(
+                        div()
+                            .h(px(32.))
+                            .px(px(8.))
+                            .flex()
+                            .items_center()
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Settings"),
+                    )
+                    .child(
+                        div()
+                            .id("settings-appearance")
+                            .debug_selector(|| "settings-appearance".into())
+                            .mt(px(16.))
+                            .h(px(32.))
+                            .px(px(8.))
+                            .rounded(px(8.))
+                            .bg(rgb(palette::CHIP))
+                            .flex()
+                            .items_center()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Appearance"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .p(px(inset))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(16.))
+                            .when(narrow, |header| header.gap(px(12.)))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Appearance"),
+                            )
+                            .child(
+                                button(
+                                    "settings-close",
+                                    "",
+                                    &self.appearance.close,
+                                    None,
+                                    self.keys.mode,
+                                    window,
+                                )
+                                .w(px(32.))
+                                .px(px(0.))
+                                .bg(gpui::rgba(0))
+                                .child(chrome::icon("close", palette::FAINT))
+                                .on_click(cx.listener(
+                                    |view, event, window, cx| {
+                                        view.close_settings(
+                                            matches!(event, gpui::ClickEvent::Keyboard(_)),
+                                            window,
+                                            cx,
+                                        )
+                                    },
+                                )),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("settings-content")
+                            .debug_selector(|| "settings-content".into())
+                            .mt(px(20.))
+                            .mx(px(-4.))
+                            .p(px(4.))
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .track_scroll(&self.appearance.scroll)
+                            .flex()
+                            .flex_col()
+                            .gap(px(12.))
+                            .child(self.glass_control(window, cx).mb(px(12.)))
+                            .child(self.picture_control())
+                            .child(self.picture_actions(window, cx))
+                            .children(
+                                self.appearance
+                                    .error
+                                    .as_ref()
+                                    .map(|error| detail(error).text_color(rgb(palette::DANGER))),
+                            ),
+                    ),
+            );
+        Some(
+            menu::scrim("settings-scrim")
+                .opacity(opacity)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|view, _, window, cx| {
+                        view.close_settings(false, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(card)
+                .into_any_element(),
+        )
+    }
+
+    fn glass_control(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let enabled = self.appearance.settings.glass;
+        let narrow = window.viewport_size().width < px(480.);
+        div()
+            .flex_none()
+            .flex()
+            .items_center()
+            .gap(px(16.))
+            .when(narrow, |row| row.flex_col().items_start().gap(px(12.)))
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .when(narrow, |text| text.flex_none().w_full())
+                    .child(div().font_weight(FontWeight::MEDIUM).child("Dark glass"))
+                    .child(detail("A soft picture behind the window.")),
+            )
+            .child(
+                div()
+                    .id("glass-toggle")
+                    .debug_selector(|| "glass-toggle".into())
+                    .track_focus(&self.appearance.toggle)
+                    .relative()
+                    .h(px(32.))
+                    .px(px(6.))
+                    .rounded(px(8.))
+                    .flex_none()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .cursor_pointer()
+                    .hover(|control| control.opacity(0.92))
+                    .active(|control| control.opacity(0.84))
+                    .when(self.keys.ring(&self.appearance.toggle, window), |control| {
+                        control.child(sidebar::outline())
+                    })
+                    .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+                    .child(
+                        div()
+                            .w(px(24.))
+                            .text_color(rgb(palette::MUTED))
+                            .child(if enabled { "On" } else { "Off" }),
+                    )
+                    .child(crate::menu::switch_track(enabled))
+                    .on_click(cx.listener(|view, _, _, cx| view.toggle_glass(cx))),
+            )
+    }
+
+    fn picture_control(&self) -> Div {
+        let appearance = &self.appearance;
+        let picture = appearance
+            .settings
+            .picture
+            .as_ref()
+            .and_then(|path| path.file_name())
+            .map_or_else(
+                || "Default picture".to_owned(),
+                |name| name.to_string_lossy().into_owned(),
+            );
+        div()
+            .flex_none()
+            .child(
+                div()
+                    .font_weight(FontWeight::MEDIUM)
+                    .child("Background picture"),
+            )
+            .child(detail(&picture))
+            .when(appearance.fallback, |row| {
+                row.child(
+                    detail("Picture unavailable. Using the default picture.")
+                        .id("picture-fallback")
+                        .debug_selector(|| "picture-fallback".into()),
+                )
+            })
+    }
+
+    fn picture_actions(&self, window: &Window, cx: &mut Context<Self>) -> Div {
+        let appearance = &self.appearance;
+        let narrow = window.viewport_size().width < px(480.);
+        div()
+            .flex_none()
+            .flex()
+            .flex_wrap()
+            .gap(px(8.))
+            .child(
+                button(
+                    "choose-picture",
+                    if appearance.busy {
+                        "Loading..."
+                    } else {
+                        "Choose picture"
+                    },
+                    &appearance.choose,
+                    None,
+                    self.keys.mode,
+                    window,
+                )
+                .when(narrow, |button| button.px(px(8.)))
+                .when(appearance.busy, |button| button.opacity(0.6))
+                .on_click(cx.listener(|view, _, window, cx| view.choose_picture(window, cx))),
+            )
+            .when(appearance.settings.picture.is_some(), |actions| {
+                actions.child(
+                    button(
+                        "default-picture",
+                        "Use default",
+                        &appearance.reset,
+                        None,
+                        self.keys.mode,
+                        window,
+                    )
+                    .when(narrow, |button| button.px(px(8.)))
+                    .when(appearance.busy, |button| button.opacity(0.6))
+                    .on_click(cx.listener(|view, _, window, cx| view.reset_picture(window, cx))),
+                )
+            })
+    }
+}
+
+fn detail(text: &str) -> Div {
+    div()
+        .mt(px(4.))
+        .text_color(rgb(palette::MUTED))
+        .child(text.to_owned())
+}

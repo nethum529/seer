@@ -1,7 +1,9 @@
 use super::*;
+use gpui::StyledImage;
 
 impl Render for SeerWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        cx.set_global(crate::appearance::Glass(self.appearance.settings.glass));
         // gpui starts a tip only on a mouse move that the tooltip listener
         // gets, so the tips come back in the frame after Escape clears them.
         if self.keys.mode == Mode::Quiet {
@@ -31,9 +33,30 @@ impl Render for SeerWindow {
             .on_action(cx.listener(Self::show_invite))
             .capture_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                 view.travel(&event.keystroke, window, cx)
-            }));
+            }))
+            .when(self.appearance.settings.glass, |root| {
+                root.children(self.appearance.picture.as_ref().map(|picture| {
+                    gpui::img(picture.clone())
+                        .object_fit(gpui::ObjectFit::Cover)
+                        .absolute()
+                        .inset_0()
+                        .size_full()
+                }))
+            });
+        let settings = self.settings_dialog(window, cx);
         let (link, name) = match &self.content {
-            Content::Join(join) => return root.child(join.clone()),
+            Content::Join(join) => {
+                return root
+                    .child(join.clone())
+                    .child(
+                        div()
+                            .absolute()
+                            .right(px(8.))
+                            .top(px(6.))
+                            .child(self.settings_button(window, cx)),
+                    )
+                    .children(settings);
+            }
             Content::Message(message) => {
                 let content = if self.room.server.is_some() {
                     self.empty_room(message, window, cx)
@@ -51,7 +74,8 @@ impl Render for SeerWindow {
                 return root
                     .child(content)
                     .children(self.room_overlays(window, cx))
-                    .children(self.invite.as_ref().map(|sheet| sheet.view.clone()));
+                    .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
+                    .children(settings);
             }
             Content::Terminal(link, name) => (link, name),
         };
@@ -101,7 +125,7 @@ impl Render for SeerWindow {
                         .flex()
                         .flex_col()
                         .child(
-                            chrome::bar()
+                            chrome::bar(cx)
                                 .gap(px(8.))
                                 .pl(px(14.))
                                 .pr(px(8.))
@@ -145,7 +169,7 @@ impl Render for SeerWindow {
                                             cx,
                                         ))
                                         .when(readonly, |bar| bar.child(people::control(can_input)))
-                                        .child(chrome::settings()),
+                                        .child(self.settings_button(window, cx)),
                                 ),
                         )
                         .when(!terminals.is_empty(), |main| {
@@ -158,7 +182,8 @@ impl Render for SeerWindow {
                 .children(self.menu(window, cx))
                 .children(self.people_menu(window, cx))
                 .children(self.room_overlays(window, cx))
-                .children(self.invite.as_ref().map(|sheet| sheet.view.clone()));
+                .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
+                .children(settings);
         }
         let title = terminals
             .iter()
@@ -182,7 +207,11 @@ impl Render for SeerWindow {
             }),
         );
         let side = sidebar::sidebar(who, terminals, shown, labels, &self.keys, window, cx).child(
-            chrome::footer(self.room_button(link.room(), false, window, cx)),
+            chrome::footer(
+                self.room_button(link.room(), false, window, cx),
+                self.settings_button(window, cx),
+                cx,
+            ),
         );
         let title = heading(
             title.as_ref(),
@@ -192,7 +221,7 @@ impl Render for SeerWindow {
             self.keys.hover(),
             cx,
         );
-        let heading = chrome::bar()
+        let heading = chrome::bar(cx)
             .relative()
             .justify_center()
             .px(px(14.))
@@ -224,6 +253,7 @@ impl Render for SeerWindow {
             .children(self.people_menu(window, cx))
             .children(self.room_overlays(window, cx))
             .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
+            .children(settings)
     }
 }
 

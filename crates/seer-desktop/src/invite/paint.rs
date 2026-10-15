@@ -49,7 +49,7 @@ impl InviteSheet {
             .gap(px(2.))
             .rounded(px(8.))
             .border_1()
-            .border_color(rgb(palette::LINE_2))
+            .border_color(crate::appearance::fill(palette::LINE_2, cx))
             .bg(rgb(palette::WINDOW))
             .children(
                 ["1 hour", "1 day", "7 days", "Custom"]
@@ -173,7 +173,7 @@ impl InviteSheet {
                         .px(px(11.))
                         .rounded(px(8.))
                         .border_1()
-                        .border_color(rgb(palette::LINE_2))
+                        .border_color(crate::appearance::fill(palette::LINE_2, cx))
                         .bg(rgb(palette::WINDOW))
                         .flex()
                         .items_center()
@@ -310,8 +310,8 @@ impl Render for InviteSheet {
                     .relative()
                     .rounded(px(14.))
                     .border_1()
-                    .border_color(rgb(palette::LINE_2))
-                    .bg(rgb(palette::RAISED))
+                    .border_color(crate::appearance::fill(palette::LINE_2, cx))
+                    .bg(crate::appearance::fill(palette::RAISED, cx))
                     .shadow(crate::menu::shadow(24., 64.))
                     .on_mouse_down_out(cx.listener(|sheet, _, _, cx| {
                         sheet.close(false, cx);

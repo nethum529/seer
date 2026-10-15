@@ -80,7 +80,7 @@ impl SeerWindow {
             .clamp(px(8.), (viewport.width - px(width) - px(8.)).max(px(8.)));
         let height = viewport.height - px(68.);
         let up = anchor.top() > viewport.height / 2.;
-        let panel = menu::panel("room-menu", width)
+        let panel = menu::panel("room-menu", width, cx)
             .debug_selector(|| "room-menu".into())
             .absolute()
             .left(left)
@@ -180,7 +180,7 @@ impl SeerWindow {
             .flex()
             .flex_col()
             .child(
-                chrome::bar()
+                chrome::bar(cx)
                     .gap(px(8.))
                     .pl(px(14.))
                     .pr(px(8.))
@@ -208,7 +208,7 @@ impl SeerWindow {
                                     .items_center()
                                     .gap(px(2.))
                                     .child(self.room_button(&name, true, window, cx))
-                                    .child(chrome::settings()),
+                                    .child(self.settings_button(window, cx)),
                             )
                     })
                     .when(!narrow, |bar| {
@@ -259,9 +259,9 @@ impl SeerWindow {
                     .flex()
                     .flex_col()
                     .px(px(8.))
-                    .bg(rgb(palette::SURFACE))
+                    .bg(crate::appearance::fill(palette::SURFACE, cx))
                     .border_r_1()
-                    .border_color(rgb(palette::LINE))
+                    .border_color(crate::appearance::fill(palette::LINE, cx))
                     .child(
                         div()
                             .h(px(44.))
@@ -285,7 +285,7 @@ impl SeerWindow {
                         .pr(px(8.)),
                     )
                     .child(div().flex_1())
-                    .child(chrome::footer(button)),
+                    .child(chrome::footer(button, self.settings_button(window, cx), cx)),
             )
             .child(main)
     }

@@ -3,7 +3,9 @@ use gpui::{
     WindowOptions, point, px, size,
 };
 
+mod appearance;
 mod assets;
+mod backdrop;
 mod cap_icon;
 mod chrome;
 mod composition;
