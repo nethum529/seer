@@ -115,10 +115,11 @@ fn typed_exit_in_a_seer_shell_leaves_seer_and_keeps_the_shell() {
             continue;
         };
         let root = Root::new(&format!("typed-{shell}"));
-        // Prompt setup in a user .zshrc can replace all zsh prompt hooks.
+        // A user .zshrc can replace all zsh prompt hooks and scheduled events.
         fs::write(
             root.0.join(".zshrc"),
-            "my_prompt() { :; }\nprecmd_functions=(my_prompt)\n",
+            "my_prompt() { :; }\nprecmd_functions=(my_prompt)\n\
+             zmodload zsh/sched\nsched +3600 :\nsched -1\n",
         )
         .expect("zshrc must be written");
         let directory = root.0.join("state-home/seer/runtimes").join(USER);
