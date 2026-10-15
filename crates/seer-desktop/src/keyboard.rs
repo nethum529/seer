@@ -16,8 +16,17 @@ pub(crate) fn event(key: &Keystroke) -> Option<InputEvent> {
     if held.platform {
         return None;
     }
-    if let Some(text) = control_key(key) {
-        return Some(InputEvent::Text(text));
+    if let Some(code) = text_key(&key.key) {
+        return Some(native_key(key, code));
+    }
+    if key.key == "keypadenter" {
+        let text = keypad_enter(key)?;
+        let prefix = if held.alt && !cfg!(target_os = "macos") {
+            "\x1b"
+        } else {
+            ""
+        };
+        return Some(InputEvent::Text(format!("{prefix}{text}")));
     }
     if let Some(code) = named_key(&key.key) {
         return Some(InputEvent::Key(KeyInput {
@@ -25,42 +34,45 @@ pub(crate) fn event(key: &Keystroke) -> Option<InputEvent> {
             modifiers: modifiers(held),
         }));
     }
-    if held.control && cfg!(target_os = "macos") {
-        return key.key_char.clone().map(InputEvent::Text);
-    }
     if held.control && (key.key == "space" || key.key.chars().count() == 1) {
         let character = if key.key == "space" {
             ' '
         } else {
             key.key.chars().next()?
         };
-        return Some(InputEvent::Key(KeyInput {
-            code: KeyCode::Char(character),
-            modifiers: modifiers(held),
-        }));
+        return Some(native_key(key, KeyCode::Char(character)));
+    }
+    if held.control && cfg!(target_os = "macos") {
+        return key.key_char.clone().map(InputEvent::Text);
     }
     if held.alt && !cfg!(target_os = "macos") && key.key_char.is_some() {
         let text = key.key_char.as_deref().unwrap_or(&key.key);
+        if key.key.chars().count() == 1 {
+            return Some(native_key(key, KeyCode::Char(key.key.chars().next()?)));
+        }
         return Some(InputEvent::Text(format!("\x1b{text}")));
     }
     None
 }
 
-fn control_key(key: &Keystroke) -> Option<String> {
-    let held = key.modifiers;
-    let text = match key.key.as_str() {
-        "enter" => "\r",
-        "keypadenter" => keypad_enter(key)?,
-        "backspace" if held.control && !cfg!(target_os = "macos") => "\x08",
-        "backspace" => "\x7f",
-        "tab" if held.shift && held.control && cfg!(target_os = "macos") => "\x19",
-        "tab" if held.shift && !held.control => "\x1b[Z",
-        "tab" => "\t",
-        "escape" => "\x1b",
+fn native_key(key: &Keystroke, code: KeyCode) -> InputEvent {
+    InputEvent::KeyWithText {
+        key: KeyInput {
+            code,
+            modifiers: modifiers(key.modifiers),
+        },
+        text: key.key_char.clone(),
+    }
+}
+
+fn text_key(key: &str) -> Option<KeyCode> {
+    Some(match key {
+        "enter" => KeyCode::Enter,
+        "backspace" => KeyCode::Backspace,
+        "tab" => KeyCode::Tab,
+        "escape" => KeyCode::Escape,
         _ => return None,
-    };
-    let prefix = if alt_prefix(key) { "\x1b" } else { "" };
-    Some(format!("{prefix}{text}"))
+    })
 }
 
 fn keypad_enter(key: &Keystroke) -> Option<&str> {
@@ -70,16 +82,6 @@ fn keypad_enter(key: &Keystroke) -> Option<&str> {
     } else {
         Some("\n")
     }
-}
-
-fn alt_prefix(key: &Keystroke) -> bool {
-    let held = key.modifiers;
-    let binding = match key.key.as_str() {
-        "backspace" => !held.shift && !held.control,
-        "tab" => held.shift && !held.control,
-        _ => false,
-    };
-    held.alt && (!cfg!(target_os = "macos") || binding)
 }
 
 fn named_key(key: &str) -> Option<KeyCode> {

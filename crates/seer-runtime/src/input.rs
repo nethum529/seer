@@ -1,7 +1,15 @@
 use alacritty_terminal::term::TermMode;
 use seer_core::{KeyCode, KeyInput, Modifiers, MouseButton, MouseInput, MouseKind};
 
+mod native;
+pub(crate) use native::encode_native_key;
+
 pub(crate) fn encode_key(key: KeyInput, mode: TermMode) -> Vec<u8> {
+    if mode.contains(TermMode::DISAMBIGUATE_ESC_CODES)
+        && let Some(bytes) = disambiguated_key(key)
+    {
+        return bytes;
+    }
     let bytes = match key.code {
         KeyCode::Char(character) => encode_character(character, key.modifiers),
         KeyCode::Backspace => modified_control(127, key.modifiers),
@@ -23,6 +31,29 @@ pub(crate) fn encode_key(key: KeyInput, mode: TermMode) -> Vec<u8> {
         KeyCode::Function(number) => function_key(number, key.modifiers),
     };
     add_alt_prefix(bytes, key.modifiers)
+}
+
+fn disambiguated_key(mut key: KeyInput) -> Option<Vec<u8>> {
+    if key.code == KeyCode::BackTab {
+        key.code = KeyCode::Tab;
+        key.modifiers.shift = true;
+    }
+    let mut without_shift = key.modifiers;
+    without_shift.shift = false;
+    let codepoint = match key.code {
+        KeyCode::Char(character) if has_modifiers(without_shift) => u32::from(character),
+        KeyCode::Escape => 27,
+        KeyCode::Backspace if has_modifiers(key.modifiers) => 127,
+        KeyCode::Enter if has_modifiers(key.modifiers) => 13,
+        KeyCode::Tab if has_modifiers(key.modifiers) => 9,
+        _ => return None,
+    };
+    let modifier = modifier_parameter(key.modifiers);
+    Some(if modifier == 1 {
+        format!("\x1b[{codepoint}u").into_bytes()
+    } else {
+        format!("\x1b[{codepoint};{modifier}u").into_bytes()
+    })
 }
 
 fn encode_character(character: char, modifiers: Modifiers) -> Vec<u8> {

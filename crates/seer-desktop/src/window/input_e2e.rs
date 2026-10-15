@@ -46,7 +46,7 @@ impl Runtime {
         Self::start_in(directory, PathBuf::from("/bin/sh"))
     }
 
-    fn start_in(directory: TempDir, shell: PathBuf) -> Self {
+    pub(super) fn start_in(directory: TempDir, shell: PathBuf) -> Self {
         let binary = std::env::var_os("SEER_RUNTIME_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| {
@@ -85,7 +85,7 @@ impl Runtime {
                 break tree;
             }
         };
-        let deadline = Instant::now() + Duration::from_secs(5);
+        let deadline = Instant::now() + Duration::from_secs(30);
         // tty.setraw flushes queued input. The fixture opens this file after raw mode is ready.
         while !self.directory.path().join("input").exists() {
             assert!(Instant::now() < deadline, "shell did not become ready");

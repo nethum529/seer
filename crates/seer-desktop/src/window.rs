@@ -360,6 +360,8 @@ fn open() -> io::Result<Option<Opened>> {
 }
 
 #[cfg(test)]
+mod edit_keys_e2e;
+#[cfg(test)]
 mod input_e2e;
 
 #[cfg(test)]

@@ -152,7 +152,7 @@ fn assert_remote_input(events: &[InputEvent]) {
             .any(|event| matches!(event, InputEvent::Text(text) if text == "a"))
     );
     assert!(events.iter().any(
-        |event| matches!(event, InputEvent::Key(key) if key.code == KeyCode::Enter)
+        |event| matches!(event, InputEvent::Key(key) | InputEvent::KeyWithText { key, .. } if key.code == KeyCode::Enter)
             || matches!(event, InputEvent::Text(text) if text == "\r")
     ));
     assert!(

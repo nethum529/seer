@@ -15,7 +15,7 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::input::{encode_key, encode_mouse};
+use crate::input::{encode_key, encode_mouse, encode_native_key};
 use crate::pty::lock_mutex;
 
 mod agent_screen;
@@ -47,6 +47,7 @@ impl PaneGrid {
         let dimensions = GridSize::new(cols, rows);
         let config = Config {
             scrolling_history: SCROLLBACK_LINES,
+            kitty_keyboard: true,
             ..Config::default()
         };
 
@@ -161,6 +162,9 @@ impl PaneGrid {
         let mode = *self.terminal.mode();
         match &input.event {
             InputEvent::Key(key) => Ok(Some(encode_key(*key, mode))),
+            InputEvent::KeyWithText { key, text } => {
+                Ok(Some(encode_native_key(*key, text.as_deref(), mode)))
+            }
             InputEvent::Text(text) => Ok(Some(text.as_bytes().to_vec())),
             InputEvent::Paste(text) => Ok(Some(encode_paste(text, mode))),
             InputEvent::Mouse(mouse) => Ok(self.handle_mouse(*mouse, mode)),
