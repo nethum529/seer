@@ -84,22 +84,24 @@ fn install_bash_login(command: &mut CommandBuilder, files: &Path, seer: &Path) -
     Ok(())
 }
 
-// zsh has no rcfile option. ZDOTDIR points at Seer's files, which load the
-// user's own files and then restore ZDOTDIR for child shells.
+// zsh has no rcfile option. ZDOTDIR points at Seer's .zshenv, which restores
+// ZDOTDIR first, so the user files and /etc/zshrc see the ZDOTDIR of a plain
+// zsh. Issue 501: macOS /etc/zshrc sets HISTFILE from ZDOTDIR. The exit
+// function is set at the first prompt, after the user files.
 fn install_zsh(command: &mut CommandBuilder, directory: &Path, seer: &Path) -> io::Result<()> {
-    let user_home = "${SEER_ZDOTDIR:-$HOME}";
-    let zshenv = format!("[ -f \"{user_home}/.zshenv\" ] && . \"{user_home}/.zshenv\"\n");
-    let zprofile = format!("[ -f \"{user_home}/.zprofile\" ] && . \"{user_home}/.zprofile\"\n");
-    let zshrc = format!(
+    let zshenv = format!(
         "if [ -n \"$SEER_ZDOTDIR\" ]; then ZDOTDIR=\"$SEER_ZDOTDIR\"; else unset ZDOTDIR; fi\n\
          unset SEER_ZDOTDIR\n\
-         [ -f \"${{ZDOTDIR:-$HOME}}/.zshrc\" ] && . \"${{ZDOTDIR:-$HOME}}/.zshrc\"\n\
-         exit() {{ {} exit; }}\n",
+         [ -f \"${{ZDOTDIR:-$HOME}}/.zshenv\" ] && . \"${{ZDOTDIR:-$HOME}}/.zshenv\"\n\
+         seer_exit_init() {{\n\
+         exit() {{ {} exit; }}\n\
+         precmd_functions=(${{precmd_functions:#seer_exit_init}})\n\
+         unfunction seer_exit_init\n\
+         }}\n\
+         precmd_functions+=(seer_exit_init)\n",
         posix_quote(seer)
     );
     write_private(directory, &directory.join(".zshenv"), &zshenv)?;
-    write_private(directory, &directory.join(".zprofile"), &zprofile)?;
-    write_private(directory, &directory.join(".zshrc"), &zshrc)?;
     if let Some(original) = env::var_os("ZDOTDIR") {
         command.env("SEER_ZDOTDIR", original);
     }
