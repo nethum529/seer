@@ -43,18 +43,19 @@ impl Render for SeerWindow {
                         .size_full()
                 }))
             });
-        if self.settings_open() {
-            return root.child(self.settings_page(window, cx));
-        }
+        let settings = self.settings_dialog(window, cx);
         let (link, name) = match &self.content {
             Content::Join(join) => {
-                return root.child(join.clone()).child(
-                    div()
-                        .absolute()
-                        .right(px(8.))
-                        .top(px(6.))
-                        .child(self.settings_button(window, cx)),
-                );
+                return root
+                    .child(join.clone())
+                    .child(
+                        div()
+                            .absolute()
+                            .right(px(8.))
+                            .top(px(6.))
+                            .child(self.settings_button(window, cx)),
+                    )
+                    .children(settings);
             }
             Content::Message(message) => {
                 let content = if self.room.server.is_some() {
@@ -73,7 +74,8 @@ impl Render for SeerWindow {
                 return root
                     .child(content)
                     .children(self.room_overlays(window, cx))
-                    .children(self.invite.as_ref().map(|sheet| sheet.view.clone()));
+                    .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
+                    .children(settings);
             }
             Content::Terminal(link, name) => (link, name),
         };
@@ -180,7 +182,8 @@ impl Render for SeerWindow {
                 .children(self.menu(window, cx))
                 .children(self.people_menu(window, cx))
                 .children(self.room_overlays(window, cx))
-                .children(self.invite.as_ref().map(|sheet| sheet.view.clone()));
+                .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
+                .children(settings);
         }
         let title = terminals
             .iter()
@@ -250,6 +253,7 @@ impl Render for SeerWindow {
             .children(self.people_menu(window, cx))
             .children(self.room_overlays(window, cx))
             .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
+            .children(settings)
     }
 }
 

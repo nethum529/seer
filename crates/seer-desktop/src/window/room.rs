@@ -101,7 +101,8 @@ impl RoomUi {
 
 impl SeerWindow {
     pub(crate) fn room_blocks_terminal_pointer(&self) -> bool {
-        self.room.menu.is_some()
+        self.appearance.motion.is_some()
+            || self.room.menu.is_some()
             || self.room.sheet.is_some()
             || self.people_menu.is_some()
             || self.invite_open()

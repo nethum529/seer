@@ -6,7 +6,7 @@ use std::{
 };
 
 use gpui::RenderImage;
-use image::{DynamicImage, Frame, ImageDecoder, ImageReader, Limits};
+use image::{DynamicImage, Frame, ImageDecoder, ImageReader, Limits, imageops::FilterType};
 
 static DEFAULT: OnceLock<Option<Arc<RenderImage>>> = OnceLock::new();
 
@@ -45,17 +45,17 @@ fn decode(bytes: &[u8]) -> io::Result<Arc<RenderImage>> {
 
 fn prepare(image: DynamicImage) -> Arc<RenderImage> {
     // GPUI 0.2.2 has no backdrop filter. Prepare the glass once, before upload.
-    let mut pixels = image.thumbnail(1600, 1200).blur(6.).to_rgba8();
-    let mut seed = 498_u32;
+    let mut pixels = image
+        .resize(2560, 2160, FilterType::Triangle)
+        .fast_blur(12.)
+        .to_rgba8();
     for pixel in pixels.pixels_mut() {
         let [r, g, b, alpha] = pixel.0.map(f32::from);
         let gray = r * 0.2126 + g * 0.7152 + b * 0.0722;
-        seed = seed.wrapping_mul(1664525).wrapping_add(1013904223);
-        let grain = ((seed >> 24) as f32 / 255. - 0.5) * 255. * 0.035;
         for channel in &mut pixel.0[..3] {
             let saturated = gray + (f32::from(*channel) - gray) * 1.17;
             let contrasted = (saturated - 127.5) * 0.89 + 127.5;
-            *channel = (contrasted * alpha / 255. * 0.18 + grain).clamp(0., 255.) as u8;
+            *channel = (contrasted * alpha / 255. * 0.18).clamp(0., 255.) as u8;
         }
         pixel.0[3] = 255;
         pixel.0.swap(0, 2);

@@ -22,7 +22,7 @@ impl Runtime {
         Self::start_with_output("Ready\r\n")
     }
 
-    fn start_with_output(output: &str) -> Self {
+    pub(super) fn start_with_output(output: &str) -> Self {
         let directory = tempfile::Builder::new()
             .prefix("s449")
             .tempdir_in("/tmp")
@@ -188,7 +188,7 @@ fn click_overlay_action(cx: &mut gpui::VisualTestContext, selector: &'static str
     cx.simulate_click(position, gpui::Modifiers::default());
 }
 
-fn exercise_overlay_pointer(
+pub(super) fn exercise_overlay_pointer(
     cx: &mut gpui::VisualTestContext,
     overlay: &'static str,
     terminal: gpui::Point<gpui::Pixels>,

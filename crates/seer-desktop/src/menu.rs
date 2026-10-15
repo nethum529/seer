@@ -19,6 +19,33 @@ pub(crate) fn panel(id: &'static str, width: f32, cx: &gpui::App) -> Stateful<Di
         .shadow(shadow(16., 40.))
 }
 
+pub(crate) fn sheet(id: &'static str, width: f32, cx: &gpui::App) -> Stateful<Div> {
+    div()
+        .id(id)
+        .debug_selector(move || id.into())
+        .relative()
+        .w(px(width))
+        .rounded(px(14.))
+        .border_1()
+        .border_color(crate::appearance::fill(palette::LINE_2, cx))
+        .bg(crate::appearance::fill(palette::RAISED, cx))
+        .shadow(shadow(24., 64.))
+        .text_size(px(13.))
+        .line_height(px(18.))
+}
+
+pub(crate) fn scrim(id: &'static str) -> Stateful<Div> {
+    div()
+        .id(id)
+        .absolute()
+        .inset_0()
+        .flex()
+        .items_center()
+        .justify_center()
+        .p(px(16.))
+        .bg(gpui::rgba(palette::SCRIM))
+}
+
 pub(crate) fn shadow(offset: f32, blur: f32) -> Vec<gpui::BoxShadow> {
     [(offset, blur), (2., 8.)]
         .map(|(offset, blur)| gpui::BoxShadow {

@@ -3,13 +3,16 @@ use std::{path::PathBuf, sync::Arc};
 use gpui::{RenderImage, StatefulInteractiveElement};
 
 use super::*;
-use crate::backdrop;
+use crate::{backdrop, motion::Motion};
 
 mod paint;
 
 impl SeerWindow {
     pub(crate) fn settings_open(&self) -> bool {
-        self.appearance.open
+        self.appearance
+            .motion
+            .as_ref()
+            .is_some_and(|motion| !motion.closing())
     }
 
     pub(super) fn settings_button(&self, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
@@ -19,7 +22,7 @@ impl SeerWindow {
                 .debug_selector(|| "settings-trigger".into()),
             "Settings".into(),
             self.ui_font.clone(),
-            self.keys.hover(),
+            self.keys.hover() && self.appearance.motion.is_none(),
         )
         .track_focus(&self.appearance.trigger)
         .relative()
@@ -30,10 +33,12 @@ impl SeerWindow {
             button.child(sidebar::outline())
         })
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .on_click(cx.listener(|view, _, window, cx| view.open_settings(window, cx)))
+        .on_click(cx.listener(|view, event, window, cx| {
+            view.open_settings(matches!(event, gpui::ClickEvent::Keyboard(_)), window, cx)
+        }))
     }
 
-    fn open_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+    fn open_settings(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.room.modal() || self.invite_open() {
             return;
         }
@@ -41,21 +46,34 @@ impl SeerWindow {
         self.menu = None;
         self.people_menu = None;
         self.close_room_menu(true, false, window, cx);
+        self.keys.mode = if keyboard {
+            Mode::Keyboard
+        } else {
+            Mode::Pointer
+        };
+        match &mut self.appearance.motion {
+            Some(motion) => motion.reopen(keyboard, 200),
+            motion => *motion = Some(Motion::open(keyboard, 200)),
+        }
         self.appearance.return_focus = window.focused(cx);
-        self.appearance.open = true;
         self.input.reset();
-        window.focus(&self.appearance.back);
+        window.focus(&self.appearance.close);
         cx.notify();
     }
 
-    fn close_settings(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        self.appearance.open = false;
-        window.focus(
+    fn close_settings(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if let Some(motion) = &mut self.appearance.motion {
+            motion.close(keyboard, 140);
+        }
+        let focus = if matches!(self.content, Content::Terminal(..)) {
+            &self.input.focus
+        } else {
             self.appearance
                 .return_focus
                 .as_ref()
-                .unwrap_or(&self.input.focus),
-        );
+                .unwrap_or(&self.input.focus)
+        };
+        window.focus(focus);
         cx.notify();
     }
 
@@ -65,15 +83,15 @@ impl SeerWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.appearance.open {
+        if !self.settings_open() {
             return false;
         }
         self.keys.mode = Mode::Keyboard;
         match key.key.as_str() {
-            "escape" => self.close_settings(window, cx),
+            "escape" => self.close_settings(true, window, cx),
             "tab" => {
                 let mut controls = vec![
-                    &self.appearance.back,
+                    &self.appearance.close,
                     &self.appearance.toggle,
                     &self.appearance.choose,
                 ];

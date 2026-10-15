@@ -3,7 +3,7 @@ use std::{path::PathBuf, sync::Arc};
 use gpui::{App, FocusHandle, Global, RenderImage, Window};
 use seer::Settings;
 
-use crate::backdrop;
+use crate::{backdrop, motion::Motion};
 
 pub(crate) struct Glass(pub(crate) bool);
 impl Global for Glass {}
@@ -14,10 +14,10 @@ pub(crate) struct Appearance {
     pub(crate) picture: Option<Arc<RenderImage>>,
     pub(crate) fallback: bool,
     pub(crate) error: Option<String>,
-    pub(crate) open: bool,
+    pub(crate) motion: Option<Motion>,
     pub(crate) busy: bool,
     pub(crate) trigger: FocusHandle,
-    pub(crate) back: FocusHandle,
+    pub(crate) close: FocusHandle,
     pub(crate) toggle: FocusHandle,
     pub(crate) choose: FocusHandle,
     pub(crate) reset: FocusHandle,
@@ -50,10 +50,10 @@ impl Appearance {
             fallback: false,
             error,
             picture: None,
-            open: false,
+            motion: None,
             busy: false,
             trigger: cx.focus_handle().tab_stop(true),
-            back: cx.focus_handle().tab_stop(true),
+            close: cx.focus_handle().tab_stop(true),
             toggle: cx.focus_handle().tab_stop(true),
             choose: cx.focus_handle().tab_stop(true),
             reset: cx.focus_handle().tab_stop(true),

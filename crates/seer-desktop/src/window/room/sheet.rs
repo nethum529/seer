@@ -22,19 +22,8 @@ impl SeerWindow {
             Confirmation::Room(action, _) => action_label(*action),
             Confirmation::Terminal { .. } => "Close terminal",
         };
-        let card = div()
-            .id("room-confirm")
-            .debug_selector(|| "room-confirm".into())
-            .relative()
-            .w(px(width))
+        let card = menu::sheet("room-confirm", width, cx)
             .p(px(20.))
-            .rounded(px(14.))
-            .border_1()
-            .border_color(crate::appearance::fill(palette::LINE_2, cx))
-            .bg(crate::appearance::fill(palette::RAISED, cx))
-            .shadow(menu::shadow(24., 64.))
-            .text_size(px(13.))
-            .line_height(px(18.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
@@ -99,15 +88,7 @@ impl SeerWindow {
                     ),
             );
         Some(
-            div()
-                .id("room-scrim")
-                .absolute()
-                .inset_0()
-                .flex()
-                .items_center()
-                .justify_center()
-                .p(px(16.))
-                .bg(gpui::rgba(palette::SCRIM))
+            menu::scrim("room-scrim")
                 .opacity(sheet.motion.value())
                 .on_mouse_down(
                     MouseButton::Left,

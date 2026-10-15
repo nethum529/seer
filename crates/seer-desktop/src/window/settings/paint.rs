@@ -1,73 +1,159 @@
 use super::*;
-use crate::menu::button;
+use crate::menu::{self, button};
+use gpui::AnyElement;
 
 impl SeerWindow {
-    pub(in crate::window) fn settings_page(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let compact = window.viewport_size().width < px(560.);
-        div()
-            .size_full()
+    pub(in crate::window) fn settings_dialog(
+        &mut self,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) -> Option<AnyElement> {
+        if self
+            .appearance
+            .motion
+            .as_ref()
+            .is_some_and(|motion| motion.gone())
+        {
+            self.appearance.motion = None;
+        }
+        let motion = self.appearance.motion.as_ref()?;
+        if motion.animating() {
+            cx.on_next_frame(window, |_, _, cx| cx.notify());
+        }
+        let opacity = motion.value();
+        let compact = window.viewport_size().width < px(600.);
+        let inset = if compact { 20. } else { 24. };
+        let width = 720_f32.min(f32::from(window.viewport_size().width) - 32.);
+        let height = 400_f32.min(f32::from(window.viewport_size().height) - 48.);
+        let card = menu::sheet("settings-dialog", width, cx)
+            .h(px(height))
             .flex()
-            .flex_col()
-            .child(chrome::bar(cx).pl(px(20.)).child(chrome::lights()))
+            .overflow_hidden()
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
-                    .id("settings-page")
-                    .debug_selector(|| "settings-page".into())
-                    .flex_1()
-                    .min_h_0()
-                    .overflow_y_scroll()
-                    .p(px(if compact { 24. } else { 40. }))
+                    .flex_none()
+                    .w(px(if compact { 120. } else { 176. }))
+                    .py(px(inset))
+                    .px(px(if compact { 12. } else { 16. }))
+                    .border_r_1()
+                    .border_color(crate::appearance::fill(palette::LINE_2, cx))
                     .child(
                         div()
-                            .max_w(px(560.))
-                            .mx_auto()
+                            .h(px(32.))
+                            .px(px(8.))
+                            .flex()
+                            .items_center()
+                            .text_size(px(15.))
+                            .font_weight(FontWeight::SEMIBOLD)
+                            .child("Settings"),
+                    )
+                    .child(
+                        div()
+                            .id("settings-appearance")
+                            .debug_selector(|| "settings-appearance".into())
+                            .mt(px(16.))
+                            .h(px(32.))
+                            .px(px(8.))
+                            .rounded(px(8.))
+                            .bg(rgb(palette::CHIP))
+                            .flex()
+                            .items_center()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child("Appearance"),
+                    ),
+            )
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .flex()
+                    .flex_col()
+                    .p(px(inset))
+                    .child(
+                        div()
+                            .flex()
+                            .items_center()
+                            .gap(px(16.))
+                            .child(
+                                div()
+                                    .flex_1()
+                                    .text_size(px(15.))
+                                    .font_weight(FontWeight::SEMIBOLD)
+                                    .child("Appearance"),
+                            )
                             .child(
                                 button(
-                                    "settings-back",
-                                    "Back",
-                                    &self.appearance.back,
+                                    "settings-close",
+                                    "",
+                                    &self.appearance.close,
                                     None,
                                     self.keys.mode,
                                     window,
                                 )
-                                .w(px(64.))
+                                .w(px(32.))
+                                .px(px(0.))
+                                .bg(gpui::rgba(0))
+                                .child(chrome::icon("close", palette::FAINT))
                                 .on_click(cx.listener(
-                                    |view, _, window, cx| view.close_settings(window, cx),
+                                    |view, event, window, cx| {
+                                        view.close_settings(
+                                            matches!(event, gpui::ClickEvent::Keyboard(_)),
+                                            window,
+                                            cx,
+                                        )
+                                    },
                                 )),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(24.))
-                                    .text_size(px(22.))
-                                    .line_height(px(28.))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Settings"),
-                            )
-                            .child(
-                                div()
-                                    .mt(px(24.))
-                                    .flex()
-                                    .flex_col()
-                                    .gap(px(24.))
-                                    .child(self.glass_control(window, cx))
-                                    .child(self.picture_control(window, cx))
-                                    .children(self.appearance.error.as_ref().map(|error| {
-                                        detail(error).text_color(rgb(palette::DANGER))
-                                    })),
+                            ),
+                    )
+                    .child(
+                        div()
+                            .id("settings-content")
+                            .mt(px(20.))
+                            .mx(px(-4.))
+                            .p(px(4.))
+                            .flex_1()
+                            .min_h_0()
+                            .overflow_y_scroll()
+                            .flex()
+                            .flex_col()
+                            .gap(px(24.))
+                            .child(self.glass_control(window, cx))
+                            .child(self.picture_control(window, cx))
+                            .children(
+                                self.appearance
+                                    .error
+                                    .as_ref()
+                                    .map(|error| detail(error).text_color(rgb(palette::DANGER))),
                             ),
                     ),
-            )
+            );
+        Some(
+            menu::scrim("settings-scrim")
+                .opacity(opacity)
+                .on_mouse_down(
+                    MouseButton::Left,
+                    cx.listener(|view, _, window, cx| {
+                        view.close_settings(false, window, cx);
+                        cx.stop_propagation();
+                    }),
+                )
+                .child(card)
+                .into_any_element(),
+        )
     }
 
     fn glass_control(&self, window: &Window, cx: &mut Context<Self>) -> Div {
         let enabled = self.appearance.settings.glass;
         div()
+            .flex_none()
             .flex()
             .items_center()
             .gap(px(16.))
             .child(
                 div()
                     .flex_1()
+                    .min_w_0()
                     .child(div().font_weight(FontWeight::MEDIUM).child("Dark glass"))
                     .child(detail("A soft picture behind the window.")),
             )
@@ -114,6 +200,7 @@ impl SeerWindow {
                 |name| name.to_string_lossy().into_owned(),
             );
         div()
+            .flex_none()
             .child(
                 div()
                     .font_weight(FontWeight::MEDIUM)
