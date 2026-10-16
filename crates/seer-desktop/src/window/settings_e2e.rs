@@ -3,6 +3,30 @@ use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use super::input_e2e::{Runtime, open_view};
 
 #[gpui::test]
+fn glass_and_top_bar_preferences_survive_restart(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    let (view, cx) = open_view(&runtime, cx);
+    cx.run_until_parked();
+    click(cx, "settings-trigger");
+    click(cx, "uniform-glass-toggle");
+    click(cx, "hide-top-bar-toggle");
+    let path = runtime.directory.path().join("settings.toml");
+    let saved = std::fs::read_to_string(&path).unwrap();
+    assert!(saved.contains("uniform_glass = false"));
+    assert!(saved.contains("hide_top_bar = false"));
+    view.update(cx, |view, cx| {
+        view.appearance = crate::appearance::Appearance::load(Some(path), cx);
+        cx.notify();
+    });
+    click(cx, "settings-trigger");
+    click(cx, "uniform-glass-toggle");
+    click(cx, "hide-top-bar-toggle");
+    let saved = std::fs::read_to_string(runtime.directory.path().join("settings.toml")).unwrap();
+    assert!(saved.contains("uniform_glass = true"));
+    assert!(saved.contains("hide_top_bar = true"));
+}
+
+#[gpui::test]
 fn appearance_survives_reopen_and_missing_picture_keeps_the_window(cx: &mut TestAppContext) {
     let runtime = Runtime::start();
     let (view, cx) = open_view(&runtime, cx);
@@ -96,9 +120,13 @@ fn narrow_settings_keeps_each_keyboard_control_in_view(cx: &mut TestAppContext) 
     click(cx, "settings-trigger");
     for (key, id) in [
         ("tab", "glass-toggle"),
+        ("tab", "uniform-glass-toggle"),
+        ("tab", "hide-top-bar-toggle"),
         ("tab", "choose-picture"),
         ("tab", "default-picture"),
         ("shift-tab", "choose-picture"),
+        ("shift-tab", "hide-top-bar-toggle"),
+        ("shift-tab", "uniform-glass-toggle"),
         ("shift-tab", "glass-toggle"),
     ] {
         cx.simulate_keystrokes(key);

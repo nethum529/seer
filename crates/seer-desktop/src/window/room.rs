@@ -17,7 +17,7 @@ pub(super) struct RoomUi {
     pub(super) server: Option<ServerEntry>,
     pub(super) current: Option<RoomSummary>,
     others: Vec<RoomSummary>,
-    focus: FocusHandle,
+    pub(super) focus: FocusHandle,
     anchor: Rc<Cell<Bounds<Pixels>>>,
     menu: Option<Menu>,
     sheet: Option<Sheet>,

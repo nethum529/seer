@@ -26,6 +26,7 @@ pub(crate) mod rename;
 mod room;
 mod settings;
 pub(crate) mod terminals;
+pub(crate) mod top_bar;
 use rename::Surface;
 
 const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";

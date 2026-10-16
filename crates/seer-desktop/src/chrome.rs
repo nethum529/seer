@@ -32,24 +32,35 @@ pub(crate) fn status(state: Option<AgentState>) -> Div {
 }
 
 pub(crate) fn bar(cx: &gpui::App) -> Div {
-    use gpui::InteractiveElement;
-    div()
-        .flex_none()
-        .h(px(44.))
+    drag_area()
         .flex()
         .items_center()
         .bg(crate::appearance::fill(palette::SURFACE, cx))
         .border_b_1()
         .border_color(crate::appearance::fill(palette::LINE, cx))
+}
+
+pub(crate) fn drag_area() -> Div {
+    use gpui::InteractiveElement;
+    div()
+        .flex_none()
+        .h(px(44.))
         .window_control_area(WindowControlArea::Drag)
 }
 
 pub(crate) fn lights() -> Div {
-    let lights = div().flex_none().w(px(56.)).h(px(44.));
-    #[cfg(target_os = "linux")]
-    {
-        use gpui::{InteractiveElement, MouseButton};
-        lights.flex().items_center().gap(px(8.)).children(
+    div().flex_none().w(px(56.)).h(px(44.))
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn window_controls(opacity: f32) -> Div {
+    use gpui::{InteractiveElement, MouseButton};
+    lights()
+        .opacity(opacity)
+        .flex()
+        .items_center()
+        .gap(px(8.))
+        .children(
             [0xff5f57, 0xfebc2e, 0x28c840]
                 .into_iter()
                 .enumerate()
@@ -68,9 +79,6 @@ pub(crate) fn lights() -> Div {
                         })
                 }),
         )
-    }
-    #[cfg(target_os = "macos")]
-    lights
 }
 
 pub(crate) fn room(room: &str, narrow: bool, compact: bool, up: bool) -> Div {

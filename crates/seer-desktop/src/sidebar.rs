@@ -102,13 +102,7 @@ pub(crate) fn sidebar(
         .bg(crate::appearance::fill(palette::SURFACE, cx))
         .border_r_1()
         .border_color(crate::appearance::fill(palette::LINE, cx))
-        .child(
-            div()
-                .flex_none()
-                .h(px(44.))
-                .pl(px(12.))
-                .child(chrome::lights()),
-        )
+        .child(chrome::drag_area().pl(px(12.)).child(chrome::lights()))
         .child(who.w_full().h(px(36.)).pl(px(7.)).pr(px(8.)))
         .child(
             list(div().id("tabs"), keys, cx)

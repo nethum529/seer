@@ -122,7 +122,12 @@ impl SeerWindow {
                             .flex()
                             .flex_col()
                             .gap(px(12.))
-                            .child(self.glass_control(window, cx).mb(px(12.)))
+                            .child(self.appearance_control(Toggle::Glass, window, cx))
+                            .child(self.appearance_control(Toggle::UniformGlass, window, cx))
+                            .child(
+                                self.appearance_control(Toggle::HideTopBar, window, cx)
+                                    .mb(px(12.)),
+                            )
                             .child(self.picture_control())
                             .child(self.picture_actions(window, cx))
                             .children(
@@ -148,8 +153,31 @@ impl SeerWindow {
         )
     }
 
-    fn glass_control(&self, window: &Window, cx: &mut Context<Self>) -> Div {
-        let enabled = self.appearance.settings.glass;
+    fn appearance_control(&self, toggle: Toggle, window: &Window, cx: &mut Context<Self>) -> Div {
+        let appearance = &self.appearance;
+        let (id, label, description, enabled, focus) = match toggle {
+            Toggle::Glass => (
+                "glass-toggle",
+                "Dark glass",
+                "A soft picture behind the window.",
+                appearance.settings.glass,
+                &appearance.toggle,
+            ),
+            Toggle::UniformGlass => (
+                "uniform-glass-toggle",
+                "Uniform glass",
+                "One even glass across the window.",
+                appearance.settings.uniform_glass,
+                &appearance.uniform,
+            ),
+            Toggle::HideTopBar => (
+                "hide-top-bar-toggle",
+                "Hide top bar",
+                "Show window controls and the name on hover.",
+                appearance.settings.hide_top_bar,
+                &appearance.hide_bar,
+            ),
+        };
         let narrow = window.viewport_size().width < px(480.);
         div()
             .flex_none()
@@ -162,14 +190,14 @@ impl SeerWindow {
                     .flex_1()
                     .min_w_0()
                     .when(narrow, |text| text.flex_none().w_full())
-                    .child(div().font_weight(FontWeight::MEDIUM).child("Dark glass"))
-                    .child(detail("A soft picture behind the window.")),
+                    .child(div().font_weight(FontWeight::MEDIUM).child(label))
+                    .child(detail(description)),
             )
             .child(
                 div()
-                    .id("glass-toggle")
-                    .debug_selector(|| "glass-toggle".into())
-                    .track_focus(&self.appearance.toggle)
+                    .id(id)
+                    .debug_selector(move || id.into())
+                    .track_focus(focus)
                     .relative()
                     .h(px(32.))
                     .px(px(6.))
@@ -181,7 +209,7 @@ impl SeerWindow {
                     .cursor_pointer()
                     .hover(|control| control.opacity(0.92))
                     .active(|control| control.opacity(0.84))
-                    .when(self.keys.ring(&self.appearance.toggle, window), |control| {
+                    .when(self.keys.ring(focus, window), |control| {
                         control.child(sidebar::outline())
                     })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
@@ -192,7 +220,9 @@ impl SeerWindow {
                             .child(if enabled { "On" } else { "Off" }),
                     )
                     .child(crate::menu::switch_track(enabled))
-                    .on_click(cx.listener(|view, _, _, cx| view.toggle_glass(cx))),
+                    .on_click(
+                        cx.listener(move |view, _, _, cx| view.toggle_appearance(toggle, cx)),
+                    ),
             )
     }
 

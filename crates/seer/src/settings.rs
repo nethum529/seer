@@ -9,6 +9,8 @@ use serde::{Deserialize, Serialize};
 #[serde(default)]
 pub struct Settings {
     pub glass: bool,
+    pub uniform_glass: bool,
+    pub hide_top_bar: bool,
     pub picture: Option<PathBuf>,
 }
 
@@ -16,6 +18,8 @@ impl Default for Settings {
     fn default() -> Self {
         Self {
             glass: true,
+            uniform_glass: true,
+            hide_top_bar: true,
             picture: None,
         }
     }

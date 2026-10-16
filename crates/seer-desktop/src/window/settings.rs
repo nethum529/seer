@@ -7,6 +7,13 @@ use crate::{backdrop, motion::Motion};
 
 mod paint;
 
+#[derive(Clone, Copy)]
+enum Toggle {
+    Glass,
+    UniformGlass,
+    HideTopBar,
+}
+
 impl SeerWindow {
     pub(crate) fn settings_open(&self) -> bool {
         self.appearance
@@ -93,6 +100,8 @@ impl SeerWindow {
                 let mut controls = vec![
                     &self.appearance.close,
                     &self.appearance.toggle,
+                    &self.appearance.uniform,
+                    &self.appearance.hide_bar,
                     &self.appearance.choose,
                 ];
                 if self.appearance.settings.picture.is_some() {
@@ -109,8 +118,8 @@ impl SeerWindow {
                 };
                 window.focus(controls[next]);
                 match next {
-                    1 => self.appearance.scroll.scroll_to_item(0),
-                    2 | 3 => self.appearance.scroll.scroll_to_item(2),
+                    1..=3 => self.appearance.scroll.scroll_to_item(next - 1),
+                    4 | 5 => self.appearance.scroll.scroll_to_item(4),
                     _ => {}
                 }
             }
@@ -120,9 +129,13 @@ impl SeerWindow {
         true
     }
 
-    fn toggle_glass(&mut self, cx: &mut Context<Self>) {
+    fn toggle_appearance(&mut self, toggle: Toggle, cx: &mut Context<Self>) {
         let mut settings = self.appearance.settings.clone();
-        settings.glass = !settings.glass;
+        match toggle {
+            Toggle::Glass => settings.glass = !settings.glass,
+            Toggle::UniformGlass => settings.uniform_glass = !settings.uniform_glass,
+            Toggle::HideTopBar => settings.hide_top_bar = !settings.hide_top_bar,
+        }
         if self.appearance.save(settings)
             && self.appearance.settings.glass
             && self.appearance.picture.is_none()
@@ -149,7 +162,7 @@ impl SeerWindow {
             self.appearance.fallback = false;
             if self.appearance.reset.is_focused(window) {
                 window.focus(&self.appearance.choose);
-                self.appearance.scroll.scroll_to_item(2);
+                self.appearance.scroll.scroll_to_item(4);
             }
         }
         cx.notify();
