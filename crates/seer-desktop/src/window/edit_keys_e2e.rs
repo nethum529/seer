@@ -9,19 +9,46 @@ use gpui::{TestAppContext, point, px};
 use super::input_e2e::{Runtime, open_view};
 
 #[gpui::test]
-fn negotiated_control_backspace_reaches_the_shell(cx: &mut TestAppContext) {
-    let runtime = Runtime::start_with_output("\x1b[>1uReady\r\n");
-    let (_, cx) = open_view(&runtime, cx);
+fn keyboard_push_bursts_keep_the_terminal_live(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    let (view, cx) = open_view(&runtime, cx);
     cx.simulate_click(point(px(300.), px(100.)), gpui::Modifiers::default());
     thread::sleep(Duration::from_millis(30));
     cx.run_until_parked();
-    cx.simulate_keystrokes("ctrl-backspace z");
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while !runtime.input().ends_with(b"z") && Instant::now() < deadline {
-        cx.run_until_parked();
-        thread::sleep(Duration::from_millis(10));
+    for (prefix, marker) in [
+        ("", "PrimaryAlive"),
+        ("\x1b[?1049h", "AlternateAlive"),
+        ("\x1b[?1049l\x1bc", "ResetAlive"),
+        ("\x1b[?2026h", "SyncAlive"),
+    ] {
+        cx.simulate_input(&format!(
+            "{prefix}{}\x1b[?2026l\r\n{marker}\r\n",
+            "\x1b[>1u".repeat(4097)
+        ));
+        let deadline = Instant::now() + Duration::from_secs(5);
+        loop {
+            cx.run_until_parked();
+            let visible = view.read_with(cx, |view, _| {
+                view.with_raw(|grid| {
+                    grid.snapshot().rows.iter().any(|row| {
+                        row.iter()
+                            .map(|cell| cell.character)
+                            .collect::<String>()
+                            .contains(marker)
+                    })
+                })
+                .unwrap_or(false)
+            });
+            if visible {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "terminal output stopped before {marker}"
+            );
+            thread::sleep(Duration::from_millis(10));
+        }
     }
-    assert_eq!(runtime.input(), b"\x1b[127;5uz");
 }
 
 #[gpui::test]
@@ -153,7 +180,7 @@ fn fish_edit_keys_delete_the_previous_word(cx: &mut TestAppContext) {
     }
     cx.simulate_input("one two");
     cx.simulate_keystrokes(if cfg!(target_os = "macos") {
-        "alt-backspace->\x17 enter"
+        "alt-backspace->\x7f enter"
     } else {
         "ctrl-backspace enter"
     });

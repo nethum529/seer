@@ -85,7 +85,7 @@ impl Runtime {
                 break tree;
             }
         };
-        let deadline = Instant::now() + Duration::from_secs(30);
+        let deadline = Instant::now() + Duration::from_secs(5);
         // tty.setraw flushes queued input. The fixture opens this file after raw mode is ready.
         while !self.directory.path().join("input").exists() {
             assert!(Instant::now() < deadline, "shell did not become ready");

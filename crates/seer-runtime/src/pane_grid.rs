@@ -15,10 +15,11 @@ use std::io;
 use std::sync::{Arc, Mutex};
 use std::time::Instant;
 
-use crate::input::{encode_key, encode_mouse, encode_native_key};
+use crate::input::{encode_key, encode_mouse};
 use crate::pty::lock_mutex;
 
 mod agent_screen;
+mod keyboard_guard;
 mod reflow;
 mod restore;
 mod selection;
@@ -28,6 +29,7 @@ const SCROLLBACK_LINES: usize = 1_000;
 pub struct PaneGrid {
     terminal: Term<TerminalReplies>,
     parser: Processor,
+    keyboard_guard: keyboard_guard::KeyboardGuard,
     replies: TerminalReplies,
     input_changed: bool,
 }
@@ -54,13 +56,15 @@ impl PaneGrid {
         Self {
             terminal: Term::new(config, &dimensions, replies.clone()),
             parser: Processor::new(),
+            keyboard_guard: keyboard_guard::KeyboardGuard::default(),
             replies,
             input_changed: false,
         }
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> bool {
-        self.parser.advance(&mut self.terminal, bytes);
+        let bytes = self.keyboard_guard.filter(bytes);
+        self.parser.advance(&mut self.terminal, &bytes);
         self.parser.sync_bytes_count() == 0
     }
 
@@ -162,10 +166,14 @@ impl PaneGrid {
         let mode = *self.terminal.mode();
         match &input.event {
             InputEvent::Key(key) => Ok(Some(encode_key(*key, mode))),
-            InputEvent::KeyWithText { key, text } => {
-                Ok(Some(encode_native_key(*key, text.as_deref(), mode)))
+            InputEvent::KeyWithText { key, .. }
+                if mode.contains(TermMode::DISAMBIGUATE_ESC_CODES) =>
+            {
+                Ok(Some(encode_key(*key, mode)))
             }
-            InputEvent::Text(text) => Ok(Some(text.as_bytes().to_vec())),
+            InputEvent::KeyWithText { text, .. } | InputEvent::Text(text) => {
+                Ok(Some(text.as_bytes().to_vec()))
+            }
             InputEvent::Paste(text) => Ok(Some(encode_paste(text, mode))),
             InputEvent::Mouse(mouse) => Ok(self.handle_mouse(*mouse, mode)),
             InputEvent::Focus(focused) => Ok(focus_bytes(*focused, mode)),
@@ -307,7 +315,14 @@ impl TerminalReplies {
 impl EventListener for TerminalReplies {
     fn send_event(&self, event: Event) {
         match event {
-            Event::PtyWrite(reply) => {
+            Event::PtyWrite(mut reply) => {
+                if let Some(flags) = reply
+                    .strip_prefix("\x1b[?")
+                    .and_then(|value| value.strip_suffix('u'))
+                    .and_then(|value| value.parse::<u8>().ok())
+                {
+                    reply = format!("\x1b[?{}u", flags & 1);
+                }
                 if let Some(bytes) = &self.bytes {
                     lock_mutex(bytes).extend(reply.into_bytes());
                 }

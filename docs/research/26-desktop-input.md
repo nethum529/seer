@@ -15,9 +15,10 @@ application requests mouse reports. Copy is Cmd C on macOS or Ctrl Shift C
 on Linux. Paste is Cmd V or Ctrl Shift V. Normal paste changes LF to CR;
 bracketed paste preserves LF and removes ESC and Ctrl C, as Alacritty does.
 T-500 enables Kitty keyboard negotiation in the runtime. The desktop sends
-key modifiers and native text together. The runtime uses the active PTY
-mode to encode the key. Without negotiation, it keeps the previous native
-text and default binding rules.
+the key with the legacy bytes made from its own platform rules. The runtime
+uses the key only when the active PTY mode requests disambiguation.
+Otherwise, it writes the supplied legacy bytes, including for input from
+a person on another OS.
 
 On macOS, Option text goes through AppKit. A local event monitor handles
 named keys before GPUI 0.2.2 gives them to AppKit text services. AppKit would
@@ -86,12 +87,26 @@ modifier on Backspace.
 
 The runtime now accepts the request and encodes modified edit keys with
 the requested disambiguation. It remains the source of truth for keyboard
-mode, including when a window attaches to an existing PTY. Native text is
-kept with the key so that legacy macOS Control text stays unchanged.
+mode, including when a window attaches to an existing PTY. The sender makes
+the legacy bytes so that macOS Control text and Linux Alt prefixes stay
+unchanged, even when the receiving runtime uses the other OS.
+
+Seer encodes Kitty flag 1 (disambiguation). Keyboard mode query replies are
+masked to that flag. Release events, alternate key codes, all-key escape
+encoding, and associated text flags are not supported.
+
+PaneGrid caps keyboard pushes at 4096 per screen before they reach Term.
+It cancels extra pushes, accepts pops, and resets the counts on RIS. The
+guard uses the same VTE parser to handle split sequences and strings. Both
+the runtime and the desktop mirror use this guard. It avoids the
+alacritty_terminal 0.26.0 overflow path, which removes from the title stack
+instead of the keyboard stack and can panic with an empty title stack.
 
 On macOS, Option Backspace keeps its legacy ESC DEL word deletion binding
-in negotiated mode. The owner approved this difference from Alacritty
-0.17.0 defaults, which send plain DEL in that mode. Other checked edit keys
+in negotiated mode. This rule stays on the sending desktop. For keys that
+carry legacy bytes, the desktop clears Option from the key used in
+negotiated mode. The owner approved this difference from Alacritty 0.17.0
+defaults, which send plain DEL in that mode. Other checked edit keys
 follow those defaults. The checks cover separate Control, Option or Alt,
 and Shift modifiers with Backspace, Delete, arrows, Home, End, Enter, and
 Tab, with and without negotiation. Shift Home and Shift End remain local

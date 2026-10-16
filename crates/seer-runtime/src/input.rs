@@ -1,9 +1,6 @@
 use alacritty_terminal::term::TermMode;
 use seer_core::{KeyCode, KeyInput, Modifiers, MouseButton, MouseInput, MouseKind};
 
-mod native;
-pub(crate) use native::encode_native_key;
-
 pub(crate) fn encode_key(key: KeyInput, mode: TermMode) -> Vec<u8> {
     if mode.contains(TermMode::DISAMBIGUATE_ESC_CODES)
         && let Some(bytes) = disambiguated_key(key)
