@@ -231,6 +231,7 @@ fn person_row(
     let user = person.user_id.clone();
     let hover_user = user.clone();
     let name = chrome::capitalize(&person.name);
+    let tag = tags(&name, own, person.host);
     let offline = !person.online;
     let waiting = activity.0;
     let away = person.state == PersonState::Away;
@@ -278,14 +279,11 @@ fn person_row(
                     sidebar::one_line(div())
                         .text_color(rgb(text))
                         .opacity(if away && !offline { 0.6 } else { 1. })
-                        .child(name),
+                        .child(name.clone()),
                 )
-                .when(own || person.host, |row| {
-                    row.child(mark(match (own, person.host) {
-                        (true, true) => "You, Host",
-                        (true, false) => "You",
-                        _ => "Host",
-                    }))
+                .when(!tag.is_empty(), |row| {
+                    let label = format!("{name}: {tag}");
+                    row.child(mark(tag).debug_selector(move || label))
                 }),
         )
         .child(
@@ -298,6 +296,15 @@ fn person_row(
         .child(div().flex_none().size(px(16.)).when(selected, |slot| {
             slot.child(chrome::icon("check", palette::TEXT))
         }))
+}
+
+fn tags(name: &str, own: bool, host: bool) -> String {
+    [(own, "You"), (host, "Host")]
+        .into_iter()
+        .filter(|&(on, word)| on && !word.eq_ignore_ascii_case(name))
+        .map(|(_, word)| word)
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn mark(text: impl Into<SharedString>) -> Div {

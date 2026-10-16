@@ -198,6 +198,34 @@ fn person_menu_watches_read_only_and_returns_to_local_input(cx: &mut TestAppCont
     );
 }
 
+#[gpui::test]
+fn person_menu_tags_do_not_repeat_the_name(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    let room = Room::start();
+    let (_, cx) = open_view(&runtime, &room, cx);
+    pump(cx);
+    cx.simulate_click(gpui::point(px(90.), px(62.)), gpui::Modifiers::default());
+    let named = |name: &str| Person {
+        name: name.into(),
+        ..person("e2e", true)
+    };
+    room.messages
+        .send(ServerMsg::People {
+            people: vec![named("Host"), person("Kyler", false)],
+        })
+        .unwrap();
+    pump(cx);
+    assert!(cx.debug_bounds("Host: You").is_some());
+    assert!(cx.debug_bounds("Host: You, Host").is_none());
+    room.messages
+        .send(ServerMsg::People {
+            people: vec![named("Alice")],
+        })
+        .unwrap();
+    pump(cx);
+    assert!(cx.debug_bounds("Alice: You, Host").is_some());
+}
+
 pub(super) fn pump(cx: &mut gpui::VisualTestContext) {
     let end = Instant::now() + Duration::from_millis(250);
     while Instant::now() < end {
