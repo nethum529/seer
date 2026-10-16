@@ -93,10 +93,14 @@ fn install_bash_login(command: &mut CommandBuilder, files: &Path, seer: &Path) -
 // Seer file: ZDOTDIR is not read only, RCS is set, and there is no sh or ksh
 // emulation (zsh then reads the next files from HOME, see sourcehome in
 // zsh Src/init.c). If not, Seer sets exit at once and keeps the user
-// ZDOTDIR. The exit function is always set right after the user .zshrc. A
-// login shell runs the user .zlogin with the builtin exit, then sets it again.
+// ZDOTDIR. The exit function is always set right after the user .zshrc.
+// Code that a startup file runs has a ZSH_EVAL_CONTEXT that starts with
+// file, so there exit stays the builtin with the status of the last command.
 fn install_zsh(command: &mut CommandBuilder, directory: &Path, seer: &Path) -> io::Result<()> {
-    let exit = format!("exit() {{ {} exit; }}\n", posix_quote(seer));
+    let exit = format!(
+        "exit() {{ case ${{ZSH_EVAL_CONTEXT-}} in file*) builtin exit \"${{1-$?}}\";; esac; {} exit; }}\n",
+        posix_quote(seer)
+    );
     let done = "unset seer_zdotdir seer_zdotdir_set seer_zdotdir_export\n";
     let restore = "unset ZDOTDIR\n\
          if [ -n \"$seer_zdotdir_set\" ]; then ZDOTDIR=$seer_zdotdir; \
@@ -137,10 +141,7 @@ fn install_zsh(command: &mut CommandBuilder, directory: &Path, seer: &Path) -> i
         ),
         (
             ".zlogin",
-            format!(
-                "unfunction exit 2>/dev/null\n{restore}{}{exit}{done}",
-                load_zsh(".zlogin")
-            ),
+            format!("{restore}{}{exit}{done}", load_zsh(".zlogin")),
         ),
     ];
     for (name, body) in files {
