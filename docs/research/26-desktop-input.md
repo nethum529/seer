@@ -14,7 +14,11 @@ mirror and its native selection rules. Shift permits selection when an
 application requests mouse reports. Copy is Cmd C on macOS or Ctrl Shift C
 on Linux. Paste is Cmd V or Ctrl Shift V. Normal paste changes LF to CR;
 bracketed paste preserves LF and removes ESC and Ctrl C, as Alacritty does.
-Kitty keyboard mode stays off.
+T-500 enables Kitty keyboard negotiation in the runtime. The desktop sends
+the key with the legacy bytes made from its own platform rules. The runtime
+uses the key only when the active PTY mode requests disambiguation.
+Otherwise, it writes the supplied legacy bytes, including for input from
+a person on another OS.
 
 On macOS, Option text goes through AppKit. A local event monitor handles
 named keys before GPUI 0.2.2 gives them to AppKit text services. AppKit would
@@ -71,6 +75,42 @@ apps received the same sequence through native window control:
 These native checks did not run on Linux. The Linux GPUI input backends use
 the same composition handler, but an actual Linux input method remains a
 required follow-up check. macOS allowed window control and screenshots.
+
+## Edit keys after negotiation
+
+T-500, checked on 2026-10-15.
+
+Fish 4 requests Kitty keyboard mode 5. The previous runtime ignored that
+request, and the desktop converted Backspace, Enter, Tab, and Escape to
+text before the runtime could see their modifiers. This lost the Control
+modifier on Backspace.
+
+The runtime now accepts the request and encodes modified edit keys with
+the requested disambiguation. It remains the source of truth for keyboard
+mode, including when a window attaches to an existing PTY. The sender makes
+the legacy bytes so that macOS Control text and Linux Alt prefixes stay
+unchanged, even when the receiving runtime uses the other OS.
+
+Seer encodes Kitty flag 1 (disambiguation). Keyboard mode query replies are
+masked to that flag. Release events, alternate key codes, all-key escape
+encoding, and associated text flags are not supported.
+
+The alacritty_terminal pin fixes upstream issue 9071 / PR 9073; remove it after a release includes the fix.
+
+On macOS, Option Backspace keeps its legacy ESC DEL word deletion binding
+in negotiated mode. This rule stays on the sending desktop. For keys that
+carry legacy bytes, the desktop clears Option from the key used in
+negotiated mode. The owner approved this difference from Alacritty 0.17.0
+defaults, which send plain DEL in that mode. Other checked edit keys
+follow those defaults. The checks cover separate Control, Option or Alt,
+and Shift modifiers with Backspace, Delete, arrows, Home, End, Enter, and
+Tab, with and without negotiation. Shift Home and Shift End remain local
+scroll actions in the primary screen.
+
+The GPUI e2e checks use a real local runtime and PTY. A separate fish 4
+check types two words, deletes the second word, and reads the resulting
+command line. Set SEER_TEST_FISH to the fish executable to run that check.
+The raw capture check guards legacy bytes as well as negotiated bytes.
 
 ## Input latency
 

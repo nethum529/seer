@@ -13,6 +13,9 @@ resolver = "3"
 edition = "2024"
 version = "0.6.0"
 
+[patch.crates-io]
+alacritty_terminal = { git = "https://github.com/nethum529/alacritty", rev = "44063686d630958326160ba3c9d61239ae5b6b2a" }
+
 [profile.release]
 strip = true
 lto = "fat"

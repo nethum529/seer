@@ -46,7 +46,7 @@ impl Runtime {
         Self::start_in(directory, PathBuf::from("/bin/sh"))
     }
 
-    fn start_in(directory: TempDir, shell: PathBuf) -> Self {
+    pub(super) fn start_in(directory: TempDir, shell: PathBuf) -> Self {
         let binary = std::env::var_os("SEER_RUNTIME_BIN")
             .map(PathBuf::from)
             .unwrap_or_else(|| {

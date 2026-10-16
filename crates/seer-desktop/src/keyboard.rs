@@ -12,6 +12,42 @@ pub(crate) fn modifiers(held: gpui::Modifiers) -> Modifiers {
 }
 
 pub(crate) fn event(key: &Keystroke) -> Option<InputEvent> {
+    let event = legacy_event(key)?;
+    let InputEvent::Text(text) = event else {
+        return Some(event);
+    };
+    let Some(code) = text_key(key) else {
+        return Some(InputEvent::Text(text));
+    };
+    let mut held = modifiers(key.modifiers);
+    if cfg!(target_os = "macos") {
+        if code == KeyCode::Backspace && held.alt && !held.control && !held.shift {
+            return Some(InputEvent::Text(text));
+        }
+        held.alt = false;
+    }
+    Some(InputEvent::KeyWithText {
+        key: KeyInput {
+            code,
+            modifiers: held,
+        },
+        text,
+    })
+}
+
+fn text_key(key: &Keystroke) -> Option<KeyCode> {
+    Some(match key.key.as_str() {
+        "enter" => KeyCode::Enter,
+        "backspace" => KeyCode::Backspace,
+        "tab" => KeyCode::Tab,
+        "escape" => KeyCode::Escape,
+        "space" if key.modifiers.control => KeyCode::Char(' '),
+        _ if key.key.chars().count() == 1 => KeyCode::Char(key.key.chars().next()?),
+        _ => return None,
+    })
+}
+
+fn legacy_event(key: &Keystroke) -> Option<InputEvent> {
     let held = key.modifiers;
     if held.platform {
         return None;

@@ -38,6 +38,7 @@ pub enum InputEvent {
     Mouse(MouseInput),
     Focus(bool),
     Scrollback { lines: i32 },
+    KeyWithText { key: KeyInput, text: String },
 }
 
 #[derive(Clone, Copy, Debug, Deserialize, Eq, PartialEq, Serialize)]

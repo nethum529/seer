@@ -148,7 +148,10 @@ fn claims_size(event: &InputEvent) -> bool {
         InputEvent::Focus(gained) => *gained,
         InputEvent::Mouse(mouse) => mouse.kind != MouseKind::Moved,
         InputEvent::Scrollback { .. } => false,
-        InputEvent::Key(_) | InputEvent::Text(_) | InputEvent::Paste(_) => true,
+        InputEvent::Key(_)
+        | InputEvent::KeyWithText { .. }
+        | InputEvent::Text(_)
+        | InputEvent::Paste(_) => true,
     }
 }
 

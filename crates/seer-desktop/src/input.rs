@@ -112,7 +112,10 @@ impl SeerWindow {
         }
         let changed = if matches!(
             event,
-            InputEvent::Text(_) | InputEvent::Key(_) | InputEvent::Paste(_)
+            InputEvent::Text(_)
+                | InputEvent::Key(_)
+                | InputEvent::KeyWithText { .. }
+                | InputEvent::Paste(_)
         ) {
             #[cfg(target_os = "macos")]
             {

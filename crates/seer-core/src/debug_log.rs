@@ -271,7 +271,9 @@ fn terminals_summary(user: &str, terminals: &[crate::proto::TerminalInfo]) -> St
 
 fn input_summary(event: &InputEvent) -> String {
     match event {
-        InputEvent::Key(key) => format!("Key({:?})", key.code),
+        InputEvent::Key(key) | InputEvent::KeyWithText { key, .. } => {
+            format!("Key({:?})", key.code)
+        }
         InputEvent::Text(text) => format!("Text(len={})", text.len()),
         InputEvent::Paste(text) => format!("Paste(len={})", text.len()),
         InputEvent::Mouse(mouse) => {
