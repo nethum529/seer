@@ -19,7 +19,6 @@ use crate::input::{encode_key, encode_mouse};
 use crate::pty::lock_mutex;
 
 mod agent_screen;
-mod keyboard_guard;
 mod reflow;
 mod restore;
 mod selection;
@@ -29,7 +28,6 @@ const SCROLLBACK_LINES: usize = 1_000;
 pub struct PaneGrid {
     terminal: Term<TerminalReplies>,
     parser: Processor,
-    keyboard_guard: keyboard_guard::KeyboardGuard,
     replies: TerminalReplies,
     input_changed: bool,
 }
@@ -56,15 +54,13 @@ impl PaneGrid {
         Self {
             terminal: Term::new(config, &dimensions, replies.clone()),
             parser: Processor::new(),
-            keyboard_guard: keyboard_guard::KeyboardGuard::default(),
             replies,
             input_changed: false,
         }
     }
 
     pub fn feed(&mut self, bytes: &[u8]) -> bool {
-        let bytes = self.keyboard_guard.filter(bytes);
-        self.parser.advance(&mut self.terminal, &bytes);
+        self.parser.advance(&mut self.terminal, bytes);
         self.parser.sync_bytes_count() == 0
     }
 

@@ -95,12 +95,7 @@ Seer encodes Kitty flag 1 (disambiguation). Keyboard mode query replies are
 masked to that flag. Release events, alternate key codes, all-key escape
 encoding, and associated text flags are not supported.
 
-PaneGrid caps keyboard pushes at 4096 per screen before they reach Term.
-It cancels extra pushes, accepts pops, and resets the counts on RIS. The
-guard uses the same VTE parser to handle split sequences and strings. Both
-the runtime and the desktop mirror use this guard. It avoids the
-alacritty_terminal 0.26.0 overflow path, which removes from the title stack
-instead of the keyboard stack and can panic with an empty title stack.
+The alacritty_terminal pin fixes upstream issue 9071 / PR 9073; remove it after a release includes the fix.
 
 On macOS, Option Backspace keeps its legacy ESC DEL word deletion binding
 in negotiated mode. This rule stays on the sending desktop. For keys that
