@@ -3,15 +3,19 @@ use gpui::StyledImage;
 
 impl Render for SeerWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        let reclaim = self.appearance.settings.hide_lines && self.appearance.settings.hide_top_bar;
         cx.set_global(crate::appearance::Glass {
             enabled: self.appearance.settings.glass,
             uniform: self.appearance.settings.uniform_glass,
+            hide_lines: self.appearance.settings.hide_lines,
+            reclaim_top: reclaim,
         });
         let menus = self.menu(window, cx);
         let people = self.people_menu(window, cx);
         let rooms = self.room_overlays(window, cx);
         let settings = self.settings_dialog(window, cx);
         let top_bar_opacity = self.top_bar_opacity(window, cx);
+        let slide = px(if reclaim { 44. * top_bar_opacity } else { 0. });
         let controls = self.top_bar_controls(window, top_bar_opacity);
         // gpui starts a tip only on a mouse move that the tooltip listener
         // gets, so the tips come back in the frame after Escape clears them.
@@ -26,6 +30,7 @@ impl Render for SeerWindow {
         let root = div()
             .size_full()
             .relative()
+            .overflow_hidden()
             .flex()
             .bg(rgb(palette::WINDOW))
             .font_family(self.ui_font.clone())
@@ -144,8 +149,10 @@ impl Render for SeerWindow {
                         .min_w_0()
                         .flex()
                         .flex_col()
+                        .relative()
                         .child(
                             chrome::bar(cx)
+                                .when(reclaim, |bar| bar.opacity(top_bar_opacity))
                                 .gap(px(8.))
                                 .pl(px(14.))
                                 .pr(px(8.))
@@ -192,12 +199,25 @@ impl Render for SeerWindow {
                                         .child(self.settings_button(window, cx)),
                                 ),
                         )
-                        .when(!terminals.is_empty(), |main| {
-                            main.child(sidebar::strip(
-                                terminals, shown, labels, &self.keys, window, cx,
-                            ))
-                        })
-                        .child(terminal),
+                        .child(slide::Slide::new(
+                            div()
+                                .flex_1()
+                                .min_h_0()
+                                .flex()
+                                .flex_col()
+                                .when(reclaim, |body| {
+                                    body.flex_none()
+                                        .flex_basis(gpui::Length::Auto)
+                                        .h(window.viewport_size().height)
+                                })
+                                .when(!terminals.is_empty(), |main| {
+                                    main.child(sidebar::strip(
+                                        terminals, shown, labels, &self.keys, window, cx,
+                                    ))
+                                })
+                                .child(terminal),
+                            if reclaim { slide - px(44.) } else { px(0.) },
+                        )),
                 )
                 .children(menus)
                 .children(people)
@@ -243,34 +263,57 @@ impl Render for SeerWindow {
             cx,
         );
         let heading = chrome::bar(cx)
+            .when(reclaim, |bar| bar.opacity(top_bar_opacity))
             .relative()
             .justify_center()
             .px(px(14.))
             .child(
-                title.opacity(top_bar_opacity).max_w(
-                    (window.viewport_size().width - px(248. + if readonly { 180. } else { 28. }))
+                title
+                    .opacity(if reclaim { 1. } else { top_bar_opacity })
+                    .max_w(
+                        (window.viewport_size().width
+                            - px(248. + if readonly { 180. } else { 28. }))
                         .max(px(0.)),
-                ),
+                    ),
             )
             .when(readonly, |bar| {
                 bar.child(
                     people::control(can_input)
-                        .opacity(top_bar_opacity)
+                        .opacity(if reclaim { 1. } else { top_bar_opacity })
                         .absolute()
                         .right(px(14.))
                         .top(px(13.)),
                 )
             });
-        root.child(side)
-            .child(
+        let (heading, overlay) = if reclaim {
+            (
+                None,
+                Some(heading.absolute().top(px(0.)).left(px(248.)).right(px(0.))),
+            )
+        } else {
+            (Some(heading), None)
+        };
+        root.child(slide::Slide::new(side, slide))
+            .child(slide::Slide::new(
                 div()
                     .flex_1()
                     .min_w_0()
                     .flex()
                     .flex_col()
-                    .child(heading)
+                    .h_full()
+                    .children(heading)
                     .child(terminal),
-            )
+                slide,
+            ))
+            .children(reclaim.then(|| {
+                chrome::bar(cx)
+                    .absolute()
+                    .top(px(0.))
+                    .left(px(0.))
+                    .w(px(248.))
+                    .opacity(top_bar_opacity)
+            }))
+            .children(overlay)
             .children(menus)
             .children(people)
             .children(rooms)

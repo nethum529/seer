@@ -42,10 +42,11 @@ impl SeerWindow {
         let bar = &mut self.appearance.top_bar;
         let shown = pinned || bar.hovered;
         if shown == bar.motion.closing() {
+            let instant = pinned || self.keys.mode == Mode::Keyboard || reduced_motion();
             if shown {
-                bar.motion.reopen(pinned, 120);
+                bar.motion.reopen(instant, 120);
             } else {
-                bar.motion.close(false, 80);
+                bar.motion.close(instant, 80);
             }
         }
         if bar.motion.animating() {
@@ -78,6 +79,7 @@ impl SeerWindow {
     pub(super) fn hover_top_bar(&mut self, hovered: bool, cx: &mut Context<Self>) {
         if self.appearance.top_bar.hovered != hovered {
             self.appearance.top_bar.hovered = hovered;
+            self.keys.mode = Mode::Pointer;
             cx.notify();
         }
     }
@@ -99,7 +101,13 @@ pub(super) fn events(cx: &Context<SeerWindow>) -> impl IntoElement {
             window.on_mouse_event(move |event: &gpui::MouseMoveEvent, phase, _, cx| {
                 if phase.capture() {
                     let _ = view.update(cx, |view, cx| {
-                        view.hover_top_bar(top.contains(&event.position), cx);
+                        let mut area = top;
+                        if view.appearance.settings.hide_lines
+                            && view.appearance.settings.hide_top_bar
+                        {
+                            area.size.height += px(44. * view.appearance.top_bar.motion.value());
+                        }
+                        view.hover_top_bar(area.contains(&event.position), cx);
                         #[cfg(target_os = "macos")]
                         if event.pressed_button == Some(MouseButton::Left)
                             && let Some(frame) = &view.input.frame
@@ -131,4 +139,35 @@ pub(super) fn events(cx: &Context<SeerWindow>) -> impl IntoElement {
     )
     .absolute()
     .inset_0()
+}
+
+#[cfg(target_os = "macos")]
+fn reduced_motion() -> bool {
+    objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
+}
+
+#[cfg(target_os = "linux")]
+fn reduced_motion() -> bool {
+    use std::process::Command;
+    let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| desktop.contains("KDE"));
+    let output = if kde {
+        Command::new("kreadconfig6")
+            .args(["--group", "KDE", "--key", "AnimationDurationFactor"])
+            .output()
+    } else {
+        Command::new("gsettings")
+            .args(["get", "org.gnome.desktop.interface", "enable-animations"])
+            .output()
+    };
+    output
+        .ok()
+        .filter(|output| output.status.success())
+        .is_some_and(|output| {
+            let value = String::from_utf8_lossy(&output.stdout);
+            if kde {
+                value.trim().parse::<f32>() == Ok(0.)
+            } else {
+                value.trim() == "false"
+            }
+        })
 }

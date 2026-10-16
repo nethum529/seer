@@ -101,8 +101,10 @@ pub(crate) fn sidebar(
         .px(px(8.))
         .bg(crate::appearance::fill(palette::SURFACE, cx))
         .border_r_1()
-        .border_color(crate::appearance::fill(palette::LINE, cx))
-        .child(chrome::drag_area().pl(px(12.)).child(chrome::lights()))
+        .border_color(crate::appearance::separator(cx))
+        .when(!crate::appearance::reclaim_top(cx), |side| {
+            side.child(chrome::drag_area().pl(px(12.)).child(chrome::lights()))
+        })
         .child(who.w_full().h(px(36.)).pl(px(7.)).pr(px(8.)))
         .child(
             list(div().id("tabs"), keys, cx)
@@ -273,7 +275,7 @@ pub(crate) fn strip(
         .overflow_x_scroll()
         .bg(crate::appearance::fill(palette::SURFACE, cx))
         .border_b_1()
-        .border_color(crate::appearance::fill(palette::LINE, cx))
+        .border_color(crate::appearance::separator(cx))
         .children(terminals.iter().map(|terminal| {
             let on = shown == Some(terminal.pane.as_str());
             let help = tip::terminal_help(&rename::display_name(terminal));

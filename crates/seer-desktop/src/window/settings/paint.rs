@@ -124,8 +124,9 @@ impl SeerWindow {
                             .gap(px(12.))
                             .child(self.appearance_control(Toggle::Glass, window, cx))
                             .child(self.appearance_control(Toggle::UniformGlass, window, cx))
+                            .child(self.appearance_control(Toggle::HideTopBar, window, cx))
                             .child(
-                                self.appearance_control(Toggle::HideTopBar, window, cx)
+                                self.appearance_control(Toggle::HideLines, window, cx)
                                     .mb(px(12.)),
                             )
                             .child(self.picture_control())
@@ -155,47 +156,43 @@ impl SeerWindow {
 
     fn appearance_control(&self, toggle: Toggle, window: &Window, cx: &mut Context<Self>) -> Div {
         let appearance = &self.appearance;
-        let (id, label, description, enabled, focus) = match toggle {
+        let (id, label, enabled, focus) = match toggle {
             Toggle::Glass => (
                 "glass-toggle",
                 "Dark glass",
-                "A soft picture behind the window.",
                 appearance.settings.glass,
                 &appearance.toggle,
             ),
             Toggle::UniformGlass => (
                 "uniform-glass-toggle",
                 "Uniform glass",
-                "One even glass across the window.",
                 appearance.settings.uniform_glass,
                 &appearance.uniform,
             ),
             Toggle::HideTopBar => (
                 "hide-top-bar-toggle",
                 "Hide top bar",
-                "Show window controls and the name on hover.",
                 appearance.settings.hide_top_bar,
                 &appearance.hide_bar,
             ),
+            Toggle::HideLines => (
+                "hide-lines-toggle",
+                "Hide lines",
+                appearance.settings.hide_lines,
+                &appearance.hide_lines,
+            ),
         };
-        let narrow = window.viewport_size().width < px(480.);
         div()
             .flex_none()
             .flex()
             .items_center()
-            .gap(px(16.))
-            .when(narrow, |row| row.flex_col().items_start().gap(px(12.)))
+            .gap(px(8.))
             .child(
                 div()
                     .flex_1()
                     .min_w_0()
-                    .when(narrow, |text| text.flex_none().w_full())
-                    .child(
-                        div()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(crate::label::text(label)),
-                    )
-                    .child(detail(description)),
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(crate::label::text(label)),
             )
             .child(
                 div()
@@ -217,12 +214,14 @@ impl SeerWindow {
                         control.child(sidebar::outline())
                     })
                     .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-                    .child(
-                        div()
-                            .w(px(24.))
-                            .text_color(rgb(palette::MUTED))
-                            .child(crate::label::text(if enabled { "On" } else { "Off" })),
-                    )
+                    .when(window.viewport_size().width >= px(480.), |control| {
+                        control.child(
+                            div()
+                                .w(px(24.))
+                                .text_color(rgb(palette::MUTED))
+                                .child(crate::label::text(if enabled { "On" } else { "Off" })),
+                        )
+                    })
                     .child(crate::menu::switch_track(enabled))
                     .on_click(
                         cx.listener(move |view, _, _, cx| view.toggle_appearance(toggle, cx)),
@@ -232,15 +231,6 @@ impl SeerWindow {
 
     fn picture_control(&self) -> Div {
         let appearance = &self.appearance;
-        let picture = appearance
-            .settings
-            .picture
-            .as_ref()
-            .and_then(|path| path.file_name())
-            .map_or_else(
-                || "Default picture".to_owned(),
-                |name| name.to_string_lossy().into_owned(),
-            );
         div()
             .flex_none()
             .child(
@@ -248,14 +238,27 @@ impl SeerWindow {
                     .font_weight(FontWeight::MEDIUM)
                     .child(crate::label::text("Background picture")),
             )
-            .child(detail(&picture))
-            .when(appearance.fallback, |row| {
-                row.child(
-                    detail("Picture unavailable. Using the default picture.")
-                        .id("picture-fallback")
-                        .debug_selector(|| "picture-fallback".into()),
-                )
-            })
+            .children(
+                appearance
+                    .settings
+                    .picture
+                    .as_ref()
+                    .and_then(|path| path.file_name())
+                    .map(|name| {
+                        let name = name.to_string_lossy();
+                        let name = if appearance.fallback {
+                            format!("{name} (Unavailable)")
+                        } else {
+                            name.into_owned()
+                        };
+                        detail(&name)
+                            .id("picture-file")
+                            .when(appearance.fallback, |file| {
+                                file.debug_selector(|| "picture-fallback".into())
+                                    .text_color(rgb(palette::DANGER))
+                            })
+                    }),
+            )
     }
 
     fn picture_actions(&self, window: &Window, cx: &mut Context<Self>) -> Div {

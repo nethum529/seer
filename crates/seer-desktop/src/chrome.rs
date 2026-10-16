@@ -37,7 +37,7 @@ pub(crate) fn bar(cx: &gpui::App) -> Div {
         .items_center()
         .bg(crate::appearance::fill(palette::SURFACE, cx))
         .border_b_1()
-        .border_color(crate::appearance::fill(palette::LINE, cx))
+        .border_color(crate::appearance::separator(cx))
 }
 
 pub(crate) fn drag_area() -> Div {
@@ -132,7 +132,7 @@ pub(crate) fn footer(
         .items_center()
         .gap(px(8.))
         .border_t_1()
-        .border_color(crate::appearance::fill(palette::LINE, cx))
+        .border_color(crate::appearance::separator(cx))
         .text_color(rgb(palette::MUTED))
         .child(div().flex_1().min_w_0().flex().items_center().child(room))
         .child(settings)

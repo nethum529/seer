@@ -8,6 +8,8 @@ use crate::{backdrop, motion::Motion};
 pub(crate) struct Glass {
     pub(crate) enabled: bool,
     pub(crate) uniform: bool,
+    pub(crate) hide_lines: bool,
+    pub(crate) reclaim_top: bool,
 }
 impl Global for Glass {}
 
@@ -24,6 +26,7 @@ pub(crate) struct Appearance {
     pub(crate) toggle: FocusHandle,
     pub(crate) uniform: FocusHandle,
     pub(crate) hide_bar: FocusHandle,
+    pub(crate) hide_lines: FocusHandle,
     pub(crate) top_bar: crate::window::top_bar::TopBar,
     pub(crate) choose: FocusHandle,
     pub(crate) reset: FocusHandle,
@@ -64,6 +67,7 @@ impl Appearance {
             toggle: cx.focus_handle().tab_stop(true),
             uniform: cx.focus_handle().tab_stop(true),
             hide_bar: cx.focus_handle().tab_stop(true),
+            hide_lines: cx.focus_handle().tab_stop(true),
             top_bar: crate::window::top_bar::TopBar::new(),
             choose: cx.focus_handle().tab_stop(true),
             reset: cx.focus_handle().tab_stop(true),
@@ -117,4 +121,20 @@ pub(crate) fn fill(color: u32, cx: &App) -> gpui::Rgba {
         }
     }
     gpui::rgb(color)
+}
+
+pub(crate) fn separator(cx: &App) -> gpui::Rgba {
+    if cx
+        .try_global::<Glass>()
+        .is_some_and(|glass| glass.hide_lines)
+    {
+        gpui::rgba(0)
+    } else {
+        fill(crate::palette::LINE, cx)
+    }
+}
+
+pub(crate) fn reclaim_top(cx: &App) -> bool {
+    cx.try_global::<Glass>()
+        .is_some_and(|glass| glass.reclaim_top)
 }

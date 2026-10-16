@@ -12,6 +12,7 @@ enum Toggle {
     Glass,
     UniformGlass,
     HideTopBar,
+    HideLines,
 }
 
 impl SeerWindow {
@@ -107,6 +108,7 @@ impl SeerWindow {
                     &self.appearance.toggle,
                     &self.appearance.uniform,
                     &self.appearance.hide_bar,
+                    &self.appearance.hide_lines,
                     &self.appearance.choose,
                 ];
                 if self.appearance.settings.picture.is_some() {
@@ -123,8 +125,8 @@ impl SeerWindow {
                 };
                 window.focus(controls[next]);
                 match next {
-                    1..=3 => self.appearance.scroll.scroll_to_item(next - 1),
-                    4 | 5 => self.appearance.scroll.scroll_to_item(4),
+                    1..=4 => self.appearance.scroll.scroll_to_item(next - 1),
+                    5 | 6 => self.appearance.scroll.scroll_to_item(5),
                     _ => {}
                 }
             }
@@ -140,6 +142,7 @@ impl SeerWindow {
             Toggle::Glass => settings.glass = !settings.glass,
             Toggle::UniformGlass => settings.uniform_glass = !settings.uniform_glass,
             Toggle::HideTopBar => settings.hide_top_bar = !settings.hide_top_bar,
+            Toggle::HideLines => settings.hide_lines = !settings.hide_lines,
         }
         if self.appearance.save(settings)
             && self.appearance.settings.glass
@@ -167,7 +170,7 @@ impl SeerWindow {
             self.appearance.fallback = false;
             if self.appearance.reset.is_focused(window) {
                 window.focus(&self.appearance.choose);
-                self.appearance.scroll.scroll_to_item(4);
+                self.appearance.scroll.scroll_to_item(5);
             }
         }
         cx.notify();
