@@ -154,7 +154,7 @@ impl SeerWindow {
         };
         let narrow = window.viewport_size().width < px(NARROW);
         let left = if narrow { 74. } else { 8. };
-        let top = if narrow { 48. } else { 84. };
+        let top = if narrow { 48. } else { 92. };
         let left = px(left).min((window.viewport_size().width - px(288.)).max(px(8.)));
         let panel = menu::panel("people-menu", 280., cx)
             .absolute()

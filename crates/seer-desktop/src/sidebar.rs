@@ -105,13 +105,13 @@ pub(crate) fn sidebar(
         .when(!crate::appearance::reclaim_top(cx), |side| {
             side.child(chrome::drag_area().pl(px(12.)).child(chrome::lights()))
         })
-        .child(who.w_full().h(px(36.)).pl(px(7.)).pr(px(8.)))
+        .child(who.w_full().h(px(36.)).mt(px(8.)).pl(px(7.)).pr(px(8.)))
         .child(
             list(div().id("tabs"), keys, cx)
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
-                .mt(px(12.))
+                .mt(px(4.))
                 .pb(px(8.))
                 .flex()
                 .flex_col()

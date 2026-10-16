@@ -181,10 +181,21 @@ pub(crate) fn exercise(
                 "close-sheet",
                 "context",
                 "tooltip",
+                "sidebar-shown-lines",
+                "sidebar-hidden-lines",
+                "sidebar-shown-no-lines",
+                "sidebar-hidden-no-lines",
             ] {
                 window
                     .update(cx, |view, window, cx| {
                         match name {
+                            name if name.starts_with("sidebar-") => {
+                                view.people_menu = None;
+                                view.appearance.settings.hide_top_bar = name.contains("hidden");
+                                view.appearance.settings.hide_lines = name.contains("no-lines");
+                                view.appearance.top_bar.hovered = false;
+                                window.focus(&view.input.focus);
+                            }
                             "people" => view.open_people(true, window, cx),
                             "settings" => view.open_settings(true, window, cx),
                             "close-settings" => {
@@ -276,11 +287,14 @@ pub(crate) fn window_options(
     mut options: gpui::WindowOptions,
     cx: &gpui::App,
 ) -> gpui::WindowOptions {
-    if std::env::var_os("TEXT_PIXEL_SECONDARY").is_some() {
+    if let Ok(secondary) = std::env::var("TEXT_PIXEL_SECONDARY") {
         let display = cx
             .displays()
             .into_iter()
-            .find(|display| display.id() != cx.primary_display().unwrap().id())
+            .find(|display| {
+                display.id() != cx.primary_display().unwrap().id()
+                    && (secondary == "1" || u32::from(display.id()).to_string() == secondary)
+            })
             .expect("a secondary native display is required");
         options.display_id = Some(display.id());
         options.window_bounds = Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
