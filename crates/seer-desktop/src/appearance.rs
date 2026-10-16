@@ -5,7 +5,10 @@ use seer::Settings;
 
 use crate::{backdrop, motion::Motion};
 
-pub(crate) struct Glass(pub(crate) bool);
+pub(crate) struct Glass {
+    pub(crate) enabled: bool,
+    pub(crate) uniform: bool,
+}
 impl Global for Glass {}
 
 pub(crate) struct Appearance {
@@ -19,6 +22,9 @@ pub(crate) struct Appearance {
     pub(crate) trigger: FocusHandle,
     pub(crate) close: FocusHandle,
     pub(crate) toggle: FocusHandle,
+    pub(crate) uniform: FocusHandle,
+    pub(crate) hide_bar: FocusHandle,
+    pub(crate) top_bar: crate::window::top_bar::TopBar,
     pub(crate) choose: FocusHandle,
     pub(crate) reset: FocusHandle,
     pub(crate) return_focus: Option<FocusHandle>,
@@ -56,6 +62,9 @@ impl Appearance {
             trigger: cx.focus_handle().tab_stop(true),
             close: cx.focus_handle().tab_stop(true),
             toggle: cx.focus_handle().tab_stop(true),
+            uniform: cx.focus_handle().tab_stop(true),
+            hide_bar: cx.focus_handle().tab_stop(true),
+            top_bar: crate::window::top_bar::TopBar::new(),
             choose: cx.focus_handle().tab_stop(true),
             reset: cx.focus_handle().tab_stop(true),
             return_focus: None,
@@ -98,8 +107,9 @@ impl Appearance {
 }
 
 pub(crate) fn fill(color: u32, cx: &App) -> gpui::Rgba {
-    if cx.try_global::<Glass>().is_some_and(|glass| glass.0) {
+    if let Some(glass) = cx.try_global::<Glass>().filter(|glass| glass.enabled) {
         match color {
+            crate::palette::SURFACE if glass.uniform => return gpui::rgba(0),
             crate::palette::SURFACE => return gpui::rgba(0x00000066),
             crate::palette::RAISED => return gpui::rgba(0x080808f5),
             crate::palette::LINE | crate::palette::LINE_2 => return gpui::rgba(0xffffff12),

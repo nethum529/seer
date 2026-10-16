@@ -3,7 +3,16 @@ use gpui::StyledImage;
 
 impl Render for SeerWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
-        cx.set_global(crate::appearance::Glass(self.appearance.settings.glass));
+        cx.set_global(crate::appearance::Glass {
+            enabled: self.appearance.settings.glass,
+            uniform: self.appearance.settings.uniform_glass,
+        });
+        let menus = self.menu(window, cx);
+        let people = self.people_menu(window, cx);
+        let rooms = self.room_overlays(window, cx);
+        let settings = self.settings_dialog(window, cx);
+        let top_bar_opacity = self.top_bar_opacity(window, cx);
+        let controls = self.top_bar_controls(window, top_bar_opacity);
         // gpui starts a tip only on a mouse move that the tooltip listener
         // gets, so the tips come back in the frame after Escape clears them.
         if self.keys.mode == Mode::Quiet {
@@ -25,8 +34,17 @@ impl Render for SeerWindow {
             .text_color(rgb(palette::TEXT))
             .on_mouse_down(
                 MouseButton::Left,
-                cx.listener(|view, _, _, cx| {
+                cx.listener(|view, event: &gpui::MouseDownEvent, _window, cx| {
                     view.keys.mode = Mode::Pointer;
+                    if event.position.y < px(44.) {
+                        #[cfg(target_os = "macos")]
+                        if let Some(frame) = &mut view.input.frame {
+                            frame.start_drag();
+                        }
+                        // GPUI's headless platform does not implement native window moves.
+                        #[cfg(all(target_os = "linux", not(test)))]
+                        _window.start_window_move();
+                    }
                     cx.notify();
                 }),
             )
@@ -42,8 +60,8 @@ impl Render for SeerWindow {
                         .inset_0()
                         .size_full()
                 }))
-            });
-        let settings = self.settings_dialog(window, cx);
+            })
+            .child(top_bar::events(cx));
         let (link, name) = match &self.content {
             Content::Join(join) => {
                 return root
@@ -55,7 +73,8 @@ impl Render for SeerWindow {
                             .top(px(6.))
                             .child(self.settings_button(window, cx)),
                     )
-                    .children(settings);
+                    .children(settings)
+                    .children(controls);
             }
             Content::Message(message) => {
                 let content = if self.room.server.is_some() {
@@ -73,9 +92,10 @@ impl Render for SeerWindow {
                 };
                 return root
                     .child(content)
-                    .children(self.room_overlays(window, cx))
+                    .children(rooms)
                     .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
-                    .children(settings);
+                    .children(settings)
+                    .children(controls);
             }
             Content::Terminal(link, name) => (link, name),
         };
@@ -179,11 +199,12 @@ impl Render for SeerWindow {
                         })
                         .child(terminal),
                 )
-                .children(self.menu(window, cx))
-                .children(self.people_menu(window, cx))
-                .children(self.room_overlays(window, cx))
+                .children(menus)
+                .children(people)
+                .children(rooms)
                 .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
-                .children(settings);
+                .children(settings)
+                .children(controls);
         }
         let title = terminals
             .iter()
@@ -226,7 +247,7 @@ impl Render for SeerWindow {
             .justify_center()
             .px(px(14.))
             .child(
-                title.max_w(
+                title.opacity(top_bar_opacity).max_w(
                     (window.viewport_size().width - px(248. + if readonly { 180. } else { 28. }))
                         .max(px(0.)),
                 ),
@@ -234,6 +255,7 @@ impl Render for SeerWindow {
             .when(readonly, |bar| {
                 bar.child(
                     people::control(can_input)
+                        .opacity(top_bar_opacity)
                         .absolute()
                         .right(px(14.))
                         .top(px(13.)),
@@ -249,11 +271,12 @@ impl Render for SeerWindow {
                     .child(heading)
                     .child(terminal),
             )
-            .children(self.menu(window, cx))
-            .children(self.people_menu(window, cx))
-            .children(self.room_overlays(window, cx))
+            .children(menus)
+            .children(people)
+            .children(rooms)
             .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
             .children(settings)
+            .children(controls)
     }
 }
 

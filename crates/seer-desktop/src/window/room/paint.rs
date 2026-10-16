@@ -262,13 +262,7 @@ impl SeerWindow {
                     .bg(crate::appearance::fill(palette::SURFACE, cx))
                     .border_r_1()
                     .border_color(crate::appearance::fill(palette::LINE, cx))
-                    .child(
-                        div()
-                            .h(px(44.))
-                            .flex_none()
-                            .pl(px(12.))
-                            .child(chrome::lights()),
-                    )
+                    .child(chrome::drag_area().pl(px(12.)).child(chrome::lights()))
                     .child(
                         sidebar::who(
                             &person,
