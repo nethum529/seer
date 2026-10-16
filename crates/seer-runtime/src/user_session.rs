@@ -1,6 +1,6 @@
 use crate::PaneHost;
 use crate::persistence::{self, Store};
-use crate::room::SECRET_VARS;
+use crate::room::RUNTIME_VARS;
 use crate::{login_shell, shell_env, shell_exit};
 use seer_core::layout::{PaneRect, rects};
 use seer_core::proto::{ClientMsg, PeekTarget, ServerMsg, TerminalInfo};
@@ -309,7 +309,7 @@ impl UserSession {
         command.env("COLORTERM", "truecolor");
         command.env("SEER_USER_ID", &self.user);
         command.env("SEER_PANE", &pane_rect.pane);
-        for name in SECRET_VARS {
+        for name in RUNTIME_VARS {
             command.env_remove(name);
         }
         PaneHost::start(command, pane_rect.cols, pane_rect.rows)

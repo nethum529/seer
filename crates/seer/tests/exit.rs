@@ -115,6 +115,14 @@ fn typed_exit_in_a_seer_shell_leaves_seer_and_keeps_the_shell() {
             continue;
         };
         let root = Root::new(&format!("typed-{shell}"));
+        // A user .zshrc can remove exit and replace all zsh prompt hooks and
+        // scheduled events.
+        fs::write(
+            root.0.join(".zshrc"),
+            "unfunction exit 2>/dev/null\nmy_prompt() { :; }\nprecmd_functions=(my_prompt)\n\
+             zmodload zsh/sched\nsched +3600 :\nsched -1\n",
+        )
+        .expect("zshrc must be written");
         let directory = root.0.join("state-home/seer/runtimes").join(USER);
         fs::create_dir_all(&directory).expect("runtime directory must exist");
         let socket = directory.join("socket");
