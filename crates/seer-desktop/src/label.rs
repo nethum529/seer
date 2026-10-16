@@ -30,13 +30,24 @@ impl IntoElement for Label {
     }
 }
 
+fn ink_height(cap_height: Pixels, scale: f32) -> Pixels {
+    // 1/32 pixel coverage is below the 8/255 visible-ink contrast cutoff.
+    (cap_height * scale - px(1. / 32.)).ceil()
+}
+
+pub(crate) fn center(bounds: Bounds<Pixels>, scale: f32) -> Pixels {
+    let top = (bounds.top() * scale).round();
+    let bottom = (bounds.bottom() * scale).round();
+    (top + bottom) / 2.
+}
+
 pub(crate) fn baseline(
     bounds: Bounds<Pixels>,
     cap_height: Pixels,
     span: Pixels,
     scale: f32,
 ) -> Pixels {
-    ((bounds.center().y + cap_height / 2.) * scale - span / 2.).round()
+    (center(bounds, scale) + ink_height(cap_height, scale) / 2. - span / 2.).round()
 }
 
 pub(crate) fn origin(
@@ -57,7 +68,21 @@ pub(crate) fn origin(
 
 pub(crate) fn cap_height(line: &ShapedLine, window: &Window) -> Pixels {
     line.runs.first().map_or(line.ascent - line.descent, |run| {
-        window.text_system().cap_height(run.font_id, line.font_size)
+        let text = window.text_system();
+        // GPUI 0.2.2 returns vertical advances instead of glyph bounds on Linux.
+        if cfg!(target_os = "linux") {
+            return text.cap_height(run.font_id, line.font_size);
+        }
+        let capital = line
+            .text
+            .chars()
+            .find(|ch| ch.is_uppercase())
+            .unwrap_or('H');
+        text.typographic_bounds(run.font_id, line.font_size, capital)
+            .map_or_else(
+                |_| text.cap_height(run.font_id, line.font_size),
+                |ink| ink.bottom(),
+            )
     })
 }
 

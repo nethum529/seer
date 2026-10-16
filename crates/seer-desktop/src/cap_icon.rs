@@ -48,20 +48,10 @@ impl Element for CapIcon {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let style = window.text_style();
-        let text = window.text_system();
-        let font = text.resolve_font(&style.font());
-        let font_size = style.font_size.to_pixels(window.rem_size());
-        let cap_height = text.cap_height(font, font_size);
         let center = bounds.center().y;
         let scale = window.scale_factor();
-        let baseline = crate::label::baseline(
-            crate::label::bounds_for(bounds, cx),
-            cap_height,
-            px(0.),
-            scale,
-        );
-        let cap_center = (baseline - cap_height * scale / 2.).round() / scale;
+        let cap_center =
+            crate::label::center(crate::label::bounds_for(bounds, cx), scale).round() / scale;
         window.with_element_offset(point(px(0.), cap_center - center), |window| {
             self.0.prepaint(window, cx);
         });
