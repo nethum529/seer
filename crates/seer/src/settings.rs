@@ -11,6 +11,7 @@ pub struct Settings {
     pub glass: bool,
     pub uniform_glass: bool,
     pub hide_top_bar: bool,
+    pub hide_sidebar: bool,
     pub hide_lines: bool,
     pub picture: Option<PathBuf>,
 }
@@ -21,6 +22,7 @@ impl Default for Settings {
             glass: true,
             uniform_glass: true,
             hide_top_bar: true,
+            hide_sidebar: false,
             hide_lines: false,
             picture: None,
         }

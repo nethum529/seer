@@ -43,7 +43,21 @@ var samples: [(String, String, [Double], [Double])] = [
     ("sheet", "Sheet button", [500, 346, 9, 32], [541, 2]),
     ("context", "Menu item", [99, 113, 9, 32], [99, 9]),
     ("tooltip", "Tooltip", [18, 92, 9, 27], [18, 9]),
+    ("terminal-tip", "Terminal shortcut tooltip", [18, 129, 9, 59], [18, 9]),
 ]
+for capture in ["toggle-show", "toggle-show-repeat"] {
+    samples += [
+        (capture, capture + " name", [44, 52, 10, 36], [44, 10]),
+        (capture, capture + " avatar", [22, 59, 9, 22], [22, 9]),
+        (capture, capture + " tab", [44, 92, 8, 33], [68, 6]),
+        (capture, capture + " New terminal", [44, 131, 9, 32], [44, 9]),
+        (capture, capture + " room", [44, 602.5, 8, 32], [44, 8]),
+        (capture, capture + " title", [590, 7.5, 8, 28], [613, 6]),
+    ]
+}
+for capture in ["toggle-hide", "toggle-hide-repeat"] {
+    samples.append((capture, capture + " title", [466, 7.5, 8, 28], [489, 6]))
+}
 for state in sidebarStates {
     let bar = state == "hidden-no-lines" ? 0.0 : 44.0
     let capture = "sidebar-" + state

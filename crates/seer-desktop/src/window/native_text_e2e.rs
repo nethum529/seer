@@ -181,6 +181,7 @@ pub(crate) fn exercise(
                 "close-sheet",
                 "context",
                 "tooltip",
+                "terminal-tip",
                 "sidebar-shown-lines",
                 "sidebar-hidden-lines",
                 "sidebar-shown-no-lines",
@@ -225,6 +226,12 @@ pub(crate) fn exercise(
                                     cx,
                                 );
                             }
+                            "terminal-tip" => {
+                                view.menu = None;
+                                view.keys.mode = crate::sidebar::Mode::Keyboard;
+                                window.focus(&view.keys.tabs);
+                                cx.notify();
+                            }
                             "tooltip" => {
                                 view.menu = None;
                                 view.keys.mode = crate::sidebar::Mode::Keyboard;
@@ -233,7 +240,7 @@ pub(crate) fn exercise(
                             }
                             _ => {}
                         }
-                        if name != "tooltip" {
+                        if !matches!(name, "tooltip" | "terminal-tip") {
                             view.keys.mode = crate::sidebar::Mode::Pointer;
                             cx.notify();
                         }
@@ -265,6 +272,8 @@ pub(crate) fn exercise(
                     String::from_utf8_lossy(&result.stderr)
                 );
             }
+            super::sidebar_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+                .await;
             let result = Command::new(&fixture.capture)
                 .arg("measure")
                 .arg(&fixture.evidence)

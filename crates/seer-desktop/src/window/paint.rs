@@ -15,6 +15,7 @@ impl Render for SeerWindow {
         let rooms = self.room_overlays(window, cx);
         let settings = self.settings_dialog(window, cx);
         let top_bar_opacity = self.top_bar_opacity(window, cx);
+        let sidebar_width = self.sidebar_width(window, cx);
         let slide = px(if reclaim { 44. * top_bar_opacity } else { 0. });
         let controls = self.top_bar_controls(window, top_bar_opacity);
         // gpui starts a tip only on a mouse move that the tooltip listener
@@ -254,6 +255,16 @@ impl Render for SeerWindow {
                 cx,
             ),
         );
+        let side = div().flex_none().w(sidebar_width).h_full().relative().when(
+            sidebar_width > px(0.),
+            |container| {
+                container.child(
+                    side.absolute()
+                        .left(sidebar_width - px(sidebar::WIDTH))
+                        .top_0(),
+                )
+            },
+        );
         let title = heading(
             title.as_ref(),
             labels,
@@ -272,7 +283,8 @@ impl Render for SeerWindow {
                     .opacity(if reclaim { 1. } else { top_bar_opacity })
                     .max_w(
                         (window.viewport_size().width
-                            - px(248. + if readonly { 180. } else { 28. }))
+                            - sidebar_width
+                            - px(if readonly { 180. } else { 28. }))
                         .max(px(0.)),
                     ),
             )
@@ -288,7 +300,13 @@ impl Render for SeerWindow {
         let (heading, overlay) = if reclaim {
             (
                 None,
-                Some(heading.absolute().top(px(0.)).left(px(248.)).right(px(0.))),
+                Some(
+                    heading
+                        .absolute()
+                        .top(px(0.))
+                        .left(sidebar_width)
+                        .right(px(0.)),
+                ),
             )
         } else {
             (Some(heading), None)
@@ -310,7 +328,7 @@ impl Render for SeerWindow {
                     .absolute()
                     .top(px(0.))
                     .left(px(0.))
-                    .w(px(248.))
+                    .w(sidebar_width)
                     .opacity(top_bar_opacity)
             }))
             .children(overlay)

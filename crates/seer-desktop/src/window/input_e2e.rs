@@ -149,7 +149,7 @@ fn room_overlays_block_terminal_pointer_input(cx: &mut TestAppContext) {
             window.refresh();
             window.draw(cx).clear();
         });
-        cx.simulate_keystrokes("secondary-shift-b tab z");
+        cx.simulate_keystrokes(&format!("{} tab z", super::sidebar_e2e::focus_shortcut()));
         wait_for_input(&runtime, cx, b'z', expected.len() + 1);
         assert_eq!(
             runtime.input(),
@@ -302,7 +302,7 @@ fn desktop_keys_reach_the_local_shell(cx: &mut TestAppContext) {
     thread::sleep(Duration::from_millis(30));
     assert!(runtime.input().ends_with(b"paste\rtext"));
 
-    cx.simulate_keystrokes("secondary-shift-b tab");
+    cx.simulate_keystrokes(&format!("{} tab", super::sidebar_e2e::focus_shortcut()));
     cx.simulate_keystrokes("z");
     thread::sleep(Duration::from_millis(30));
     expected.extend_from_slice(b"paste\rtextz");

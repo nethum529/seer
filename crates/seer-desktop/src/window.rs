@@ -25,6 +25,7 @@ mod people;
 pub(crate) mod rename;
 mod room;
 mod settings;
+pub(crate) mod sidebar_visibility;
 mod slide;
 pub(crate) mod terminals;
 pub(crate) mod top_bar;
@@ -227,22 +228,15 @@ impl SeerWindow {
         if self.join_travel(keystroke, window, cx) {
             return;
         }
+        if self.sidebar_key(keystroke, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.room_key(keystroke, window, cx) || self.people_key(keystroke, window, cx) {
             cx.stop_propagation();
             return;
         }
-        let held = keystroke.modifiers;
-        let secondary = if cfg!(target_os = "macos") {
-            held.platform
-        } else {
-            held.control
-        };
         if self.new_terminal_key(keystroke, window, cx) {
-            cx.stop_propagation();
-            return;
-        }
-        if secondary && held.shift && !held.alt && keystroke.key == "b" {
-            self.focus_tabs(window, cx);
             cx.stop_propagation();
             return;
         }
@@ -383,3 +377,9 @@ mod terminals_e2e;
 pub(crate) mod native_text_e2e;
 #[cfg(all(test, not(feature = "native-text-e2e")))]
 mod top_bar_e2e;
+
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+mod sidebar_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod sidebar_native_e2e;

@@ -26,15 +26,11 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                     if !window.is_window_active() || view.invite_open() || view.settings_open() {
                         return false;
                     }
-                    if view.room_key(&key, window, cx) {
+                    if view.sidebar_key(&key, window, cx) || view.room_key(&key, window, cx) {
                         return true;
                     }
                     if crate::window::terminals::new_shortcut(&key) {
                         view.new_terminal(window, cx);
-                        return true;
-                    }
-                    if key.modifiers.platform {
-                        view.focus_tabs(window, cx);
                         return true;
                     }
                     if !view.input.focus.is_focused(window) || view.input.composition.marked() {
@@ -69,9 +65,9 @@ fn key(event: &NSEvent) -> Option<Keystroke> {
     // GPUI 0.2.2 sends non-printing keys to AppKit first. AppKit consumes
     // F20 and Option+Shift+Tab as text. Carbon virtual key codes do not vary by layout.
     let key = if command {
-        // AppKit consumes Command Shift B before GPUI's key callback.
+        // AppKit consumes Command B shortcuts before GPUI's key callback.
         match (event.keyCode(), shift, alt, control) {
-            (0x0b, true, false, false) => "b".to_owned(),
+            (0x0b, _, false, false) => "b".to_owned(),
             (0x2d, false, false, false) => "n".to_owned(),
             _ => return None,
         }
