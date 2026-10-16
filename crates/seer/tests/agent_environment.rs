@@ -26,6 +26,7 @@ const MARKERS: &[&str] = &[
     "CODEX_PERMISSION_PROFILE",
     "CODEX_TOOL_CALL_ID",
     "CODEX_PLUGIN_METRICS_OUTPUT",
+    "EXEC_WRAPPER",
     "CODEX_ESCALATE_SOCKET",
     "CODEX_SANDBOX",
     "CODEX_SANDBOX_NETWORK_DISABLED",
@@ -62,6 +63,8 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
             "REVIEW_ACTIVATION=from-activation",
             "CLAUDE_CODE_CHILD_SESSION=user-child",
             "CODEX_THREAD_ID=user-thread",
+            "EXEC_WRAPPER=/user/exec-wrapper",
+            "CODEX_ESCALATE_SOCKET=42",
             "CLAUDE_CODE_EFFORT_LEVEL=high",
             "CLAUDE_CODE_TMPDIR=/tmp/user-claude",
             "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS=1",
@@ -96,7 +99,8 @@ fn shell_environment(shell: &str) -> (Running, String, String) {
     .expect("activation file must exist");
     let startup = "env > \"$HOME/before\"\n\
         export USER_STARTUP_VALUE=from-startup\n\
-        export CLAUDE_CODE_CHILD_SESSION=user-child CODEX_THREAD_ID=user-thread\n";
+        export CLAUDE_CODE_CHILD_SESSION=user-child CODEX_THREAD_ID=user-thread\n\
+        export EXEC_WRAPPER=/user/exec-wrapper CODEX_ESCALATE_SOCKET=42\n";
     for name in [".bashrc", ".zshenv"] {
         fs::write(running.directory.join(name), startup).expect("startup file must exist");
     }
@@ -129,6 +133,12 @@ fn shell_environment(shell: &str) -> (Running, String, String) {
     for marker in MARKERS {
         command.env(marker, "outer-session");
     }
+    command
+        .env(
+            "EXEC_WRAPPER",
+            running.directory.join("codex-execve-wrapper"),
+        )
+        .env("CODEX_ESCALATE_SOCKET", "17");
     running.child = Some(command.spawn().expect("runtime must start"));
     let deadline = Instant::now() + WAIT;
     let mut stream = loop {

@@ -14,7 +14,7 @@ const SESSION_PREFIXES: [&str; 7] = [
     "ITERM_",
     "ALACRITTY_",
 ];
-const SESSION_NAMES: [&str; 27] = [
+const SESSION_NAMES: [&str; 28] = [
     "STY",
     "WINDOW",
     "TERM_PROGRAM",
@@ -39,6 +39,7 @@ const SESSION_NAMES: [&str; 27] = [
     "CODEX_PERMISSION_PROFILE",
     "CODEX_TOOL_CALL_ID",
     "CODEX_PLUGIN_METRICS_OUTPUT",
+    "EXEC_WRAPPER",
     "CODEX_ESCALATE_SOCKET",
     "CODEX_SANDBOX",
     "CODEX_SANDBOX_NETWORK_DISABLED",
