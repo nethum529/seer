@@ -1,6 +1,6 @@
 // Issue 421: a runtime from before 0.6.0 greets a window without a version.
 
-use std::io::Write;
+use std::io::{Read, Write};
 use std::os::unix::net::UnixListener;
 
 use super::*;
@@ -22,6 +22,7 @@ fn a_window_on_a_runtime_without_a_version_shows_the_restart_notice() {
             .expect("greeting must send");
         let _: ClientMsg = codec::decode(&mut stream).expect("attach must decode");
         codec::encode(&mut stream, &ServerMsg::Tree { tree: Tree::new() }).expect("tree must send");
+        let _ = stream.read(&mut [0]);
     });
 
     let ready = greet(&socket, None, READY_TIMEOUT).expect("the old greeting must decode");

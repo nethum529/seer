@@ -19,7 +19,7 @@ seer-runtime = { path = "../seer-runtime" }
 [target.'cfg(target_os = "macos")'.dependencies]
 block2 = "0.6"
 objc2 = "0.6"
-objc2-app-kit = { version = "0.3", default-features = false, features = ["NSEvent", "NSView", "NSWindow", "NSButton", "NSControl", "block2", "objc2-quartz-core"] }
+objc2-app-kit = { version = "0.3", default-features = false, features = ["NSEvent", "NSView", "NSWindow", "NSButton", "NSControl", "NSWorkspace", "NSAccessibility", "block2", "objc2-quartz-core"] }
 raw-window-handle = "0.6"
 
 [dev-dependencies]

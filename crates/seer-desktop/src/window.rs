@@ -25,6 +25,7 @@ mod people;
 pub(crate) mod rename;
 mod room;
 mod settings;
+mod slide;
 pub(crate) mod terminals;
 pub(crate) mod top_bar;
 use rename::Surface;
@@ -380,3 +381,5 @@ mod terminals_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 pub(crate) mod native_text_e2e;
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+mod top_bar_e2e;
