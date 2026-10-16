@@ -57,7 +57,7 @@ fn hover_slides_content_without_resizing_the_shell(cx: &mut TestAppContext) {
 }
 
 fn settle(cx: &mut VisualTestContext) {
-    std::thread::sleep(std::time::Duration::from_millis(180));
+    std::thread::sleep(std::time::Duration::from_millis(320));
     cx.update(|window, cx| {
         window.refresh();
         window.draw(cx).clear();

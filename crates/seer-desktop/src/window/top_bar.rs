@@ -1,17 +1,17 @@
 use super::*;
-use crate::motion::Motion;
+mod reveal;
+
+use reveal::Reveal;
 
 pub(crate) struct TopBar {
-    motion: Motion,
+    motion: Reveal,
     pub(super) hovered: bool,
 }
 
 impl TopBar {
     pub(crate) fn new() -> Self {
-        let mut motion = Motion::open(true, 0);
-        motion.close(true, 0);
         Self {
-            motion,
+            motion: Reveal::new(),
             hovered: false,
         }
     }
@@ -43,11 +43,7 @@ impl SeerWindow {
         let shown = pinned || bar.hovered;
         if shown == bar.motion.closing() {
             let instant = pinned || self.keys.mode == Mode::Keyboard || reduced_motion();
-            if shown {
-                bar.motion.reopen(instant, 120);
-            } else {
-                bar.motion.close(instant, 80);
-            }
+            bar.motion.retarget(shown, instant);
         }
         if bar.motion.animating() {
             cx.on_next_frame(window, |_, _, cx| cx.notify());
