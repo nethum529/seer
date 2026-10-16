@@ -3,6 +3,9 @@ name = "seer-desktop"
 version.workspace = true
 edition.workspace = true
 
+[features]
+native-text-e2e = []
+
 [dependencies]
 futures = "0.3"
 gpui = "=0.2.2"
@@ -22,3 +25,9 @@ raw-window-handle = "0.6"
 [dev-dependencies]
 gpui = { version = "=0.2.2", features = ["test-support"] }
 tempfile = "3"
+
+[[test]]
+name = "text_pixels"
+path = "src/native_test_main.rs"
+harness = false
+required-features = ["native-text-e2e"]

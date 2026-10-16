@@ -84,7 +84,7 @@ impl InviteSheet {
                                         sheet.pick(index, window, cx);
                                     }))
                             })
-                            .child(label)
+                            .child(crate::label::text(label))
                     }),
             );
         div()
@@ -103,7 +103,7 @@ impl InviteSheet {
                                 .text_size(px(12.))
                                 .line_height(px(16.))
                                 .text_color(rgb(palette::MUTED))
-                                .child("Hours, 1 to 168"),
+                                .child(crate::label::text("Hours, 1 to 168")),
                         ),
                 )
             })
@@ -159,7 +159,7 @@ impl InviteSheet {
                             .child(chrome::icon("check", 0x4ade80)),
                     ),
             )
-            .child(if copied { "Copied" } else { "Copy" });
+            .child(crate::label::text(if copied { "Copied" } else { "Copy" }));
         div().child(label(title)).child(
             div()
                 .flex()
@@ -181,7 +181,7 @@ impl InviteSheet {
                         .font_family("JetBrains Mono")
                         .text_size(px(12.))
                         .text_color(rgb(palette::TEXT_2))
-                        .child(crate::sidebar::one_line(div()).child(line)),
+                        .child(crate::sidebar::one_line(div()).child(crate::label::text(line))),
                 )
                 .child(button),
         )
@@ -194,7 +194,7 @@ impl InviteSheet {
                 .text_size(px(12.))
                 .line_height(px(16.))
                 .text_color(rgb(0xf87171))
-                .child(error)
+                .child(crate::label::text(error))
         })
     }
 
@@ -228,7 +228,9 @@ impl InviteSheet {
                         } else {
                             format!("{hours} hour{}", if hours == 1 { "" } else { "s" })
                         };
-                        note.child(format!("Works once. Expires in {expires}."))
+                        note.child(crate::label::text(format!(
+                            "Works once. Expires in {expires}."
+                        )))
                     }),
             )
             .child(
@@ -244,7 +246,7 @@ impl InviteSheet {
                             sheet.create(window, cx);
                         }
                     }))
-                    .child(text),
+                    .child(crate::label::text(text)),
             )
     }
 }
@@ -256,7 +258,7 @@ fn label(text: &'static str) -> Div {
         .line_height(px(16.))
         .font_weight(FontWeight::MEDIUM)
         .text_color(rgb(palette::MUTED))
-        .child(text)
+        .child(crate::label::text(text))
 }
 
 impl Render for InviteSheet {
@@ -324,7 +326,7 @@ impl Render for InviteSheet {
                             .text_size(px(15.))
                             .line_height(px(20.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Invite a person"),
+                            .child(crate::label::text("Invite a person")),
                     )
                     .child(
                         self.button("invite-close", &self.close_focus, window)

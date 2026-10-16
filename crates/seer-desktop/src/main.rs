@@ -11,10 +11,11 @@ mod chrome;
 mod composition;
 mod input;
 mod invite;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod invite_e2e;
 mod join;
 mod keyboard;
+mod label;
 mod link;
 mod menu;
 mod motion;
@@ -34,10 +35,17 @@ mod window;
 
 use window::SeerWindow;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod join_e2e;
 
 fn main() {
+    #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+    let Some(fixture) = window::native_text_e2e::prepare() else {
+        return;
+    };
+    if cfg!(all(test, not(target_os = "macos"))) {
+        return;
+    }
     let links = urls::Links::new();
     let incoming = links.clone();
     let application = Application::new().with_assets(assets::Assets);
@@ -72,6 +80,8 @@ fn main() {
             window_decorations: Some(WindowDecorations::Client),
             ..Default::default()
         };
+        #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+        let options = window::native_text_e2e::window_options(options, cx);
         // gpui on Wayland does not send the title from TitlebarOptions.
         let opened = cx.open_window(options, |window, cx| {
             window.set_window_title("Seer");
@@ -84,7 +94,11 @@ fn main() {
             view
         });
         match opened {
-            Ok(window) => links.borrow_mut().attach(window, cx),
+            Ok(window) => {
+                links.borrow_mut().attach(window, cx);
+                #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+                window::native_text_e2e::exercise(window, fixture, cx);
+            }
             Err(error) => {
                 eprintln!("seer: could not open the window: {error}");
                 cx.quit();

@@ -329,7 +329,7 @@ fn menu_item(menu: &Menu, index: usize, cx: &mut Context<SeerWindow>) -> Statefu
             view.pick_tab_action(window, cx);
         }))
         .child(crate::cap_icon::cap_icon(chrome::icon(icon, color)))
-        .child(label)
+        .child(crate::label::text(label))
 }
 
 pub(crate) fn label(terminal: &TerminalInfo, surface: Surface, labels: Labels<'_>) -> AnyElement {
@@ -345,7 +345,7 @@ pub(crate) fn label(terminal: &TerminalInfo, surface: Surface, labels: Labels<'_
         .into_any_element();
     }
     sidebar::one_line(div())
-        .child(display_name(terminal))
+        .child(crate::label::text(display_name(terminal)))
         .into_any_element()
 }
 

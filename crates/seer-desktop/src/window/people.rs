@@ -198,7 +198,7 @@ impl SeerWindow {
                     .p(px(8.))
                     .text_size(px(12.))
                     .text_color(rgb(palette::DANGER))
-                    .child(error)
+                    .child(crate::label::text(error))
             }));
         let closing = menu.motion.closing();
         Some(
@@ -279,7 +279,7 @@ fn person_row(
                     sidebar::one_line(div())
                         .text_color(rgb(text))
                         .opacity(if away && !offline { 0.6 } else { 1. })
-                        .child(name.clone()),
+                        .child(crate::label::text(name.clone())),
                 )
                 .when(!tag.is_empty(), |row| {
                     let label = format!("{name}: {tag}");
@@ -315,7 +315,7 @@ fn mark(text: impl Into<SharedString>) -> Div {
         .font_weight(FontWeight::NORMAL)
         .text_color(rgb(palette::FAINT))
         .whitespace_nowrap()
-        .child(text.into())
+        .child(crate::label::text(text))
 }
 
 fn presence(person: &Person, (waiting, working): (bool, usize)) -> String {
@@ -361,11 +361,11 @@ pub(super) fn control(can_input: bool) -> Div {
             .into()
         })
         .child(chrome::icon(if can_input { "check" } else { "lock" }, palette::FAINT).size(px(12.)))
-        .child(if can_input {
+        .child(crate::label::text(if can_input {
             "You have control"
         } else {
             "Read only"
-        })
+        }))
 }
 
 impl SeerWindow {
@@ -411,8 +411,8 @@ fn share_switch(
                 view.share_control(&user, cx);
             }),
         )
-        .child("Share control")
+        .child(crate::label::text("Share control"))
         .child(div().flex_1())
-        .when(keyboard, |row| row.child("Space"))
+        .when(keyboard, |row| row.child(crate::label::text("Space")))
         .child(menu::switch_track(on))
 }

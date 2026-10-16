@@ -69,16 +69,24 @@ pub(super) fn text(input: Entity<NameInput>) -> impl IntoElement {
             } else {
                 offset
             };
-            (line, offset)
+            let scale = window.scale_factor();
+            let baseline = crate::label::baseline(
+                crate::label::bounds_for(bounds, cx),
+                crate::label::cap_height(&line, window),
+                px(0.),
+                scale,
+            );
+            let origin = crate::label::origin(&line, bounds, px(20.), baseline, scale);
+            (line, offset, origin)
         },
-        move |bounds, (line, offset), window, cx| {
+        move |bounds, (line, offset, mut origin), window, cx| {
             let held = input.read(cx);
             window.handle_input(
                 &held.focus,
                 ElementInputHandler::new(bounds, input.clone()),
                 cx,
             );
-            let origin = point(bounds.left() - offset, bounds.top());
+            origin.x -= offset;
             if held.focus.is_focused(window) {
                 let start = line.x_for_index(held.selection.start);
                 let end = line.x_for_index(held.selection.end);

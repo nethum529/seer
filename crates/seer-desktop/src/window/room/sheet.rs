@@ -30,15 +30,20 @@ impl SeerWindow {
                     .text_size(px(15.))
                     .line_height(px(20.))
                     .font_weight(FontWeight::SEMIBOLD)
-                    .child(title),
+                    .child(crate::label::text(title)),
             )
-            .child(div().mt(px(8.)).text_color(rgb(palette::MUTED)).child(body))
+            .child(
+                div()
+                    .mt(px(8.))
+                    .text_color(rgb(palette::MUTED))
+                    .child(crate::label::text(body)),
+            )
             .children(self.room.error.as_ref().map(|error| {
                 div()
                     .mt(px(8.))
                     .text_size(px(12.))
                     .text_color(rgb(palette::DANGER))
-                    .child(error.clone())
+                    .child(crate::label::text(error.clone()))
             }))
             .child(
                 div()

@@ -136,5 +136,5 @@ pub(crate) fn button(
         .hover(|button| button.opacity(0.92))
         .active(|button| button.opacity(0.84))
         .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-        .child(text)
+        .child(crate::label::text(text))
 }

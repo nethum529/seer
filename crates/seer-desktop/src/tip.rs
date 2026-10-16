@@ -7,8 +7,6 @@ use gpui::{
 
 use crate::palette;
 
-mod text;
-
 const GAP: f32 = 4.;
 const MAX_WIDTH: f32 = 280.;
 
@@ -73,7 +71,7 @@ pub(crate) fn below(text: SharedString, font: SharedString) -> Div {
 
 // gpui draws a tooltip outside the window root, so it needs its own font.
 fn tip(text: SharedString, font: SharedString) -> impl IntoElement {
-    text::PixelTip::new(text, |text| {
+    crate::label::centered(
         div()
             .max_w(px(MAX_WIDTH))
             .py(px(5.))
@@ -87,6 +85,6 @@ fn tip(text: SharedString, font: SharedString) -> impl IntoElement {
             .text_size(px(12.))
             .line_height(relative(16. / 12.))
             .whitespace_normal()
-            .child(text)
-    })
+            .child(crate::label::tooltip(text)),
+    )
 }

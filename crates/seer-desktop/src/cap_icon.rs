@@ -48,21 +48,10 @@ impl Element for CapIcon {
         window: &mut Window,
         cx: &mut App,
     ) {
-        let style = window.text_style();
-        let text = window.text_system();
-        let font = text.resolve_font(&style.font());
-        let font_size = style.font_size.to_pixels(window.rem_size());
-        let ascent = text.ascent(font, font_size);
-        let descent = text.descent(font, font_size).abs();
-        let cap_height = text.cap_height(font, font_size);
         let center = bounds.center().y;
-        let baseline = center + (ascent - descent) / 2.;
         let scale = window.scale_factor();
-        // GPUI 0.2.2 rasterizes vertical glyph positions on whole device
-        // pixels on Linux, and quarter device pixels on macOS.
-        let variants = if cfg!(target_os = "macos") { 4. } else { 1. };
-        let baseline = (baseline * scale * variants).floor() / variants;
-        let cap_center = (baseline - cap_height * scale / 2.).round() / scale;
+        let cap_center =
+            crate::label::center(crate::label::bounds_for(bounds, cx), scale).round() / scale;
         window.with_element_offset(point(px(0.), cap_center - center), |window| {
             self.0.prepaint(window, cx);
         });
