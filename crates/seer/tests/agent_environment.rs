@@ -16,7 +16,6 @@ const MARKERS: &[&str] = &[
     "CLAUDE_CODE_MESSAGING_TOKEN",
     "CLAUDE_PID",
     "CLAUDE_EFFORT",
-    "CLAUDE_ENV_FILE",
     "CLAUDE_PROJECT_DIR",
     "CLAUDE_JOB_DIR",
     "AI_AGENT",
@@ -26,6 +25,7 @@ const MARKERS: &[&str] = &[
     "CODEX_VERSION",
     "CODEX_PERMISSION_PROFILE",
     "CODEX_TOOL_CALL_ID",
+    "CODEX_PLUGIN_METRICS_OUTPUT",
     "CODEX_ESCALATE_SOCKET",
     "CODEX_SANDBOX",
     "CODEX_SANDBOX_NETWORK_DISABLED",
@@ -39,6 +39,16 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
             continue;
         }
         let (running, before, after) = shell_environment(shell);
+        let activation = format!(
+            "CLAUDE_ENV_FILE={}/activation.sh",
+            running.directory.display()
+        );
+        for environment in [&before, &after] {
+            assert!(
+                environment.lines().any(|line| line == activation),
+                "{shell} must keep the configured activation file: {environment}"
+            );
+        }
         for marker in MARKERS {
             assert!(
                 !before
@@ -49,6 +59,7 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
         }
         for entry in [
             "USER_STARTUP_VALUE=from-startup",
+            "REVIEW_ACTIVATION=from-activation",
             "CLAUDE_CODE_CHILD_SESSION=user-child",
             "CODEX_THREAD_ID=user-thread",
             "CLAUDE_CODE_EFFORT_LEVEL=high",
@@ -78,6 +89,11 @@ fn shell_environment(shell: &str) -> (Running, String, String) {
         child: None,
         directory,
     };
+    fs::write(
+        running.directory.join("activation.sh"),
+        "export REVIEW_ACTIVATION=from-activation\n",
+    )
+    .expect("activation file must exist");
     let startup = "env > \"$HOME/before\"\n\
         export USER_STARTUP_VALUE=from-startup\n\
         export CLAUDE_CODE_CHILD_SESSION=user-child CODEX_THREAD_ID=user-thread\n";
@@ -97,6 +113,7 @@ fn shell_environment(shell: &str) -> (Running, String, String) {
         .env("SEER_SNAPSHOT_DIR", running.directory.join("snapshot"))
         .env("CLAUDE_CODE_EFFORT_LEVEL", "high")
         .env("CLAUDE_CODE_TMPDIR", "/tmp/user-claude")
+        .env("CLAUDE_ENV_FILE", running.directory.join("activation.sh"))
         .env("CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS", "1")
         .env("CODEX_HOME", running.directory.join("codex"))
         .env("ANTHROPIC_API_KEY", "user-key-sentinel")
@@ -138,7 +155,7 @@ fn shell_environment(shell: &str) -> (Running, String, String) {
             tab: tab.id.clone(),
             pane: tab.panes[0].id.clone(),
             input: TerminalInput::new(InputEvent::Text(
-                "env > \"$HOME/after.tmp\"; mv \"$HOME/after.tmp\" \"$HOME/after\"\n".into(),
+                ". \"$CLAUDE_ENV_FILE\"; env > \"$HOME/after.tmp\"; mv \"$HOME/after.tmp\" \"$HOME/after\"\n".into(),
             )),
         },
     )
