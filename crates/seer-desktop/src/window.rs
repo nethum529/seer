@@ -23,6 +23,7 @@ mod join;
 mod paint;
 mod people;
 pub(crate) mod rename;
+mod reveal;
 mod room;
 mod settings;
 pub(crate) mod sidebar_visibility;

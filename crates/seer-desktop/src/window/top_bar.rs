@@ -1,7 +1,5 @@
+use super::reveal::Reveal;
 use super::*;
-mod reveal;
-
-use reveal::Reveal;
 
 pub(crate) struct TopBar {
     motion: Reveal,

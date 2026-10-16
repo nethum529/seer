@@ -1,18 +1,16 @@
+use super::reveal::Reveal;
 use super::*;
-use crate::motion::Motion;
 
 pub(crate) struct Sidebar {
-    motion: Motion,
+    motion: Reveal,
     pub(crate) moving: bool,
     return_focus: Option<gpui::FocusHandle>,
 }
 
 impl Sidebar {
     pub(crate) fn new(hidden: bool) -> Self {
-        let mut motion = Motion::open(true, 0);
-        if hidden {
-            motion.close(true, 0);
-        }
+        let mut motion = Reveal::new();
+        motion.retarget(!hidden, true);
         Self {
             motion,
             moving: false,
@@ -82,13 +80,10 @@ impl SeerWindow {
         if hidden {
             sidebar.return_focus = return_focus;
             window.focus(&self.input.focus);
-            sidebar.motion.close(instant, 160);
-        } else {
-            if let Some(focus) = sidebar.return_focus.take() {
-                window.focus(&focus);
-            }
-            sidebar.motion.reopen(instant, 180);
+        } else if let Some(focus) = sidebar.return_focus.take() {
+            window.focus(&focus);
         }
+        sidebar.motion.retarget(!hidden, instant);
         cx.notify();
     }
 

@@ -14,7 +14,7 @@ fn record(start: Instant, samples: Samples, window: &mut Window, cx: &mut Contex
                 grid.cols,
             ));
         }
-        if start.elapsed() < Duration::from_millis(300) {
+        if start.elapsed() < Duration::from_millis(450) {
             record(start, samples, window, cx);
             cx.notify();
         }
@@ -50,12 +50,17 @@ pub(super) async fn exercise(
                     window.is_window_active(),
                     "native shortcut requires the active window"
                 );
+                if let Some(grid) = view.input.grid {
+                    samples
+                        .borrow_mut()
+                        .push((0., f32::from(grid.origin.x), grid.cols));
+                }
                 record(Instant::now(), samples.clone(), window, cx);
                 post_shortcut();
             })
             .unwrap();
         cx.background_executor()
-            .timer(Duration::from_millis(380))
+            .timer(Duration::from_millis(530))
             .await;
         {
             let samples = samples.borrow();
@@ -72,6 +77,11 @@ pub(super) async fn exercise(
             } else {
                 assert_eq!(changes, 1, "the native grid must resize once for {name}");
             }
+            assert!(
+                samples
+                    .windows(2)
+                    .all(|pair| { pair[0].2 == pair[1].2 || pair[1].1 == expected_x })
+            );
             for (index, (elapsed, x, cols)) in samples.iter().enumerate() {
                 csv.push_str(&format!("{name},{index},{elapsed:.3},{x:.3},{cols}\n"));
             }

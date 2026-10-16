@@ -21,7 +21,7 @@ pub(super) fn focus_shortcut() -> &'static str {
 }
 
 fn settle(cx: &mut VisualTestContext) {
-    std::thread::sleep(Duration::from_millis(220));
+    std::thread::sleep(Duration::from_millis(320));
     cx.update(|window, cx| {
         window.refresh();
         window.draw(cx).clear();
