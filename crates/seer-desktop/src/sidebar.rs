@@ -165,7 +165,9 @@ pub(crate) fn new_terminal(
         chrome::icon("plus", palette::MUTED)
             .group_hover("new-terminal", |style| style.text_color(rgb(palette::TEXT))),
     ))
-    .when(!compact, |row| row.child("New terminal"))
+    .when(!compact, |row| {
+        row.child(crate::label::text("New terminal"))
+    })
     .when(compact, |row| {
         row.w(px(32.)).mt(px(0.)).px(px(0.)).justify_center()
     })
@@ -206,7 +208,7 @@ pub(crate) fn who(
         who.child(
             one_line(div().flex_1())
                 .font_weight(FontWeight::SEMIBOLD)
-                .child(name.clone()),
+                .child(crate::label::text(name.clone())),
         )
     })
     .child(cap_icon(chrome::icon("selector", palette::FAINT)))
@@ -233,7 +235,14 @@ pub(crate) fn avatar(name: &str, diameter: f32, initial: f32) -> Div {
         .text_size(px(initial))
         .line_height(relative(1.))
         .font_weight(FontWeight::SEMIBOLD)
-        .child(letter)
+        .child(crate::label::centered(
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .child(crate::label::text(letter)),
+        ))
 }
 
 // gpui 0.2.2 keeps the first measure of a text that does not wrap. That
@@ -319,7 +328,7 @@ fn tab(
     labels: rename::Labels<'_>,
     ring: bool,
     cx: &mut Context<SeerWindow>,
-) -> Stateful<Div> {
+) -> crate::label::Centered {
     let on = shown == Some(terminal.pane.as_str());
     let name: SharedString = rename::display_name(terminal).into();
     let help = tip::terminal_help(&name);
@@ -350,8 +359,6 @@ fn tab(
     )
     .children(tab_time::label(terminal).map(|time| {
         div()
-            .relative()
-            .top(px(-1.))
             .flex_none()
             .text_size(px(12.))
             .line_height(relative(16. / 12.))
@@ -360,15 +367,15 @@ fn tab(
                 ..gpui::font("Inter")
             })
             .text_color(rgb(palette::FAINT))
-            .child(time)
+            .child(crate::label::text(time))
     }));
-    if shown == Some(terminal.pane.as_str()) {
+    crate::label::centered(if shown == Some(terminal.pane.as_str()) {
         row.bg(rgb(palette::SELECTED)).when(ring, |row| {
             row.child(outline()).child(tip::below(help, "Inter".into()))
         })
     } else {
         row.hover(|style| style.bg(rgb(palette::HOVER)))
-    }
+    })
 }
 
 fn selectable(

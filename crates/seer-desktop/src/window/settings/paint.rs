@@ -47,7 +47,7 @@ impl SeerWindow {
                             .items_center()
                             .text_size(px(15.))
                             .font_weight(FontWeight::SEMIBOLD)
-                            .child("Settings"),
+                            .child(crate::label::text("Settings")),
                     )
                     .child(
                         div()
@@ -61,7 +61,7 @@ impl SeerWindow {
                             .flex()
                             .items_center()
                             .font_weight(FontWeight::MEDIUM)
-                            .child("Appearance"),
+                            .child(crate::label::text("Appearance")),
                     ),
             )
             .child(
@@ -82,7 +82,7 @@ impl SeerWindow {
                                     .flex_1()
                                     .text_size(px(15.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child("Appearance"),
+                                    .child(crate::label::text("Appearance")),
                             )
                             .child(
                                 button(
@@ -190,7 +190,11 @@ impl SeerWindow {
                     .flex_1()
                     .min_w_0()
                     .when(narrow, |text| text.flex_none().w_full())
-                    .child(div().font_weight(FontWeight::MEDIUM).child(label))
+                    .child(
+                        div()
+                            .font_weight(FontWeight::MEDIUM)
+                            .child(crate::label::text(label)),
+                    )
                     .child(detail(description)),
             )
             .child(
@@ -217,7 +221,7 @@ impl SeerWindow {
                         div()
                             .w(px(24.))
                             .text_color(rgb(palette::MUTED))
-                            .child(if enabled { "On" } else { "Off" }),
+                            .child(crate::label::text(if enabled { "On" } else { "Off" })),
                     )
                     .child(crate::menu::switch_track(enabled))
                     .on_click(
@@ -242,7 +246,7 @@ impl SeerWindow {
             .child(
                 div()
                     .font_weight(FontWeight::MEDIUM)
-                    .child("Background picture"),
+                    .child(crate::label::text("Background picture")),
             )
             .child(detail(&picture))
             .when(appearance.fallback, |row| {
@@ -301,5 +305,5 @@ fn detail(text: &str) -> Div {
     div()
         .mt(px(4.))
         .text_color(rgb(palette::MUTED))
-        .child(text.to_owned())
+        .child(crate::label::text(text.to_owned()))
 }

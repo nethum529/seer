@@ -234,11 +234,11 @@ impl Render for Join {
                                     .text_size(px(22.))
                                     .line_height(px(28.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(if name {
+                                    .child(crate::label::text(if name {
                                         "Choose your name"
                                     } else {
                                         "Join a room"
-                                    }),
+                                    })),
                             )
                             .when(!name, |form| {
                                 form.child(
@@ -248,7 +248,7 @@ impl Render for Join {
                                         .line_height(px(16.))
                                         .font_weight(FontWeight::MEDIUM)
                                         .text_color(rgb(palette::MUTED))
-                                        .child("Invite from the host"),
+                                        .child(crate::label::text("Invite from the host")),
                                 )
                             })
                             .child(self.field.clone())
@@ -260,7 +260,7 @@ impl Render for Join {
                                     .text_size(px(12.))
                                     .line_height(px(16.))
                                     .text_color(rgb(0xf87171))
-                                    .child(error_text(error, window))
+                                    .child(crate::label::text(error_text(error, window)))
                             }))
                             .child(actions),
                     ),
@@ -338,5 +338,5 @@ fn button(
         } else {
             gpui::transparent_black()
         })
-        .child(label)
+        .child(crate::label::text(label))
 }

@@ -98,7 +98,9 @@ impl SeerWindow {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .children(self.room.current.as_ref().map(|room| room_row(room, true)))
             .when(self.room.current.is_none(), |menu| {
-                menu.child(menu::item("room-loading", 36.).child("Checking room..."))
+                menu.child(
+                    menu::item("room-loading", 36.).child(crate::label::text("Checking room...")),
+                )
             })
             .children(self.room.others.iter().map(|room| room_row(room, false)))
             .child(menu::separator())
@@ -131,10 +133,10 @@ impl SeerWindow {
                             .child(cap_icon(div().w(px(22.)).flex().justify_center().child(
                                 chrome::icon(action_icon(action), action_color(action)),
                             )))
-                            .child(match action {
+                            .child(crate::label::text(match action {
                                 MenuAction::Invite => "Invite a person",
                                 MenuAction::Room(action) => action_label(action),
-                            })
+                            }))
                     }),
             )
             .children(self.room.error.as_ref().map(|error| {
@@ -142,7 +144,7 @@ impl SeerWindow {
                     .p(px(8.))
                     .text_size(px(12.))
                     .text_color(rgb(palette::DANGER))
-                    .child(error.clone())
+                    .child(crate::label::text(error.clone()))
             }));
         Some(panel.into_any_element())
     }
@@ -217,7 +219,7 @@ impl SeerWindow {
                                 .flex_1()
                                 .text_center()
                                 .font_weight(FontWeight::MEDIUM)
-                                .child(person.clone()),
+                                .child(crate::label::text(person.clone())),
                         )
                     }),
             )
@@ -239,11 +241,11 @@ impl SeerWindow {
                                 div()
                                     .text_color(rgb(palette::TEXT_2))
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child("The room is stopped"),
+                                    .child(crate::label::text("The room is stopped")),
                             )
-                            .child("Open the room menu to restore it.")
+                            .child(crate::label::text("Open the room menu to restore it."))
                     } else {
-                        div().child(message.clone())
+                        div().child(crate::label::text(message.clone()))
                     }),
             );
         if narrow {
@@ -322,7 +324,7 @@ fn room_row(room: &RoomSummary, current: bool) -> Stateful<Div> {
                 sidebar::one_line(div())
                     .flex_none()
                     .max_w(px(112.))
-                    .child(chrome::capitalize(room.room_name())),
+                    .child(crate::label::text(chrome::capitalize(room.room_name()))),
             )
             .when(current, |row| {
                 row.child(
@@ -331,7 +333,7 @@ fn room_row(room: &RoomSummary, current: bool) -> Stateful<Div> {
                         .font_weight(FontWeight::NORMAL)
                         .font_family("JetBrains Mono")
                         .text_color(rgb(palette::FAINT))
-                        .child(room.address().to_owned()),
+                        .child(crate::label::text(room.address().to_owned())),
                 )
             }),
     )
@@ -341,7 +343,7 @@ fn room_row(room: &RoomSummary, current: bool) -> Stateful<Div> {
             .text_size(px(12.))
             .font_weight(FontWeight::NORMAL)
             .text_color(rgb(palette::FAINT))
-            .child(status),
+            .child(crate::label::text(status)),
     )
     .child(cap_icon(
         div().w(px(16.)).flex_none().when(current, |slot| {

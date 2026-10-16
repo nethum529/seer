@@ -359,21 +359,24 @@ fn open() -> io::Result<Option<Opened>> {
         .transpose()
 }
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod edit_keys_e2e;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod input_e2e;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod control_e2e;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod invite_e2e;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod room_invite_e2e;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod watch_e2e;
 
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod settings_e2e;
-#[cfg(test)]
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod terminals_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+pub(crate) mod native_text_e2e;

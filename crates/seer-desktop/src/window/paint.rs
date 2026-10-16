@@ -88,7 +88,7 @@ impl Render for SeerWindow {
                         .p(px(24.))
                         .text_center()
                         .text_color(rgb(palette::FAINT))
-                        .child(message.clone())
+                        .child(crate::label::text(message.clone()))
                 };
                 return root
                     .child(content)
@@ -313,14 +313,14 @@ fn heading(
                 sidebar::one_line(div())
                     .font_weight(FontWeight::NORMAL)
                     .text_color(rgb(palette::MUTED))
-                    .child(name.clone()),
+                    .child(crate::label::text(name.clone())),
             )
             .when(terminal.is_some(), |title| {
                 title.child(
                     div()
                         .font_weight(FontWeight::NORMAL)
                         .text_color(rgb(palette::FAINTER))
-                        .child("/"),
+                        .child(crate::label::text("/")),
                 )
             })
     })
@@ -345,5 +345,5 @@ fn empty_terminal(text: &'static str) -> Div {
         .items_center()
         .justify_center()
         .text_color(rgb(palette::FAINT))
-        .child(text)
+        .child(crate::label::text(text))
 }

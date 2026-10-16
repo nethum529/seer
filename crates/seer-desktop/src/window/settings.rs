@@ -45,7 +45,12 @@ impl SeerWindow {
         }))
     }
 
-    fn open_settings(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+    pub(super) fn open_settings(
+        &mut self,
+        keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if self.room.modal() || self.invite_open() {
             return;
         }

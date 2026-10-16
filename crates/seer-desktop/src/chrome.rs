@@ -103,7 +103,7 @@ pub(crate) fn room(room: &str, narrow: bool, compact: bool, up: bool) -> Div {
                 .child(room_dot(up)),
         ))
         .when(!compact, |row| {
-            row.child(crate::sidebar::one_line(div()).child(room.to_owned()))
+            row.child(crate::sidebar::one_line(div()).child(crate::label::text(room.to_owned())))
         })
         .child(cap_icon(icon("selector", palette::FAINT)))
 }
