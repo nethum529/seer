@@ -96,10 +96,11 @@ fn install_bash_login(command: &mut CommandBuilder, files: &Path, seer: &Path) -
 // ZDOTDIR. The exit function is always set right after the user .zshrc.
 // Code that a startup file runs has a ZSH_EVAL_CONTEXT that starts with
 // file, so there exit stays the builtin. case keeps $? for a bare exit, and
-// return keeps the builtin error when the arguments are wrong.
+// builtin return keeps the builtin error when the arguments are wrong. A
+// user alias or function named return cannot replace builtin return.
 fn install_zsh(command: &mut CommandBuilder, directory: &Path, seer: &Path) -> io::Result<()> {
     let exit = format!(
-        "exit() {{ case ${{ZSH_EVAL_CONTEXT-}} in file*) builtin exit \"$@\"; return;; esac; {} exit; }}\n",
+        "exit() {{ case ${{ZSH_EVAL_CONTEXT-}} in file*) builtin exit \"$@\"; builtin return;; esac; {} exit; }}\n",
         posix_quote(seer)
     );
     let done = "unset seer_zdotdir seer_zdotdir_set seer_zdotdir_export\n";
