@@ -115,10 +115,11 @@ fn typed_exit_in_a_seer_shell_leaves_seer_and_keeps_the_shell() {
             continue;
         };
         let root = Root::new(&format!("typed-{shell}"));
-        // A user .zshrc can replace all zsh prompt hooks and scheduled events.
+        // A user .zshrc can remove exit and replace all zsh prompt hooks and
+        // scheduled events.
         fs::write(
             root.0.join(".zshrc"),
-            "my_prompt() { :; }\nprecmd_functions=(my_prompt)\n\
+            "unfunction exit 2>/dev/null\nmy_prompt() { :; }\nprecmd_functions=(my_prompt)\n\
              zmodload zsh/sched\nsched +3600 :\nsched -1\n",
         )
         .expect("zshrc must be written");

@@ -84,37 +84,64 @@ fn install_bash_login(command: &mut CommandBuilder, files: &Path, seer: &Path) -
     Ok(())
 }
 
-// zsh has no rcfile option. ZDOTDIR points at Seer's .zshenv, which restores
-// ZDOTDIR first, so the user files and /etc/zshrc see the ZDOTDIR of a plain
-// zsh. Issue 501: macOS /etc/zshrc sets HISTFILE from ZDOTDIR, and an empty
-// ZDOTDIR makes zsh read no files from HOME. The exit function is set before
-// the user files, so no user hook list or module can remove it. Code that a
-// startup file runs has a ZSH_EVAL_CONTEXT that starts with file, and there
-// it acts as the builtin. The first prompt sets it again in case a user file
-// replaced it.
+// zsh has no rcfile option. ZDOTDIR points at Seer's files, and each one
+// loads the user file of the same name. zsh reads each file from the ZDOTDIR
+// of that moment, so a user file runs with the user ZDOTDIR (unset, empty or
+// set, exported or not) and Seer keeps any change it makes. Issue 501: macOS
+// /etc/zshrc runs before the Seer .zshrc and sets HISTFILE from ZDOTDIR. The
+// exit function is set after the last user file, so no user file removes it.
+// zsh reads no .zlogin when a user file unsets RCS.
 fn install_zsh(command: &mut CommandBuilder, directory: &Path, seer: &Path) -> io::Result<()> {
-    let function = format!(
-        "exit() {{ [[ $ZSH_EVAL_CONTEXT == file* ]] && builtin exit \"$@\"; {} exit; }}",
+    let keep = format!(
+        "seer_zdotdir_set=; seer_zdotdir_export=; seer_zdotdir=\n\
+         if [ -n \"${{ZDOTDIR+x}}\" ]; then seer_zdotdir_set=x; seer_zdotdir=$ZDOTDIR; \
+         case ${{(t)ZDOTDIR}} in *export*) seer_zdotdir_export=x;; esac; fi\n\
+         ZDOTDIR={}\n",
+        posix_quote(directory)
+    );
+    let exit = format!(
+        "exit() {{ {} exit; }}\nunset seer_zdotdir seer_zdotdir_set seer_zdotdir_export\n",
         posix_quote(seer)
     );
-    let zshenv = format!(
-        "if [ -n \"${{SEER_ZDOTDIR+x}}\" ]; then ZDOTDIR=\"$SEER_ZDOTDIR\"; else unset ZDOTDIR; fi\n\
-         unset SEER_ZDOTDIR\n\
-         {function}\n\
-         [ -f \"${{ZDOTDIR-$HOME}}/.zshenv\" ] && . \"${{ZDOTDIR-$HOME}}/.zshenv\"\n\
-         seer_exit_init() {{\n\
-         {function}\n\
-         precmd_functions=(${{precmd_functions:#seer_exit_init}})\n\
-         unfunction seer_exit_init\n\
-         }}\n\
-         precmd_functions+=(seer_exit_init)\n"
-    );
-    write_private(directory, &directory.join(".zshenv"), &zshenv)?;
+    let restore = "unset ZDOTDIR\n\
+         if [ -n \"$seer_zdotdir_set\" ]; then ZDOTDIR=$seer_zdotdir; \
+         if [ -n \"$seer_zdotdir_export\" ]; then export ZDOTDIR; else typeset +x ZDOTDIR; fi; fi\n";
+    let files = [
+        (
+            ".zshenv",
+            format!(
+                "if [ -n \"${{SEER_ZDOTDIR+x}}\" ]; then ZDOTDIR=\"$SEER_ZDOTDIR\"; else unset ZDOTDIR; fi\n\
+                 unset SEER_ZDOTDIR\n{}{keep}",
+                load_zsh(".zshenv")
+            ),
+        ),
+        (
+            ".zprofile",
+            format!("{restore}{}{keep}", load_zsh(".zprofile")),
+        ),
+        (
+            ".zshrc",
+            format!(
+                "if [ \"${{HISTFILE-}}\" = {} ]; then HISTFILE=${{seer_zdotdir:-$HOME}}/.zsh_history; fi\n\
+                 {restore}{}if [[ -o login && -o rcs ]]; then\n{keep}else\n{exit}fi\n",
+                posix_quote(&directory.join(".zsh_history")),
+                load_zsh(".zshrc")
+            ),
+        ),
+        (".zlogin", format!("{restore}{}{exit}", load_zsh(".zlogin"))),
+    ];
+    for (name, body) in files {
+        write_private(directory, &directory.join(name), &body)?;
+    }
     if let Some(original) = env::var_os("ZDOTDIR") {
         command.env("SEER_ZDOTDIR", original);
     }
     command.env("ZDOTDIR", directory);
     Ok(())
+}
+
+fn load_zsh(name: &str) -> String {
+    format!("[ -f \"${{ZDOTDIR-$HOME}}/{name}\" ] && . \"${{ZDOTDIR-$HOME}}/{name}\"\n")
 }
 
 fn files_directory() -> PathBuf {
