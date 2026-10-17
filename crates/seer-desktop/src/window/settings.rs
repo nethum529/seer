@@ -102,16 +102,15 @@ impl SeerWindow {
             return false;
         }
         self.keys.mode = Mode::Keyboard;
-        let action = shortcuts::action(Scope::Settings, key);
-        match action {
-            Some(Action::Cancel) => self.close_settings(true, window, cx),
-            Some(Action::NextControl | Action::PreviousControl) => {
+        match key.key.as_str() {
+            "escape" => self.close_settings(true, window, cx),
+            "tab" => {
                 let controls = self.settings_focus_order();
                 let at = controls
                     .iter()
                     .position(|focus| focus.is_focused(window))
                     .unwrap_or(0);
-                let next = if action == Some(Action::PreviousControl) {
+                let next = if key.modifiers.shift {
                     (at + controls.len() - 1) % controls.len()
                 } else {
                     (at + 1) % controls.len()
@@ -119,7 +118,7 @@ impl SeerWindow {
                 window.focus(controls[next]);
                 self.reveal_settings_focus(controls[next]);
             }
-            _ if shortcuts::action(Scope::Button, key) == Some(Action::Activate) => {
+            "enter" | "space" => {
                 if let Some(index) = self
                     .appearance
                     .sections

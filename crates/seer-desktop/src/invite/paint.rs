@@ -5,7 +5,6 @@ use gpui::{
 };
 
 use super::InviteSheet;
-use crate::shortcuts::{self, Action, Scope};
 use crate::{chrome, palette, sidebar};
 
 impl InviteSheet {
@@ -300,7 +299,7 @@ impl Render for InviteSheet {
                 cx.listener(|sheet, event: &KeyDownEvent, window, cx| sheet.key(event, window, cx)),
             )
             .capture_key_up(|event, _, cx| {
-                if shortcuts::action(Scope::Invite, &event.keystroke) == Some(Action::Activate) {
+                if matches!(event.keystroke.key.as_str(), "enter" | "space") {
                     cx.stop_propagation();
                 }
             })

@@ -20,7 +20,7 @@ impl SeerWindow {
         }
         if !new_shortcut(key)
             && !(self.keys.new_terminal.is_focused(window)
-                && shortcuts::action(Scope::Button, key) == Some(Action::Activate))
+                && matches!(key.key.as_str(), "enter" | "space"))
         {
             return false;
         }

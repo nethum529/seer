@@ -262,14 +262,14 @@ impl SeerWindow {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                     view.keys.mode = Mode::Keyboard;
-                    let action = shortcuts::action(Scope::TabMenu, &event.keystroke);
-                    match action {
-                        Some(Action::Activate) => view.pick_tab_action(window, cx),
-                        Some(Action::Dismiss) => view.dismiss_menu(window, cx),
-                        Some(Action::Previous | Action::Next | Action::First | Action::Last) => {
+                    match event.keystroke.key.as_str() {
+                        "enter" | "space" => view.pick_tab_action(window, cx),
+                        "escape" | "tab" => view.dismiss_menu(window, cx),
+                        "up" | "down" | "home" | "end" => {
                             if let Some(menu) = &mut view.menu {
                                 menu.selected =
-                                    sidebar::step(action, 2, Some(menu.selected)).unwrap_or(0);
+                                    sidebar::step(&event.keystroke.key, 2, Some(menu.selected))
+                                        .unwrap_or(0);
                                 view.notify_room(cx);
                             }
                         }

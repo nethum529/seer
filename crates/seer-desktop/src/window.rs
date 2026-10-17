@@ -200,16 +200,17 @@ impl SeerWindow {
         let Content::Terminal(link, _) = &self.content else {
             return;
         };
+        let held = keystroke.modifiers;
+        if held.control || held.alt || held.platform || held.function {
+            return;
+        }
         let terminals = link.terminals();
         let now = terminals
             .iter()
             .position(|terminal| Some(terminal.pane.as_str()) == link.shown());
-        let Some((at, terminal)) = sidebar::step(
-            shortcuts::action(Scope::Tabs, keystroke),
-            terminals.len(),
-            now,
-        )
-        .and_then(|at| Some((at, terminals.get(at)?))) else {
+        let Some((at, terminal)) = sidebar::step(&keystroke.key, terminals.len(), now)
+            .and_then(|at| Some((at, terminals.get(at)?)))
+        else {
             return;
         };
         let pane = terminal.pane.clone();
@@ -244,20 +245,20 @@ impl SeerWindow {
         if self.input.focus.is_focused(window) || self.editing.is_some() || self.menu.is_some() {
             return;
         }
-        self.keys.mode = match shortcuts::action(Scope::Focus, keystroke) {
-            Some(Action::PreviousControl) => {
+        self.keys.mode = match keystroke.key.as_str() {
+            "tab" if keystroke.modifiers.shift => {
                 window.focus_prev();
                 Mode::Keyboard
             }
-            Some(Action::NextControl) if self.keys.tabs.is_focused(window) => {
+            "tab" if self.keys.tabs.is_focused(window) => {
                 window.focus(&self.input.focus);
                 Mode::Keyboard
             }
-            Some(Action::NextControl) => {
+            "tab" => {
                 window.focus_next();
                 Mode::Keyboard
             }
-            Some(Action::Cancel) => Mode::Quiet,
+            "escape" => Mode::Quiet,
             _ => return,
         };
         cx.stop_propagation();

@@ -161,6 +161,10 @@ fn shortcuts_are_readable_and_settings_keeps_terminal_input(cx: &mut TestAppCont
         "New terminal: Ctrl Shift N"
     };
     assert!(cx.debug_bounds(new_label).is_some());
+    assert!(cx.debug_bounds("Activate button: Enter / Space").is_none());
+    let cue = cx.debug_bounds("shortcut-scroll-cue").unwrap();
+    let dialog = cx.debug_bounds("settings-dialog").unwrap();
+    assert!(dialog.contains(&cue.origin) && dialog.contains(&cue.bottom_right()));
     let expected = runtime.input();
     cx.simulate_keystrokes("n");
     super::watch_e2e::pump(cx);

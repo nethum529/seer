@@ -141,7 +141,21 @@ impl SeerWindow {
                                         detail(error).text_color(rgb(palette::DANGER))
                                     }))
                             }),
-                    ),
+                    )
+                    .when(self.appearance.section == Section::Shortcuts, |content| {
+                        content.child(
+                            div()
+                                .id("shortcut-scroll-cue")
+                                .debug_selector(|| "shortcut-scroll-cue".into())
+                                .mt(px(8.))
+                                .h(px(32.))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .text_color(rgb(palette::MUTED))
+                                .child(crate::label::text("Scroll to see all")),
+                        )
+                    }),
             );
         Some(
             menu::scrim("settings-scrim")

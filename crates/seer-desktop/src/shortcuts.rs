@@ -8,23 +8,12 @@ const CTRL: u8 = 2;
 const ALT: u8 = 4;
 const CMD: u8 = 8;
 const FN: u8 = 16;
-const ALL: u8 = SHIFT | CTRL | ALT | CMD | FN;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub(crate) enum Scope {
     Window,
     Terminal,
     Tabs,
-    MenuTrigger,
-    Button,
-    Focus,
-    RoomMenu,
-    TabMenu,
-    PeopleMenu,
-    Settings,
-    Confirmation,
-    Invite,
-    TextField,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
@@ -40,25 +29,6 @@ pub(crate) enum Action {
     PageDown,
     Rename,
     TabMenu,
-    OpenMenu,
-    Activate,
-    Dismiss,
-    Cancel,
-    NextControl,
-    PreviousControl,
-    Previous,
-    Next,
-    First,
-    Last,
-    ShareControl,
-    SelectAll,
-    Cut,
-    DeleteBackward,
-    DeleteForward,
-    MoveLeft,
-    MoveRight,
-    LineStart,
-    LineEnd,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]
@@ -152,7 +122,6 @@ impl Chord {
         parts.push(match self.key {
             "pageup" => "Page Up".to_owned(),
             "pagedown" => "Page Down".to_owned(),
-            "backspace" => "Backspace".to_owned(),
             key => {
                 let mut chars = key.chars();
                 chars.next().map_or_else(String::new, |first| {

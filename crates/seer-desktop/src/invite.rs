@@ -1,4 +1,3 @@
-use crate::shortcuts::{self, Action, Scope};
 use std::time::{Duration, Instant};
 
 use gpui::{
@@ -221,33 +220,26 @@ impl InviteSheet {
     fn key(&mut self, event: &KeyDownEvent, window: &mut Window, cx: &mut Context<Self>) {
         self.keyboard = true;
         let key = &event.keystroke;
-        let action = shortcuts::action(Scope::Invite, key);
-        match action {
-            Some(Action::Cancel) => self.close(true, cx),
-            Some(Action::NextControl | Action::PreviousControl) => {
+        match key.key.as_str() {
+            "escape" => self.close(true, cx),
+            "tab" => {
                 let order = self.focus_order(cx);
                 let index = order
                     .iter()
                     .position(|focus| focus.is_focused(window))
                     .unwrap_or(0);
-                let next = if action == Some(Action::PreviousControl) {
+                let next = if key.modifiers.shift {
                     (index + order.len() - 1) % order.len()
                 } else {
                     (index + 1) % order.len()
                 };
                 window.focus(&order[next]);
             }
-            Some(Action::Previous | Action::Next) if self.duration_focus.is_focused(window) => {
-                let next = (self.selected()
-                    + if action == Some(Action::Previous) {
-                        3
-                    } else {
-                        1
-                    })
-                    % 4;
+            "left" | "right" if self.duration_focus.is_focused(window) => {
+                let next = (self.selected() + if key.key == "left" { 3 } else { 1 }) % 4;
                 self.pick(next, window, cx);
             }
-            Some(Action::Activate) => {
+            "enter" | "space" => {
                 if self.input.read(cx).focus.is_focused(window) {
                     return;
                 }

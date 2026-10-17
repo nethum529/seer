@@ -68,6 +68,7 @@ pub(super) async fn exercise(
                     ("Appearance", 145., 193., 13., FontWeight::MEDIUM, "Appearance navigation"),
                     ("Shortcuts", 145., 225., 13., FontWeight::MEDIUM, "Shortcuts navigation"),
                     ("Shortcuts", 321., 145., 15., FontWeight::SEMIBOLD, "Shortcuts title"),
+                    ("Scroll to see all", 321., 463., 13., FontWeight::NORMAL, "Shortcuts scroll cue"),
                 ] {
                     let width = text_width(window, &text[..1], size, weight).floor();
                     let probe = baseline_probe(window, text, x, size, weight);

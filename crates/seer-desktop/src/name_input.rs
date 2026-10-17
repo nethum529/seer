@@ -1,4 +1,3 @@
-use crate::shortcuts::{self, Action, Scope};
 use std::ops::Range;
 
 use gpui::prelude::*;
@@ -126,52 +125,54 @@ impl NameInput {
             return;
         }
         let key = &event.keystroke;
-        let action = shortcuts::action(Scope::TextField, key);
-        match action {
-            Some(Action::Activate) => cx.emit(Finished::Save),
-            Some(Action::Cancel) => cx.emit(Finished::Cancel),
-            Some(Action::SelectAll) => {
+        let command = key.modifiers.platform || key.modifiers.control;
+        match key.key.as_str() {
+            "enter" => cx.emit(Finished::Save),
+            "escape" => cx.emit(Finished::Cancel),
+            "a" if command => {
                 self.anchor = 0;
                 self.selection = 0..self.text.len();
             }
-            Some(Action::Copy | Action::Cut) => {
+            "c" | "x" if command => {
                 cx.write_to_clipboard(ClipboardItem::new_string(
                     self.text[self.selection.clone()].to_owned(),
                 ));
-                if action == Some(Action::Cut) {
+                if key.key == "x" {
                     self.replace_text_in_range(None, "", window, cx);
                 }
             }
-            Some(Action::Paste) => {
+            "v" if command => {
                 if let Some(text) = cx.read_from_clipboard().and_then(|item| item.text()) {
                     self.replace_text_in_range(None, &text, window, cx);
                 }
             }
-            Some(Action::DeleteBackward | Action::DeleteForward) => {
+            "backspace" | "delete" => {
                 if self.selection.is_empty() {
-                    let at = self.adjacent(self.cursor(), action == Some(Action::DeleteBackward));
+                    let at = self.adjacent(self.cursor(), key.key == "backspace");
                     self.select(at, true);
                 }
                 self.replace_text_in_range(None, "", window, cx);
             }
-            Some(
-                action @ (Action::MoveLeft
-                | Action::MoveRight
-                | Action::LineStart
-                | Action::LineEnd),
-            ) => self.navigate(action, key.modifiers.shift),
+            "left" | "right" | "home" | "end" => self.navigate(key),
             _ => return,
         }
         cx.stop_propagation();
         cx.notify();
     }
 
-    fn navigate(&mut self, action: Action, select: bool) {
-        let left = action == Action::MoveLeft;
-        let at = match action {
-            Action::LineStart => 0,
-            Action::LineEnd => self.text.len(),
-            _ if !select && !self.selection.is_empty() => {
+    fn navigate(&mut self, key: &gpui::Keystroke) {
+        let left = key.key == "left";
+        let at = match key.key.as_str() {
+            "home" => 0,
+            "end" => self.text.len(),
+            _ if key.modifiers.platform => {
+                if left {
+                    0
+                } else {
+                    self.text.len()
+                }
+            }
+            _ if !key.modifiers.shift && !self.selection.is_empty() => {
                 if left {
                     self.selection.start
                 } else {
@@ -180,7 +181,7 @@ impl NameInput {
             }
             _ => self.adjacent(self.cursor(), left),
         };
-        self.select(at, select);
+        self.select(at, key.modifiers.shift);
     }
 
     fn mouse_index(&self, position: Point<Pixels>) -> usize {
