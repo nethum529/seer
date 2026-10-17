@@ -14,7 +14,7 @@ const SESSION_PREFIXES: [&str; 7] = [
     "ITERM_",
     "ALACRITTY_",
 ];
-const SESSION_NAMES: [&str; 28] = [
+const SESSION_NAMES: [&str; 27] = [
     "STY",
     "WINDOW",
     "TERM_PROGRAM",
@@ -39,13 +39,16 @@ const SESSION_NAMES: [&str; 28] = [
     "CODEX_PERMISSION_PROFILE",
     "CODEX_TOOL_CALL_ID",
     "CODEX_PLUGIN_METRICS_OUTPUT",
-    "EXEC_WRAPPER",
     "CODEX_ESCALATE_SOCKET",
     "CODEX_SANDBOX",
     "CODEX_SANDBOX_NETWORK_DISABLED",
 ];
 
 pub(crate) fn remove_session_vars(command: &mut CommandBuilder) {
+    // Codex exports the exec wrapper and escalation socket together.
+    if env::var_os("CODEX_ESCALATE_SOCKET").is_some() {
+        command.env_remove("EXEC_WRAPPER");
+    }
     for (name, _) in env::vars_os() {
         let Some(name) = name.to_str() else {
             continue;
