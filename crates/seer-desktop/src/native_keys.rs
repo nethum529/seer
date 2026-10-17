@@ -23,14 +23,31 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
         let handled = app
             .update_window(handle, |_, window, cx| {
                 view.update(cx, |view, cx| {
-                    if !window.is_window_active() || view.invite_open() || view.settings_open() {
+                    if !window.is_window_active() || view.invite_open() {
+                        return false;
+                    }
+                    if view.settings_open() {
+                        return view.settings_key(&key, window, cx);
+                    }
+                    if key.modifiers.platform
+                        && crate::shortcuts::action(crate::shortcuts::Scope::Window, &key, cx)
+                            .is_none()
+                        && crate::shortcuts::action(crate::shortcuts::Scope::Terminal, &key, cx)
+                            .is_none()
+                        && crate::shortcuts::action(crate::shortcuts::Scope::Tabs, &key, cx)
+                            .is_none()
+                        && !crate::shortcuts::released(&key, cx)
+                    {
                         return false;
                     }
                     if view.sidebar_key(&key, window, cx) || view.room_key(&key, window, cx) {
                         return true;
                     }
-                    if crate::window::terminals::new_shortcut(&key) {
+                    if crate::window::terminals::new_shortcut(&key, cx) {
                         view.new_terminal(window, cx);
+                        return true;
+                    }
+                    if view.rename_key(&key, window, cx) {
                         return true;
                     }
                     if !view.input.focus.is_focused(window) || view.input.composition.marked() {
@@ -64,21 +81,9 @@ fn key(event: &NSEvent) -> Option<Keystroke> {
     let control = flags.contains(NSEventModifierFlags::Control);
     // GPUI 0.2.2 sends non-printing keys to AppKit first. AppKit consumes
     // F20 and Option+Shift+Tab as text. Carbon virtual key codes do not vary by layout.
-    let key = if command {
-        crate::shortcuts::native_command(
-            event.keyCode(),
-            Modifiers {
-                shift,
-                alt,
-                platform: command,
-                control,
-                ..Modifiers::default()
-            },
-        )?
-        .key
-    } else if let Some((_, key)) = KEYS.iter().find(|(code, _)| *code == event.keyCode()) {
+    let key = if let Some((_, key)) = KEYS.iter().find(|(code, _)| *code == event.keyCode()) {
         (*key).to_owned()
-    } else if control {
+    } else if control || command {
         event
             .charactersIgnoringModifiers()?
             .to_string()
@@ -104,6 +109,7 @@ fn key(event: &NSEvent) -> Option<Keystroke> {
 const KEYS: &[(u16, &str)] = &[
     (0x24, "enter"),
     (0x30, "tab"),
+    (0x31, "space"),
     (0x33, "backspace"),
     (0x35, "escape"),
     (0x4c, "keypadenter"),

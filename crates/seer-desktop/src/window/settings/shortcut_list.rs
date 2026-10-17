@@ -49,7 +49,7 @@ impl SeerWindow {
         .collect()
     }
 
-    pub(super) fn shortcut_rows(&self, window: &Window) -> Vec<AnyElement> {
+    pub(super) fn shortcut_rows(&self, window: &Window, cx: &mut Context<Self>) -> Vec<AnyElement> {
         shortcuts::rows()
             .into_iter()
             .enumerate()
@@ -69,52 +69,175 @@ impl SeerWindow {
                     )
                     .into_any_element(),
                 shortcuts::Row::Binding(index) => {
-                    let shortcut = &shortcuts::SHORTCUTS[index];
-                    let keys = shortcut.keys(shortcuts::Platform::current());
-                    let label = format!("{}: {keys}", shortcut.name);
-                    let focus = &self.appearance.shortcut_focus[index];
-                    div()
-                        .id(("shortcut", index))
-                        .debug_selector(move || label.clone())
-                        .track_focus(focus)
-                        .relative()
-                        .flex_none()
-                        .min_h(px(32.))
-                        .flex()
-                        .items_center()
-                        .gap(px(16.))
-                        .when(window.viewport_size().width < px(NARROW), |row| {
-                            row.min_h(px(52.))
-                                .flex_col()
-                                .items_start()
-                                .justify_center()
-                                .gap(px(4.))
-                        })
-                        .when(self.keys.ring(focus, window), |row| {
-                            row.child(sidebar::outline())
-                                .debug_selector(|| "shortcut-focused".into())
-                        })
-                        .child(
-                            div()
-                                .flex_1()
-                                .min_w_0()
-                                .when(window.viewport_size().width < px(NARROW), |label| {
-                                    label.flex_none()
-                                })
-                                .font_weight(FontWeight::MEDIUM)
-                                .child(crate::label::tooltip(shortcut.name.into())),
-                        )
-                        .child(
-                            div()
-                                .flex_none()
-                                .text_size(px(13.))
-                                .line_height(px(18.))
-                                .text_color(rgb(palette::MUTED))
-                                .child(crate::label::tooltip(keys.into())),
-                        )
-                        .into_any_element()
+                    self.shortcut_row(index, window, cx).into_any_element()
                 }
             })
             .collect()
+    }
+
+    fn shortcut_row(&self, index: usize, window: &Window, cx: &mut Context<Self>) -> Stateful<Div> {
+        let shortcut = &shortcuts::SHORTCUTS[index];
+        let capturing = self.appearance.capture == Some(index);
+        let keys = if capturing {
+            "Press new keys".to_owned()
+        } else {
+            shortcut.effective_keys(shortcuts::Platform::current(), cx)
+        };
+        let label = format!("{}: {keys}", shortcut.name);
+        let focus = &self.appearance.shortcut_focus[index];
+        let narrow = window.viewport_size().width < px(NARROW);
+        let message = self
+            .appearance
+            .shortcut_error
+            .as_ref()
+            .filter(|(at, _)| *at == index);
+        let control = div()
+            .id(("shortcut", index))
+            .track_focus(focus)
+            .relative()
+            .min_h(px(32.))
+            .rounded(px(8.))
+            .flex()
+            .items_center()
+            .gap(px(16.))
+            .cursor_pointer()
+            .when(narrow, |row| {
+                row.min_h(px(52.))
+                    .flex_col()
+                    .items_start()
+                    .justify_center()
+                    .gap(px(4.))
+            })
+            .child(
+                div()
+                    .flex_1()
+                    .min_w_0()
+                    .when(narrow, |name| name.flex_none())
+                    .font_weight(FontWeight::MEDIUM)
+                    .child(crate::label::tooltip(shortcut.name.into())),
+            )
+            .child(
+                div()
+                    .min_w_0()
+                    .max_w_full()
+                    .flex()
+                    .items_center()
+                    .gap(px(8.))
+                    .flex_wrap()
+                    .child(
+                        div()
+                            .id(("shortcut-keys", index))
+                            .relative()
+                            .min_w_0()
+                            .max_w_full()
+                            .debug_selector(move || keys.clone())
+                            .min_h(px(32.))
+                            .px(px(8.))
+                            .rounded(px(8.))
+                            .flex()
+                            .items_center()
+                            .bg(rgb(palette::CHIP))
+                            .text_color(rgb(palette::MUTED))
+                            .hover(|key| key.bg(rgb(palette::CHIP_2)))
+                            .when(self.keys.ring(focus, window), |key| {
+                                key.child(
+                                    sidebar::outline().debug_selector(|| "shortcut-focused".into()),
+                                )
+                            })
+                            .child(crate::label::tooltip(
+                                if capturing {
+                                    "Press new keys".to_owned()
+                                } else {
+                                    shortcut.effective_keys(shortcuts::Platform::current(), cx)
+                                }
+                                .into(),
+                            )),
+                    )
+                    .when(capturing, |controls| {
+                        controls.child(
+                            crate::menu::button(
+                                "shortcut-cancel",
+                                "Cancel",
+                                &self.appearance.shortcut_cancel,
+                                None,
+                                self.keys.mode,
+                                window,
+                            )
+                            .px(px(8.))
+                            .on_click(cx.listener(
+                                |view, _, window, cx| {
+                                    view.cancel_capture(window, cx);
+                                    cx.stop_propagation();
+                                },
+                            )),
+                        )
+                    })
+                    .when(!capturing && shortcut.changed(cx), |controls| {
+                        controls.child(
+                            crate::menu::button(
+                                "shortcut-reset",
+                                "Reset",
+                                &self.appearance.shortcut_reset[index],
+                                None,
+                                self.keys.mode,
+                                window,
+                            )
+                            .id(("shortcut-reset", index))
+                            .debug_selector(move || format!("shortcut-reset-{index}"))
+                            .px(px(8.))
+                            .on_click(cx.listener(
+                                move |view, _, window, cx| {
+                                    view.change_shortcut(index, None, window, cx);
+                                    cx.stop_propagation();
+                                },
+                            )),
+                        )
+                    }),
+            )
+            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_click(cx.listener(move |view, event, window, cx| {
+                view.keys.mode = if matches!(event, gpui::ClickEvent::Keyboard(_)) {
+                    Mode::Keyboard
+                } else {
+                    Mode::Pointer
+                };
+                view.start_capture(index, window, cx);
+            }));
+        div()
+            .id(("shortcut-row", index))
+            .debug_selector(move || label.clone())
+            .flex_none()
+            .flex()
+            .flex_col()
+            .gap(px(4.))
+            .child(control)
+            .when(capturing || message.is_some(), |row| {
+                let text = message
+                    .map_or("Escape cancels", |(_, text)| text.as_str())
+                    .to_owned();
+                let selector = text.clone();
+                row.child(
+                    div()
+                        .id(("shortcut-message", index))
+                        .debug_selector(move || selector.clone())
+                        .min_h(px(32.))
+                        .flex()
+                        .items_center()
+                        .text_color(rgb(if message.is_some() {
+                            palette::DANGER
+                        } else {
+                            palette::MUTED
+                        }))
+                        .child(
+                            div()
+                                .id("shortcut-error")
+                                .when(message.is_some(), |error| {
+                                    error.debug_selector(|| "shortcut-error".into())
+                                })
+                                .min_w_0()
+                                .child(crate::label::tooltip(text.into())),
+                        ),
+                )
+            })
     }
 }

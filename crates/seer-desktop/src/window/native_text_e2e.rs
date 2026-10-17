@@ -276,6 +276,8 @@ pub(crate) fn exercise(
                 .await;
             super::shortcuts_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                 .await;
+            super::rebind_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+                .await;
             let result = Command::new(&fixture.capture)
                 .arg("measure")
                 .arg(&fixture.evidence)

@@ -1,4 +1,8 @@
-use gpui::{Keystroke, Modifiers};
+use gpui::{App, Keystroke, Modifiers};
+use std::borrow::Cow;
+
+mod bindings;
+pub(crate) use bindings::Bindings;
 
 mod defaults;
 pub(crate) use defaults::SHORTCUTS;
@@ -56,15 +60,16 @@ pub(crate) struct Shortcut {
     linux: &'static [Chord],
 }
 
+#[derive(Clone)]
 struct Chord {
-    key: &'static str,
+    key: Cow<'static, str>,
     required: u8,
     ignored: u8,
 }
 
 const fn chord(key: &'static str, required: u8, ignored: u8) -> Chord {
     Chord {
-        key,
+        key: Cow::Borrowed(key),
         required,
         ignored,
     }
@@ -87,7 +92,11 @@ impl Shortcut {
     }
 
     pub(crate) fn keys(&self, platform: Platform) -> String {
-        self.chords(platform)
+        Self::format(self.chords(platform), platform)
+    }
+
+    fn format(chords: &[Chord], platform: Platform) -> String {
+        chords
             .iter()
             .map(|chord| chord.label(platform))
             .collect::<Vec<_>>()
@@ -119,7 +128,7 @@ impl Chord {
                 parts.push(name.to_owned());
             }
         }
-        parts.push(match self.key {
+        parts.push(match self.key.as_ref() {
             "pageup" => "Page Up".to_owned(),
             "pagedown" => "Page Down".to_owned(),
             key => {
@@ -133,42 +142,36 @@ impl Chord {
     }
 }
 
-pub(crate) fn action(scope: Scope, key: &Keystroke) -> Option<Action> {
+pub(crate) fn action(scope: Scope, key: &Keystroke, cx: &App) -> Option<Action> {
     SHORTCUTS
         .iter()
         .find(|shortcut| {
             shortcut.scopes.contains(&scope)
                 && shortcut
-                    .chords(Platform::current())
+                    .effective(Platform::current(), cx)
                     .iter()
                     .any(|chord| chord.matches(key))
         })
         .map(|shortcut| shortcut.action)
 }
 
-pub(crate) fn keys(scope: Scope, action: Action) -> String {
+pub(crate) fn keys(scope: Scope, action: Action, cx: &App) -> String {
     SHORTCUTS
         .iter()
         .filter(|shortcut| shortcut.scopes.contains(&scope) && shortcut.action == action)
-        .map(|shortcut| shortcut.keys(Platform::current()))
+        .map(|shortcut| shortcut.effective_keys(Platform::current(), cx))
         .collect::<Vec<_>>()
         .join(" / ")
 }
 
-#[cfg(target_os = "macos")]
-pub(crate) fn native_command(code: u16, modifiers: Modifiers) -> Option<Keystroke> {
-    // Carbon virtual key codes are independent of the active keyboard layout.
-    let key = match code {
-        0x0b => "b",
-        0x2d => "n",
-        _ => return None,
-    };
-    let key = Keystroke {
-        key: key.to_owned(),
-        key_char: None,
-        modifiers,
-    };
-    action(Scope::Window, &key).map(|_| key)
+pub(crate) fn released(key: &Keystroke, cx: &App) -> bool {
+    SHORTCUTS.iter().any(|shortcut| {
+        shortcut.changed(cx)
+            && shortcut
+                .chords(Platform::current())
+                .iter()
+                .any(|chord| chord.matches(key))
+    })
 }
 
 pub(crate) enum Row {

@@ -35,6 +35,16 @@ pub(crate) fn event(key: &Keystroke) -> Option<InputEvent> {
     })
 }
 
+pub(crate) fn released_event(key: &Keystroke) -> Option<InputEvent> {
+    if !key.modifiers.platform {
+        return event(key);
+    }
+    Some(InputEvent::Key(KeyInput {
+        code: text_key(key).or_else(|| named_key(&key.key))?,
+        modifiers: modifiers(key.modifiers),
+    }))
+}
+
 fn text_key(key: &Keystroke) -> Option<KeyCode> {
     Some(match key.key.as_str() {
         "enter" => KeyCode::Enter,

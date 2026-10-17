@@ -30,7 +30,13 @@ impl SeerWindow {
             .h(px(height))
             .flex()
             .overflow_hidden()
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
+            .on_mouse_down(
+                MouseButton::Left,
+                cx.listener(|view, _, window, cx| {
+                    view.cancel_capture(window, cx);
+                    cx.stop_propagation();
+                }),
+            )
             .child(
                 div()
                     .flex_none()
@@ -120,7 +126,7 @@ impl SeerWindow {
                             .flex_col()
                             .gap(px(12.))
                             .when(self.appearance.section == Section::Shortcuts, |content| {
-                                content.children(self.shortcut_rows(window))
+                                content.children(self.shortcut_rows(window, cx))
                             })
                             .when(self.appearance.section == Section::Appearance, |content| {
                                 content

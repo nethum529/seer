@@ -1,4 +1,5 @@
 use std::{
+    collections::BTreeMap,
     fs, io,
     path::{Path, PathBuf},
 };
@@ -14,6 +15,7 @@ pub struct Settings {
     pub hide_sidebar: bool,
     pub hide_lines: bool,
     pub picture: Option<PathBuf>,
+    pub shortcut_overrides: BTreeMap<String, String>,
 }
 
 impl Default for Settings {
@@ -25,6 +27,7 @@ impl Default for Settings {
             hide_sidebar: false,
             hide_lines: false,
             picture: None,
+            shortcut_overrides: BTreeMap::new(),
         }
     }
 }

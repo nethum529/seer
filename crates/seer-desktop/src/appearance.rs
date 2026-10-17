@@ -23,6 +23,10 @@ pub(crate) struct Appearance {
     pub(crate) section: Section,
     pub(crate) sections: [FocusHandle; 2],
     pub(crate) shortcut_focus: Vec<FocusHandle>,
+    pub(crate) shortcut_reset: Vec<FocusHandle>,
+    pub(crate) shortcut_cancel: FocusHandle,
+    pub(crate) capture: Option<usize>,
+    pub(crate) shortcut_error: Option<(usize, String)>,
     pub(crate) settings: Settings,
     pub(crate) sidebar: crate::window::sidebar_visibility::Sidebar,
     pub(crate) path: Option<PathBuf>,
@@ -64,6 +68,16 @@ impl Appearance {
                 Some(format!("Could not read settings: {error}")),
             ),
         };
+        let error = match crate::shortcuts::Bindings::load(&settings) {
+            Ok(bindings) => {
+                cx.set_global(bindings);
+                error
+            }
+            Err(message) => {
+                cx.set_global(crate::shortcuts::Bindings::default());
+                Some(message)
+            }
+        };
         let mut appearance = Self {
             section: Section::Appearance,
             sections: [
@@ -74,6 +88,13 @@ impl Appearance {
                 .iter()
                 .map(|_| cx.focus_handle().tab_stop(true))
                 .collect(),
+            shortcut_reset: crate::shortcuts::SHORTCUTS
+                .iter()
+                .map(|_| cx.focus_handle().tab_stop(true))
+                .collect(),
+            shortcut_cancel: cx.focus_handle().tab_stop(true),
+            capture: None,
+            shortcut_error: None,
             sidebar: crate::window::sidebar_visibility::Sidebar::new(settings.hide_sidebar),
             settings,
             path,

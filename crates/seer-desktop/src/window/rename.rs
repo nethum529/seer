@@ -179,7 +179,7 @@ impl SeerWindow {
         self.notify_room(cx);
     }
 
-    pub(super) fn rename_key(
+    pub(crate) fn rename_key(
         &mut self,
         key: &Keystroke,
         window: &mut Window,
@@ -188,7 +188,7 @@ impl SeerWindow {
         if !self.keys.tabs.is_focused(window) {
             return false;
         }
-        let Some(action) = shortcuts::action(Scope::Tabs, key) else {
+        let Some(action) = shortcuts::action(Scope::Tabs, key, cx) else {
             return false;
         };
         let Content::Terminal(link, _) = &self.content else {

@@ -134,7 +134,7 @@ pub(crate) fn new_terminal(
 ) -> Stateful<Div> {
     let help: SharedString = format!(
         "New terminal ({})",
-        crate::window::terminals::new_shortcut_label()
+        crate::window::terminals::new_shortcut_label(cx)
     )
     .into();
     let ring = keys.ring(&keys.new_terminal, window);
@@ -278,7 +278,7 @@ pub(crate) fn strip(
         .border_color(crate::appearance::separator(cx))
         .children(terminals.iter().map(|terminal| {
             let on = shown == Some(terminal.pane.as_str());
-            let help = tip::terminal_help(&rename::display_name(terminal));
+            let help = tip::terminal_help(&rename::display_name(terminal), cx);
             tip::on_hover(
                 selectable(terminal, Surface::Strip, cx),
                 help.clone(),
@@ -333,7 +333,7 @@ fn tab(
 ) -> crate::label::Centered {
     let on = shown == Some(terminal.pane.as_str());
     let name: SharedString = rename::display_name(terminal).into();
-    let help = tip::terminal_help(&name);
+    let help = tip::terminal_help(&name, cx);
     let row = tip::on_hover(
         selectable(terminal, Surface::Tab, cx),
         help.clone(),

@@ -33,7 +33,7 @@ impl SeerWindow {
         {
             return false;
         }
-        let action = shortcuts::action(Scope::Window, key);
+        let action = shortcuts::action(Scope::Window, key, cx);
         let toggle = action == Some(Action::ToggleSidebar);
         let focus = action == Some(Action::FocusSidebar);
         if toggle {

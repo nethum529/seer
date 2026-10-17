@@ -1,11 +1,11 @@
 use super::*;
 
-pub(crate) fn new_shortcut(key: &Keystroke) -> bool {
-    shortcuts::action(Scope::Window, key) == Some(Action::NewTerminal)
+pub(crate) fn new_shortcut(key: &Keystroke, cx: &gpui::App) -> bool {
+    shortcuts::action(Scope::Window, key, cx) == Some(Action::NewTerminal)
 }
 
-pub(crate) fn new_shortcut_label() -> String {
-    shortcuts::keys(Scope::Window, Action::NewTerminal)
+pub(crate) fn new_shortcut_label(cx: &gpui::App) -> String {
+    shortcuts::keys(Scope::Window, Action::NewTerminal, cx)
 }
 
 impl SeerWindow {
@@ -18,7 +18,7 @@ impl SeerWindow {
         if self.editing.is_some() || self.menu.is_some() {
             return false;
         }
-        if !new_shortcut(key)
+        if !new_shortcut(key, cx)
             && !(self.keys.new_terminal.is_focused(window)
                 && matches!(key.key.as_str(), "enter" | "space"))
         {
