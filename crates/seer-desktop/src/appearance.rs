@@ -27,6 +27,7 @@ pub(crate) struct Appearance {
     pub(crate) shortcut_cancel: FocusHandle,
     pub(crate) capture: Option<usize>,
     pub(crate) shortcut_error: Option<(usize, String)>,
+    pub(crate) shortcut_load_errors: Vec<(usize, String)>,
     pub(crate) settings: Settings,
     pub(crate) sidebar: crate::window::sidebar_visibility::Sidebar,
     pub(crate) path: Option<PathBuf>,
@@ -61,23 +62,15 @@ impl Appearance {
 
     pub(crate) fn load(path: Option<PathBuf>, cx: &mut App) -> Self {
         let loaded = path.as_deref().map(Settings::load_from).transpose();
-        let (settings, error) = match loaded {
+        let (mut settings, error) = match loaded {
             Ok(settings) => (settings.unwrap_or_default(), None),
             Err(error) => (
                 Settings::default(),
                 Some(format!("Could not read settings: {error}")),
             ),
         };
-        let error = match crate::shortcuts::Bindings::load(&settings) {
-            Ok(bindings) => {
-                cx.set_global(bindings);
-                error
-            }
-            Err(message) => {
-                cx.set_global(crate::shortcuts::Bindings::default());
-                Some(message)
-            }
-        };
+        let (bindings, shortcut_load_errors) = crate::shortcuts::Bindings::load(&mut settings);
+        cx.set_global(bindings);
         let mut appearance = Self {
             section: Section::Appearance,
             sections: [
@@ -95,6 +88,7 @@ impl Appearance {
             shortcut_cancel: cx.focus_handle().tab_stop(true),
             capture: None,
             shortcut_error: None,
+            shortcut_load_errors,
             sidebar: crate::window::sidebar_visibility::Sidebar::new(settings.hide_sidebar),
             settings,
             path,
@@ -140,6 +134,7 @@ impl Appearance {
         match result {
             Ok(()) => {
                 self.settings = settings;
+                self.shortcut_load_errors.clear();
                 self.error = None;
                 true
             }

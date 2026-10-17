@@ -35,29 +35,53 @@ pub(crate) fn saved_id(action: Action) -> String {
 }
 
 impl Bindings {
-    pub(crate) fn load(settings: &Settings) -> Result<Self, String> {
-        Self::checked(settings, None)
+    pub(crate) fn load(settings: &mut Settings) -> (Self, Vec<(usize, String)>) {
+        let mut errors = Vec::new();
+        loop {
+            match Self::checked(settings, None) {
+                Ok(bindings) => return (bindings, errors),
+                Err((index, _)) => {
+                    let shortcut = &SHORTCUTS[index];
+                    settings
+                        .shortcut_overrides
+                        .remove(&saved_id(shortcut.action));
+                    errors.push((
+                        index,
+                        format!(
+                            "Invalid saved keys for {}. Default keys restored.",
+                            shortcut.name
+                        ),
+                    ));
+                }
+            }
+        }
     }
 
-    fn checked(settings: &Settings, edited: Option<&Shortcut>) -> Result<Self, String> {
+    fn checked(settings: &Settings, edited: Option<usize>) -> Result<Self, (usize, String)> {
         let mut bindings = Self::default();
-        for shortcut in SHORTCUTS {
+        for (index, shortcut) in SHORTCUTS.iter().enumerate() {
             if let Some(text) = settings.shortcut_overrides.get(&saved_id(shortcut.action)) {
-                let key = Keystroke::parse(text).map_err(|_| {
-                    format!(
-                        "Could not read keys for {}. Reset this shortcut.",
-                        shortcut.name
-                    )
-                })?;
-                let chord = captured(&key)?;
+                let key = Keystroke::parse(text)
+                    .map_err(|_| (index, format!("Could not read keys for {}.", shortcut.name)))?;
+                let chord = captured(&key).map_err(|error| (index, error))?;
                 bindings.0.insert(shortcut.action.id().to_owned(), chord);
             }
         }
-        if let Some(shortcut) = edited {
-            bindings.conflicts(shortcut.action, bindings.chords(shortcut))?;
+        if let Some(index) = edited {
+            let shortcut = &SHORTCUTS[index];
+            if let Some(other) = bindings.conflict(shortcut.action, bindings.chords(shortcut)) {
+                return Err((index, conflict_message(other)));
+            }
         }
-        for shortcut in SHORTCUTS {
-            bindings.conflicts(shortcut.action, bindings.chords(shortcut))?;
+        for (index, shortcut) in SHORTCUTS.iter().enumerate() {
+            if let Some(other) = bindings.conflict(shortcut.action, bindings.chords(shortcut)) {
+                let invalid = if bindings.0.contains_key(shortcut.action.id()) {
+                    index
+                } else {
+                    other
+                };
+                return Err((invalid, conflict_message(other)));
+            }
         }
         Ok(bindings)
     }
@@ -69,10 +93,11 @@ impl Bindings {
         )
     }
 
-    fn conflicts(&self, action: Action, candidates: &[Chord]) -> Result<(), String> {
-        for shortcut in SHORTCUTS
+    fn conflict(&self, action: Action, candidates: &[Chord]) -> Option<usize> {
+        for (index, shortcut) in SHORTCUTS
             .iter()
-            .filter(|shortcut| shortcut.action != action)
+            .enumerate()
+            .filter(|(_, shortcut)| shortcut.action != action)
         {
             if candidates.iter().any(|candidate| {
                 self.chords(shortcut).iter().any(|other| {
@@ -82,10 +107,10 @@ impl Bindings {
                             == 0
                 })
             }) {
-                return Err(format!("Used by {}. Choose other keys.", shortcut.name));
+                return Some(index);
             }
         }
-        Ok(())
+        None
     }
 
     pub(crate) fn change(
@@ -104,9 +129,13 @@ impl Bindings {
         } else {
             settings.shortcut_overrides.remove(&id);
         }
-        let bindings = Self::checked(&settings, Some(shortcut))?;
+        let bindings = Self::checked(&settings, Some(index)).map_err(|(_, error)| error)?;
         Ok((settings, bindings))
     }
+}
+
+fn conflict_message(index: usize) -> String {
+    format!("Used by {}. Choose other keys.", SHORTCUTS[index].name)
 }
 
 impl Shortcut {

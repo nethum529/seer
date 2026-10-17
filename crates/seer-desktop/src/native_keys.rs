@@ -29,6 +29,9 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                     if view.settings_open() {
                         return view.settings_key(&key, window, cx);
                     }
+                    if key.key == "space" && !key.modifiers.control {
+                        return false;
+                    }
                     if key.modifiers.platform
                         && crate::shortcuts::action(crate::shortcuts::Scope::Window, &key, cx)
                             .is_none()

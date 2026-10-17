@@ -90,7 +90,13 @@ impl SeerWindow {
             .appearance
             .shortcut_error
             .as_ref()
-            .filter(|(at, _)| *at == index);
+            .filter(|(at, _)| *at == index)
+            .or_else(|| {
+                self.appearance
+                    .shortcut_load_errors
+                    .iter()
+                    .find(|(at, _)| *at == index)
+            });
         let control = div()
             .id(("shortcut", index))
             .track_focus(focus)

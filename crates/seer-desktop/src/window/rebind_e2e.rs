@@ -164,3 +164,87 @@ fn failed_shortcut_save_keeps_the_current_binding(cx: &mut TestAppContext) {
     };
     assert!(cx.debug_bounds(original).is_some());
 }
+
+#[gpui::test]
+fn invalid_saved_shortcuts_can_be_replaced_in_settings(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    let (view, cx) = open_view(&runtime, cx);
+    let platform = if cfg!(target_os = "macos") {
+        "mac"
+    } else {
+        "linux"
+    };
+    let other = if cfg!(target_os = "macos") {
+        "linux"
+    } else {
+        "mac"
+    };
+    let path = runtime.directory.path().join("settings.toml");
+    let mut settings = seer::Settings::default();
+    for (id, keys) in [
+        (format!("{platform}.new_terminal"), "ctrl-c"),
+        (format!("{platform}.toggle_sidebar"), "tab"),
+        (format!("{platform}.focus_sidebar"), "ctrl-shift-f"),
+        (format!("{platform}.future_action"), "future-key"),
+        (format!("{other}.new_terminal"), "future-key"),
+    ] {
+        settings.shortcut_overrides.insert(id, keys.into());
+    }
+    settings.save_to(&path).unwrap();
+    view.update(cx, |view, cx| {
+        view.appearance = crate::appearance::Appearance::load(Some(path.clone()), cx);
+        cx.notify();
+    });
+    cx.simulate_resize(size(px(960.), px(640.)));
+    cx.run_until_parked();
+    click(cx, "settings-trigger");
+    click(cx, "settings-shortcuts");
+    click(
+        cx,
+        if cfg!(target_os = "macos") {
+            "Cmd N"
+        } else {
+            "Ctrl Shift N"
+        },
+    );
+    cx.simulate_keystrokes("ctrl-shift-y");
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("New terminal: Ctrl Shift Y").is_some());
+    click(
+        cx,
+        if cfg!(target_os = "macos") {
+            "Cmd B"
+        } else {
+            "Ctrl Shift B"
+        },
+    );
+    cx.simulate_keystrokes("ctrl-shift-u");
+    cx.run_until_parked();
+    assert!(
+        cx.debug_bounds("Show or hide sidebar: Ctrl Shift U")
+            .is_some()
+    );
+    let saved = seer::Settings::load_from(&path).unwrap();
+    for (action, keys) in [
+        ("new_terminal", "ctrl-shift-y"),
+        ("toggle_sidebar", "ctrl-shift-u"),
+        ("focus_sidebar", "ctrl-shift-f"),
+        ("future_action", "future-key"),
+    ] {
+        assert_eq!(
+            saved.shortcut_overrides[&format!("{platform}.{action}")],
+            keys
+        );
+    }
+    assert_eq!(
+        saved.shortcut_overrides[&format!("{other}.new_terminal")],
+        "future-key"
+    );
+    click(cx, "shortcut-reset-0");
+    assert!(
+        !seer::Settings::load_from(&path)
+            .unwrap()
+            .shortcut_overrides
+            .contains_key(&format!("{platform}.new_terminal"))
+    );
+}
