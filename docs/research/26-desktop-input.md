@@ -28,11 +28,13 @@ Alacritty's native text rule after default bindings, rather than converting
 the key name through a generic Control map. Plain keypad Enter sends LF;
 modified keypad Enter keeps native text. Other printable text and marked
 composition stay with the native input handler. The monitor also handles
-Cmd Shift B before AppKit consumes that shortcut.
+Cmd B and Cmd Shift B before AppKit consumes those shortcuts.
 
-Cmd Shift B on macOS or Ctrl Shift B on Linux focuses the sidebar tabs.
-The title and terminal tab tooltips show the shortcut. Arrows select a
-terminal there.
+Cmd B on macOS or Ctrl Shift B on Linux hides or shows the sidebar.
+Cmd Shift B on macOS or Ctrl Alt Shift B on Linux reveals and focuses its
+tabs. The Linux focus shortcut adds Alt so Ctrl Shift B can toggle.
+Plain Ctrl B stays with the terminal. The title and terminal tab tooltips
+show both sidebar shortcuts. Arrows select a terminal there.
 Tab returns to terminal input. Tab, Escape, and arrows in the terminal go
 to the shell. No animation delays input or focus.
 

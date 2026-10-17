@@ -116,6 +116,28 @@ measured product crops, and the full contrast matrix are in
   you watch another person. Its shortcut is in its tooltip: Cmd N on
   macOS, Ctrl Shift N on Linux.
 
+## Sidebar visibility (T-514)
+
+- Cmd B on macOS and Ctrl Shift B on Linux hide or show the sidebar.
+  Plain Ctrl B stays with the terminal.
+- Cmd Shift B on macOS and Ctrl Alt Shift B on Linux show the sidebar
+  and focus its tabs. Shift Tab reaches the person menu. Tab returns to
+  terminal input. The terminal title tooltip lists both sidebar shortcuts.
+- Hide and show share the top bar's critically damped spring, with
+  frequency 40. Retarget from the current position and velocity. A full
+  change settles in about 280 ms. This motion is required for the sidebar
+  shortcut. Initial visibility and OS reduced motion are instant.
+- The terminal fills the free width. Its grid stays fixed during motion
+  and changes once at the end. OS reduced motion makes the change instant.
+- Selection and sidebar scroll stay in place. Hiding moves focus to the
+  terminal. Showing restores the previous focus. An open menu closes and
+  returns focus to its trigger when the sidebar comes back.
+- New terminal keeps Cmd N or Ctrl Shift N while the sidebar is hidden.
+  The focus shortcut reveals the tabs and gives access to the person menu.
+- Save visibility in the existing settings file. Load it without motion.
+  Existing settings show the sidebar by default. Narrow layouts keep their
+  current top bar and tab strip rules.
+
 ## Terminal names (R-468)
 
 - Where the name lives: in the local runtime, as Tab.title in the runtime

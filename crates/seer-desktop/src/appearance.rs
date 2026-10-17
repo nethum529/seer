@@ -15,6 +15,7 @@ impl Global for Glass {}
 
 pub(crate) struct Appearance {
     pub(crate) settings: Settings,
+    pub(crate) sidebar: crate::window::sidebar_visibility::Sidebar,
     pub(crate) path: Option<PathBuf>,
     pub(crate) picture: Option<Arc<RenderImage>>,
     pub(crate) fallback: bool,
@@ -55,6 +56,7 @@ impl Appearance {
             ),
         };
         let mut appearance = Self {
+            sidebar: crate::window::sidebar_visibility::Sidebar::new(settings.hide_sidebar),
             settings,
             path,
             fallback: false,

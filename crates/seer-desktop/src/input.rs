@@ -153,6 +153,7 @@ impl SeerWindow {
         if self.invite_open() || !matches!(self.content, Content::Terminal(_, _)) {
             return;
         }
+        self.set_sidebar_hidden(false, true, window, cx);
         self.keys.mode = Mode::Keyboard;
         window.focus(&self.keys.tabs);
         cx.notify();

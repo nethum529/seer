@@ -154,8 +154,9 @@ impl Element for Screen {
         cx: &mut App,
     ) -> Self::PrepaintState {
         let grid = self.grid(bounds, window);
-        let (cols, rows) = (to_u16(grid.cols), to_u16(grid.rows));
         self.view.update(cx, |view, cx| {
+            let grid = view.sidebar_grid(grid);
+            let (cols, rows) = (to_u16(grid.cols), to_u16(grid.rows));
             view.input.grid = Some(grid);
             view.resize(cols, rows, cx);
             let focused = view.input.focus.is_focused(window) && window.is_window_active();

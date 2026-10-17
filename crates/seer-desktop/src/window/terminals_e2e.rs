@@ -108,7 +108,10 @@ fn close_shell_selects_next_and_last_close_keeps_new_terminal(cx: &mut TestAppCo
     cx.simulate_keystrokes(new_key());
     pump(cx);
     assert_eq!(count(&view, cx), 2);
-    cx.simulate_keystrokes("secondary-shift-b shift-f10 down enter");
+    cx.simulate_keystrokes(&format!(
+        "{} shift-f10 down enter",
+        super::sidebar_e2e::focus_shortcut()
+    ));
     pump(cx);
     assert_eq!(count(&view, cx), 1);
     assert!(cx.debug_bounds("room-confirm").is_none());
@@ -130,7 +133,10 @@ fn close_program_asks_cancel_keeps_it_and_confirm_closes_it(cx: &mut TestAppCont
     cx.simulate_input("sleep 60");
     cx.simulate_keystrokes("enter");
     pump(cx);
-    cx.simulate_keystrokes("secondary-shift-b shift-f10 down enter");
+    cx.simulate_keystrokes(&format!(
+        "{} shift-f10 down enter",
+        super::sidebar_e2e::focus_shortcut()
+    ));
     pump(cx);
     assert!(cx.debug_bounds("room-confirm").is_some());
     assert_eq!(count(&view, cx), 1);
@@ -185,7 +191,10 @@ fn close_after_starting_program_checks_the_live_process(cx: &mut TestAppContext)
     cx.simulate_input("sleep 60");
     cx.simulate_keystrokes("enter");
     std::thread::sleep(std::time::Duration::from_millis(60));
-    cx.simulate_keystrokes("secondary-shift-b shift-f10 down enter");
+    cx.simulate_keystrokes(&format!(
+        "{} shift-f10 down enter",
+        super::sidebar_e2e::focus_shortcut()
+    ));
     pump(cx);
     assert!(cx.debug_bounds("room-confirm").is_some());
     assert_eq!(count(&view, cx), 1);
@@ -205,7 +214,10 @@ fn close_background_program_asks_and_cancel_keeps_the_job(cx: &mut TestAppContex
         pump(cx);
     }
     let pid = std::fs::read_to_string(pid_file).unwrap();
-    cx.simulate_keystrokes("secondary-shift-b shift-f10 down enter");
+    cx.simulate_keystrokes(&format!(
+        "{} shift-f10 down enter",
+        super::sidebar_e2e::focus_shortcut()
+    ));
     pump(cx);
     assert!(cx.debug_bounds("room-confirm").is_some());
     assert_eq!(count(&view, cx), 1);

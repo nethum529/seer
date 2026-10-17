@@ -14,9 +14,14 @@ pub(crate) fn terminal_help(name: &str) -> SharedString {
     let shortcut = if cfg!(target_os = "macos") {
         "Cmd+Shift+B"
     } else {
+        "Ctrl+Alt+Shift+B"
+    };
+    let toggle = if cfg!(target_os = "macos") {
+        "Cmd+B"
+    } else {
         "Ctrl+Shift+B"
     };
-    format!("{name}\n{shortcut} to go to the sidebar").into()
+    format!("{name}\n{shortcut} to go to the sidebar\n{toggle} to hide or show the sidebar").into()
 }
 
 struct Tip {

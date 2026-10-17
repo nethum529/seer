@@ -1,7 +1,5 @@
+use super::reveal::Reveal;
 use super::*;
-mod reveal;
-
-use reveal::Reveal;
 
 pub(crate) struct TopBar {
     motion: Reveal,
@@ -138,12 +136,12 @@ pub(super) fn events(cx: &Context<SeerWindow>) -> impl IntoElement {
 }
 
 #[cfg(target_os = "macos")]
-fn reduced_motion() -> bool {
+pub(super) fn reduced_motion() -> bool {
     objc2_app_kit::NSWorkspace::sharedWorkspace().accessibilityDisplayShouldReduceMotion()
 }
 
 #[cfg(target_os = "linux")]
-fn reduced_motion() -> bool {
+pub(super) fn reduced_motion() -> bool {
     use std::process::Command;
     let kde = std::env::var("XDG_CURRENT_DESKTOP").is_ok_and(|desktop| desktop.contains("KDE"));
     let output = if kde {

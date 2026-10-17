@@ -14,7 +14,7 @@ use crate::tip;
 use crate::window::SeerWindow;
 use crate::window::rename::{self, Surface};
 
-const WIDTH: f32 = 248.;
+pub(crate) const WIDTH: f32 = 248.;
 const STRIP_PAD: f32 = 8.;
 
 pub(crate) struct Keys {
