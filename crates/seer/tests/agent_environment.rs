@@ -39,7 +39,7 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
         if !std::path::Path::new(shell).is_file() {
             continue;
         }
-        let (running, before, after) = shell_environment(shell, false);
+        let (running, before, after) = shell_environment(shell, false, true);
         let activation = format!(
             "CLAUDE_ENV_FILE={}/activation.sh",
             running.directory.display()
@@ -82,33 +82,50 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
 }
 
 #[test]
-fn login_profile_wrapper_reaches_non_login_shells_without_codex_context() {
+fn login_profile_wrapper_reaches_non_login_shells() {
     for shell in ["/bin/bash", "/bin/zsh"] {
         if !std::path::Path::new(shell).is_file() {
             continue;
         }
-        let (running, before, after) = shell_environment(shell, true);
-        let launcher = fs::read_to_string(running.directory.join("launcher"))
-            .expect("login profile must run before the runtime");
-        let wrapper = format!("EXEC_WRAPPER={}/user-wrapper", running.directory.display());
-        for environment in [&launcher, &before, &after] {
+        for inherited_socket in [false, true] {
+            let (running, before, after) = shell_environment(shell, true, inherited_socket);
+            let launcher = fs::read_to_string(running.directory.join("launcher"))
+                .expect("login profile must run before the runtime");
+            let wrapper = format!("EXEC_WRAPPER={}/user-wrapper", running.directory.display());
             assert!(
-                environment.lines().any(|line| line == wrapper),
-                "{shell} must keep the login profile wrapper: {environment}"
+                launcher.lines().any(|line| line == wrapper),
+                "{shell} login profile must replace the wrapper: {launcher}"
             );
-            assert!(
-                !environment
+            assert_eq!(
+                launcher
                     .lines()
-                    .any(|line| line.starts_with("CODEX_ESCALATE_SOCKET=")),
-                "{shell} must have no Codex socket: {environment}"
+                    .find(|line| line.starts_with("CODEX_ESCALATE_SOCKET=")),
+                inherited_socket.then_some("CODEX_ESCALATE_SOCKET=17"),
+                "{shell}: {launcher}"
             );
+            for environment in [&before, &after] {
+                assert!(
+                    environment.lines().any(|line| line == wrapper),
+                    "{shell} must keep the login profile wrapper: {environment}"
+                );
+                assert!(
+                    !environment
+                        .lines()
+                        .any(|line| line.starts_with("CODEX_ESCALATE_SOCKET=")),
+                    "{shell} must have no Codex socket: {environment}"
+                );
+            }
         }
     }
 }
 
-fn shell_environment(shell: &str, inherited_profile: bool) -> (Running, String, String) {
+fn shell_environment(
+    shell: &str,
+    inherited_profile: bool,
+    inherited_socket: bool,
+) -> (Running, String, String) {
     let directory = PathBuf::from(format!(
-        "/tmp/seer-agent-env-{}-{}-{}",
+        "/tmp/seer-agent-env-{}-{}-{}-{inherited_socket}",
         std::process::id(),
         shell.rsplit('/').next().expect("shell name"),
         if inherited_profile {
@@ -160,6 +177,7 @@ fn shell_environment(shell: &str, inherited_profile: bool) -> (Running, String, 
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", &running.directory)
+        .env("HISTFILE", "/dev/null")
         .env("XDG_CONFIG_HOME", running.directory.join("config"))
         .env("XDG_STATE_HOME", running.directory.join("state"))
         .env("SEER_SNAPSHOT_DIR", running.directory.join("snapshot"))
@@ -183,13 +201,14 @@ fn shell_environment(shell: &str, inherited_profile: bool) -> (Running, String, 
             command.env(marker, "outer-session");
         }
     }
-    if !inherited_profile {
-        command
-            .env(
-                "EXEC_WRAPPER",
-                running.directory.join("codex-execve-wrapper"),
-            )
-            .env("CODEX_ESCALATE_SOCKET", "17");
+    if !inherited_profile || inherited_socket {
+        command.env(
+            "EXEC_WRAPPER",
+            running.directory.join("codex-execve-wrapper"),
+        );
+    }
+    if inherited_socket {
+        command.env("CODEX_ESCALATE_SOCKET", "17");
     }
     running.child = Some(command.spawn().expect("runtime must start"));
     let deadline = Instant::now() + WAIT;
