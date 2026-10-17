@@ -68,10 +68,12 @@ for state in sidebarStates {
         (capture, state + " New terminal", [44, bar + 87, 9, 32], [44, 9]),
     ]
 }
+var sampleColors: [String: [Double]] = [:]
 let shortcutSamples = output + "/shortcut-samples.json"
 if FileManager.default.fileExists(atPath: shortcutSamples) {
     let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: shortcutSamples))) as! [[String: Any]]
     for row in rows {
+        if let color = row["color"] as? [Double] { sampleColors[row["name"] as! String] = color.map { $0 / 255 } }
         let box = row["box"] as! [Double]
         samples.append((row["capture"] as! String, row["name"] as! String, box, row["probe"] as! [Double]))
     }
@@ -91,6 +93,11 @@ for (capture, name, box, probe) in samples {
                 let mean = channels.reduce(0, +) / 3
                 let reference = (background.redComponent + background.greenComponent + background.blueComponent) / 3
                 let contrast = reference > 0.5 ? reference - mean : mean - reference
+                if let foreground = sampleColors[name] {
+                    let dominant = foreground.indices.max { foreground[$0] < foreground[$1] }!
+                    let other = channels.enumerated().filter { $0.offset != dominant }.map { $0.element }.max()!
+                    return contrast > 8.0 / 255 && channels[dominant] - other > 8.0 / 255
+                }
                 return contrast > 8.0 / 255 && channels.max()! - channels.min()! < 4.0 / 255
             }
         }

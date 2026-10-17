@@ -171,6 +171,13 @@ pub(crate) fn exercise(
 ) {
     cx.spawn(async move |cx| {
         let result = std::panic::AssertUnwindSafe(async {
+            super::spaces_native_e2e::exercise(
+                window,
+                fixture._directory.path(),
+                &fixture.evidence,
+                cx,
+            )
+            .await;
             for name in [
                 "main",
                 "people",
@@ -275,6 +282,10 @@ pub(crate) fn exercise(
             super::sidebar_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                 .await;
             super::shortcuts_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+                .await;
+            super::rebind_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+                .await;
+            super::recovery_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                 .await;
             let result = Command::new(&fixture.capture)
                 .arg("measure")

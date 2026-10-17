@@ -10,17 +10,10 @@ use crate::palette;
 const GAP: f32 = 4.;
 const MAX_WIDTH: f32 = 280.;
 
-pub(crate) fn terminal_help(name: &str) -> SharedString {
-    let shortcut = if cfg!(target_os = "macos") {
-        "Cmd+Shift+B"
-    } else {
-        "Ctrl+Alt+Shift+B"
-    };
-    let toggle = if cfg!(target_os = "macos") {
-        "Cmd+B"
-    } else {
-        "Ctrl+Shift+B"
-    };
+pub(crate) fn terminal_help(name: &str, cx: &gpui::App) -> SharedString {
+    use crate::shortcuts::{self, Action, Scope};
+    let shortcut = shortcuts::keys(Scope::Window, Action::FocusSidebar, cx);
+    let toggle = shortcuts::keys(Scope::Window, Action::ToggleSidebar, cx);
     format!("{name}\n{shortcut} to go to the sidebar\n{toggle} to hide or show the sidebar").into()
 }
 

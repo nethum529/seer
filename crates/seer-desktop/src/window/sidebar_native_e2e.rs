@@ -56,7 +56,7 @@ pub(super) async fn exercise(
                         .push((0., f32::from(grid.origin.x), grid.cols));
                 }
                 record(Instant::now(), samples.clone(), window, cx);
-                post_shortcut();
+                post_shortcut(0x0b, 1 << 20);
             })
             .unwrap();
         cx.background_executor()
@@ -118,7 +118,7 @@ unsafe impl objc2::RefEncode for KeyboardEvent {
         objc2::Encoding::Pointer(&objc2::Encoding::Struct("__CGEvent", &[]));
 }
 
-fn post_shortcut() {
+pub(super) fn post_shortcut(key: u16, flags: u64) {
     use objc2::{class, msg_send, runtime::AnyObject};
     use std::ffi::c_void;
     #[link(name = "CoreGraphics", kind = "framework")]
@@ -138,9 +138,9 @@ fn post_shortcut() {
     unsafe {
         let app: *mut AnyObject = msg_send![class!(NSApplication), sharedApplication];
         for down in [true, false] {
-            let event = CGEventCreateKeyboardEvent(std::ptr::null(), 0x0b, down);
+            let event = CGEventCreateKeyboardEvent(std::ptr::null(), key, down);
             assert!(!event.is_null());
-            CGEventSetFlags(event, 1 << 20);
+            CGEventSetFlags(event, flags);
             let native: *mut AnyObject = msg_send![class!(NSEvent), eventWithCGEvent: event];
             assert!(!native.is_null());
             let _: () = msg_send![app, postEvent: native, atStart: false];

@@ -59,7 +59,7 @@ pub(super) async fn exercise(
                     sample(shortcut.name, x, 13., FontWeight::MEDIUM, format!("{} - name", shortcut.name));
                     let keys = shortcut.keys(shortcuts::Platform::current());
                     let width = px(text_width(window, &keys, 13., FontWeight::NORMAL));
-                    sample(&keys, f32::from(bounds.right() - width), 13., FontWeight::NORMAL, format!("{} - keys", shortcut.name));
+                    sample(&keys, f32::from(bounds.right() - width - px(8.)), 13., FontWeight::NORMAL, format!("{} - keys", shortcut.name));
                 }
             }
             if row == 0 {
@@ -146,7 +146,7 @@ pub(super) async fn exercise(
         .unwrap();
 }
 
-fn text_width(window: &gpui::Window, text: &str, size: f32, weight: FontWeight) -> f32 {
+pub(super) fn text_width(window: &gpui::Window, text: &str, size: f32, weight: FontWeight) -> f32 {
     let mut face = font("Inter");
     face.weight = weight;
     f32::from(
@@ -169,7 +169,7 @@ fn text_width(window: &gpui::Window, text: &str, size: f32, weight: FontWeight) 
     )
 }
 
-fn baseline_probe(
+pub(super) fn baseline_probe(
     window: &gpui::Window,
     text: &str,
     x: f32,

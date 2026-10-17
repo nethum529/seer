@@ -356,7 +356,7 @@ fn heading(
     let pane = terminal.map(|terminal| terminal.pane.clone());
     tip::on_hover(
         div().id("title"),
-        tip::terminal_help(&title),
+        tip::terminal_help(&title, cx),
         font.clone(),
         hover && !labels.readonly && !terminal.is_some_and(|terminal| labels.active(terminal)),
     )

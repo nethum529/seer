@@ -6,6 +6,7 @@ use super::*;
 use crate::appearance::Section;
 use crate::{backdrop, motion::Motion};
 
+mod capture;
 mod paint;
 mod shortcut_list;
 
@@ -77,6 +78,8 @@ impl SeerWindow {
     }
 
     fn close_settings(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+        self.appearance.capture = None;
+        self.appearance.shortcut_error = None;
         if let Some(motion) = &mut self.appearance.motion {
             motion.close(keyboard, 140);
         }
@@ -92,7 +95,7 @@ impl SeerWindow {
         cx.notify();
     }
 
-    pub(super) fn settings_key(
+    pub(crate) fn settings_key(
         &mut self,
         key: &Keystroke,
         window: &mut Window,
@@ -102,10 +105,14 @@ impl SeerWindow {
             return false;
         }
         self.keys.mode = Mode::Keyboard;
+        if self.capture_key(key, window, cx) {
+            cx.notify();
+            return true;
+        }
         match key.key.as_str() {
             "escape" => self.close_settings(true, window, cx),
             "tab" => {
-                let controls = self.settings_focus_order();
+                let controls = self.settings_focus_order(cx);
                 let at = controls
                     .iter()
                     .position(|focus| focus.is_focused(window))
@@ -126,6 +133,8 @@ impl SeerWindow {
                     .position(|focus| focus.is_focused(window))
                 {
                     self.settings_section([Section::Appearance, Section::Shortcuts][index], cx);
+                } else if self.appearance.section == Section::Shortcuts {
+                    self.shortcut_activation(window, cx);
                 }
             }
             _ => {}
@@ -134,7 +143,7 @@ impl SeerWindow {
         true
     }
 
-    fn settings_focus_order(&self) -> Vec<&gpui::FocusHandle> {
+    fn settings_focus_order(&self, cx: &gpui::App) -> Vec<&gpui::FocusHandle> {
         let appearance = &self.appearance;
         let mut controls = vec![&appearance.close];
         if appearance.section == Section::Appearance {
@@ -151,10 +160,14 @@ impl SeerWindow {
             controls.extend(appearance.sections.iter());
         } else {
             controls.extend(appearance.sections.iter());
-            controls.extend(shortcuts::rows().into_iter().filter_map(|row| match row {
-                shortcuts::Row::Binding(index) => appearance.shortcut_focus.get(index),
-                shortcuts::Row::Heading(_) => None,
-            }));
+            for row in shortcuts::rows() {
+                if let shortcuts::Row::Binding(index) = row {
+                    controls.push(&appearance.shortcut_focus[index]);
+                    if shortcuts::SHORTCUTS[index].changed(cx) {
+                        controls.push(&appearance.shortcut_reset[index]);
+                    }
+                }
+            }
         }
         controls
     }
@@ -165,7 +178,13 @@ impl SeerWindow {
             let index = appearance
                 .shortcut_focus
                 .iter()
-                .position(|item| item == focus);
+                .position(|item| item == focus)
+                .or_else(|| {
+                    appearance
+                        .shortcut_reset
+                        .iter()
+                        .position(|item| item == focus)
+                });
             if let Some(row) = shortcuts::rows()
                 .iter()
                 .position(|row| matches!(row, shortcuts::Row::Binding(at) if Some(*at) == index))
@@ -190,6 +209,8 @@ impl SeerWindow {
     }
 
     pub(in crate::window) fn settings_section(&mut self, section: Section, cx: &mut Context<Self>) {
+        self.appearance.capture = None;
+        self.appearance.shortcut_error = None;
         self.appearance.section = section;
         self.appearance.scroll.set_offset(gpui::Point::default());
         cx.notify();

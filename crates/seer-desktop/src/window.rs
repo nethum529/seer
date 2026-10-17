@@ -388,3 +388,15 @@ mod sidebar_native_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod shortcuts_native_e2e;
+
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+mod rebind_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod rebind_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod spaces_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod recovery_native_e2e;

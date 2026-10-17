@@ -164,11 +164,11 @@ impl SeerWindow {
         if self.input.composition.marked() {
             return;
         }
-        if self.scroll_key(key) {
+        if self.scroll_key(key, cx) {
             cx.notify();
             cx.stop_propagation();
         } else if let Some(action @ (Action::Copy | Action::Paste)) =
-            shortcuts::action(Scope::Terminal, key)
+            shortcuts::action(Scope::Terminal, key, cx)
         {
             match action {
                 Action::Copy => self.copy(cx),
@@ -176,7 +176,11 @@ impl SeerWindow {
                 _ => {}
             }
             cx.stop_propagation();
-        } else if let Some(event) = keyboard::event(key) {
+        } else if let Some(event) = if shortcuts::released(key, cx) {
+            keyboard::released_event(key)
+        } else {
+            keyboard::event(key)
+        } {
             self.send_input(event, cx);
             cx.stop_propagation();
         } else if key.modifiers.platform {
@@ -184,9 +188,9 @@ impl SeerWindow {
         }
     }
 
-    fn scroll_key(&self, key: &Keystroke) -> bool {
+    fn scroll_key(&self, key: &Keystroke, cx: &gpui::App) -> bool {
         let rows = self.input.grid.map_or(1, |grid| grid.rows as i32);
-        let lines = match shortcuts::action(Scope::Terminal, key) {
+        let lines = match shortcuts::action(Scope::Terminal, key, cx) {
             Some(Action::ScrollTop) => i32::MAX,
             Some(Action::ScrollBottom) => -i32::MAX,
             Some(Action::PageUp) => rows,
