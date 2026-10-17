@@ -146,6 +146,39 @@ fn narrow_settings_keeps_each_keyboard_control_in_view(cx: &mut TestAppContext) 
     }
 }
 
+#[gpui::test]
+fn shortcuts_are_readable_and_settings_keeps_terminal_input(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    let (_, cx) = open_view(&runtime, cx);
+    cx.simulate_resize(size(px(960.), px(640.)));
+    cx.run_until_parked();
+    click(cx, "settings-trigger");
+    cx.simulate_keystrokes("shift-tab enter");
+    cx.run_until_parked();
+    let new_label = if cfg!(target_os = "macos") {
+        "New terminal: Cmd N"
+    } else {
+        "New terminal: Ctrl Shift N"
+    };
+    assert!(cx.debug_bounds(new_label).is_some());
+    let expected = runtime.input();
+    cx.simulate_keystrokes("n");
+    super::watch_e2e::pump(cx);
+    assert_eq!(runtime.input(), expected);
+    for _ in 0..90 {
+        cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        let viewport = cx.debug_bounds("settings-content").unwrap();
+        if let Some(row) = cx.debug_bounds("shortcut-focused") {
+            assert!(viewport.contains(&row.origin) && viewport.contains(&row.bottom_right()));
+        }
+    }
+    cx.simulate_keystrokes("escape");
+    cx.simulate_keystrokes("z");
+    super::watch_e2e::pump(cx);
+    assert!(runtime.input().ends_with(b"z"));
+}
+
 fn click(cx: &mut VisualTestContext, id: &'static str) {
     let bounds = cx.debug_bounds(id).expect("control must be visible");
     cx.simulate_click(bounds.center(), Modifiers::default());

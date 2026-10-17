@@ -185,13 +185,12 @@ impl SeerWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.keys.tabs.is_focused(window)
-            || key.modifiers.control
-            || key.modifiers.alt
-            || key.modifiers.platform
-        {
+        if !self.keys.tabs.is_focused(window) {
             return false;
         }
+        let Some(action) = shortcuts::action(Scope::Tabs, key) else {
+            return false;
+        };
         let Content::Terminal(link, _) = &self.content else {
             return false;
         };
@@ -204,9 +203,9 @@ impl SeerWindow {
             Surface::Tab
         };
         self.keys.mode = Mode::Keyboard;
-        match key.key.as_str() {
-            "f2" if !key.modifiers.shift => self.rename(&pane, surface, window, cx),
-            "f10" if key.modifiers.shift => {
+        match action {
+            Action::Rename => self.rename(&pane, surface, window, cx),
+            Action::TabMenu => {
                 let at = link
                     .terminals()
                     .iter()
@@ -263,14 +262,14 @@ impl SeerWindow {
                 .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
                 .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
                     view.keys.mode = Mode::Keyboard;
-                    match event.keystroke.key.as_str() {
-                        "enter" | "space" => view.pick_tab_action(window, cx),
-                        "escape" | "tab" => view.dismiss_menu(window, cx),
-                        "up" | "down" | "home" | "end" => {
+                    let action = shortcuts::action(Scope::TabMenu, &event.keystroke);
+                    match action {
+                        Some(Action::Activate) => view.pick_tab_action(window, cx),
+                        Some(Action::Dismiss) => view.dismiss_menu(window, cx),
+                        Some(Action::Previous | Action::Next | Action::First | Action::Last) => {
                             if let Some(menu) = &mut view.menu {
                                 menu.selected =
-                                    sidebar::step(&event.keystroke.key, 2, Some(menu.selected))
-                                        .unwrap_or(0);
+                                    sidebar::step(action, 2, Some(menu.selected)).unwrap_or(0);
                                 view.notify_room(cx);
                             }
                         }

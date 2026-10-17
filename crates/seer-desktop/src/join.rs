@@ -1,3 +1,4 @@
+use crate::shortcuts::{self, Action, Scope};
 use gpui::prelude::*;
 use gpui::{
     Context, Entity, EventEmitter, FocusHandle, FontWeight, IntoElement, KeyDownEvent, Render,
@@ -192,7 +193,9 @@ impl Render for Join {
                     button("join-back", "Back", &self.back, false, busy, window)
                         .on_click(cx.listener(|view, _, window, cx| view.back(window, cx)))
                         .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
-                            if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                            if shortcuts::action(Scope::Button, &event.keystroke)
+                                == Some(Action::Activate)
+                            {
                                 view.back(window, cx);
                                 cx.stop_propagation();
                             }
@@ -204,7 +207,9 @@ impl Render for Join {
                     .when(busy, |button| button.opacity(0.6))
                     .on_click(cx.listener(|view, _, window, cx| view.submit(window, cx)))
                     .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
-                        if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                        if shortcuts::action(Scope::Button, &event.keystroke)
+                            == Some(Action::Activate)
+                        {
                             view.submit(window, cx);
                             cx.stop_propagation();
                         }

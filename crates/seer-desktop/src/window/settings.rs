@@ -3,9 +3,11 @@ use std::{path::PathBuf, sync::Arc};
 use gpui::{RenderImage, StatefulInteractiveElement};
 
 use super::*;
+use crate::appearance::Section;
 use crate::{backdrop, motion::Motion};
 
 mod paint;
+mod shortcut_list;
 
 #[derive(Clone, Copy)]
 enum Toggle {
@@ -100,40 +102,98 @@ impl SeerWindow {
             return false;
         }
         self.keys.mode = Mode::Keyboard;
-        match key.key.as_str() {
-            "escape" => self.close_settings(true, window, cx),
-            "tab" => {
-                let mut controls = vec![
-                    &self.appearance.close,
-                    &self.appearance.toggle,
-                    &self.appearance.uniform,
-                    &self.appearance.hide_bar,
-                    &self.appearance.hide_lines,
-                    &self.appearance.choose,
-                ];
-                if self.appearance.settings.picture.is_some() {
-                    controls.push(&self.appearance.reset);
-                }
+        let action = shortcuts::action(Scope::Settings, key);
+        match action {
+            Some(Action::Cancel) => self.close_settings(true, window, cx),
+            Some(Action::NextControl | Action::PreviousControl) => {
+                let controls = self.settings_focus_order();
                 let at = controls
                     .iter()
                     .position(|focus| focus.is_focused(window))
                     .unwrap_or(0);
-                let next = if key.modifiers.shift {
+                let next = if action == Some(Action::PreviousControl) {
                     (at + controls.len() - 1) % controls.len()
                 } else {
                     (at + 1) % controls.len()
                 };
                 window.focus(controls[next]);
-                match next {
-                    1..=4 => self.appearance.scroll.scroll_to_item(next - 1),
-                    5 | 6 => self.appearance.scroll.scroll_to_item(5),
-                    _ => {}
+                self.reveal_settings_focus(controls[next]);
+            }
+            _ if shortcuts::action(Scope::Button, key) == Some(Action::Activate) => {
+                if let Some(index) = self
+                    .appearance
+                    .sections
+                    .iter()
+                    .position(|focus| focus.is_focused(window))
+                {
+                    self.settings_section([Section::Appearance, Section::Shortcuts][index], cx);
                 }
             }
             _ => {}
         }
         cx.notify();
         true
+    }
+
+    fn settings_focus_order(&self) -> Vec<&gpui::FocusHandle> {
+        let appearance = &self.appearance;
+        let mut controls = vec![&appearance.close];
+        if appearance.section == Section::Appearance {
+            controls.extend([
+                &appearance.toggle,
+                &appearance.uniform,
+                &appearance.hide_bar,
+                &appearance.hide_lines,
+                &appearance.choose,
+            ]);
+            if appearance.settings.picture.is_some() {
+                controls.push(&appearance.reset);
+            }
+            controls.extend(appearance.sections.iter());
+        } else {
+            controls.extend(appearance.sections.iter());
+            controls.extend(shortcuts::rows().into_iter().filter_map(|row| match row {
+                shortcuts::Row::Binding(index) => appearance.shortcut_focus.get(index),
+                shortcuts::Row::Heading(_) => None,
+            }));
+        }
+        controls
+    }
+
+    fn reveal_settings_focus(&self, focus: &gpui::FocusHandle) {
+        let appearance = &self.appearance;
+        if appearance.section == Section::Shortcuts {
+            let index = appearance
+                .shortcut_focus
+                .iter()
+                .position(|item| item == focus);
+            if let Some(row) = shortcuts::rows()
+                .iter()
+                .position(|row| matches!(row, shortcuts::Row::Binding(at) if Some(*at) == index))
+            {
+                appearance.scroll.scroll_to_item(row);
+            }
+        } else if let Some(index) = [
+            &appearance.toggle,
+            &appearance.uniform,
+            &appearance.hide_bar,
+            &appearance.hide_lines,
+            &appearance.choose,
+            &appearance.reset,
+        ]
+        .iter()
+        .position(|item| *item == focus)
+        {
+            appearance
+                .scroll
+                .scroll_to_item(if index >= 4 { 5 } else { index });
+        }
+    }
+
+    pub(in crate::window) fn settings_section(&mut self, section: Section, cx: &mut Context<Self>) {
+        self.appearance.section = section;
+        self.appearance.scroll.set_offset(gpui::Point::default());
+        cx.notify();
     }
 
     fn toggle_appearance(&mut self, toggle: Toggle, cx: &mut Context<Self>) {

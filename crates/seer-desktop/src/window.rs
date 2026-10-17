@@ -14,6 +14,7 @@ use crate::input::Input;
 use crate::link::{Event, Link, Messages, Terminal};
 use crate::palette;
 use crate::screen::{self, Rows, Screen};
+use crate::shortcuts::{self, Action, Scope};
 use crate::sidebar::{self, Keys, Mode};
 use crate::tab_time;
 use crate::tip;
@@ -199,17 +200,16 @@ impl SeerWindow {
         let Content::Terminal(link, _) = &self.content else {
             return;
         };
-        let held = keystroke.modifiers;
-        if held.control || held.alt || held.platform || held.function {
-            return;
-        }
         let terminals = link.terminals();
         let now = terminals
             .iter()
             .position(|terminal| Some(terminal.pane.as_str()) == link.shown());
-        let Some((at, terminal)) = sidebar::step(&keystroke.key, terminals.len(), now)
-            .and_then(|at| Some((at, terminals.get(at)?)))
-        else {
+        let Some((at, terminal)) = sidebar::step(
+            shortcuts::action(Scope::Tabs, keystroke),
+            terminals.len(),
+            now,
+        )
+        .and_then(|at| Some((at, terminals.get(at)?))) else {
             return;
         };
         let pane = terminal.pane.clone();
@@ -244,20 +244,20 @@ impl SeerWindow {
         if self.input.focus.is_focused(window) || self.editing.is_some() || self.menu.is_some() {
             return;
         }
-        self.keys.mode = match keystroke.key.as_str() {
-            "tab" if keystroke.modifiers.shift => {
+        self.keys.mode = match shortcuts::action(Scope::Focus, keystroke) {
+            Some(Action::PreviousControl) => {
                 window.focus_prev();
                 Mode::Keyboard
             }
-            "tab" if self.keys.tabs.is_focused(window) => {
+            Some(Action::NextControl) if self.keys.tabs.is_focused(window) => {
                 window.focus(&self.input.focus);
                 Mode::Keyboard
             }
-            "tab" => {
+            Some(Action::NextControl) => {
                 window.focus_next();
                 Mode::Keyboard
             }
-            "escape" => Mode::Quiet,
+            Some(Action::Cancel) => Mode::Quiet,
             _ => return,
         };
         cx.stop_propagation();
@@ -384,3 +384,6 @@ mod sidebar_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod sidebar_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod shortcuts_native_e2e;

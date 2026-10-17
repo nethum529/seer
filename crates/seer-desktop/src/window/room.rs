@@ -279,7 +279,7 @@ impl SeerWindow {
             return true;
         }
         if self.room.focus.is_focused(window)
-            && matches!(key.key.as_str(), "enter" | "space" | "up" | "down")
+            && shortcuts::action(Scope::MenuTrigger, key) == Some(Action::OpenMenu)
         {
             self.open_room(true, window, cx);
             return true;
@@ -297,15 +297,16 @@ impl SeerWindow {
             .selected
             .unwrap_or(0)
             .min(actions.len().saturating_sub(1));
-        match key.key.as_str() {
-            "escape" | "tab" => self.close_room_menu(true, true, window, cx),
-            "enter" | "space" => {
+        let action = shortcuts::action(Scope::RoomMenu, key);
+        match action {
+            Some(Action::Dismiss) => self.close_room_menu(true, true, window, cx),
+            Some(Action::Activate) => {
                 if let Some(action) = actions.get(selected) {
                     self.pick_room_action(*action, true, window, cx);
                 }
             }
-            "up" | "down" | "home" | "end" => {
-                menu.selected = sidebar::step(&key.key, actions.len(), menu.selected);
+            Some(Action::Previous | Action::Next | Action::First | Action::Last) => {
+                menu.selected = sidebar::step(action, actions.len(), menu.selected);
             }
             _ => {}
         }
@@ -317,16 +318,16 @@ impl SeerWindow {
         let Some(sheet) = &self.room.sheet else {
             return;
         };
-        match key.key.as_str() {
-            "escape" => self.close_room_sheet(true, window, cx),
-            "tab" => {
+        match shortcuts::action(Scope::Confirmation, key) {
+            Some(Action::Cancel) => self.close_room_sheet(true, window, cx),
+            Some(Action::NextControl | Action::PreviousControl) => {
                 window.focus(if sheet.cancel.is_focused(window) {
                     &sheet.confirm
                 } else {
                     &sheet.cancel
                 });
             }
-            "enter" | "space" if !self.room.pending => {
+            Some(Action::Activate) if !self.room.pending => {
                 if sheet.confirm.is_focused(window) {
                     self.run_confirmation(window, cx);
                 } else {

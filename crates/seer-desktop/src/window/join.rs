@@ -1,3 +1,4 @@
+use crate::shortcuts::{self, Action, Scope};
 use std::io;
 
 use gpui::{AppContext, Context, Window};
@@ -20,8 +21,9 @@ impl SeerWindow {
         if !matches!(self.content, Content::Join(_)) {
             return false;
         }
-        if key.key == "tab" {
-            if key.modifiers.shift {
+        let action = shortcuts::action(Scope::Focus, key);
+        if matches!(action, Some(Action::NextControl | Action::PreviousControl)) {
+            if action == Some(Action::PreviousControl) {
                 window.focus_prev();
             } else {
                 window.focus_next();

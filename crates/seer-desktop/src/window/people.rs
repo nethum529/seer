@@ -89,14 +89,15 @@ impl SeerWindow {
             .is_none_or(|menu| menu.motion.closing())
         {
             if self.keys.who.is_focused(window)
-                && matches!(key.key.as_str(), "enter" | "space" | "down" | "up")
+                && shortcuts::action(Scope::MenuTrigger, key) == Some(Action::OpenMenu)
             {
                 self.open_people(true, window, cx);
                 return true;
             }
             return false;
         }
-        if matches!(key.key.as_str(), "escape" | "tab") {
+        let action = shortcuts::action(Scope::PeopleMenu, key);
+        if action == Some(Action::Dismiss) {
             self.close_people(true, window, cx);
             return true;
         }
@@ -104,9 +105,9 @@ impl SeerWindow {
         else {
             return true;
         };
-        if matches!(key.key.as_str(), "enter" | "space") {
+        if matches!(action, Some(Action::Activate | Action::ShareControl)) {
             let user = menu.highlighted.clone();
-            if key.key == "space"
+            if action == Some(Action::ShareControl)
                 && !link
                     .people
                     .people
@@ -122,7 +123,7 @@ impl SeerWindow {
             let now = people
                 .iter()
                 .position(|person| person.user_id == menu.highlighted);
-            if let Some(at) = sidebar::step(&key.key, people.len(), now) {
+            if let Some(at) = sidebar::step(action, people.len(), now) {
                 menu.highlighted.clone_from(&people[at].user_id);
                 menu.motion.reopen(true, 0);
                 menu.scroll.scroll_to_item(at);

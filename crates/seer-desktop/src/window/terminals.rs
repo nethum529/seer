@@ -1,23 +1,11 @@
 use super::*;
 
 pub(crate) fn new_shortcut(key: &Keystroke) -> bool {
-    let held = key.modifiers;
-    key.key == "n"
-        && !held.alt
-        && !held.function
-        && if cfg!(target_os = "macos") {
-            held.platform && !held.control && !held.shift
-        } else {
-            held.control && held.shift && !held.platform
-        }
+    shortcuts::action(Scope::Window, key) == Some(Action::NewTerminal)
 }
 
-pub(crate) fn new_shortcut_label() -> &'static str {
-    if cfg!(target_os = "macos") {
-        "Cmd N"
-    } else {
-        "Ctrl Shift N"
-    }
+pub(crate) fn new_shortcut_label() -> String {
+    shortcuts::keys(Scope::Window, Action::NewTerminal)
 }
 
 impl SeerWindow {
@@ -32,7 +20,7 @@ impl SeerWindow {
         }
         if !new_shortcut(key)
             && !(self.keys.new_terminal.is_focused(window)
-                && matches!(key.key.as_str(), "enter" | "space"))
+                && shortcuts::action(Scope::Button, key) == Some(Action::Activate))
         {
             return false;
         }

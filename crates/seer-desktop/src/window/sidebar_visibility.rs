@@ -26,23 +26,16 @@ impl SeerWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        let held = key.modifiers;
-        if key.key != "b"
-            || held.function
-            || self.editing.is_some()
+        if self.editing.is_some()
             || self.menu.is_some()
             || self.room.modal()
             || !matches!(self.content, Content::Terminal(..))
         {
             return false;
         }
-        let (toggle, focus) = if cfg!(target_os = "macos") {
-            let command = held.platform && !held.control && !held.alt;
-            (command && !held.shift, command && held.shift)
-        } else {
-            let command = held.control && held.shift && !held.platform;
-            (command && !held.alt, command && held.alt)
-        };
+        let action = shortcuts::action(Scope::Window, key);
+        let toggle = action == Some(Action::ToggleSidebar);
+        let focus = action == Some(Action::FocusSidebar);
         if toggle {
             let hidden = !self.appearance.settings.hide_sidebar;
             self.set_sidebar_hidden(hidden, top_bar::reduced_motion(), window, cx);

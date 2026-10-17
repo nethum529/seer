@@ -13,7 +13,16 @@ pub(crate) struct Glass {
 }
 impl Global for Glass {}
 
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub(crate) enum Section {
+    Appearance,
+    Shortcuts,
+}
+
 pub(crate) struct Appearance {
+    pub(crate) section: Section,
+    pub(crate) sections: [FocusHandle; 2],
+    pub(crate) shortcut_focus: Vec<FocusHandle>,
     pub(crate) settings: Settings,
     pub(crate) sidebar: crate::window::sidebar_visibility::Sidebar,
     pub(crate) path: Option<PathBuf>,
@@ -56,6 +65,15 @@ impl Appearance {
             ),
         };
         let mut appearance = Self {
+            section: Section::Appearance,
+            sections: [
+                cx.focus_handle().tab_stop(true),
+                cx.focus_handle().tab_stop(true),
+            ],
+            shortcut_focus: crate::shortcuts::SHORTCUTS
+                .iter()
+                .map(|_| cx.focus_handle().tab_stop(true))
+                .collect(),
             sidebar: crate::window::sidebar_visibility::Sidebar::new(settings.hide_sidebar),
             settings,
             path,

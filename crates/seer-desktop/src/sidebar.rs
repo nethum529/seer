@@ -1,3 +1,4 @@
+use crate::shortcuts::Action;
 use gpui::prelude::FluentBuilder;
 use gpui::{
     Context, Div, FocusHandle, Font, FontFeatures, FontWeight, InteractiveElement, KeyDownEvent,
@@ -304,14 +305,14 @@ pub(crate) fn strip(
 
 // The tab list is one tab stop. The arrow keys move the selection, as in the
 // WAI-ARIA tabs pattern with automatic activation.
-pub(crate) fn step(key: &str, count: usize, now: Option<usize>) -> Option<usize> {
+pub(crate) fn step(action: Option<Action>, count: usize, now: Option<usize>) -> Option<usize> {
     let last = count.checked_sub(1)?;
-    match key {
-        "up" | "left" => Some(now.map_or(last, |at| at.checked_sub(1).unwrap_or(last))),
-        "down" | "right" => Some(now.map_or(0, |at| if at == last { 0 } else { at + 1 })),
-        "home" => Some(0),
-        "end" => Some(last),
-        "enter" | "space" => Some(now.unwrap_or(0)),
+    match action {
+        Some(Action::Previous) => Some(now.map_or(last, |at| at.checked_sub(1).unwrap_or(last))),
+        Some(Action::Next) => Some(now.map_or(0, |at| if at == last { 0 } else { at + 1 })),
+        Some(Action::First) => Some(0),
+        Some(Action::Last) => Some(last),
+        Some(Action::Activate) => Some(now.unwrap_or(0)),
         _ => None,
     }
 }
