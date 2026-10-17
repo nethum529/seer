@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -26,6 +27,7 @@ const MARKERS: &[&str] = &[
     "CODEX_PERMISSION_PROFILE",
     "CODEX_TOOL_CALL_ID",
     "CODEX_PLUGIN_METRICS_OUTPUT",
+    "EXEC_WRAPPER",
     "CODEX_ESCALATE_SOCKET",
     "CODEX_SANDBOX",
     "CODEX_SANDBOX_NETWORK_DISABLED",
@@ -38,7 +40,7 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
         if !std::path::Path::new(shell).is_file() {
             continue;
         }
-        let (running, before, after) = shell_environment(shell);
+        let (running, before, after) = shell_environment(shell, None, true);
         let activation = format!(
             "CLAUDE_ENV_FILE={}/activation.sh",
             running.directory.display()
@@ -62,6 +64,8 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
             "REVIEW_ACTIVATION=from-activation",
             "CLAUDE_CODE_CHILD_SESSION=user-child",
             "CODEX_THREAD_ID=user-thread",
+            "EXEC_WRAPPER=/user/exec-wrapper",
+            "CODEX_ESCALATE_SOCKET=42",
             "CLAUDE_CODE_EFFORT_LEVEL=high",
             "CLAUDE_CODE_TMPDIR=/tmp/user-claude",
             "CODEX_APPLY_PATCH_PRESERVE_LINE_ENDINGS=1",
@@ -78,11 +82,66 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
     }
 }
 
-fn shell_environment(shell: &str) -> (Running, String, String) {
+#[test]
+fn login_profile_wrapper_reaches_non_login_shells() {
+    for shell in ["/bin/bash", "/bin/zsh"] {
+        if !std::path::Path::new(shell).is_file() {
+            continue;
+        }
+        for (profile_wrapper, inherited_socket) in [
+            ("user-wrapper", false),
+            ("user-wrapper", true),
+            ("user/codex-execve-wrapper", false),
+        ] {
+            let (running, before, after) =
+                shell_environment(shell, Some(profile_wrapper), inherited_socket);
+            let launcher = fs::read_to_string(running.directory.join("launcher"))
+                .expect("login profile must run before the runtime");
+            let wrapper = format!(
+                "EXEC_WRAPPER={}/{profile_wrapper}",
+                running.directory.display()
+            );
+            assert!(
+                launcher.lines().any(|line| line == wrapper),
+                "{shell} login profile must replace the wrapper: {launcher}"
+            );
+            assert_eq!(
+                launcher
+                    .lines()
+                    .find(|line| line.starts_with("CODEX_ESCALATE_SOCKET=")),
+                inherited_socket.then_some("CODEX_ESCALATE_SOCKET=17"),
+                "{shell}: {launcher}"
+            );
+            for environment in [&before, &after] {
+                assert!(
+                    environment.lines().any(|line| line == wrapper),
+                    "{shell} must keep the login profile wrapper: {environment}"
+                );
+                assert!(
+                    !environment
+                        .lines()
+                        .any(|line| line.starts_with("CODEX_ESCALATE_SOCKET=")),
+                    "{shell} must have no Codex socket: {environment}"
+                );
+            }
+        }
+    }
+}
+
+fn shell_environment(
+    shell: &str,
+    inherited_profile: Option<&str>,
+    inherited_socket: bool,
+) -> (Running, String, String) {
     let directory = PathBuf::from(format!(
-        "/tmp/seer-agent-env-{}-{}",
+        "/tmp/seer-agent-env-{}-{}-{}-{inherited_socket}",
         std::process::id(),
-        shell.rsplit('/').next().expect("shell name")
+        shell.rsplit('/').next().expect("shell name"),
+        if inherited_profile.is_some() {
+            "profile"
+        } else {
+            "codex"
+        }
     ));
     fs::create_dir(&directory).expect("isolated home must exist");
     let mut running = Running {
@@ -97,17 +156,43 @@ fn shell_environment(shell: &str) -> (Running, String, String) {
     let startup = "env > \"$HOME/before\"\n\
         export USER_STARTUP_VALUE=from-startup\n\
         export CLAUDE_CODE_CHILD_SESSION=user-child CODEX_THREAD_ID=user-thread\n";
+    let startup = if inherited_profile.is_some() {
+        startup.to_owned()
+    } else {
+        format!("{startup}export EXEC_WRAPPER=/user/exec-wrapper CODEX_ESCALATE_SOCKET=42\n")
+    };
     for name in [".bashrc", ".zshenv"] {
-        fs::write(running.directory.join(name), startup).expect("startup file must exist");
+        fs::write(running.directory.join(name), &startup).expect("startup file must exist");
     }
     fs::write(running.directory.join(".zshrc"), "HISTFILE=/dev/null\n")
         .expect("zsh history must stay disabled in the fixture");
     let socket = running.directory.join("socket");
-    let mut command = Command::new(env!("CARGO_BIN_EXE_seer-runtime"));
+    let mut command = if let Some(wrapper) = inherited_profile {
+        let path = running.directory.join(wrapper);
+        fs::create_dir_all(path.parent().expect("wrapper directory"))
+            .expect("user wrapper directory must exist");
+        fs::write(&path, "#!/bin/sh\nshift\nexec \"$@\"\n").expect("user wrapper must exist");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+            .expect("user wrapper must be executable");
+        for name in [".bash_profile", ".zprofile"] {
+            fs::write(
+                running.directory.join(name),
+                format!("export EXEC_WRAPPER=\"$HOME/{wrapper}\"\nenv > \"$HOME/launcher\"\n"),
+            )
+            .expect("login profile must exist");
+        }
+        let mut launcher = Command::new(shell);
+        launcher.args(["-l", "-c", "exec \"$@\"", "seer-launch"]);
+        launcher.arg(env!("CARGO_BIN_EXE_seer-runtime"));
+        launcher
+    } else {
+        Command::new(env!("CARGO_BIN_EXE_seer-runtime"))
+    };
     command
         .env_clear()
         .env("PATH", "/usr/bin:/bin")
         .env("HOME", &running.directory)
+        .env("HISTFILE", "/dev/null")
         .env("XDG_CONFIG_HOME", running.directory.join("config"))
         .env("XDG_STATE_HOME", running.directory.join("state"))
         .env("SEER_SNAPSHOT_DIR", running.directory.join("snapshot"))
@@ -127,7 +212,20 @@ fn shell_environment(shell: &str) -> (Running, String, String) {
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     for marker in MARKERS {
-        command.env(marker, "outer-session");
+        if inherited_profile.is_none()
+            || !["EXEC_WRAPPER", "CODEX_ESCALATE_SOCKET"].contains(marker)
+        {
+            command.env(marker, "outer-session");
+        }
+    }
+    if inherited_profile.is_none() || inherited_socket {
+        command.env(
+            "EXEC_WRAPPER",
+            running.directory.join("codex-execve-wrapper"),
+        );
+    }
+    if inherited_socket {
+        command.env("CODEX_ESCALATE_SOCKET", "17");
     }
     running.child = Some(command.spawn().expect("runtime must start"));
     let deadline = Instant::now() + WAIT;

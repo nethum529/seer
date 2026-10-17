@@ -1,5 +1,7 @@
 use portable_pty::CommandBuilder;
 use std::env;
+use std::ffi::OsStr;
+use std::path::Path;
 
 // Issue 402: the runtime outlives the terminal that started it, so these
 // markers of that terminal would reach every later Seer shell. Issue 512:
@@ -45,6 +47,14 @@ const SESSION_NAMES: [&str; 27] = [
 ];
 
 pub(crate) fn remove_session_vars(command: &mut CommandBuilder) {
+    // Codex exports this alias and its escalation socket together.
+    if env::var_os("CODEX_ESCALATE_SOCKET").is_some()
+        && env::var_os("EXEC_WRAPPER").is_some_and(|wrapper| {
+            Path::new(&wrapper).file_name() == Some(OsStr::new("codex-execve-wrapper"))
+        })
+    {
+        command.env_remove("EXEC_WRAPPER");
+    }
     for (name, _) in env::vars_os() {
         let Some(name) = name.to_str() else {
             continue;
