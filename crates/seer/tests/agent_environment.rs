@@ -1,4 +1,5 @@
 use std::fs;
+use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixStream;
 use std::path::PathBuf;
 use std::process::{Child, Command, Stdio};
@@ -39,7 +40,7 @@ fn agent_markers_do_not_reach_shells_but_user_startup_values_stay() {
         if !std::path::Path::new(shell).is_file() {
             continue;
         }
-        let (running, before, after) = shell_environment(shell, false, true);
+        let (running, before, after) = shell_environment(shell, None, true);
         let activation = format!(
             "CLAUDE_ENV_FILE={}/activation.sh",
             running.directory.display()
@@ -87,11 +88,19 @@ fn login_profile_wrapper_reaches_non_login_shells() {
         if !std::path::Path::new(shell).is_file() {
             continue;
         }
-        for inherited_socket in [false, true] {
-            let (running, before, after) = shell_environment(shell, true, inherited_socket);
+        for (profile_wrapper, inherited_socket) in [
+            ("user-wrapper", false),
+            ("user-wrapper", true),
+            ("user/codex-execve-wrapper", false),
+        ] {
+            let (running, before, after) =
+                shell_environment(shell, Some(profile_wrapper), inherited_socket);
             let launcher = fs::read_to_string(running.directory.join("launcher"))
                 .expect("login profile must run before the runtime");
-            let wrapper = format!("EXEC_WRAPPER={}/user-wrapper", running.directory.display());
+            let wrapper = format!(
+                "EXEC_WRAPPER={}/{profile_wrapper}",
+                running.directory.display()
+            );
             assert!(
                 launcher.lines().any(|line| line == wrapper),
                 "{shell} login profile must replace the wrapper: {launcher}"
@@ -121,14 +130,14 @@ fn login_profile_wrapper_reaches_non_login_shells() {
 
 fn shell_environment(
     shell: &str,
-    inherited_profile: bool,
+    inherited_profile: Option<&str>,
     inherited_socket: bool,
 ) -> (Running, String, String) {
     let directory = PathBuf::from(format!(
         "/tmp/seer-agent-env-{}-{}-{}-{inherited_socket}",
         std::process::id(),
         shell.rsplit('/').next().expect("shell name"),
-        if inherited_profile {
+        if inherited_profile.is_some() {
             "profile"
         } else {
             "codex"
@@ -147,7 +156,7 @@ fn shell_environment(
     let startup = "env > \"$HOME/before\"\n\
         export USER_STARTUP_VALUE=from-startup\n\
         export CLAUDE_CODE_CHILD_SESSION=user-child CODEX_THREAD_ID=user-thread\n";
-    let startup = if inherited_profile {
+    let startup = if inherited_profile.is_some() {
         startup.to_owned()
     } else {
         format!("{startup}export EXEC_WRAPPER=/user/exec-wrapper CODEX_ESCALATE_SOCKET=42\n")
@@ -158,11 +167,17 @@ fn shell_environment(
     fs::write(running.directory.join(".zshrc"), "HISTFILE=/dev/null\n")
         .expect("zsh history must stay disabled in the fixture");
     let socket = running.directory.join("socket");
-    let mut command = if inherited_profile {
+    let mut command = if let Some(wrapper) = inherited_profile {
+        let path = running.directory.join(wrapper);
+        fs::create_dir_all(path.parent().expect("wrapper directory"))
+            .expect("user wrapper directory must exist");
+        fs::write(&path, "#!/bin/sh\nshift\nexec \"$@\"\n").expect("user wrapper must exist");
+        fs::set_permissions(&path, fs::Permissions::from_mode(0o700))
+            .expect("user wrapper must be executable");
         for name in [".bash_profile", ".zprofile"] {
             fs::write(
                 running.directory.join(name),
-                "export EXEC_WRAPPER=\"$HOME/user-wrapper\"\nenv > \"$HOME/launcher\"\n",
+                format!("export EXEC_WRAPPER=\"$HOME/{wrapper}\"\nenv > \"$HOME/launcher\"\n"),
             )
             .expect("login profile must exist");
         }
@@ -197,11 +212,13 @@ fn shell_environment(
         .stdout(Stdio::null())
         .stderr(Stdio::null());
     for marker in MARKERS {
-        if !inherited_profile || !["EXEC_WRAPPER", "CODEX_ESCALATE_SOCKET"].contains(marker) {
+        if inherited_profile.is_none()
+            || !["EXEC_WRAPPER", "CODEX_ESCALATE_SOCKET"].contains(marker)
+        {
             command.env(marker, "outer-session");
         }
     }
-    if !inherited_profile || inherited_socket {
+    if inherited_profile.is_none() || inherited_socket {
         command.env(
             "EXEC_WRAPPER",
             running.directory.join("codex-execve-wrapper"),
