@@ -27,6 +27,7 @@ mod native_keys;
 mod palette;
 mod room;
 mod screen;
+mod shortcuts;
 mod sidebar;
 mod tab_time;
 mod tip;

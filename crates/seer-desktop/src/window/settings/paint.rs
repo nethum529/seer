@@ -51,17 +51,8 @@ impl SeerWindow {
                     )
                     .child(
                         div()
-                            .id("settings-appearance")
-                            .debug_selector(|| "settings-appearance".into())
                             .mt(px(16.))
-                            .h(px(32.))
-                            .px(px(8.))
-                            .rounded(px(8.))
-                            .bg(rgb(palette::CHIP))
-                            .flex()
-                            .items_center()
-                            .font_weight(FontWeight::MEDIUM)
-                            .child(crate::label::text("Appearance")),
+                            .children(self.settings_sections(window, cx)),
                     ),
             )
             .child(
@@ -82,7 +73,13 @@ impl SeerWindow {
                                     .flex_1()
                                     .text_size(px(15.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(crate::label::text("Appearance")),
+                                    .child(crate::label::text(
+                                        if self.appearance.section == Section::Appearance {
+                                            "Appearance"
+                                        } else {
+                                            "Shortcuts"
+                                        },
+                                    )),
                             )
                             .child(
                                 button(
@@ -122,22 +119,43 @@ impl SeerWindow {
                             .flex()
                             .flex_col()
                             .gap(px(12.))
-                            .child(self.appearance_control(Toggle::Glass, window, cx))
-                            .child(self.appearance_control(Toggle::UniformGlass, window, cx))
-                            .child(self.appearance_control(Toggle::HideTopBar, window, cx))
-                            .child(
-                                self.appearance_control(Toggle::HideLines, window, cx)
-                                    .mb(px(12.)),
-                            )
-                            .child(self.picture_control())
-                            .child(self.picture_actions(window, cx))
-                            .children(
-                                self.appearance
-                                    .error
-                                    .as_ref()
-                                    .map(|error| detail(error).text_color(rgb(palette::DANGER))),
-                            ),
-                    ),
+                            .when(self.appearance.section == Section::Shortcuts, |content| {
+                                content.children(self.shortcut_rows(window))
+                            })
+                            .when(self.appearance.section == Section::Appearance, |content| {
+                                content
+                                    .child(self.appearance_control(Toggle::Glass, window, cx))
+                                    .child(self.appearance_control(
+                                        Toggle::UniformGlass,
+                                        window,
+                                        cx,
+                                    ))
+                                    .child(self.appearance_control(Toggle::HideTopBar, window, cx))
+                                    .child(
+                                        self.appearance_control(Toggle::HideLines, window, cx)
+                                            .mb(px(12.)),
+                                    )
+                                    .child(self.picture_control())
+                                    .child(self.picture_actions(window, cx))
+                                    .children(self.appearance.error.as_ref().map(|error| {
+                                        detail(error).text_color(rgb(palette::DANGER))
+                                    }))
+                            }),
+                    )
+                    .when(self.appearance.section == Section::Shortcuts, |content| {
+                        content.child(
+                            div()
+                                .id("shortcut-scroll-cue")
+                                .debug_selector(|| "shortcut-scroll-cue".into())
+                                .mt(px(8.))
+                                .h(px(32.))
+                                .flex_none()
+                                .flex()
+                                .items_center()
+                                .text_color(rgb(palette::MUTED))
+                                .child(crate::label::text("Scroll to see all")),
+                        )
+                    }),
             );
         Some(
             menu::scrim("settings-scrim")

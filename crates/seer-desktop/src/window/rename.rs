@@ -185,13 +185,12 @@ impl SeerWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if !self.keys.tabs.is_focused(window)
-            || key.modifiers.control
-            || key.modifiers.alt
-            || key.modifiers.platform
-        {
+        if !self.keys.tabs.is_focused(window) {
             return false;
         }
+        let Some(action) = shortcuts::action(Scope::Tabs, key) else {
+            return false;
+        };
         let Content::Terminal(link, _) = &self.content else {
             return false;
         };
@@ -204,9 +203,9 @@ impl SeerWindow {
             Surface::Tab
         };
         self.keys.mode = Mode::Keyboard;
-        match key.key.as_str() {
-            "f2" if !key.modifiers.shift => self.rename(&pane, surface, window, cx),
-            "f10" if key.modifiers.shift => {
+        match action {
+            Action::Rename => self.rename(&pane, surface, window, cx),
+            Action::TabMenu => {
                 let at = link
                     .terminals()
                     .iter()

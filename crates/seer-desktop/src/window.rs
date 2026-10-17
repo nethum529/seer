@@ -14,6 +14,7 @@ use crate::input::Input;
 use crate::link::{Event, Link, Messages, Terminal};
 use crate::palette;
 use crate::screen::{self, Rows, Screen};
+use crate::shortcuts::{self, Action, Scope};
 use crate::sidebar::{self, Keys, Mode};
 use crate::tab_time;
 use crate::tip;
@@ -384,3 +385,6 @@ mod sidebar_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod sidebar_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod shortcuts_native_e2e;

@@ -68,6 +68,14 @@ for state in sidebarStates {
         (capture, state + " New terminal", [44, bar + 87, 9, 32], [44, 9]),
     ]
 }
+let shortcutSamples = output + "/shortcut-samples.json"
+if FileManager.default.fileExists(atPath: shortcutSamples) {
+    let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: shortcutSamples))) as! [[String: Any]]
+    for row in rows {
+        let box = row["box"] as! [Double]
+        samples.append((row["capture"] as! String, row["name"] as! String, box, row["probe"] as! [Double]))
+    }
+}
 for (capture, name, box, probe) in samples {
     let image = NSBitmapImageRep(data: try! Data(contentsOf: URL(fileURLWithPath: output + "/" + capture + ".png")))!
     let scale = Double(image.pixelsWide) / 960
@@ -93,7 +101,8 @@ for (capture, name, box, probe) in samples {
     let stem = inkRows(stemX, stemWidth)
     precondition(!capitals.isEmpty && !stem.isEmpty, "no text in " + name)
     let top = capitals.first!
-    let bottom = height - stem.last! - 1
+    let overshoot = probe.count > 2 ? Int((probe[2] * scale).rounded(.up)) : 0
+    let bottom = height - stem.last! - 1 + overshoot
     let difference = abs(top - bottom)
     table += "\(name) | \(scale) | \(top) | \(bottom) | \(difference)\n"
     if difference > 1 { failures += 1 }

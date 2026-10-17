@@ -65,12 +65,17 @@ fn key(event: &NSEvent) -> Option<Keystroke> {
     // GPUI 0.2.2 sends non-printing keys to AppKit first. AppKit consumes
     // F20 and Option+Shift+Tab as text. Carbon virtual key codes do not vary by layout.
     let key = if command {
-        // AppKit consumes Command B shortcuts before GPUI's key callback.
-        match (event.keyCode(), shift, alt, control) {
-            (0x0b, _, false, false) => "b".to_owned(),
-            (0x2d, false, false, false) => "n".to_owned(),
-            _ => return None,
-        }
+        crate::shortcuts::native_command(
+            event.keyCode(),
+            Modifiers {
+                shift,
+                alt,
+                platform: command,
+                control,
+                ..Modifiers::default()
+            },
+        )?
+        .key
     } else if let Some((_, key)) = KEYS.iter().find(|(code, _)| *code == event.keyCode()) {
         (*key).to_owned()
     } else if control {

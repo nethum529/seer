@@ -9,6 +9,7 @@ use crate::composition::Composition;
 use crate::keyboard;
 use crate::link::{Shown, lock};
 use crate::screen::{Grid, Screen};
+use crate::shortcuts::{self, Action, Scope};
 use crate::sidebar::Mode;
 use crate::window::{Content, SeerWindow};
 
@@ -166,10 +167,12 @@ impl SeerWindow {
         if self.scroll_key(key) {
             cx.notify();
             cx.stop_propagation();
-        } else if clipboard_shortcut(key) {
-            match key.key.as_str() {
-                "c" => self.copy(cx),
-                "v" => self.paste(cx),
+        } else if let Some(action @ (Action::Copy | Action::Paste)) =
+            shortcuts::action(Scope::Terminal, key)
+        {
+            match action {
+                Action::Copy => self.copy(cx),
+                Action::Paste => self.paste(cx),
                 _ => {}
             }
             cx.stop_propagation();
@@ -182,16 +185,12 @@ impl SeerWindow {
     }
 
     fn scroll_key(&self, key: &Keystroke) -> bool {
-        let held = key.modifiers;
-        if !held.shift || held.control || held.alt || held.platform {
-            return false;
-        }
         let rows = self.input.grid.map_or(1, |grid| grid.rows as i32);
-        let lines = match key.key.as_str() {
-            "home" => i32::MAX,
-            "end" => -i32::MAX,
-            "pageup" => rows,
-            "pagedown" => -rows,
+        let lines = match shortcuts::action(Scope::Terminal, key) {
+            Some(Action::ScrollTop) => i32::MAX,
+            Some(Action::ScrollBottom) => -i32::MAX,
+            Some(Action::PageUp) => rows,
+            Some(Action::PageDown) => -rows,
             _ => return false,
         };
         self.with_raw(|grid| {
@@ -417,17 +416,6 @@ impl SeerWindow {
         self.input.last_mouse = Some(mouse);
         self.send_input(InputEvent::Mouse(mouse), cx);
     }
-}
-
-fn clipboard_shortcut(key: &Keystroke) -> bool {
-    let held = key.modifiers;
-    let copy = matches!(key.key.as_str(), "c" | "v");
-    let modifier = if cfg!(target_os = "macos") {
-        held.platform && !held.control
-    } else {
-        held.control && held.shift && !held.platform
-    };
-    copy && modifier && !held.alt
 }
 
 fn mouse_button(button: MouseButton) -> Option<seer_core::MouseButton> {
