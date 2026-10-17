@@ -4,11 +4,11 @@ use seer::Settings;
 use std::collections::BTreeMap;
 
 #[derive(Default)]
-pub(crate) struct Bindings(BTreeMap<String, Chord>);
+pub(crate) struct Bindings(BTreeMap<Action, Chord>);
 impl Global for Bindings {}
 
 impl Action {
-    fn id(self) -> &'static str {
+    fn id(self) -> String {
         match self {
             Self::NewTerminal => "new_terminal",
             Self::ToggleSidebar => "toggle_sidebar",
@@ -21,7 +21,11 @@ impl Action {
             Self::PageDown => "page_down",
             Self::Rename => "rename",
             Self::TabMenu => "tab_menu",
+            Self::NextTerminal => "next_terminal",
+            Self::PreviousTerminal => "previous_terminal",
+            Self::Terminal(number) => return format!("terminal_{number}"),
         }
+        .to_owned()
     }
 }
 
@@ -64,7 +68,7 @@ impl Bindings {
                 let key = Keystroke::parse(text)
                     .map_err(|_| (index, format!("Could not read keys for {}.", shortcut.name)))?;
                 let chord = captured(&key).map_err(|error| (index, error))?;
-                bindings.0.insert(shortcut.action.id().to_owned(), chord);
+                bindings.0.insert(shortcut.action, chord);
             }
         }
         if let Some(index) = edited {
@@ -75,7 +79,7 @@ impl Bindings {
         }
         for (index, shortcut) in SHORTCUTS.iter().enumerate() {
             if let Some(other) = bindings.conflict(shortcut.action, bindings.chords(shortcut)) {
-                let invalid = if bindings.0.contains_key(shortcut.action.id()) {
+                let invalid = if bindings.0.contains_key(&shortcut.action) {
                     index
                 } else {
                     other
@@ -87,7 +91,7 @@ impl Bindings {
     }
 
     fn chords<'a>(&'a self, shortcut: &'a Shortcut) -> &'a [Chord] {
-        self.0.get(shortcut.action.id()).map_or_else(
+        self.0.get(&shortcut.action).map_or_else(
             || shortcut.chords(Platform::current()),
             std::slice::from_ref,
         )
@@ -158,7 +162,7 @@ impl Shortcut {
 
     pub(crate) fn changed(&self, cx: &App) -> bool {
         cx.try_global::<Bindings>()
-            .is_some_and(|bindings| bindings.0.contains_key(self.action.id()))
+            .is_some_and(|bindings| bindings.0.contains_key(&self.action))
     }
 }
 
