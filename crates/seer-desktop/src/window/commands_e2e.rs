@@ -75,6 +75,39 @@ fn window_commands_open_settings_and_menus_without_shell_input(cx: &mut TestAppC
     cx.simulate_keystrokes("z");
     pump(cx);
     assert_eq!(runtime.input(), b"z", "the shell must keep working");
+    cx.update(|window, cx| {
+        view.update(cx, |view, cx| {
+            view._messages = None;
+            view.content = Content::Join(cx.new(|cx| crate::join::Join::new(window, cx)));
+            cx.notify();
+        });
+    });
+    cx.run_until_parked();
+    click(cx, "room-trigger");
+    let focus = cx.update(|window, cx| window.focused(cx).unwrap());
+    view.read_with(cx, |view, _| {
+        assert!(view.room.open());
+        assert!(matches!(view.keys.mode, Mode::Pointer));
+    });
+    cx.simulate_keystrokes(keys("cmd-shift-e", "ctrl-alt-super-e"));
+    cx.run_until_parked();
+    view.read_with(cx, |view, _| {
+        assert!(
+            view.room.open(),
+            "unavailable Person menu must keep the room menu open"
+        );
+        assert!(view.people_menu.is_none());
+        assert!(
+            matches!(view.keys.mode, Mode::Pointer),
+            "unavailable action must keep input mode"
+        );
+    });
+    cx.update(|window, _| {
+        assert!(
+            focus.is_focused(window),
+            "unavailable action must keep focus"
+        )
+    });
 }
 
 #[gpui::test]
