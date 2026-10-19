@@ -25,7 +25,12 @@ impl SeerWindow {
         let narrow = window.viewport_size().width < px(480.);
         let inset = if compact { 20. } else { 24. };
         let width = 720_f32.min(f32::from(window.viewport_size().width) - 32.);
-        let height = 400_f32.min(f32::from(window.viewport_size().height) - 48.);
+        let height: f32 = if self.appearance.section == Section::Appearance {
+            560.
+        } else {
+            400.
+        };
+        let height = height.min(f32::from(window.viewport_size().height) - 48.);
         let card = menu::sheet("settings-dialog", width, cx)
             .h(px(height))
             .flex()
@@ -130,7 +135,9 @@ impl SeerWindow {
                             })
                             .when(self.appearance.section == Section::Appearance, |content| {
                                 content
-                                    .child(self.appearance_control(Toggle::Glass, window, cx))
+                                    .children(
+                                        (0..3).map(|index| self.adjustment_row(index, window, cx)),
+                                    )
                                     .child(self.appearance_control(
                                         Toggle::UniformGlass,
                                         window,
@@ -174,6 +181,7 @@ impl SeerWindow {
                     }),
                 )
                 .child(card)
+                .child(self.adjustment_events(cx))
                 .into_any_element(),
         )
     }
@@ -181,12 +189,6 @@ impl SeerWindow {
     fn appearance_control(&self, toggle: Toggle, window: &Window, cx: &mut Context<Self>) -> Div {
         let appearance = &self.appearance;
         let (id, label, enabled, focus) = match toggle {
-            Toggle::Glass => (
-                "glass-toggle",
-                "Dark glass",
-                appearance.settings.glass,
-                &appearance.toggle,
-            ),
             Toggle::UniformGlass => (
                 "uniform-glass-toggle",
                 "Uniform glass",

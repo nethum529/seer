@@ -171,6 +171,17 @@ pub(crate) fn exercise(
 ) {
     cx.spawn(async move |cx| {
         let result = std::panic::AssertUnwindSafe(async {
+            if std::env::var_os("APPEARANCE_LEGACY_QA").is_some() {
+                super::legacy_appearance_native_e2e::exercise(
+                    window,
+                    &fixture._directory.path().join("config/seer/settings.toml"),
+                    &fixture.evidence,
+                    &fixture.capture,
+                    cx,
+                )
+                .await;
+                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
+            }
             if std::env::var_os("TEXT_PIXEL_START_ROOM_ONLY").is_some() {
                 super::start_room_native_e2e::exercise(
                     window,
@@ -179,7 +190,17 @@ pub(crate) fn exercise(
                     cx,
                 )
                 .await;
-                return measure(&fixture.capture, &fixture.evidence);
+                return measure(&fixture.capture, &fixture.evidence, "measure");
+            }
+            if std::env::var_os("APPEARANCE_SLIDER_QA").is_some() {
+                super::appearance_native_e2e::exercise(
+                    window,
+                    &fixture.evidence,
+                    &fixture.capture,
+                    cx,
+                )
+                .await;
+                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
             }
             super::spaces_native_e2e::exercise(
                 window,
@@ -292,6 +313,8 @@ pub(crate) fn exercise(
             }
             super::sidebar_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                 .await;
+            super::appearance_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+                .await;
             super::shortcuts_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                 .await;
             super::rebind_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
@@ -300,7 +323,7 @@ pub(crate) fn exercise(
                 .await;
             super::start_room_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                 .await;
-            measure(&fixture.capture, &fixture.evidence)
+            measure(&fixture.capture, &fixture.evidence, "measure")
         })
         .catch_unwind()
         .await;
@@ -334,9 +357,9 @@ pub(crate) fn window_options(
     options
 }
 
-fn measure(capture: &std::path::Path, evidence: &std::path::Path) -> bool {
+fn measure(capture: &std::path::Path, evidence: &std::path::Path, mode: &str) -> bool {
     let result = Command::new(capture)
-        .arg("measure")
+        .arg(mode)
         .arg(evidence)
         .output()
         .unwrap();

@@ -1,6 +1,6 @@
 use std::{path::PathBuf, sync::Arc};
 
-use gpui::{RenderImage, StatefulInteractiveElement};
+use gpui::StatefulInteractiveElement;
 
 use super::*;
 use crate::appearance::Section;
@@ -9,10 +9,10 @@ use crate::{backdrop, motion::Motion};
 mod capture;
 mod paint;
 mod shortcut_list;
+pub(super) mod sliders;
 
 #[derive(Clone, Copy)]
 enum Toggle {
-    Glass,
     UniformGlass,
     HideTopBar,
     HideLines,
@@ -78,6 +78,9 @@ impl SeerWindow {
     }
 
     fn close_settings(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+        if self.appearance.slider_drag.take().is_some() {
+            self.save_adjustments(cx);
+        }
         self.appearance.capture = None;
         self.appearance.shortcut_error = None;
         if let Some(motion) = &mut self.appearance.motion {
@@ -107,6 +110,9 @@ impl SeerWindow {
         self.keys.mode = Mode::Keyboard;
         if self.capture_key(key, window, cx) {
             cx.notify();
+            return true;
+        }
+        if self.adjustment_key(key, window, cx) {
             return true;
         }
         match key.key.as_str() {
@@ -147,8 +153,8 @@ impl SeerWindow {
         let appearance = &self.appearance;
         let mut controls = vec![&appearance.close];
         if appearance.section == Section::Appearance {
+            controls.extend(self.adjustment_focus());
             controls.extend([
-                &appearance.toggle,
                 &appearance.uniform,
                 &appearance.hide_bar,
                 &appearance.hide_lines,
@@ -191,20 +197,20 @@ impl SeerWindow {
             {
                 appearance.scroll.scroll_to_item(row);
             }
-        } else if let Some(index) = [
-            &appearance.toggle,
-            &appearance.uniform,
-            &appearance.hide_bar,
-            &appearance.hide_lines,
-            &appearance.choose,
-            &appearance.reset,
-        ]
-        .iter()
-        .position(|item| *item == focus)
+        } else if !self.reveal_adjustment(focus)
+            && let Some(index) = [
+                &appearance.uniform,
+                &appearance.hide_bar,
+                &appearance.hide_lines,
+                &appearance.choose,
+                &appearance.reset,
+            ]
+            .iter()
+            .position(|item| *item == focus)
         {
             appearance
                 .scroll
-                .scroll_to_item(if index >= 4 { 5 } else { index });
+                .scroll_to_item(if index >= 3 { 7 } else { index + 3 });
         }
     }
 
@@ -219,17 +225,11 @@ impl SeerWindow {
     fn toggle_appearance(&mut self, toggle: Toggle, cx: &mut Context<Self>) {
         let mut settings = self.appearance.settings.clone();
         match toggle {
-            Toggle::Glass => settings.glass = !settings.glass,
             Toggle::UniformGlass => settings.uniform_glass = !settings.uniform_glass,
             Toggle::HideTopBar => settings.hide_top_bar = !settings.hide_top_bar,
             Toggle::HideLines => settings.hide_lines = !settings.hide_lines,
         }
-        if self.appearance.save(settings)
-            && self.appearance.settings.glass
-            && self.appearance.picture.is_none()
-        {
-            self.appearance.load_picture();
-        }
+        self.appearance.save(settings);
         cx.notify();
     }
 
@@ -240,17 +240,12 @@ impl SeerWindow {
         let mut settings = self.appearance.settings.clone();
         settings.picture = None;
         if self.appearance.save(settings) {
-            let picture = self
-                .appearance
-                .settings
-                .glass
-                .then(backdrop::default_picture)
-                .flatten();
+            let picture = backdrop::default_picture();
             self.appearance.replace_picture(picture, window);
             self.appearance.fallback = false;
             if self.appearance.reset.is_focused(window) {
                 window.focus(&self.appearance.choose);
-                self.appearance.scroll.scroll_to_item(5);
+                self.appearance.scroll.scroll_to_item(7);
             }
         }
         cx.notify();
@@ -302,7 +297,7 @@ impl SeerWindow {
     pub(super) fn set_picture(
         &mut self,
         path: PathBuf,
-        loaded: io::Result<Arc<RenderImage>>,
+        loaded: io::Result<Arc<backdrop::Picture>>,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {

@@ -5,7 +5,8 @@ let output = CommandLine.arguments[2]
 if CommandLine.arguments[1] == "display" {
     exit(CGSessionCopyCurrentDictionary() != nil && CGDisplayPixelsWide(CGMainDisplayID()) > 0 ? 0 : 77)
 }
-if CommandLine.arguments[1] != "measure" {
+let appearanceOnly = CommandLine.arguments[1] == "measure-appearance"
+if CommandLine.arguments[1] != "measure" && !appearanceOnly {
     let pid = Int32(CommandLine.arguments[1])!
     let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
     let window = windows.first { ($0[kCGWindowOwnerPID as String] as? Int32) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }!
@@ -31,12 +32,10 @@ var samples: [(String, String, [Double], [Double])] = startRoomOnly ? [] : [
     ("people", "Person name", [53, 97, 10, 36], [53, 10]),
     ("people", "Person avatar", [28, 104, 8, 22], [28, 8]),
     ("people", "Badge", [89, 97, 8, 36], [89, 8]),
-    ("settings", "Settings heading", [145, 145, 9, 32], [175, 2]),
-    ("settings", "Settings navigation", [145, 193, 9, 32], [145, 9]),
-    ("settings", "Settings title", [321, 145, 10, 32], [321, 10]),
-    ("settings", "Settings row", [321, 208, 9, 18], [321, 4]),
-    ("settings", "Settings switch", [745, 201, 9, 32], [756, 2]),
-    ("settings", "Button", [335, 419, 9, 32], [395, 2]),
+    ("settings", "Settings heading", [145, 65, 9, 32], [175, 2]),
+    ("settings", "Settings navigation", [145, 113, 9, 32], [145, 9]),
+    ("settings", "Settings title", [321, 65, 10, 32], [321, 10]),
+    ("settings", "Settings row", [321, 128, 9, 18], [321, 4]),
     ("main", "Room trigger", [44, 602.5, 8, 32], [44, 8]),
     ("room", "Room name", [53, 476.5, 8, 36], [53, 8]),
     ("room", "Room action", [53, 521.5, 8, 36], [53, 8]),
@@ -69,12 +68,15 @@ for state in sidebarStates {
         (capture, state + " New terminal", [44, bar + 87, 9, 32], [44, 9]),
     ]
 }
+if appearanceOnly { samples = [] }
 var sampleColors: [String: [Double]] = [:]
-for file in ["shortcut-samples.json", "start-room-samples.json"] {
+var captureWidths: [String: Double] = [:]
+for file in ["shortcut-samples.json", "start-room-samples.json", "appearance-samples.json"] {
     let path = output + "/" + file
     if !FileManager.default.fileExists(atPath: path) { continue }
     let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]
     for row in rows {
+        if let width = row["logical_width"] as? Double { captureWidths[row["capture"] as! String] = width }
         if let color = row["color"] as? [Double] { sampleColors[row["name"] as! String] = color.map { $0 / 255 } }
         let box = row["box"] as! [Double]
         samples.append((row["capture"] as! String, row["name"] as! String, box, row["probe"] as! [Double]))
@@ -83,7 +85,7 @@ for file in ["shortcut-samples.json", "start-room-samples.json"] {
 if startRoomOnly { precondition(!samples.isEmpty, "start room pixel samples are missing") }
 for (capture, name, box, probe) in samples {
     let image = NSBitmapImageRep(data: try! Data(contentsOf: URL(fileURLWithPath: output + "/" + capture + ".png")))!
-    let scale = Double(image.pixelsWide) / 960
+    let scale = Double(image.pixelsWide) / (captureWidths[capture] ?? 960)
     precondition(scale == 1 || scale == 2, "expected a full native window capture at 1x or 2x")
     let values = box.map { Int(($0 * scale).rounded()) }
     let (x, y, width, height) = (values[0], values[1], values[2], values[3])
@@ -121,7 +123,7 @@ for (capture, name, box, probe) in samples {
     let crop = image.cgImage!.cropping(to: CGRect(x: left, y: y, width: right - left, height: height))!
     try! NSBitmapImageRep(cgImage: crop).representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output + "/crop-" + name.replacingOccurrences(of: " ", with: "-") + ".png"))
 }
-for state in sidebarStates {
+for state in (appearanceOnly ? [] : sidebarStates) {
     let image = NSBitmapImageRep(data: try! Data(contentsOf: URL(fileURLWithPath: output + "/sidebar-" + state + ".png")))!
     let scale = Double(image.pixelsWide) / 960
     let bar = state == "hidden-no-lines" ? 0.0 : 44.0
@@ -143,5 +145,5 @@ for state in sidebarStates {
     if abs(inset - rowInset) > 0.5 || !aligned { failures += 1 }
 }
 try! table.write(toFile: output + "/measurements.txt", atomically: true, encoding: .utf8)
-print(table + "Failed checks: \(failures) / \(samples.count + sidebarStates.count)")
+print(table + "Failed checks: \(failures) / \(samples.count + (appearanceOnly ? 0 : sidebarStates.count))")
 exit(failures == 0 ? 0 : 1)
