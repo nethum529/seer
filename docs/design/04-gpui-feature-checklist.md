@@ -76,20 +76,22 @@ When a PR decides or builds a row, it updates the row.
 ## Rooms
 
 T-456 places the room menu and confirm sheets. Click motion uses opacity
-only. Linux action execution needs coordinator QA. Invites belong to R-454.
+only. Coordinator QA on Linux on 2026-10-19 ran Start, Stop, Restore, and
+Leave through the CLI paths that the window uses. All passed. Invites belong
+to R-454.
 
 | Feature | Source | Window place, or reason | Item |
 | --- | --- | --- | --- |
-| seer start opens a new room on Linux and prints a join line. The people of the old room are removed | README Host a room, README Commands, help | Placed: Start a room in the no-room menu on Linux, with the shared confirm sheet and retry after failure. Start a new room stays in the stopped host room menu. Both use the CLI start path. macOS does not offer Start a room. Linux execution needs coordinator QA. The sheet does not promise a new invite. Invites belong to R-454. The command stays. | T-531, R-456, R-454 |
-| seer start --restore reopens the old room with its people | README Commands, help | Placed: Restore room in the stopped host room menu. It uses the CLI start path. Linux execution needs QA. The command stays. | R-456 |
+| seer start opens a new room on Linux and prints a join line. The people of the old room are removed | README Host a room, README Commands, help | Placed: Start a room in the no-room menu on Linux, with the shared confirm sheet and retry after failure. Start a new room stays in the stopped host room menu. Both use the CLI start path. macOS does not offer Start a room. Linux execution passed QA on 2026-10-19. The sheet does not promise a new invite. Invites belong to R-454. The command stays. | T-531, R-456, R-454 |
+| seer start --restore reopens the old room with its people | README Commands, help | Placed: Restore room in the stopped host room menu. It uses the CLI start path. Linux execution passed QA on 2026-10-19: the old people stay, and a guest connects again without a new join line. The command stays. | R-456 |
 | seer invite --hours N makes a one use join line that lasts 1 to 168 hours | README Host a room, README Commands, help | Built: invite sheet with 1 hour, 1 day, 7 days, and custom 1 to 168 hours. The sheet and CLI use the same invite request and line builder. Invite a person opens the sheet from the connected host room menu. Closing returns focus to the room trigger. | R-454 |
 | seer join LINE, or seer join with no line to paste it at a prompt | README Join a room, README Commands, help | Placed: the first-run Join screen accepts an invite line or capsule. A seer://join/CAPSULE link opens the name step. The command stays. | T-455 |
 | The name prompt at join. Enter accepts the system user name | README Join a room | Placed: the Join screen selects the system user name. Enter accepts it; typing replaces it. | T-455 |
 | The install line that installs Seer and joins in one step | README Join a room | Placed: paste the install line into the Join screen. The command stays. | T-455 |
 | seer list lists your saved rooms and people | README Commands, help | Placed: the room menu shows the current room and people count, then read-only saved rooms with the CLI list state. The command stays. | R-456 |
 | The room address in the picker | README People | Placed: the current room row in the room menu shows the address. The footer and narrow top bar show the room trigger. | R-456 |
-| seer leave removes you from the room and stops your terminals on this computer | README Commands, help | Placed: Leave room in the guest room menu, with a confirm sheet. It uses the CLI leave path. Successful execution needs QA. The command stays. | R-456 |
-| seer stop stops the room server. Host only | README Commands, help | Placed: Stop room in the running host room menu, with a confirm sheet. It uses the CLI stop path. Linux execution needs QA. The command stays. | R-456 |
+| seer leave removes you from the room and stops your terminals on this computer | README Commands, help | Placed: Leave room in the guest room menu, with a confirm sheet. It uses the CLI leave path. Execution passed QA on 2026-10-19: the host no longer lists the guest, and no guest runtime stays. The command stays. | R-456 |
+| seer stop stops the room server. Host only | README Commands, help | Placed: Stop room in the running host room menu, with a confirm sheet. It uses the CLI stop path. Linux execution passed QA on 2026-10-19. The command stays. | R-456 |
 
 ## Processes and updates
 
