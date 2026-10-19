@@ -16,6 +16,7 @@ pub(super) const STOPPED: &str = "The room is stopped. Open the room menu to res
 pub(super) struct RoomUi {
     pub(super) server: Option<ServerEntry>,
     pub(super) current: Option<RoomSummary>,
+    pub(super) can_host: bool,
     others: Vec<RoomSummary>,
     pub(super) focus: FocusHandle,
     anchor: Rc<Cell<Bounds<Pixels>>>,
@@ -41,7 +42,7 @@ enum MenuAction {
 
 #[derive(Clone)]
 enum Confirmation {
-    Room(RoomAction, Box<RoomSummary>),
+    Room(RoomAction, Option<Box<RoomSummary>>),
     Terminal { pane: String, program: String },
 }
 
@@ -58,6 +59,7 @@ impl RoomUi {
         Self {
             server,
             current: None,
+            can_host: cfg!(target_os = "linux"),
             others: Vec::new(),
             focus: cx.focus_handle().tab_stop(true),
             anchor: Rc::default(),
@@ -72,7 +74,11 @@ impl RoomUi {
 
     fn actions(&self) -> Vec<MenuAction> {
         let Some(room) = &self.current else {
-            return Vec::new();
+            return if self.server.is_none() && self.can_host {
+                vec![MenuAction::Room(RoomAction::Start)]
+            } else {
+                Vec::new()
+            };
         };
         if !room.host {
             vec![MenuAction::Room(RoomAction::Leave)]
@@ -228,13 +234,7 @@ impl SeerWindow {
         let confirm = cx.focus_handle();
         window.focus(&cancel);
         self.room.sheet = Some(Sheet {
-            action: Confirmation::Room(
-                action,
-                Box::new(match &self.room.current {
-                    Some(room) => room.clone(),
-                    None => return,
-                }),
-            ),
+            action: Confirmation::Room(action, self.room.current.clone().map(Box::new)),
             return_focus: self.room.focus.clone(),
             cancel,
             confirm,
@@ -342,9 +342,7 @@ impl SeerWindow {
         if self.room.pending {
             return;
         }
-        let Some(server) = self.room.server.clone() else {
-            return;
-        };
+        let server = self.room.server.clone();
         self.room.pending = true;
         self.room.error = None;
         self.room.refresh = None;
@@ -354,11 +352,17 @@ impl SeerWindow {
             window.focus(&self.room.focus);
         }
         let work = cx.background_executor().spawn(async move {
-            action.run(&server)?;
-            if matches!(action, RoomAction::Restore | RoomAction::StartNew) {
+            action.run(server.as_ref())?;
+            if matches!(
+                action,
+                RoomAction::Start | RoomAction::Restore | RoomAction::StartNew
+            ) {
                 ServerStore::load()?
                     .default_server()
-                    .map(join::open_server)
+                    .map(|server| {
+                        let opened = join::open_server(server)?;
+                        Ok::<_, io::Error>((opened, seer::rooms::inspect_room(server.clone())))
+                    })
                     .transpose()
             } else {
                 Ok(None)
@@ -377,7 +381,11 @@ impl SeerWindow {
                         if action == RoomAction::Restore {
                             view.open_room(view.keys.mode == Mode::Keyboard, window, cx);
                         }
-                        view.room.error = Some(error.to_string());
+                        view.room.error = Some(if action == RoomAction::Start {
+                            "Could not start the room. Try again.".into()
+                        } else {
+                            error.to_string()
+                        });
                     }
                 }
                 view.notify_room(cx);
@@ -389,7 +397,7 @@ impl SeerWindow {
     fn room_action_done(
         &mut self,
         action: RoomAction,
-        opened: Option<(Link, ServerEntry, Messages)>,
+        opened: Option<(Opened, RoomSummary)>,
         cx: &mut Context<Self>,
     ) {
         if let Some(sheet) = &mut self.room.sheet {
@@ -412,11 +420,13 @@ impl SeerWindow {
                 self.room.server = None;
                 self.room.current = None;
             }
-            RoomAction::Restore | RoomAction::StartNew => {
-                if let Some((link, server, messages)) = opened {
+            RoomAction::Start | RoomAction::Restore | RoomAction::StartNew => {
+                if let Some(((link, server, messages), summary)) = opened {
                     self.content = Content::Terminal(Box::new(link), server.name.clone().into());
                     self.server = Some(server.clone());
                     self.room.server = Some(server);
+                    self.room.current = Some(summary);
+                    self._join = None;
                     self.listen(messages, cx);
                 }
                 self.refresh_room(cx);

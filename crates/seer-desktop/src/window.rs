@@ -228,6 +228,10 @@ impl SeerWindow {
         if self.invite.is_some() {
             return;
         }
+        if self.room_key(keystroke, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.join_travel(keystroke, window, cx) {
             return;
         }
@@ -235,7 +239,7 @@ impl SeerWindow {
             cx.stop_propagation();
             return;
         }
-        if self.room_key(keystroke, window, cx) || self.people_key(keystroke, window, cx) {
+        if self.people_key(keystroke, window, cx) {
             cx.stop_propagation();
             return;
         }
@@ -410,3 +414,9 @@ mod recovery_native_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod switch_native_e2e;
+
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+mod start_room_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod start_room_native_e2e;

@@ -20,8 +20,9 @@ if CommandLine.arguments[1] != "measure" {
 }
 var table = "Label | Scale | Above capitals | Below baseline | Difference\n"
 var failures = 0
-let sidebarStates = ["shown-lines", "hidden-lines", "shown-no-lines", "hidden-no-lines"]
-var samples: [(String, String, [Double], [Double])] = [
+let startRoomOnly = ProcessInfo.processInfo.environment["TEXT_PIXEL_START_ROOM_ONLY"] != nil
+let sidebarStates = startRoomOnly ? [] : ["shown-lines", "hidden-lines", "shown-no-lines", "hidden-no-lines"]
+var samples: [(String, String, [Double], [Double])] = startRoomOnly ? [] : [
     ("main", "Sidebar name", [44, 52, 10, 36], [44, 10]),
     ("main", "Sidebar avatar", [22, 59, 9, 22], [22, 9]),
     ("main", "Sidebar tab", [44, 92, 8, 33], [68, 6]),
@@ -45,7 +46,7 @@ var samples: [(String, String, [Double], [Double])] = [
     ("tooltip", "Tooltip", [18, 92, 9, 27], [18, 9]),
     ("terminal-tip", "Terminal shortcut tooltip", [18, 129, 9, 59], [18, 9]),
 ]
-for capture in ["toggle-show", "toggle-show-repeat"] {
+for capture in (startRoomOnly ? [] : ["toggle-show", "toggle-show-repeat"]) {
     samples += [
         (capture, capture + " name", [44, 52, 10, 36], [44, 10]),
         (capture, capture + " avatar", [22, 59, 9, 22], [22, 9]),
@@ -55,7 +56,7 @@ for capture in ["toggle-show", "toggle-show-repeat"] {
         (capture, capture + " title", [590, 7.5, 8, 28], [613, 6]),
     ]
 }
-for capture in ["toggle-hide", "toggle-hide-repeat"] {
+for capture in (startRoomOnly ? [] : ["toggle-hide", "toggle-hide-repeat"]) {
     samples.append((capture, capture + " title", [466, 7.5, 8, 28], [489, 6]))
 }
 for state in sidebarStates {
@@ -69,15 +70,17 @@ for state in sidebarStates {
     ]
 }
 var sampleColors: [String: [Double]] = [:]
-let shortcutSamples = output + "/shortcut-samples.json"
-if FileManager.default.fileExists(atPath: shortcutSamples) {
-    let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: shortcutSamples))) as! [[String: Any]]
+for file in ["shortcut-samples.json", "start-room-samples.json"] {
+    let path = output + "/" + file
+    if !FileManager.default.fileExists(atPath: path) { continue }
+    let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]
     for row in rows {
         if let color = row["color"] as? [Double] { sampleColors[row["name"] as! String] = color.map { $0 / 255 } }
         let box = row["box"] as! [Double]
         samples.append((row["capture"] as! String, row["name"] as! String, box, row["probe"] as! [Double]))
     }
 }
+if startRoomOnly { precondition(!samples.isEmpty, "start room pixel samples are missing") }
 for (capture, name, box, probe) in samples {
     let image = NSBitmapImageRep(data: try! Data(contentsOf: URL(fileURLWithPath: output + "/" + capture + ".png")))!
     let scale = Double(image.pixelsWide) / 960
@@ -140,5 +143,5 @@ for state in sidebarStates {
     if abs(inset - rowInset) > 0.5 || !aligned { failures += 1 }
 }
 try! table.write(toFile: output + "/measurements.txt", atomically: true, encoding: .utf8)
-print(table + "Failed checks: \(failures) / \(samples.count + 4)")
+print(table + "Failed checks: \(failures) / \(samples.count + sidebarStates.count)")
 exit(failures == 0 ? 0 : 1)

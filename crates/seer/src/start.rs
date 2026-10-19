@@ -67,10 +67,20 @@ pub fn run(restore: bool) -> ExitCode {
 
 #[cfg(target_os = "linux")]
 pub(crate) fn run_linux(restore: bool) -> io::Result<()> {
+    run_with_name(restore, true)
+}
+
+#[cfg(target_os = "linux")]
+pub(crate) fn run_window() -> io::Result<()> {
+    run_with_name(false, false)
+}
+
+#[cfg(target_os = "linux")]
+fn run_with_name(restore: bool, ask_name: bool) -> io::Result<()> {
     let config_dir = config_dir()?;
     secure_directory(&config_dir)?;
     let config_path = config_dir.join("broker.toml");
-    let (config, mut first_start) = load_or_create_config(&config_path)?;
+    let (config, mut first_start) = load_or_create_config(&config_path, ask_name)?;
     let started = Instant::now();
     secure_directory(&config.state_dir)?;
     if running_broker(&config) {
@@ -119,13 +129,13 @@ fn secure_directory(path: &Path) -> io::Result<()> {
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 }
 #[cfg(target_os = "linux")]
-fn load_or_create_config(path: &Path) -> io::Result<(BrokerConfig, bool)> {
+fn load_or_create_config(path: &Path, ask_name: bool) -> io::Result<(BrokerConfig, bool)> {
     match fs::read_to_string(path) {
         Ok(contents) => toml::from_str(&contents)
             .map(|config| (config, false))
             .map_err(invalid_data),
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
-            let config = prompt_config()?;
+            let config = prompt_config(ask_name)?;
             write_private(path, toml_text(&config)?.as_bytes())?;
             Ok((config, true))
         }
@@ -133,11 +143,15 @@ fn load_or_create_config(path: &Path) -> io::Result<(BrokerConfig, bool)> {
     }
 }
 #[cfg(target_os = "linux")]
-fn prompt_config() -> io::Result<BrokerConfig> {
+fn prompt_config(ask_name: bool) -> io::Result<BrokerConfig> {
     let login = env::var("USER")
         .or_else(|_| env::var("LOGNAME"))
         .unwrap_or_else(|_| "owner".to_owned());
-    let owner_name = prompt("Your name", &login)?;
+    let owner_name = if ask_name {
+        prompt("Your name", &login)?
+    } else {
+        login
+    };
     let listen = SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), PORT);
     Ok(BrokerConfig {
         listen,

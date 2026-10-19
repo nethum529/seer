@@ -72,13 +72,8 @@ impl Render for SeerWindow {
             Content::Join(join) => {
                 return root
                     .child(join.clone())
-                    .child(
-                        div()
-                            .absolute()
-                            .right(px(8.))
-                            .top(px(6.))
-                            .child(self.settings_button(window, cx)),
-                    )
+                    .child(self.no_room_controls(window, cx))
+                    .children(rooms)
                     .children(settings)
                     .children(controls);
             }
@@ -95,6 +90,7 @@ impl Render for SeerWindow {
                         .text_center()
                         .text_color(rgb(palette::FAINT))
                         .child(crate::label::text(message.clone()))
+                        .child(self.no_room_controls(window, cx))
                 };
                 return root
                     .child(content)
