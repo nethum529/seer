@@ -112,7 +112,7 @@ to R-454.
 
 | Feature | Source | Window place, or reason | Item |
 | --- | --- | --- | --- |
-| Your shells continue when you close the window or lose the room connection | README Good to know | Placed: closing the window keeps the shells. No place yet for the banner when the connection drops. | T-448, R-458 |
+| Your shells continue when you close the window or lose the room connection | README Good to know | Built: closing the window keeps the shells. A lost room connection shows a banner above the terminal. Local input stays available. The banner clears when the room returns. An intentional Stop keeps the stopped room screen. | T-448, T-540 |
 | A restart of the computer or the runtime restores the saved layout with new shells | README Good to know | No control. The window shows the restored terminals as tabs. | none |
 | One computer at a time can publish the terminals of one person | README Good to know | No place yet. The second computer must show the refusal. | R-458 |
 | A grant is for one person and one direction. No person can open, close, select, or resize your terminals | README People | No control. The broker and the runtime enforce it. | none |

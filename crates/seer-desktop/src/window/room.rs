@@ -23,7 +23,8 @@ pub(super) struct RoomUi {
     anchor: Rc<Cell<Bounds<Pixels>>>,
     menu: Option<Menu>,
     sheet: Option<Sheet>,
-    pending: bool,
+    pub(super) pending: bool,
+    pub(super) lost: bool,
     error: Option<String>,
     refresh: Option<Task<()>>,
     action: Option<Task<()>>,
@@ -67,6 +68,7 @@ impl RoomUi {
             menu: None,
             sheet: None,
             pending: false,
+            lost: false,
             error: None,
             refresh: None,
             action: None,
@@ -467,3 +469,7 @@ impl SeerWindow {
         }
     }
 }
+
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+#[path = "banner_e2e.rs"]
+mod banner_e2e;
