@@ -1,12 +1,13 @@
-use std::{path::PathBuf, sync::Arc};
+use std::{cell::Cell, path::PathBuf, rc::Rc, sync::Arc};
 
-use gpui::{App, FocusHandle, Global, RenderImage, ScrollHandle, Window};
+use gpui::{App, FocusHandle, Global, ScrollHandle, Window};
 use seer::Settings;
 
 use crate::{backdrop, motion::Motion};
 
 pub(crate) struct Glass {
     pub(crate) enabled: bool,
+    pub(crate) darkness: f32,
     pub(crate) uniform: bool,
     pub(crate) hide_lines: bool,
     pub(crate) reclaim_top: bool,
@@ -31,14 +32,17 @@ pub(crate) struct Appearance {
     pub(crate) settings: Settings,
     pub(crate) sidebar: crate::window::sidebar_visibility::Sidebar,
     pub(crate) path: Option<PathBuf>,
-    pub(crate) picture: Option<Arc<RenderImage>>,
+    pub(crate) picture: Option<Arc<backdrop::Picture>>,
     pub(crate) fallback: bool,
     pub(crate) error: Option<String>,
     pub(crate) motion: Option<Motion>,
     pub(crate) busy: bool,
     pub(crate) trigger: FocusHandle,
     pub(crate) close: FocusHandle,
-    pub(crate) toggle: FocusHandle,
+    pub(crate) sliders: [FocusHandle; 3],
+    pub(crate) slider_reset: [FocusHandle; 3],
+    pub(crate) slider_bounds: [Rc<Cell<gpui::Bounds<gpui::Pixels>>>; 3],
+    pub(crate) slider_drag: Option<usize>,
     pub(crate) uniform: FocusHandle,
     pub(crate) hide_bar: FocusHandle,
     pub(crate) hide_lines: FocusHandle,
@@ -52,11 +56,11 @@ pub(crate) struct Appearance {
 impl Appearance {
     pub(crate) fn replace_picture(
         &mut self,
-        picture: Option<Arc<RenderImage>>,
+        picture: Option<Arc<backdrop::Picture>>,
         window: &mut Window,
     ) {
         if let Some(previous) = std::mem::replace(&mut self.picture, picture) {
-            let _ = window.drop_image(previous);
+            previous.drop_images(window);
         }
     }
 
@@ -99,7 +103,10 @@ impl Appearance {
             busy: false,
             trigger: cx.focus_handle().tab_stop(true),
             close: cx.focus_handle().tab_stop(true),
-            toggle: cx.focus_handle().tab_stop(true),
+            sliders: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            slider_reset: std::array::from_fn(|_| cx.focus_handle().tab_stop(true)),
+            slider_bounds: std::array::from_fn(|_| Rc::new(Cell::new(gpui::Bounds::default()))),
+            slider_drag: None,
             uniform: cx.focus_handle().tab_stop(true),
             hide_bar: cx.focus_handle().tab_stop(true),
             hide_lines: cx.focus_handle().tab_stop(true),
@@ -109,9 +116,7 @@ impl Appearance {
             return_focus: None,
             scroll: ScrollHandle::new(),
         };
-        if appearance.settings.glass {
-            appearance.load_picture();
-        }
+        appearance.load_picture();
         appearance
     }
 
@@ -149,8 +154,13 @@ impl Appearance {
 pub(crate) fn fill(color: u32, cx: &App) -> gpui::Rgba {
     if let Some(glass) = cx.try_global::<Glass>().filter(|glass| glass.enabled) {
         match color {
-            crate::palette::SURFACE if glass.uniform => return gpui::rgba(0),
-            crate::palette::SURFACE => return gpui::rgba(0x00000066),
+            crate::palette::WINDOW => return gpui::black().opacity(glass.darkness).into(),
+            crate::palette::SURFACE => {
+                let base = if glass.uniform { 0. } else { 0.4 };
+                return gpui::black()
+                    .opacity(base + (1. - base) * glass.darkness)
+                    .into();
+            }
             crate::palette::RAISED => return gpui::rgba(0x080808f5),
             crate::palette::LINE | crate::palette::LINE_2 => return gpui::rgba(0xffffff12),
             _ => {}

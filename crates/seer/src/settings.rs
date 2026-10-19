@@ -15,6 +15,9 @@ pub struct Settings {
     pub hide_sidebar: bool,
     pub hide_lines: bool,
     pub picture: Option<PathBuf>,
+    pub picture_brightness: u8,
+    pub glass_darkness: u8,
+    pub glass_blur: u8,
     pub shortcut_overrides: BTreeMap<String, String>,
 }
 
@@ -27,6 +30,9 @@ impl Default for Settings {
             hide_sidebar: false,
             hide_lines: false,
             picture: None,
+            picture_brightness: 18,
+            glass_darkness: 0,
+            glass_blur: 12,
             shortcut_overrides: BTreeMap::new(),
         }
     }
@@ -39,7 +45,17 @@ impl Settings {
 
     pub fn load_from(path: &Path) -> io::Result<Self> {
         match fs::read_to_string(path) {
-            Ok(contents) => toml::from_str(&contents).map_err(io::Error::other),
+            Ok(contents) => {
+                let mut settings: Self = toml::from_str(&contents).map_err(io::Error::other)?;
+                settings.picture_brightness = if settings.glass {
+                    settings.picture_brightness.min(100)
+                } else {
+                    0
+                };
+                settings.glass_darkness = settings.glass_darkness.min(100);
+                settings.glass_blur = settings.glass_blur.min(40);
+                Ok(settings)
+            }
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Self::default()),
             Err(error) => Err(error),
         }

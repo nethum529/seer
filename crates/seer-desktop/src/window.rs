@@ -420,3 +420,8 @@ mod start_room_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod start_room_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod appearance_native_e2e;
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod appearance_pixel_samples;

@@ -6,6 +6,7 @@ impl Render for SeerWindow {
         let reclaim = self.appearance.settings.hide_lines && self.appearance.settings.hide_top_bar;
         cx.set_global(crate::appearance::Glass {
             enabled: self.appearance.settings.glass,
+            darkness: f32::from(self.appearance.settings.glass_darkness) / 100.,
             uniform: self.appearance.settings.uniform_glass,
             hide_lines: self.appearance.settings.hide_lines,
             reclaim_top: reclaim,
@@ -59,13 +60,30 @@ impl Render for SeerWindow {
                 view.travel(&event.keystroke, window, cx)
             }))
             .when(self.appearance.settings.glass, |root| {
-                root.children(self.appearance.picture.as_ref().map(|picture| {
-                    gpui::img(picture.clone())
-                        .object_fit(gpui::ObjectFit::Cover)
-                        .absolute()
-                        .inset_0()
-                        .size_full()
-                }))
+                root.bg(gpui::black())
+                    .children(self.appearance.picture.as_ref().map(|picture| {
+                        div()
+                            .absolute()
+                            .inset_0()
+                            .size_full()
+                            .bg(gpui::black())
+                            .children(
+                                picture
+                                    .blend(
+                                        self.appearance.settings.glass_blur,
+                                        self.appearance.settings.picture_brightness,
+                                    )
+                                    .into_iter()
+                                    .map(|(layer, opacity)| {
+                                        gpui::img(layer)
+                                            .object_fit(gpui::ObjectFit::Cover)
+                                            .absolute()
+                                            .inset_0()
+                                            .size_full()
+                                            .opacity(opacity)
+                                    }),
+                            )
+                    }))
             })
             .child(top_bar::events(cx));
         let (link, name) = match &self.content {

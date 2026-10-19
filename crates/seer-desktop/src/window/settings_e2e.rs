@@ -3,6 +3,53 @@ use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use super::input_e2e::{Runtime, open_view};
 
 #[gpui::test]
+fn appearance_slider_values_survive_restart(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    let (view, cx) = open_view(&runtime, cx);
+    cx.run_until_parked();
+    click(cx, "settings-trigger");
+    for id in ["picture-brightness", "glass-darkness", "glass-blur"] {
+        click(cx, id);
+        cx.simulate_keystrokes("home right right right");
+        cx.run_until_parked();
+    }
+    let path = runtime.directory.path().join("settings.toml");
+    let saved = std::fs::read_to_string(&path).unwrap();
+    for setting in [
+        "picture_brightness = 3",
+        "glass_darkness = 3",
+        "glass_blur = 3",
+    ] {
+        assert!(saved.contains(setting), "{setting} must be saved");
+    }
+    view.update(cx, |view, cx| {
+        view.appearance = crate::appearance::Appearance::load(Some(path.clone()), cx);
+        cx.notify();
+    });
+    click(cx, "settings-trigger");
+    for id in ["picture-brightness", "glass-darkness", "glass-blur"] {
+        cx.simulate_keystrokes(if id == "picture-brightness" {
+            "tab"
+        } else {
+            "tab tab"
+        });
+        cx.simulate_keystrokes("right");
+        cx.run_until_parked();
+    }
+    let saved = std::fs::read_to_string(&path).unwrap();
+    for setting in [
+        "picture_brightness = 4",
+        "glass_darkness = 4",
+        "glass_blur = 4",
+    ] {
+        assert!(
+            saved.contains(setting),
+            "{setting} must come back after restart"
+        );
+    }
+}
+
+#[gpui::test]
 fn appearance_preferences_survive_restart(cx: &mut TestAppContext) {
     let runtime = Runtime::start();
     let (view, cx) = open_view(&runtime, cx);
@@ -37,7 +84,8 @@ fn appearance_survives_reopen_and_missing_picture_keeps_the_window(cx: &mut Test
     cx.run_until_parked();
     click(cx, "settings-trigger");
     assert!(cx.debug_bounds("default-picture").is_none());
-    click(cx, "glass-toggle");
+    click(cx, "picture-brightness");
+    cx.simulate_keystrokes("home");
     let picture = runtime.directory.path().join("picture.jpg");
     std::fs::write(&picture, include_bytes!("../../assets/backdrop.jpg")).unwrap();
     cx.update(|window, cx| {
@@ -48,7 +96,7 @@ fn appearance_survives_reopen_and_missing_picture_keeps_the_window(cx: &mut Test
     cx.run_until_parked();
     let path = runtime.directory.path().join("settings.toml");
     let settings = seer::Settings::load_from(&path).unwrap();
-    assert!(!settings.glass);
+    assert_eq!(settings.picture_brightness, 0);
     assert_eq!(settings.picture.as_ref(), Some(&picture));
     std::fs::remove_file(picture).unwrap();
     view.update(cx, |view, cx| {
@@ -56,7 +104,8 @@ fn appearance_survives_reopen_and_missing_picture_keeps_the_window(cx: &mut Test
         cx.notify();
     });
     click(cx, "settings-trigger");
-    click(cx, "glass-toggle");
+    click(cx, "picture-brightness");
+    cx.simulate_keystrokes("end");
     assert!(cx.debug_bounds("settings-dialog").is_some());
     assert!(cx.debug_bounds("picture-fallback").is_some());
     click(cx, "default-picture");
@@ -123,7 +172,12 @@ fn narrow_settings_keeps_each_keyboard_control_in_view(cx: &mut TestAppContext) 
     cx.run_until_parked();
     click(cx, "settings-trigger");
     for (key, id) in [
-        ("tab", "glass-toggle"),
+        ("tab", "picture-brightness"),
+        ("tab", "reset-brightness"),
+        ("tab", "glass-darkness"),
+        ("tab", "reset-darkness"),
+        ("tab", "glass-blur"),
+        ("tab", "reset-blur"),
         ("tab", "uniform-glass-toggle"),
         ("tab", "hide-top-bar-toggle"),
         ("tab", "hide-lines-toggle"),
@@ -133,7 +187,12 @@ fn narrow_settings_keeps_each_keyboard_control_in_view(cx: &mut TestAppContext) 
         ("shift-tab", "hide-lines-toggle"),
         ("shift-tab", "hide-top-bar-toggle"),
         ("shift-tab", "uniform-glass-toggle"),
-        ("shift-tab", "glass-toggle"),
+        ("shift-tab", "reset-blur"),
+        ("shift-tab", "glass-blur"),
+        ("shift-tab", "reset-darkness"),
+        ("shift-tab", "glass-darkness"),
+        ("shift-tab", "reset-brightness"),
+        ("shift-tab", "picture-brightness"),
     ] {
         cx.simulate_keystrokes(key);
         cx.run_until_parked();
