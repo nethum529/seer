@@ -6,7 +6,7 @@ macro_rules! entry {
     };
     ($name:literal, $digit:literal) => {
         entry!(Action::Terminal($digit), [Window], "Window", $name,
-            &[chord(stringify!($digit), CMD, 0)], &[chord(stringify!($digit), CTRL | CMD, 0)])
+            &[chord(stringify!($digit), CMD, 0)], &[chord(stringify!($digit), CTRL | ALT | CMD, 0)])
     };
     ($action:expr, [$($scope:ident),+], $context:literal, $name:literal, $keys:expr) => {
         entry!($action, [$($scope),+], $context, $name, $keys, $keys)

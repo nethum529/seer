@@ -32,7 +32,7 @@ fn terminal_switching_wraps_uses_sidebar_order_and_consumes_missing_numbers(
     pump(cx);
     cx.simulate_keystrokes(keys(
         "cmd-9 cmd-right cmd-left",
-        "ctrl-super-9 ctrl-super-f6 ctrl-super-shift-f6",
+        "ctrl-alt-super-9 ctrl-super-f6 ctrl-super-shift-f6",
     ));
     pump(cx);
     assert_eq!(shown(&view, cx), 0);
@@ -47,8 +47,8 @@ fn terminal_switching_wraps_uses_sidebar_order_and_consumes_missing_numbers(
     for (key, at) in [
         (keys("cmd-right", "ctrl-super-f6"), 0),
         (keys("cmd-left", "ctrl-super-shift-f6"), 1),
-        (keys("cmd-1", "ctrl-super-1"), 0),
-        (keys("cmd-9", "ctrl-super-9"), 0),
+        (keys("cmd-1", "ctrl-alt-super-1"), 0),
+        (keys("cmd-9", "ctrl-alt-super-9"), 0),
     ] {
         cx.simulate_keystrokes(key);
         pump(cx);
@@ -60,7 +60,7 @@ fn terminal_switching_wraps_uses_sidebar_order_and_consumes_missing_numbers(
         pump(cx);
     }
     for number in 1..=9 {
-        cx.simulate_keystrokes(&format!("{}-{number}", keys("cmd", "ctrl-super")));
+        cx.simulate_keystrokes(&format!("{}-{number}", keys("cmd", "ctrl-alt-super")));
         pump(cx);
         assert_eq!(shown(&view, cx), number - 1);
     }
@@ -75,7 +75,7 @@ fn terminal_switching_wraps_uses_sidebar_order_and_consumes_missing_numbers(
     pump(cx);
     assert_eq!(runtime.input(), b"typed-after-switch");
     cx.simulate_keystrokes(keys("cmd-b", "ctrl-shift-b"));
-    cx.simulate_keystrokes(keys("cmd-1", "ctrl-super-1"));
+    cx.simulate_keystrokes(keys("cmd-1", "ctrl-alt-super-1"));
     pump(cx);
     assert_eq!(shown(&view, cx), 0, "hidden sidebar keeps switching");
     cx.simulate_keystrokes("ctrl-c->\x03 ctrl-tab alt-1->1");
