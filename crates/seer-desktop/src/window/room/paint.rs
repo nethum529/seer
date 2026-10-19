@@ -5,6 +5,22 @@ use crate::cap_icon::cap_icon;
 use crate::menu;
 
 impl SeerWindow {
+    pub(in crate::window) fn no_room_controls(
+        &self,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        div()
+            .absolute()
+            .right(px(8.))
+            .top(px(6.))
+            .flex()
+            .items_center()
+            .gap(px(2.))
+            .child(self.room_button("No room", false, window, cx))
+            .child(self.settings_button(window, cx))
+    }
+
     pub(crate) fn room_button(
         &self,
         name: &str,
@@ -98,12 +114,18 @@ impl SeerWindow {
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .children(self.room.current.as_ref().map(|room| room_row(room, true)))
             .when(self.room.current.is_none(), |menu| {
-                menu.child(
-                    menu::item("room-loading", 36.).child(crate::label::text("Checking room...")),
-                )
+                menu.child(menu::item("room-loading", 36.).child(crate::label::text(
+                    if self.room.server.is_some() {
+                        "Checking room..."
+                    } else {
+                        "No room"
+                    },
+                )))
             })
             .children(self.room.others.iter().map(|room| room_row(room, false)))
-            .child(menu::separator())
+            .when(!self.room.actions().is_empty(), |menu| {
+                menu.child(menu::separator())
+            })
             .children(
                 self.room
                     .actions()
@@ -354,6 +376,7 @@ fn room_row(room: &RoomSummary, current: bool) -> Stateful<Div> {
 
 pub(super) fn action_label(action: RoomAction) -> &'static str {
     match action {
+        RoomAction::Start => "Start a room",
         RoomAction::Stop => "Stop room",
         RoomAction::Leave => "Leave room",
         RoomAction::Restore => "Restore room",
@@ -364,6 +387,7 @@ pub(super) fn action_label(action: RoomAction) -> &'static str {
 fn action_icon(action: MenuAction) -> &'static str {
     match action {
         MenuAction::Invite => "invite",
+        MenuAction::Room(RoomAction::Start) => "fresh",
         MenuAction::Room(RoomAction::Stop) => "stop",
         MenuAction::Room(RoomAction::Leave) => "leave",
         MenuAction::Room(RoomAction::Restore) => "restore",
@@ -374,6 +398,7 @@ fn action_icon(action: MenuAction) -> &'static str {
 fn action_id(action: MenuAction) -> &'static str {
     match action {
         MenuAction::Invite => "room-invite",
+        MenuAction::Room(RoomAction::Start) => "room-start",
         MenuAction::Room(RoomAction::Stop) => "room-stop",
         MenuAction::Room(RoomAction::Leave) => "room-leave",
         MenuAction::Room(RoomAction::Restore) => "room-restore",
@@ -384,7 +409,7 @@ fn action_id(action: MenuAction) -> &'static str {
 fn action_color(action: MenuAction) -> u32 {
     if matches!(
         action,
-        MenuAction::Invite | MenuAction::Room(RoomAction::Restore)
+        MenuAction::Invite | MenuAction::Room(RoomAction::Start | RoomAction::Restore)
     ) {
         palette::TEXT_2
     } else {

@@ -78,6 +78,7 @@ pub fn inspect_room(server: ServerEntry) -> RoomSummary {
 
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum RoomAction {
+    Start,
     Stop,
     Leave,
     Restore,
@@ -85,11 +86,17 @@ pub enum RoomAction {
 }
 
 impl RoomAction {
-    pub fn run(self, server: &ServerEntry) -> io::Result<()> {
-        match self {
-            Self::Stop => commands::stop_selected_room(server).map_err(command_error),
-            Self::Leave => commands::leave_room(server).map_err(command_error),
-            Self::Restore | Self::StartNew => start_saved(server, self == Self::Restore),
+    pub fn run(self, server: Option<&ServerEntry>) -> io::Result<()> {
+        match (self, server) {
+            (Self::Start, _) => start_room(),
+            (Self::Stop, Some(server)) => {
+                commands::stop_selected_room(server).map_err(command_error)
+            }
+            (Self::Leave, Some(server)) => commands::leave_room(server).map_err(command_error),
+            (Self::Restore | Self::StartNew, Some(server)) => {
+                start_saved(server, self == Self::Restore)
+            }
+            (_, None) => Err(io::Error::other("No room is selected.")),
         }
     }
 }
@@ -126,5 +133,15 @@ pub fn stopped_host(server: &ServerEntry) -> Option<RoomSummary> {
 
 #[cfg(target_os = "macos")]
 fn start_saved(_: &ServerEntry, _: bool) -> io::Result<()> {
+    Err(io::Error::other("The room server runs on Linux only."))
+}
+
+#[cfg(target_os = "linux")]
+fn start_room() -> io::Result<()> {
+    crate::start::run_window()
+}
+
+#[cfg(target_os = "macos")]
+fn start_room() -> io::Result<()> {
     Err(io::Error::other("The room server runs on Linux only."))
 }

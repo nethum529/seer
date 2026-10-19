@@ -171,6 +171,16 @@ pub(crate) fn exercise(
 ) {
     cx.spawn(async move |cx| {
         let result = std::panic::AssertUnwindSafe(async {
+            if std::env::var_os("TEXT_PIXEL_START_ROOM_ONLY").is_some() {
+                super::start_room_native_e2e::exercise(
+                    window,
+                    &fixture.evidence,
+                    &fixture.capture,
+                    cx,
+                )
+                .await;
+                return measure(&fixture.capture, &fixture.evidence);
+            }
             super::spaces_native_e2e::exercise(
                 window,
                 fixture._directory.path(),
@@ -288,14 +298,9 @@ pub(crate) fn exercise(
                 .await;
             super::recovery_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                 .await;
-            let result = Command::new(&fixture.capture)
-                .arg("measure")
-                .arg(&fixture.evidence)
-                .output()
-                .unwrap();
-            println!("{}", String::from_utf8_lossy(&result.stdout));
-            eprintln!("{}", String::from_utf8_lossy(&result.stderr));
-            result.status.success()
+            super::start_room_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+                .await;
+            measure(&fixture.capture, &fixture.evidence)
         })
         .catch_unwind()
         .await;
@@ -327,4 +332,15 @@ pub(crate) fn window_options(
         )));
     }
     options
+}
+
+fn measure(capture: &std::path::Path, evidence: &std::path::Path) -> bool {
+    let result = Command::new(capture)
+        .arg("measure")
+        .arg(evidence)
+        .output()
+        .unwrap();
+    println!("{}", String::from_utf8_lossy(&result.stdout));
+    eprintln!("{}", String::from_utf8_lossy(&result.stderr));
+    result.status.success()
 }

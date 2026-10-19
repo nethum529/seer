@@ -8,7 +8,7 @@ impl SeerWindow {
     pub(super) fn room_sheet(&self, window: &Window, cx: &mut Context<Self>) -> Option<AnyElement> {
         let sheet = self.room.sheet.as_ref()?;
         let (title, body) = match &sheet.action {
-            Confirmation::Room(action, room) => confirm_copy(*action, room),
+            Confirmation::Room(action, room) => confirm_copy(*action, room.as_deref()),
             Confirmation::Terminal { program, .. } => (
                 "Close terminal?".into(),
                 format!(
@@ -40,6 +40,8 @@ impl SeerWindow {
             )
             .children(self.room.error.as_ref().map(|error| {
                 div()
+                    .id("room-error")
+                    .debug_selector(|| "room-error".into())
                     .mt(px(8.))
                     .text_size(px(12.))
                     .text_color(rgb(palette::DANGER))
@@ -77,7 +79,14 @@ impl SeerWindow {
                                 label
                             },
                             &sheet.confirm,
-                            Some(palette::DANGER),
+                            Some(
+                                if matches!(sheet.action, Confirmation::Room(RoomAction::Start, _))
+                                {
+                                    palette::ACCENT
+                                } else {
+                                    palette::DANGER
+                                },
+                            ),
                             self.keys.mode,
                             window,
                         )
@@ -144,7 +153,13 @@ impl SeerWindow {
     }
 }
 
-fn confirm_copy(action: RoomAction, room: &RoomSummary) -> (String, String) {
+fn confirm_copy(action: RoomAction, room: Option<&RoomSummary>) -> (String, String) {
+    let Some(room) = room else {
+        return (
+            "Start a room?".into(),
+            "You will host a room on this computer.".into(),
+        );
+    };
     let name = chrome::capitalize(room.room_name());
     let (people, lose, are) = match room.people.len() {
         0 => ("other people".to_owned(), "lose", "are"),
@@ -163,7 +178,7 @@ fn confirm_copy(action: RoomAction, room: &RoomSummary) -> (String, String) {
             format!("Leave {name}?"),
             "Your terminals on this computer stop. The room stays open for the others.".into(),
         ),
-        RoomAction::StartNew | RoomAction::Restore => (
+        RoomAction::Start | RoomAction::StartNew | RoomAction::Restore => (
             "Start a new room?".into(),
             format!("The {people} of {name} {are} removed."),
         ),
