@@ -207,7 +207,7 @@ pub(super) async fn exercise(
         .unwrap();
 }
 
-async fn pause(handle: WindowHandle<SeerWindow>, cx: &mut gpui::AsyncApp) {
+pub(super) async fn pause(handle: WindowHandle<SeerWindow>, cx: &mut gpui::AsyncApp) {
     cx.background_executor()
         .timer(Duration::from_millis(100))
         .await;
@@ -224,7 +224,7 @@ async fn pause(handle: WindowHandle<SeerWindow>, cx: &mut gpui::AsyncApp) {
         .await;
 }
 
-fn snapshot(capture: &Path, evidence: &Path, name: &str) {
+pub(super) fn snapshot(capture: &Path, evidence: &Path, name: &str) {
     let output = Command::new(capture)
         .arg(std::process::id().to_string())
         .arg(evidence)
@@ -256,7 +256,7 @@ fn record_frame(
     });
 }
 
-fn post_mouse(window: &gpui::Window, position: gpui::Point<gpui::Pixels>, kind: usize) {
+pub(super) fn post_mouse(window: &gpui::Window, position: gpui::Point<gpui::Pixels>, kind: usize) {
     use objc2::{class, msg_send, runtime::AnyObject};
     use objc2_app_kit::NSView;
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};

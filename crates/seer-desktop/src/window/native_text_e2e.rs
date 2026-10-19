@@ -171,6 +171,17 @@ pub(crate) fn exercise(
 ) {
     cx.spawn(async move |cx| {
         let result = std::panic::AssertUnwindSafe(async {
+            if std::env::var_os("APPEARANCE_LEGACY_QA").is_some() {
+                super::legacy_appearance_native_e2e::exercise(
+                    window,
+                    &fixture._directory.path().join("config/seer/settings.toml"),
+                    &fixture.evidence,
+                    &fixture.capture,
+                    cx,
+                )
+                .await;
+                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
+            }
             if std::env::var_os("TEXT_PIXEL_START_ROOM_ONLY").is_some() {
                 super::start_room_native_e2e::exercise(
                     window,

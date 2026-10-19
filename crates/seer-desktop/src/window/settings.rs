@@ -79,7 +79,7 @@ impl SeerWindow {
 
     fn close_settings(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
         if self.appearance.slider_drag.take().is_some() {
-            self.appearance.save(self.appearance.settings.clone());
+            self.save_adjustments(cx);
         }
         self.appearance.capture = None;
         self.appearance.shortcut_error = None;

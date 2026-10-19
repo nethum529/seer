@@ -23,7 +23,9 @@ impl SeerWindow {
         cx: &mut Context<Self>,
     ) {
         let value = value.min(MAX[index]);
-        self.appearance.settings.glass = true;
+        if value == self::value(&self.appearance.settings, index) {
+            return;
+        }
         match index {
             0 => {
                 self.appearance.settings.picture_brightness = value;
@@ -31,11 +33,14 @@ impl SeerWindow {
             1 => self.appearance.settings.glass_darkness = value,
             _ => self.appearance.settings.glass_blur = value,
         }
+        self.appearance.slider_dirty = true;
         cx.notify();
     }
 
-    fn save_adjustments(&mut self, cx: &mut Context<Self>) {
-        self.appearance.save(self.appearance.settings.clone());
+    pub(super) fn save_adjustments(&mut self, cx: &mut Context<Self>) {
+        if self.appearance.slider_dirty && self.appearance.save(self.appearance.settings.clone()) {
+            self.appearance.slider_dirty = false;
+        }
         cx.notify();
     }
 
@@ -180,6 +185,8 @@ impl SeerWindow {
                     .w_full()
                     .rounded(px(6.))
                     .cursor_pointer()
+                    .hover(|track| track.opacity(0.92))
+                    .active(|track| track.opacity(0.84))
                     .when(ring, |track| track.child(sidebar::outline()))
                     .on_mouse_down(
                         MouseButton::Left,
