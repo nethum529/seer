@@ -102,7 +102,7 @@ pub(crate) const SHORTCUTS: &[Shortcut] = &[
         "Window",
         "Next terminal",
         &[chord("right", CMD, FN)],
-        &[chord("f6", CTRL, FN)]
+        &[chord("f6", CTRL | CMD, FN)]
     ),
     entry!(
         Action::PreviousTerminal,
@@ -110,7 +110,7 @@ pub(crate) const SHORTCUTS: &[Shortcut] = &[
         "Window",
         "Previous terminal",
         &[chord("left", CMD, FN)],
-        &[chord("f6", CTRL | SHIFT, FN)]
+        &[chord("f6", CTRL | CMD | SHIFT, FN)]
     ),
     entry!("Switch to terminal 1", 1),
     entry!("Switch to terminal 2", 2),

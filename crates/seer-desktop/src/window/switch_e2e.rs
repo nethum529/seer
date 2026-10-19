@@ -32,7 +32,7 @@ fn terminal_switching_wraps_uses_sidebar_order_and_consumes_missing_numbers(
     pump(cx);
     cx.simulate_keystrokes(keys(
         "cmd-9 cmd-right cmd-left",
-        "ctrl-super-9 ctrl-f6 ctrl-shift-f6",
+        "ctrl-super-9 ctrl-super-f6 ctrl-super-shift-f6",
     ));
     pump(cx);
     assert_eq!(shown(&view, cx), 0);
@@ -45,8 +45,8 @@ fn terminal_switching_wraps_uses_sidebar_order_and_consumes_missing_numbers(
     pump(cx);
     assert_eq!(shown(&view, cx), 1);
     for (key, at) in [
-        (keys("cmd-right", "ctrl-f6"), 0),
-        (keys("cmd-left", "ctrl-shift-f6"), 1),
+        (keys("cmd-right", "ctrl-super-f6"), 0),
+        (keys("cmd-left", "ctrl-super-shift-f6"), 1),
         (keys("cmd-1", "ctrl-super-1"), 0),
         (keys("cmd-9", "ctrl-super-9"), 0),
     ] {
@@ -64,7 +64,7 @@ fn terminal_switching_wraps_uses_sidebar_order_and_consumes_missing_numbers(
         pump(cx);
         assert_eq!(shown(&view, cx), number - 1);
     }
-    cx.simulate_keystrokes(keys("cmd-right", "ctrl-f6"));
+    cx.simulate_keystrokes(keys("cmd-right", "ctrl-super-f6"));
     pump(cx);
     assert_eq!(
         shown(&view, cx),
@@ -99,7 +99,7 @@ fn terminal_switch_shortcuts_can_be_changed_saved_and_reset(cx: &mut TestAppCont
         cx.simulate_keystrokes("tab");
     }
     cx.run_until_parked();
-    let label = keys("Next terminal: Cmd Right", "Next terminal: Ctrl F6");
+    let label = keys("Next terminal: Cmd Right", "Next terminal: Ctrl Super F6");
     let button = cx
         .debug_bounds(label)
         .expect("Next terminal must be in Settings");
@@ -113,7 +113,7 @@ fn terminal_switch_shortcuts_can_be_changed_saved_and_reset(cx: &mut TestAppCont
             .unwrap()
             .contains("ctrl-shift-y")
     );
-    cx.simulate_keystrokes(keys("cmd-right", "ctrl-f6"));
+    cx.simulate_keystrokes(keys("cmd-right", "ctrl-super-f6"));
     pump(cx);
     assert_eq!(shown(&view, cx), 0, "old keys must stop switching");
     assert!(
@@ -140,7 +140,7 @@ fn terminal_switch_shortcuts_can_be_changed_saved_and_reset(cx: &mut TestAppCont
     cx.run_until_parked();
     assert!(cx.debug_bounds(label).is_some());
     cx.simulate_keystrokes("escape");
-    cx.simulate_keystrokes(keys("cmd-right", "ctrl-f6"));
+    cx.simulate_keystrokes(keys("cmd-right", "ctrl-super-f6"));
     pump(cx);
     assert_eq!(shown(&view, cx), 0);
 }
