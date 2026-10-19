@@ -29,6 +29,7 @@ mod room;
 mod settings;
 pub(crate) mod sidebar_visibility;
 mod slide;
+mod switch;
 pub(crate) mod terminals;
 pub(crate) mod top_bar;
 use rename::Surface;
@@ -242,6 +243,10 @@ impl SeerWindow {
             cx.stop_propagation();
             return;
         }
+        if self.switch_terminal_key(keystroke, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.input.focus.is_focused(window) || self.editing.is_some() || self.menu.is_some() {
             return;
         }
@@ -373,6 +378,8 @@ mod watch_e2e;
 #[cfg(all(test, not(feature = "native-text-e2e")))]
 mod settings_e2e;
 #[cfg(all(test, not(feature = "native-text-e2e")))]
+mod switch_e2e;
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod terminals_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
@@ -400,3 +407,6 @@ mod spaces_native_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod recovery_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod switch_native_e2e;

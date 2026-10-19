@@ -20,7 +20,7 @@ pub(crate) enum Scope {
     Tabs,
 }
 
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
+#[derive(Clone, Copy, PartialEq, Eq, PartialOrd, Ord, Debug)]
 pub(crate) enum Action {
     NewTerminal,
     ToggleSidebar,
@@ -33,6 +33,9 @@ pub(crate) enum Action {
     PageDown,
     Rename,
     TabMenu,
+    NextTerminal,
+    PreviousTerminal,
+    Terminal(u8),
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

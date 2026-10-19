@@ -1,17 +1,21 @@
 use super::*;
 
 macro_rules! entry {
-    ($action:ident, [$($scope:ident),+], $context:literal, $name:literal, $mac:expr, $linux:expr) => {
-        Shortcut { action: Action::$action, scopes: &[$(Scope::$scope),+], context: $context, name: $name, mac: $mac, linux: $linux }
+    ($action:expr, [$($scope:ident),+], $context:literal, $name:literal, $mac:expr, $linux:expr) => {
+        Shortcut { action: $action, scopes: &[$(Scope::$scope),+], context: $context, name: $name, mac: $mac, linux: $linux }
     };
-    ($action:ident, [$($scope:ident),+], $context:literal, $name:literal, $keys:expr) => {
+    ($name:literal, $digit:literal) => {
+        entry!(Action::Terminal($digit), [Window], "Window", $name,
+            &[chord(stringify!($digit), CMD, 0)], &[chord(stringify!($digit), CTRL | ALT | CMD, 0)])
+    };
+    ($action:expr, [$($scope:ident),+], $context:literal, $name:literal, $keys:expr) => {
         entry!($action, [$($scope),+], $context, $name, $keys, $keys)
     };
 }
 
 pub(crate) const SHORTCUTS: &[Shortcut] = &[
     entry!(
-        NewTerminal,
+        Action::NewTerminal,
         [Window],
         "Window",
         "New terminal",
@@ -19,7 +23,7 @@ pub(crate) const SHORTCUTS: &[Shortcut] = &[
         &[chord("n", CTRL | SHIFT, 0)]
     ),
     entry!(
-        ToggleSidebar,
+        Action::ToggleSidebar,
         [Window],
         "Window",
         "Show or hide sidebar",
@@ -27,7 +31,7 @@ pub(crate) const SHORTCUTS: &[Shortcut] = &[
         &[chord("b", CTRL | SHIFT, 0)]
     ),
     entry!(
-        FocusSidebar,
+        Action::FocusSidebar,
         [Window],
         "Window",
         "Focus sidebar",
@@ -35,7 +39,7 @@ pub(crate) const SHORTCUTS: &[Shortcut] = &[
         &[chord("b", CTRL | ALT | SHIFT, 0)]
     ),
     entry!(
-        Copy,
+        Action::Copy,
         [Terminal],
         "Terminal",
         "Copy selection",
@@ -43,7 +47,7 @@ pub(crate) const SHORTCUTS: &[Shortcut] = &[
         &[chord("c", CTRL | SHIFT, FN)]
     ),
     entry!(
-        Paste,
+        Action::Paste,
         [Terminal],
         "Terminal",
         "Paste",
@@ -51,45 +55,70 @@ pub(crate) const SHORTCUTS: &[Shortcut] = &[
         &[chord("v", CTRL | SHIFT, FN)]
     ),
     entry!(
-        ScrollTop,
+        Action::ScrollTop,
         [Terminal],
         "Terminal (main screen)",
         "Scroll to top",
         &[chord("home", SHIFT, FN)]
     ),
     entry!(
-        ScrollBottom,
+        Action::ScrollBottom,
         [Terminal],
         "Terminal (main screen)",
         "Scroll to bottom",
         &[chord("end", SHIFT, FN)]
     ),
     entry!(
-        PageUp,
+        Action::PageUp,
         [Terminal],
         "Terminal (main screen)",
         "Scroll one page up",
         &[chord("pageup", SHIFT, FN)]
     ),
     entry!(
-        PageDown,
+        Action::PageDown,
         [Terminal],
         "Terminal (main screen)",
         "Scroll one page down",
         &[chord("pagedown", SHIFT, FN)]
     ),
     entry!(
-        Rename,
+        Action::Rename,
         [Tabs],
         "Focused terminal tab",
         "Rename terminal",
         &[chord("f2", 0, FN)]
     ),
     entry!(
-        TabMenu,
+        Action::TabMenu,
         [Tabs],
         "Focused terminal tab",
         "Open terminal menu",
         &[chord("f10", SHIFT, FN)]
     ),
+    entry!(
+        Action::NextTerminal,
+        [Window],
+        "Window",
+        "Next terminal",
+        &[chord("right", CMD, FN)],
+        &[chord("f6", CTRL | CMD, FN)]
+    ),
+    entry!(
+        Action::PreviousTerminal,
+        [Window],
+        "Window",
+        "Previous terminal",
+        &[chord("left", CMD, FN)],
+        &[chord("f6", CTRL | CMD | SHIFT, FN)]
+    ),
+    entry!("Switch to terminal 1", 1),
+    entry!("Switch to terminal 2", 2),
+    entry!("Switch to terminal 3", 3),
+    entry!("Switch to terminal 4", 4),
+    entry!("Switch to terminal 5", 5),
+    entry!("Switch to terminal 6", 6),
+    entry!("Switch to terminal 7", 7),
+    entry!("Switch to terminal 8", 8),
+    entry!("Switch to terminal 9", 9),
 ];

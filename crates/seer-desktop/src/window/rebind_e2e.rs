@@ -120,8 +120,18 @@ fn replaced_terminal_shortcut_returns_old_keys_to_pty(cx: &mut TestAppContext) {
     cx.run_until_parked();
     click(cx, "settings-trigger");
     click(cx, "settings-shortcuts");
-    for _ in 0..6 {
+    for _ in 0..crate::shortcuts::SHORTCUTS.len() {
         cx.simulate_keystrokes("tab");
+        cx.run_until_parked();
+        if cx
+            .debug_bounds("Scroll to top: Shift Home")
+            .is_some_and(|row| {
+                cx.debug_bounds("shortcut-focused")
+                    .is_some_and(|focused| row.contains(&focused.center()))
+            })
+        {
+            break;
+        }
     }
     cx.run_until_parked();
     click(cx, "Scroll to top: Shift Home");

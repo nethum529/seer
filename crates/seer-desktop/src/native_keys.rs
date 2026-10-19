@@ -50,6 +50,9 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                         view.new_terminal(window, cx);
                         return true;
                     }
+                    if view.switch_terminal_key(&key, window, cx) {
+                        return true;
+                    }
                     if view.rename_key(&key, window, cx) {
                         return true;
                     }
