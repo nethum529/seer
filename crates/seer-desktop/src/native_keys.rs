@@ -43,7 +43,10 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                     {
                         return false;
                     }
-                    if view.sidebar_key(&key, window, cx) || view.room_key(&key, window, cx) {
+                    if view.window_command_key(&key, window, cx)
+                        || view.sidebar_key(&key, window, cx)
+                        || view.room_key(&key, window, cx)
+                    {
                         return true;
                     }
                     if crate::window::terminals::new_shortcut(&key, cx) {

@@ -27,7 +27,7 @@ impl SeerWindow {
             return;
         };
         if let Some(menu) = &mut self.people_menu {
-            if !menu.motion.closing() {
+            if !keyboard && !menu.motion.closing() {
                 self.close_people(keyboard, window, cx);
                 return;
             }
@@ -42,6 +42,13 @@ impl SeerWindow {
                 highlighted: link.people.selected.clone(),
                 motion: Motion::open(keyboard, 150),
             });
+        }
+        if keyboard
+            && let Some(menu) = &mut self.people_menu
+            && let Some(first) = link.people.people.first()
+        {
+            menu.highlighted.clone_from(&first.user_id);
+            menu.scroll.scroll_to_item(0);
         }
         self.keys.mode = if keyboard {
             Mode::Keyboard

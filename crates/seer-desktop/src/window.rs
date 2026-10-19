@@ -19,6 +19,7 @@ use crate::sidebar::{self, Keys, Mode};
 use crate::tab_time;
 use crate::tip;
 
+mod commands;
 mod invite;
 mod join;
 mod paint;
@@ -228,6 +229,10 @@ impl SeerWindow {
         if self.invite.is_some() {
             return;
         }
+        if self.window_command_key(keystroke, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.room_key(keystroke, window, cx) {
             cx.stop_propagation();
             return;
@@ -371,6 +376,8 @@ mod edit_keys_e2e;
 mod input_e2e;
 
 #[cfg(all(test, not(feature = "native-text-e2e")))]
+mod commands_e2e;
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod control_e2e;
 #[cfg(all(test, not(feature = "native-text-e2e")))]
 mod invite_e2e;
@@ -414,6 +421,9 @@ mod recovery_native_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod switch_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod commands_native_e2e;
 
 #[cfg(all(test, not(feature = "native-text-e2e")))]
 mod start_room_e2e;

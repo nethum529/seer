@@ -8,6 +8,7 @@ use seer::rooms::{RoomAction, RoomState, RoomSummary};
 use super::*;
 use crate::motion::Motion;
 
+mod commands;
 mod paint;
 mod sheet;
 

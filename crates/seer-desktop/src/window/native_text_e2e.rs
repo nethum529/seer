@@ -210,6 +210,7 @@ pub(crate) fn exercise(
             )
             .await;
             super::switch_native_e2e::exercise(window, &fixture.evidence, cx).await;
+            super::commands_native_e2e::exercise(window, &fixture.evidence, cx).await;
             for name in [
                 "main",
                 "people",

@@ -35,26 +35,35 @@ fn host_room_menu_opens_invite_and_restores_trigger_focus(cx: &mut TestAppContex
             view.room.current = Some(summary);
             cx.notify();
         });
-        draw(cx);
+        cx.run_until_parked();
+        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+            "cmd-shift-i"
+        } else {
+            "ctrl-alt-super-i"
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("invite-primary").is_some());
+        close_invite(cx);
+        cx.run_until_parked();
         let trigger = cx.debug_bounds("room-trigger").unwrap();
         cx.simulate_click(trigger.center(), gpui::Modifiers::default());
-        draw(cx);
+        cx.run_until_parked();
         let invite = cx
             .debug_bounds("room-invite")
             .expect("a connected host must have Invite a person");
         cx.simulate_click(invite.center(), gpui::Modifiers::default());
-        draw(cx);
+        cx.run_until_parked();
         assert!(cx.debug_bounds("invite-primary").is_some());
         assert!(cx.debug_bounds("room-confirm").is_none());
         close_invite(cx);
         cx.simulate_keystrokes("enter");
-        draw(cx);
+        cx.run_until_parked();
         assert!(
             cx.debug_bounds("room-invite").is_some(),
             "close must return focus to the room trigger"
         );
         cx.simulate_keystrokes("enter");
-        draw(cx);
+        cx.run_until_parked();
         assert!(
             cx.debug_bounds("invite-primary").is_some(),
             "keyboard activation must open Invite"
@@ -62,9 +71,9 @@ fn host_room_menu_opens_invite_and_restores_trigger_focus(cx: &mut TestAppContex
         create_and_copy(cx, &room.capsule);
         close_invite(cx);
         cx.simulate_keystrokes("space");
-        draw(cx);
+        cx.run_until_parked();
         cx.simulate_keystrokes("escape");
-        draw(cx);
+        cx.run_until_parked();
     }
     assert_eq!(
         runtime.input(),
@@ -81,10 +90,18 @@ fn host_room_menu_opens_invite_and_restores_trigger_focus(cx: &mut TestAppContex
         view.room.current = Some(summary);
         cx.notify();
     });
-    draw(cx);
+    cx.run_until_parked();
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-shift-i"
+    } else {
+        "ctrl-alt-super-i"
+    });
+    cx.run_until_parked();
+    assert!(cx.debug_bounds("invite-primary").is_none());
+    cx.run_until_parked();
     let trigger = cx.debug_bounds("room-trigger").unwrap();
     cx.simulate_click(trigger.center(), gpui::Modifiers::default());
-    draw(cx);
+    cx.run_until_parked();
     assert!(cx.debug_bounds("room-leave").is_some());
     assert!(
         cx.debug_bounds("room-invite").is_none(),
@@ -100,7 +117,7 @@ fn host_room_menu_opens_invite_and_restores_trigger_focus(cx: &mut TestAppContex
 
 fn close_invite(cx: &mut gpui::VisualTestContext) {
     cx.simulate_keystrokes("escape");
-    draw(cx);
+    cx.run_until_parked();
 }
 
 fn create_and_copy(cx: &mut gpui::VisualTestContext, capsule: &str) {
@@ -109,7 +126,7 @@ fn create_and_copy(cx: &mut gpui::VisualTestContext, capsule: &str) {
     let expected = format!("seer join {capsule}");
     let deadline = Instant::now() + Duration::from_secs(5);
     loop {
-        draw(cx);
+        cx.run_until_parked();
         cx.simulate_keystrokes("enter");
         if cx.read_from_clipboard().and_then(|item| item.text()) == Some(expected.clone()) {
             break;
@@ -120,14 +137,6 @@ fn create_and_copy(cx: &mut gpui::VisualTestContext, capsule: &str) {
         );
         thread::sleep(Duration::from_millis(10));
     }
-}
-
-fn draw(cx: &mut gpui::VisualTestContext) {
-    cx.run_until_parked();
-    cx.update(|window, cx| {
-        window.refresh();
-        window.draw(cx).clear();
-    });
 }
 
 struct Room {

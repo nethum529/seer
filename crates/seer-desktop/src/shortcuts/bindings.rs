@@ -24,6 +24,11 @@ impl Action {
             Self::NextTerminal => "next_terminal",
             Self::PreviousTerminal => "previous_terminal",
             Self::Terminal(number) => return format!("terminal_{number}"),
+            Self::Settings => "settings",
+            Self::StartRoom => "start_room",
+            Self::Invite => "invite",
+            Self::PersonMenu => "person_menu",
+            Self::RoomMenu => "room_menu",
         }
         .to_owned()
     }

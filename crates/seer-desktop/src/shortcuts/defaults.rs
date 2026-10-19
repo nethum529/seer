@@ -121,4 +121,44 @@ pub(crate) const SHORTCUTS: &[Shortcut] = &[
     entry!("Switch to terminal 7", 7),
     entry!("Switch to terminal 8", 8),
     entry!("Switch to terminal 9", 9),
+    entry!(
+        Action::Settings,
+        [Window],
+        "Window",
+        "Open Settings",
+        &[chord(",", CMD, FN)],
+        &[chord(",", CTRL | CMD, FN)]
+    ),
+    entry!(
+        Action::StartRoom,
+        [Window],
+        "Window",
+        "Start a room",
+        &[chord("r", CMD | SHIFT, FN)],
+        &[chord("r", CTRL | ALT | CMD, FN)]
+    ),
+    entry!(
+        Action::Invite,
+        [Window],
+        "Window",
+        "Invite a person",
+        &[chord("i", CMD | SHIFT, FN)],
+        &[chord("i", CTRL | ALT | CMD, FN)]
+    ),
+    entry!(
+        Action::PersonMenu,
+        [Window],
+        "Window",
+        "Open person menu",
+        &[chord("e", CMD | SHIFT, FN)],
+        &[chord("e", CTRL | ALT | CMD, FN)]
+    ),
+    entry!(
+        Action::RoomMenu,
+        [Window],
+        "Window",
+        "Open room menu",
+        &[chord("m", CMD | SHIFT, FN)],
+        &[chord("m", CTRL | ALT | CMD, FN)]
+    ),
 ];
