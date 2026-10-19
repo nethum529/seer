@@ -36,6 +36,11 @@ pub(crate) enum Action {
     NextTerminal,
     PreviousTerminal,
     Terminal(u8),
+    Settings,
+    StartRoom,
+    Invite,
+    PersonMenu,
+    RoomMenu,
 }
 
 #[derive(Clone, Copy, PartialEq, Eq)]

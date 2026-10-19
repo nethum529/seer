@@ -73,7 +73,12 @@ fn start_room_from_an_empty_window(cx: &mut TestAppContext) {
         cx.debug_bounds("room-start").is_some(),
         "Linux must offer Start a room"
     );
-    cx.simulate_keystrokes("home enter");
+    cx.simulate_keystrokes("escape");
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-shift-r"
+    } else {
+        "ctrl-alt-super-r"
+    });
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-confirm").is_some());
     cx.simulate_keystrokes("enter");

@@ -188,7 +188,14 @@ fn person_menu_watches_read_only_and_returns_to_local_input(cx: &mut TestAppCont
         .unwrap();
     pump(cx);
     cx.simulate_click(gpui::point(px(90.), px(62.)), gpui::Modifiers::default());
-    cx.simulate_keystrokes("home enter");
+    cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+        "cmd-shift-e"
+    } else {
+        "ctrl-alt-super-e"
+    });
+    cx.run_until_parked();
+    cx.simulate_keystrokes("enter");
+    cx.run_until_parked();
     cx.simulate_click(gpui::point(px(300.), px(100.)), gpui::Modifiers::default());
     cx.simulate_keystrokes("z");
     pump(cx);
