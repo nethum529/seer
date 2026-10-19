@@ -49,18 +49,23 @@ fn start_room_from_an_empty_window(cx: &mut TestAppContext) {
         SeerWindow::new(window, cx)
     });
     cx.simulate_resize(size(px(960.), px(640.)));
-    draw(cx);
+    // GPUI 0.2.2 retains old debug bounds after forced extra draws.
+    cx.run_until_parked();
     let trigger = cx
         .debug_bounds("room-trigger")
         .expect("a window with no room needs a room menu");
     cx.simulate_click(trigger.center(), gpui::Modifiers::default());
-    draw(cx);
+    cx.run_until_parked();
     if !cfg!(target_os = "linux") {
         assert!(
             cx.debug_bounds("room-start").is_none(),
             "this computer cannot host"
         );
-        return;
+        view.update(cx, |view, cx| {
+            view.room.can_host = true;
+            cx.notify();
+        });
+        cx.run_until_parked();
     }
     let runtime = Runtime::start();
     let (mut original, _) = runtime.connect();
@@ -69,16 +74,19 @@ fn start_room_from_an_empty_window(cx: &mut TestAppContext) {
         "Linux must offer Start a room"
     );
     cx.simulate_keystrokes("home enter");
-    draw(cx);
+    cx.run_until_parked();
     assert!(cx.debug_bounds("room-confirm").is_some());
     cx.simulate_keystrokes("enter");
-    draw(cx);
+    cx.run_until_parked();
     assert!(
         cx.debug_bounds("room-confirm").is_none(),
         "Cancel has initial focus"
     );
+    if !cfg!(target_os = "linux") {
+        return;
+    }
     cx.simulate_keystrokes("enter home enter");
-    draw(cx);
+    cx.run_until_parked();
     let config = std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap())
         .join("seer/broker.toml");
     fs::create_dir_all(config.parent().unwrap()).unwrap();
@@ -98,7 +106,7 @@ fn start_room_from_an_empty_window(cx: &mut TestAppContext) {
     cx.simulate_keystrokes("enter");
     let deadline = Instant::now() + Duration::from_secs(15);
     loop {
-        draw(cx);
+        cx.run_until_parked();
         if view.read_with(cx, |view, _| {
             view.room.current.as_ref().is_some_and(|room| room.host)
         }) {
@@ -108,13 +116,13 @@ fn start_room_from_an_empty_window(cx: &mut TestAppContext) {
         thread::sleep(Duration::from_millis(10));
     }
     cx.simulate_keystrokes("enter");
-    draw(cx);
+    cx.run_until_parked();
     assert!(
         cx.debug_bounds("room-invite").is_some(),
         "the new host can invite at once"
     );
     cx.simulate_keystrokes("home enter");
-    draw(cx);
+    cx.run_until_parked();
     assert!(cx.debug_bounds("invite-primary").is_some());
     original
         .input(seer_core::InputEvent::Text("k".into()))
@@ -129,18 +137,10 @@ fn start_room_from_an_empty_window(cx: &mut TestAppContext) {
     }
 }
 
-fn draw(cx: &mut VisualTestContext) {
-    cx.run_until_parked();
-    cx.update(|window, cx| {
-        window.refresh();
-        window.draw(cx).clear();
-    });
-}
-
 fn wait(cx: &mut VisualTestContext, mut ready: impl FnMut(&mut VisualTestContext) -> bool) {
     let deadline = Instant::now() + Duration::from_secs(10);
     loop {
-        draw(cx);
+        cx.run_until_parked();
         if ready(cx) {
             return;
         }
