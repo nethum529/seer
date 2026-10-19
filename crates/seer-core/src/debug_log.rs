@@ -92,6 +92,7 @@ pub fn client_summary(message: &ClientMsg) -> String {
         }
         ClientMsg::Stop => "Stop".to_owned(),
         ClientMsg::Leave => "Leave".to_owned(),
+        ClientMsg::RemovePerson { name } => format!("RemovePerson name={name}"),
         ClientMsg::SetAllGrants { can_type } => format!("SetAllGrants can_type={can_type}"),
         ClientMsg::MouseInto { user, pane, mouse } => {
             format!("MouseInto user={user} pane={pane} kind={:?}", mouse.kind)
@@ -254,6 +255,7 @@ pub fn server_summary(message: &ServerMsg) -> String {
             diff.cells.len()
         ),
         ServerMsg::OpenStream { .. } => "OpenStream".to_owned(),
+        ServerMsg::PersonRemoved { name } => format!("PersonRemoved name={name}"),
     }
 }
 

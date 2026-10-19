@@ -19,7 +19,9 @@ pub(crate) mod invitation;
 pub(crate) mod join;
 pub(crate) use join::run as join;
 mod lifecycle;
-pub(crate) use lifecycle::{leave, leave_room, perms, stop, stop_selected_room};
+pub(crate) use lifecycle::{
+    leave, leave_room, perms, remove, remove_person, stop, stop_selected_room,
+};
 mod ps;
 pub(crate) use ps::{PsAction, ps};
 mod restart;

@@ -53,6 +53,25 @@ impl Grants {
         self.update(owner, |current| *current = users)
     }
 
+    pub(crate) fn remove_person(&self, user: &str) -> io::Result<()> {
+        let owners: Vec<_> = self
+            .lock()?
+            .iter()
+            .filter(|(owner, users)| owner.as_str() == user || users.contains_key(user))
+            .map(|(owner, _)| owner.clone())
+            .collect();
+        for owner in owners {
+            self.update(&owner, |users| {
+                if owner == user {
+                    users.clear();
+                } else {
+                    users.remove(user);
+                }
+            })?;
+        }
+        Ok(())
+    }
+
     pub(crate) fn permits(&self, owner: &str, user: &str) -> io::Result<bool> {
         Ok(self.permit(owner, user)?.is_some())
     }

@@ -3,8 +3,7 @@
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::fs;
 use std::io::Write;
-use std::net::TcpStream;
-use std::os::unix::fs::PermissionsExt;
+use std::net::{TcpListener, TcpStream};
 use std::path::PathBuf;
 use std::process::{Command, Stdio};
 use std::time::Duration;
@@ -21,7 +20,6 @@ impl Host {
             .env("XDG_STATE_HOME", self.root.join("s"))
             .env("HOME", &self.root)
             .env("USER", "alice")
-            .env("SEER_TEST_BROKER", env!("CARGO_BIN_EXE_seer-broker"))
             .stdin(Stdio::piped())
             .stdout(Stdio::piped())
             .stderr(Stdio::piped());
@@ -55,21 +53,7 @@ impl Drop for Host {
 
 #[test]
 fn restore_recovers_an_owner_credential_that_authenticates() {
-    let host = Host {
-        root: PathBuf::from(format!("/tmp/s318-{}", std::process::id())),
-    };
-    fs::create_dir(&host.root).expect("test directory must be created");
-    fs::copy(env!("CARGO_BIN_EXE_seer"), host.root.join("seer"))
-        .expect("client binary must be copied");
-    let launcher = host.root.join("seer-broker");
-    fs::write(
-        &launcher,
-        "#!/bin/sh\nsed -i 's/remote = true/remote = false/' \"$1\"\nexec \"$SEER_TEST_BROKER\" \"$@\"\n",
-    )
-    .expect("local broker launcher must be written");
-    fs::set_permissions(&launcher, fs::Permissions::from_mode(0o700))
-        .expect("broker launcher must be executable");
-    host.run(&["start"]);
+    let host = start_host();
     let path = host.root.join("c/seer/servers.toml");
     let original: toml::Value =
         toml::from_str(&fs::read_to_string(&path).expect("owner store must exist"))
@@ -162,4 +146,91 @@ impl Drop for Runtime {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+fn start_host() -> Host {
+    let host = Host {
+        root: PathBuf::from(format!(
+            "/tmp/s318-{}-{}",
+            std::process::id(),
+            std::time::SystemTime::now()
+                .duration_since(std::time::UNIX_EPOCH)
+                .unwrap()
+                .as_nanos()
+        )),
+    };
+    fs::create_dir(&host.root).expect("test directory must be created");
+    fs::copy(env!("CARGO_BIN_EXE_seer"), host.root.join("seer"))
+        .expect("client binary must be copied");
+    fs::copy(
+        env!("CARGO_BIN_EXE_seer-broker"),
+        host.root.join("seer-broker"),
+    )
+    .expect("broker binary must be copied");
+    let address = TcpListener::bind("127.0.0.1:0")
+        .unwrap()
+        .local_addr()
+        .unwrap();
+    let config_dir = host.root.join("c/seer");
+    fs::create_dir_all(&config_dir).unwrap();
+    fs::write(config_dir.join("broker.toml"), format!(
+        "listen = \"{address}\"\npublished_addr = \"{address}\"\nremote = false\nstate_dir = \"{}\"\nowner_name = \"alice\"\n", host.root.join("s/seer").display()
+    )).unwrap();
+    host.run(&["start"]);
+    host
+}
+
+#[test]
+fn removed_person_stays_removed_after_start_restore() {
+    let host = start_host();
+    let saved: toml::Value =
+        toml::from_str(&fs::read_to_string(host.root.join("c/seer/servers.toml")).unwrap())
+            .unwrap();
+    let endpoint = saved["servers"][0]["endpoint"].as_str().unwrap();
+    let invitation = host.run(&["invite"]);
+    let capsule = invitation
+        .lines()
+        .find_map(|line| line.strip_prefix("seer join "))
+        .unwrap();
+    let token = capsule.rsplit('-').next().unwrap();
+    let mut guest = TcpStream::connect(endpoint).unwrap();
+    guest
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    codec::encode(
+        &mut guest,
+        &ClientMsg::Join {
+            seat_token: token.into(),
+            name: "Guest".into(),
+            version: Some(env!("CARGO_PKG_VERSION").into()),
+        },
+    )
+    .unwrap();
+    let ServerMsg::Joined {
+        user_id,
+        credential,
+        ..
+    } = codec::decode(&mut guest).unwrap()
+    else {
+        panic!("Guest must join");
+    };
+    host.run(&["remove", "Guest"]);
+    host.run(&["stop"]);
+    host.run(&["start", "--restore"]);
+    let mut guest = TcpStream::connect(endpoint).unwrap();
+    guest
+        .set_read_timeout(Some(Duration::from_secs(5)))
+        .unwrap();
+    codec::encode(
+        &mut guest,
+        &ClientMsg::Hello {
+            user_id,
+            credential,
+            version: env!("CARGO_PKG_VERSION").into(),
+        },
+    )
+    .unwrap();
+    assert!(matches!(codec::decode::<_, ServerMsg>(&mut guest).unwrap(),
+        ServerMsg::Refused { reason } if reason.contains("host removed you")));
+    assert!(!host.run(&["list"]).contains("Guest"));
 }

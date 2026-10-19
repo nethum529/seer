@@ -157,6 +157,9 @@ pub enum ClientMsg {
         user: String,
         can_type: bool,
     },
+    RemovePerson {
+        name: String,
+    },
     Stop,
     Leave,
     Detach,
@@ -164,6 +167,9 @@ pub enum ClientMsg {
 
 #[derive(Clone, Debug, Deserialize, Eq, PartialEq, Serialize)]
 pub enum ServerMsg {
+    PersonRemoved {
+        name: String,
+    },
     TerminalPrograms {
         programs: Option<Vec<String>>,
     },

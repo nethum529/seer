@@ -33,6 +33,8 @@ impl Coordinator<'_> {
     }
 
     pub(super) fn set_all_grants(&self, can_type: bool) -> io::Result<()> {
+        let membership = self.broker.membership()?;
+        self.broker.require_member(&self.owner.user_id)?;
         let users = if can_type {
             self.broker
                 .registry()
@@ -45,11 +47,14 @@ impl Coordinator<'_> {
             BTreeSet::new()
         };
         self.broker.grants.set_all(&self.owner.user_id, users)?;
+        drop(membership);
         self.broker.publish_grants()?;
         self.write(&ServerMsg::GrantsUpdated)
     }
 
     pub(super) fn set_grant(&self, user: &str, can_type: bool) -> io::Result<()> {
+        let membership = self.broker.membership()?;
+        self.broker.require_member(&self.owner.user_id)?;
         self.person(user)?;
         seer_core::debug_log!(
             "grant owner={} user={user} can_type={can_type}",
@@ -58,6 +63,7 @@ impl Coordinator<'_> {
         self.broker
             .grants
             .set(&self.owner.user_id, user, can_type)?;
+        drop(membership);
         self.broker.publish_grants()
     }
 

@@ -102,6 +102,9 @@ quit Seer.
 - `seer detach` disconnects a selected client. Its terminals continue.
 - `seer leave` removes you from the room and stops your terminals on
   this computer. The room stays open for the others.
+- `seer remove <person>` removes one person from the room. Only the host
+  can do this. Their connections and grants end. Their local shells keep
+  running. They need a new invite to join again.
 - `seer stop` stops the room server. Only the host can do this. Other
   people keep their terminals.
 - `seer ps` shows your Seer processes on this computer. `seer ps
