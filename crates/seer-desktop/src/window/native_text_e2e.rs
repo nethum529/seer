@@ -189,32 +189,6 @@ pub(crate) fn exercise(
                 .await;
                 return true;
             }
-            if std::env::var_os("VERSION_BANNER_QA").is_some() {
-                super::version_native_e2e::exercise(
-                    window,
-                    &fixture.evidence,
-                    &fixture.capture,
-                    cx,
-                )
-                .await;
-                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
-            }
-            if std::env::var_os("BANNER_QA").is_some() {
-                super::banner_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
-                    .await;
-                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
-            }
-            if std::env::var_os("APPEARANCE_LEGACY_QA").is_some() {
-                super::legacy_appearance_native_e2e::exercise(
-                    window,
-                    &fixture._directory.path().join("config/seer/settings.toml"),
-                    &fixture.evidence,
-                    &fixture.capture,
-                    cx,
-                )
-                .await;
-                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
-            }
             if std::env::var_os("TEXT_PIXEL_START_SCREEN_ONLY").is_some() {
                 super::start_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                     .await;
@@ -233,6 +207,9 @@ pub(crate) fn exercise(
             cx.background_executor()
                 .timer(Duration::from_millis(900))
                 .await;
+            if exercise_room_qa(window, &fixture, cx).await {
+                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
+            }
             if std::env::var_os("TEXT_PIXEL_START_ROOM_ONLY").is_some() {
                 super::start_room_native_e2e::exercise(
                     window,
@@ -384,6 +361,33 @@ pub(crate) fn exercise(
         std::process::exit(if matches!(result, Ok(true)) { 0 } else { 1 });
     })
     .detach();
+}
+
+async fn exercise_room_qa(
+    window: gpui::WindowHandle<crate::window::SeerWindow>,
+    fixture: &Fixture,
+    cx: &mut gpui::AsyncApp,
+) -> bool {
+    if std::env::var_os("VERSION_BANNER_QA").is_some() {
+        super::version_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        return true;
+    }
+    if std::env::var_os("BANNER_QA").is_some() {
+        super::banner_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        return true;
+    }
+    if std::env::var_os("APPEARANCE_LEGACY_QA").is_some() {
+        super::legacy_appearance_native_e2e::exercise(
+            window,
+            &fixture._directory.path().join("config/seer/settings.toml"),
+            &fixture.evidence,
+            &fixture.capture,
+            cx,
+        )
+        .await;
+        return true;
+    }
+    false
 }
 
 pub(crate) fn window_options(
