@@ -70,16 +70,23 @@ pub(super) fn text(input: Entity<NameInput>) -> impl IntoElement {
                 offset
             };
             let scale = window.scale_factor();
+            let cap_height = crate::label::cap_height(&line, window);
             let baseline = crate::label::baseline(
                 crate::label::bounds_for(bounds, cx),
-                crate::label::cap_height(&line, window),
+                cap_height,
                 px(0.),
                 scale,
             );
             let origin = crate::label::origin(&line, bounds, px(20.), baseline, scale);
-            (line, offset, origin)
+            (
+                line,
+                offset,
+                origin,
+                baseline / scale,
+                (cap_height * scale).ceil() / scale,
+            )
         },
-        move |bounds, (line, offset, mut origin), window, cx| {
+        move |bounds, (line, offset, mut origin, baseline, height), window, cx| {
             let held = input.read(cx);
             window.handle_input(
                 &held.focus,
@@ -95,13 +102,18 @@ pub(super) fn text(input: Entity<NameInput>) -> impl IntoElement {
                 } else {
                     (start, end, gpui::rgba(0x60a5fa73))
                 };
-                window.paint_quad(fill(
-                    gpui::Bounds::from_corners(
-                        point(origin.x + from, bounds.top()),
-                        point(origin.x + to, bounds.bottom()),
-                    ),
-                    color,
-                ));
+                let mut highlight = gpui::Bounds::from_corners(
+                    point(origin.x + from, bounds.top()),
+                    point(origin.x + to, bounds.bottom()),
+                );
+                if held.selection.is_empty() && !held.form {
+                    highlight.origin.y = baseline - height;
+                    highlight.size.height = height;
+                    if held.cursor() == 0 {
+                        highlight.origin.x -= px(2.);
+                    }
+                }
+                window.paint_quad(fill(highlight, color));
             }
             if let Err(error) = line.paint(origin, px(20.), window, cx) {
                 eprintln!("seer: could not draw terminal name: {error}");
