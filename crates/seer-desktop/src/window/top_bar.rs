@@ -17,7 +17,8 @@ impl TopBar {
 
 impl SeerWindow {
     pub(super) fn top_bar_opacity(&mut self, window: &mut Window, cx: &mut Context<Self>) -> f32 {
-        let focused = window.viewport_size().width < px(NARROW)
+        let narrow = window.viewport_size().width < px(NARROW);
+        let focused = narrow
             && self.keys.mode == Mode::Keyboard
             && [
                 &self.keys.who,
@@ -27,16 +28,12 @@ impl SeerWindow {
             ]
             .iter()
             .any(|focus| focus.is_focused(window));
+        let top_bar_popup = narrow
+            && (self.appearance.motion.is_some() || self.people_menu.is_some() || self.room.open());
         let pinned = !self.appearance.settings.hide_top_bar
             || !matches!(self.content, Content::Terminal(..))
-            || self.appearance.motion.is_some()
-            || self.menu.is_some()
-            || self.people_menu.is_some()
-            || self.room.open()
-            || self.room.modal()
-            || self.invite.is_some()
             || self.join_screen.is_some()
-            || self.editing.is_some()
+            || top_bar_popup
             || focused;
         let bar = &mut self.appearance.top_bar;
         let shown = pinned || bar.hovered;
