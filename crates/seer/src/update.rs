@@ -18,12 +18,8 @@ pub(crate) fn run() -> ExitCode {
             println!("Already up to date.");
             ExitCode::SUCCESS
         }
-        Err(UpdateError::Download) => {
-            eprintln!("Cannot download the update. Check the internet connection.");
-            ExitCode::from(1)
-        }
-        Err(UpdateError::Install) => {
-            eprintln!("Cannot install the update.");
+        Err(error) => {
+            eprintln!("{error}");
             ExitCode::from(1)
         }
     }
@@ -58,7 +54,7 @@ fn exchange_paths(from: &str, to: &str) -> io::Result<()> {
     }
 }
 
-fn update() -> Result<UpdateResult, UpdateError> {
+pub(crate) fn update() -> Result<UpdateResult, UpdateError> {
     let asset = asset_name().ok_or(UpdateError::Install)?;
     let base_url = std::env::var("SEER_UPDATE_URL").unwrap_or_else(|_| RELEASE_BASE_URL.to_owned());
     let download_url = format!("{}/{asset}", base_url.trim_end_matches('/'));
@@ -219,12 +215,21 @@ impl Drop for TemporaryDirectory {
     }
 }
 
-enum UpdateResult {
+pub(crate) enum UpdateResult {
     Updated(String),
     Current,
 }
 
-enum UpdateError {
+pub(crate) enum UpdateError {
     Download,
     Install,
+}
+
+impl std::fmt::Display for UpdateError {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(match self {
+            Self::Download => "Cannot download the update. Check the internet connection.",
+            Self::Install => "Cannot install the update.",
+        })
+    }
 }

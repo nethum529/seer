@@ -189,7 +189,7 @@ impl Room {
                 self.send(ClientMsg::ListPeople);
             }
             RoomEvent::Message(message) => self.message(message),
-            RoomEvent::Lost | RoomEvent::Stopped => {
+            RoomEvent::Lost | RoomEvent::Stopped | RoomEvent::VersionMismatch(_) => {
                 self.writer = None;
                 self.can_type_here.clear();
                 self.you_may_type_into.clear();

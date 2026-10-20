@@ -21,6 +21,40 @@ use crate::window::{
 };
 
 #[gpui::test]
+fn version_refusal_keeps_local_input_and_offers_update(cx: &mut TestAppContext) {
+    let room = Room::start_with_refusal(Some(
+        "version mismatch: server 0.7.0, client 0.6.0. Run: seer update",
+    ));
+    let runtime = Runtime::start();
+    let (view, cx) = open_view(&runtime, cx);
+    let center = cx.debug_bounds("terminal").unwrap().center();
+    cx.simulate_click(center, gpui::Modifiers::default());
+    view.update(cx, |view, cx| {
+        let Content::Terminal(link, _) = &mut view.content else {
+            panic!("terminal missing")
+        };
+        let messages = link.join_room(room.server.clone(), None);
+        view.listen(messages, cx);
+    });
+    let deadline = Instant::now() + Duration::from_secs(2);
+    loop {
+        cx.run_until_parked();
+        if cx.debug_bounds("version-update").is_some() {
+            break;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "version refusal must offer Update"
+        );
+        thread::sleep(Duration::from_millis(5));
+    }
+    let banner = cx.debug_bounds("status-banner").unwrap();
+    assert!(banner.bottom() <= cx.debug_bounds("terminal").unwrap().top());
+    cx.simulate_keystrokes("k");
+    wait(cx, || runtime.input().ends_with(b"k"));
+}
+
+#[gpui::test]
 fn room_drop_keeps_local_input_and_recovers_without_action(cx: &mut TestAppContext) {
     let room = Room::start();
     let runtime = Runtime::start();
@@ -158,6 +192,10 @@ struct Room {
 
 impl Room {
     fn start() -> Self {
+        Self::start_with_refusal(None)
+    }
+
+    fn start_with_refusal(refusal: Option<&'static str>) -> Self {
         let listener = TcpListener::bind("127.0.0.1:0").unwrap();
         listener.set_nonblocking(true).unwrap();
         let server = serde_json::from_value(serde_json::json!({"endpoint":listener.local_addr().unwrap().to_string(),"alias":"E2e","user_id":"e2e","name":"E2e","credential":"e2e","current":true})).unwrap();
@@ -180,6 +218,15 @@ impl Room {
                     .set_read_timeout(Some(Duration::from_secs(2)))
                     .unwrap();
                 if !matches!(codec::decode(&mut stream), Ok(ClientMsg::Hello { .. })) {
+                    continue;
+                }
+                if let Some(reason) = refusal {
+                    let _ = codec::encode(
+                        &mut stream,
+                        &ServerMsg::Refused {
+                            reason: reason.into(),
+                        },
+                    );
                     continue;
                 }
                 if codec::encode(

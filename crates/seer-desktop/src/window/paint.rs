@@ -230,7 +230,7 @@ impl Render for SeerWindow {
                                         terminals, shown, labels, &self.keys, window, cx,
                                     ))
                                 })
-                                .children(self.connection_banner())
+                                .children(self.status_banner(window, cx))
                                 .child(terminal),
                             if reclaim { slide - px(44.) } else { px(0.) },
                         )),
@@ -335,7 +335,7 @@ impl Render for SeerWindow {
                     .flex_col()
                     .h_full()
                     .children(heading)
-                    .children(self.connection_banner())
+                    .children(self.status_banner(window, cx))
                     .child(terminal),
                 slide,
             ))
