@@ -10,10 +10,12 @@ use seer_core::proto::{ClientMsg, ServerMsg, codec};
 // A listing must not inherit the attach timeout: one wedged runtime would
 // hold the whole table for seconds.
 const STATUS_TIMEOUT: Duration = Duration::from_secs(1);
+mod display;
+
 const PS_FORMAT: &str = "pid=,ppid=,etime=,pcpu=,tty=,args=";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, PartialOrd, Ord)]
-pub(crate) enum Kind {
+pub enum Kind {
     Broker,
     Runtime,
     Window,
@@ -45,7 +47,6 @@ pub(crate) enum Detail {
     },
 }
 
-/// One process as ps saw it at one moment.
 pub(crate) struct Snapshot {
     pub(crate) pid: u32,
     pub(crate) parent: u32,
@@ -55,7 +56,7 @@ pub(crate) struct Snapshot {
     pub(crate) args: Vec<String>,
 }
 
-pub(crate) struct Process {
+pub struct Process {
     pub(crate) snapshot: Snapshot,
     pub(crate) kind: Kind,
     pub(crate) state_home: Option<PathBuf>,
@@ -63,17 +64,33 @@ pub(crate) struct Process {
 }
 
 impl Process {
-    pub(crate) fn pid(&self) -> u32 {
+    pub fn pid(&self) -> u32 {
         self.snapshot.pid
     }
 
-    pub(crate) fn has_terminal(&self) -> bool {
-        matches!(&self.detail, Detail::Window { terminal: Some(_) })
+    pub fn kind(&self) -> Kind {
+        self.kind
+    }
+
+    pub fn uptime(&self) -> String {
+        display::format_up(self.snapshot.up_secs)
+    }
+
+    pub fn cpu(&self) -> String {
+        format!("{}%", self.snapshot.cpu)
+    }
+
+    pub fn description(&self) -> String {
+        display::describe(&self.detail)
+    }
+
+    pub fn can_clean(&self) -> bool {
+        matches!(&self.detail, Detail::Window { terminal: None })
     }
 }
 
 // A window belongs to the state home of the runtime that reports it attached.
-pub(crate) fn list() -> io::Result<Vec<Process>> {
+pub fn list() -> io::Result<Vec<Process>> {
     let own_pid = std::process::id();
     let mut processes: Vec<Process> = own_rows()?
         .into_iter()
@@ -241,4 +258,17 @@ fn broker_state_home(config: &Path) -> Option<PathBuf> {
     let table: toml::Table = toml::from_str(&fs::read_to_string(config).ok()?).ok()?;
     let state_dir = table.get("state_dir")?.as_str()?;
     Path::new(state_dir).parent().map(Path::to_path_buf)
+}
+
+pub fn clean() -> Result<usize, String> {
+    let processes = list().map_err(|error| error.to_string())?;
+    crate::commands::ps::clean(&processes).map_err(|error| error.message)
+}
+
+pub fn stop(pid: u32, serving_runtime: Option<u32>) -> Result<usize, String> {
+    if Some(pid) == serving_runtime {
+        return Err("This runtime is used by this window.".into());
+    }
+    let processes = list().map_err(|error| error.to_string())?;
+    crate::commands::ps::stop_runtime(&processes, pid).map_err(|error| error.message)
 }

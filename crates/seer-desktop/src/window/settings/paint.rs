@@ -25,7 +25,7 @@ impl SeerWindow {
         let narrow = window.viewport_size().width < px(480.);
         let inset = if compact { 20. } else { 24. };
         let width = 720_f32.min(f32::from(window.viewport_size().width) - 32.);
-        let height: f32 = if self.appearance.section == Section::Appearance {
+        let height: f32 = if self.appearance.section != Section::Shortcuts {
             560.
         } else {
             400.
@@ -84,13 +84,11 @@ impl SeerWindow {
                                     .flex_1()
                                     .text_size(px(15.))
                                     .font_weight(FontWeight::SEMIBOLD)
-                                    .child(crate::label::text(
-                                        if self.appearance.section == Section::Appearance {
-                                            "Appearance"
-                                        } else {
-                                            "Shortcuts"
-                                        },
-                                    )),
+                                    .child(crate::label::text(match self.appearance.section {
+                                        Section::Appearance => "Appearance",
+                                        Section::Shortcuts => "Shortcuts",
+                                        Section::Processes => "Processes",
+                                    })),
                             )
                             .child(
                                 button(
@@ -130,6 +128,9 @@ impl SeerWindow {
                             .flex()
                             .flex_col()
                             .gap(px(12.))
+                            .when(self.appearance.section == Section::Processes, |content| {
+                                content.children(self.process_rows(window, cx))
+                            })
                             .when(self.appearance.section == Section::Shortcuts, |content| {
                                 content.children(self.shortcut_rows(window, cx))
                             })
@@ -167,20 +168,25 @@ impl SeerWindow {
                                     }))
                             }),
                     )
-                    .when(self.appearance.section == Section::Shortcuts, |content| {
-                        content.child(
-                            div()
-                                .id("shortcut-scroll-cue")
-                                .debug_selector(|| "shortcut-scroll-cue".into())
-                                .mt(px(8.))
-                                .h(px(32.))
-                                .flex_none()
-                                .flex()
-                                .items_center()
-                                .text_color(rgb(palette::MUTED))
-                                .child(crate::label::text("Scroll to see all")),
-                        )
-                    }),
+                    .when(
+                        self.appearance.section == Section::Shortcuts
+                            || (self.appearance.section == Section::Processes
+                                && self.appearance.scroll.max_offset().height > px(0.)),
+                        |content| {
+                            content.child(
+                                div()
+                                    .id("shortcut-scroll-cue")
+                                    .debug_selector(|| "shortcut-scroll-cue".into())
+                                    .mt(px(8.))
+                                    .h(px(32.))
+                                    .flex_none()
+                                    .flex()
+                                    .items_center()
+                                    .text_color(rgb(palette::MUTED))
+                                    .child(crate::label::text("Scroll to see all")),
+                            )
+                        },
+                    ),
             );
         Some(
             menu::scrim("settings-scrim")
@@ -194,6 +200,7 @@ impl SeerWindow {
                 )
                 .child(card)
                 .child(self.adjustment_events(cx))
+                .children(self.process_sheet(window, cx))
                 .into_any_element(),
         )
     }

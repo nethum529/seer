@@ -28,99 +28,65 @@ impl SeerWindow {
                 ),
             ),
         };
-        let width = 400_f32.min(f32::from(window.viewport_size().width) - 32.);
         let label = match &sheet.action {
             Confirmation::Room(action, _) => action_label(*action),
             Confirmation::Terminal { .. } => "Close terminal",
             Confirmation::Remove { .. } => "Remove",
             Confirmation::ShareAll => "Share control",
         };
-        let card = menu::sheet("room-confirm", width, cx)
-            .p(px(20.))
-            .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
-            .child(
-                div()
-                    .debug_selector({
-                        let title = title.clone();
-                        move || title.clone()
-                    })
-                    .text_size(px(15.))
-                    .line_height(px(20.))
-                    .font_weight(FontWeight::SEMIBOLD)
-                    .child(crate::label::text(title)),
-            )
-            .child(
-                div()
-                    .mt(px(8.))
-                    .text_color(rgb(palette::MUTED))
-                    .child(crate::label::text(body)),
-            )
-            .children(self.room.error.as_ref().map(|error| {
-                div()
-                    .id("room-error")
-                    .debug_selector(|| "room-error".into())
-                    .mt(px(8.))
-                    .text_size(px(12.))
-                    .text_color(rgb(palette::DANGER))
-                    .child(crate::label::text(error.clone()))
-            }))
-            .child(
-                div()
-                    .mt(px(20.))
-                    .flex()
-                    .justify_end()
-                    .gap(px(8.))
-                    .child(
-                        menu::button(
-                            "room-cancel",
-                            "Cancel",
-                            &sheet.cancel,
-                            None,
-                            self.keys.mode,
-                            window,
-                        )
-                        .on_click(cx.listener(
-                            |view, event, window, cx| {
-                                if matches!(event, gpui::ClickEvent::Mouse(_)) {
-                                    view.close_room_sheet(false, window, cx);
-                                }
-                            },
-                        )),
-                    )
-                    .child(
-                        menu::button(
-                            "room-confirm-action",
-                            if self.room.pending {
-                                "Working..."
-                            } else {
-                                label
-                            },
-                            &sheet.confirm,
-                            Some(
-                                if matches!(
-                                    sheet.action,
-                                    Confirmation::Room(RoomAction::Start, _)
-                                        | Confirmation::ShareAll
-                                ) {
-                                    palette::ACCENT
-                                } else {
-                                    palette::DANGER
-                                },
-                            ),
-                            self.keys.mode,
-                            window,
-                        )
-                        .when(self.room.pending, |button| button.opacity(0.6))
-                        .on_click(cx.listener(
-                            |view, event, window, cx| {
-                                if matches!(event, gpui::ClickEvent::Mouse(_)) && view.room.modal()
-                                {
-                                    view.run_confirmation(window, cx);
-                                }
-                            },
-                        )),
-                    ),
-            );
+        let cancel = menu::button(
+            "room-cancel",
+            "Cancel",
+            &sheet.cancel,
+            None,
+            self.keys.mode,
+            window,
+        )
+        .on_click(cx.listener(|view, event, window, cx| {
+            if matches!(event, gpui::ClickEvent::Mouse(_)) {
+                view.close_room_sheet(false, window, cx);
+            }
+        }));
+        let confirm = menu::button(
+            "room-confirm-action",
+            if self.room.pending {
+                "Working..."
+            } else {
+                label
+            },
+            &sheet.confirm,
+            Some(
+                if matches!(
+                    sheet.action,
+                    Confirmation::Room(RoomAction::Start, _) | Confirmation::ShareAll
+                ) {
+                    palette::ACCENT
+                } else {
+                    palette::DANGER
+                },
+            ),
+            self.keys.mode,
+            window,
+        )
+        .when(self.room.pending, |button| button.opacity(0.6))
+        .on_click(cx.listener(|view, event, window, cx| {
+            if matches!(event, gpui::ClickEvent::Mouse(_)) && view.room.modal() {
+                view.run_confirmation(window, cx);
+            }
+        }));
+        let card = menu::confirm::card(
+            menu::confirm::Copy {
+                id: "room-confirm",
+                title: &title,
+                body: &body,
+                error: self.room.error.as_deref(),
+            },
+            cancel,
+            confirm,
+            window,
+            cx,
+        );
+
         Some(
             menu::scrim("room-scrim")
                 .opacity(sheet.motion.value())

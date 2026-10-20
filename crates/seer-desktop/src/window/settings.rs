@@ -8,6 +8,7 @@ use crate::{backdrop, motion::Motion};
 
 mod capture;
 mod paint;
+pub(crate) mod processes;
 mod shortcut_list;
 pub(super) mod sliders;
 
@@ -74,6 +75,9 @@ impl SeerWindow {
         }
         self.appearance.return_focus = window.focused(cx);
         self.input.reset();
+        if self.appearance.section == Section::Processes {
+            self.load_processes(None, cx);
+        }
         window.focus(&self.appearance.close);
         cx.notify();
     }
@@ -109,6 +113,9 @@ impl SeerWindow {
             return false;
         }
         self.keys.mode = Mode::Keyboard;
+        if self.process_sheet_key(key, window, cx) {
+            return true;
+        }
         if self.capture_key(key, window, cx) {
             cx.notify();
             return true;
@@ -139,9 +146,14 @@ impl SeerWindow {
                     .iter()
                     .position(|focus| focus.is_focused(window))
                 {
-                    self.settings_section([Section::Appearance, Section::Shortcuts][index], cx);
+                    self.settings_section(
+                        [Section::Appearance, Section::Shortcuts, Section::Processes][index],
+                        cx,
+                    );
                 } else if self.appearance.section == Section::Shortcuts {
                     self.shortcut_activation(window, cx);
+                } else if self.appearance.section == Section::Processes {
+                    self.process_activation(window, cx);
                 }
             }
             _ => {}
@@ -170,6 +182,20 @@ impl SeerWindow {
                 }
             }
             controls.extend(appearance.sections.iter());
+        } else if appearance.section == Section::Processes {
+            controls.extend(appearance.sections.iter());
+            controls.push(&appearance.processes.refresh);
+            if appearance.processes.can_clean() {
+                controls.push(&appearance.processes.clean);
+            }
+            controls.extend(
+                appearance
+                    .processes
+                    .rows
+                    .iter()
+                    .filter(|row| row.can_stop())
+                    .map(|row| &row.focus),
+            );
         } else {
             controls.extend(appearance.sections.iter());
             for row in shortcuts::rows() {
@@ -186,7 +212,19 @@ impl SeerWindow {
 
     fn reveal_settings_focus(&self, focus: &gpui::FocusHandle) {
         let appearance = &self.appearance;
-        if appearance.section == Section::Shortcuts {
+        if appearance.section == Section::Processes {
+            if let Some(index) = appearance
+                .processes
+                .rows
+                .iter()
+                .position(|row| &row.focus == focus)
+            {
+                appearance.scroll.scroll_to_item(index + 1);
+            } else if focus == &appearance.processes.refresh || focus == &appearance.processes.clean
+            {
+                appearance.scroll.scroll_to_item(0);
+            }
+        } else if appearance.section == Section::Shortcuts {
             let index = appearance
                 .shortcut_focus
                 .iter()
@@ -228,6 +266,9 @@ impl SeerWindow {
         self.appearance.capture = None;
         self.appearance.shortcut_error = None;
         self.appearance.section = section;
+        if section == Section::Processes {
+            self.load_processes(None, cx);
+        }
         self.appearance.scroll.set_offset(gpui::Point::default());
         cx.notify();
     }

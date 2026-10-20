@@ -82,6 +82,7 @@ struct Target {
 
 pub(crate) struct Link {
     writer: Writer,
+    runtime_pid: Option<u32>,
     user: String,
     target: Option<Target>,
     tree: Tree,
@@ -104,8 +105,13 @@ impl Link {
         room: String,
     ) -> io::Result<(Self, Messages)> {
         let reader = socket.clone();
+        let runtime_pid = match &socket {
+            Socket::Iroh(stream) => seer_runtime::peer_pid(stream),
+            Socket::Tcp(_) => None,
+        };
         let mut link = Self {
             writer: Arc::new(Mutex::new(socket)),
+            runtime_pid,
             people: Room::new(user.clone()),
             user,
             target: first_target(tree),
@@ -132,6 +138,10 @@ impl Link {
             Arc::clone(&link.woken),
         );
         Ok((link, messages))
+    }
+
+    pub(crate) fn runtime_pid(&self) -> Option<u32> {
+        self.runtime_pid
     }
 
     pub(crate) fn terminal(&self) -> &Terminal {

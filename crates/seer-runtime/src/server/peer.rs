@@ -2,7 +2,7 @@ use std::os::unix::io::AsRawFd;
 use std::os::unix::net::UnixStream;
 
 #[cfg(target_os = "linux")]
-pub(super) fn peer_pid(stream: &UnixStream) -> Option<u32> {
+pub fn peer_pid(stream: &UnixStream) -> Option<u32> {
     let mut credentials = libc::ucred {
         pid: 0,
         uid: 0,
@@ -25,7 +25,7 @@ pub(super) fn peer_pid(stream: &UnixStream) -> Option<u32> {
 }
 
 #[cfg(target_os = "macos")]
-pub(super) fn peer_pid(stream: &UnixStream) -> Option<u32> {
+pub fn peer_pid(stream: &UnixStream) -> Option<u32> {
     let mut pid: libc::pid_t = 0;
     let mut length = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
     // SAFETY: the buffer is a pid_t owned by this frame and length holds its size.

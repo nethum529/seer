@@ -31,7 +31,12 @@ pub(crate) fn restart(yes: bool) -> Result<(), CommandError> {
         if let Detail::Runtime { socket, .. } = &runtime.detail {
             notify_windows(socket);
         }
-        stop_runtime(&processes, runtime.pid())?;
+        let pid = runtime.pid();
+        let shells = stop_runtime(&processes, pid)?;
+        println!(
+            "Runtime {pid} stopped with {}.",
+            super::ps::count(shells, "shell")
+        );
     }
     Ok(())
 }

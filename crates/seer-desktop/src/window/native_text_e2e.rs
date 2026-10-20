@@ -62,6 +62,24 @@ pub(crate) fn prepare() -> Option<Fixture> {
         .map(std::path::PathBuf::from)
         .unwrap_or_else(|| root.join("captures"));
     fs::create_dir_all(&evidence).unwrap();
+    if std::env::var_os("PROCESSES_QA").is_some() {
+        use std::os::unix::fs::PermissionsExt;
+        let bin = root.join("bin");
+        fs::create_dir_all(&bin).unwrap();
+        let ps = bin.join("ps");
+        fs::write(&ps, format!(
+            "#!/bin/sh\n[ -f '{0}/fail-ps' ] && exit 1\n[ -f '{0}/slow-ps' ] && /bin/sleep 3\n/bin/ps \"$@\" | /usr/bin/awk -v root='{0}' '{{row[NR]=$0; pid[NR]=$1; parent[NR]=$2; if(index($0,root)) own[$1]=1}} END {{for(i=1;i<=NR;i++) if(own[pid[i]] || own[parent[i]]) print row[i]}}'\n",
+            root.display()
+        )).unwrap();
+        fs::set_permissions(ps, fs::Permissions::from_mode(0o700)).unwrap();
+        // SAFETY: the native fixture sets its environment before GPUI or worker threads start.
+        unsafe {
+            std::env::set_var(
+                "PATH",
+                format!("{}:{}", bin.display(), std::env::var("PATH").unwrap()),
+            );
+        }
+    }
     let mirror = std::env::var_os("VERSION_BANNER_QA")
         .map(|_| super::version_mirror::prepare(evidence.clone()));
     // SAFETY: this test entry runs on the main thread before it starts GPUI or any worker thread.
@@ -182,17 +200,21 @@ pub(crate) fn prepare() -> Option<Fixture> {
         .stderr(Stdio::null())
         .spawn()
         .unwrap());
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !state.join("socket").exists() {
-        assert!(Instant::now() < deadline && runtime.0.try_wait().unwrap().is_none());
-        thread::sleep(Duration::from_millis(20));
-    }
+    wait_runtime(&mut runtime, &state.join("socket"));
     Some(Fixture {
         _runtime: runtime,
         _directory: directory,
         evidence,
         capture,
     })
+}
+
+fn wait_runtime(runtime: &mut App, socket: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !socket.exists() {
+        assert!(Instant::now() < deadline && runtime.0.try_wait().unwrap().is_none());
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 pub(crate) fn exercise(
@@ -400,6 +422,17 @@ async fn exercise_room_qa(
             .await;
         return true;
     }
+    if std::env::var_os("PROCESSES_QA").is_some() {
+        super::processes_native_e2e::exercise(
+            window,
+            fixture._directory.path(),
+            &fixture.evidence,
+            &fixture.capture,
+            cx,
+        )
+        .await;
+        return true;
+    }
     if std::env::var_os("VERSION_BANNER_QA").is_some() {
         super::version_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
         return true;
@@ -426,7 +459,9 @@ pub(crate) fn window_options(
     mut options: gpui::WindowOptions,
     cx: &gpui::App,
 ) -> gpui::WindowOptions {
-    if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some() {
+    if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some()
+        || std::env::var_os("PROCESSES_QA").is_some()
+    {
         // Nonactivating panels can receive native keys while the test app is in the background.
         options.kind = gpui::WindowKind::PopUp;
     }

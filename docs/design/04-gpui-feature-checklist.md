@@ -106,9 +106,9 @@ to R-454.
 | --- | --- | --- | --- |
 | seer detach disconnects a selected client. Its terminals continue | README Commands, help | Command only. It acts on a different window or TUI. To detach this window, close it. | none |
 | seer exit leaves Seer from inside a Seer terminal | README Commands, help | Command only. It runs inside a terminal. In the window, close the window. | none |
-| seer ps shows your Seer processes on this computer | README Commands, help | No place yet. The command stays. | R-453 |
-| seer ps --clean stops the windows that have no terminal | README Commands, help | No place yet. The command stays. | R-453 |
-| seer ps --stop PID stops one runtime with its shells | README Commands, help | No place yet. The command stays. | R-453 |
+| seer ps shows your Seer processes on this computer | README Commands, help | Settings > Processes. The command stays. | T-549 |
+| seer ps --clean stops the windows that have no terminal | README Commands, help | Settings > Processes > Clean up. The command stays. | T-549 |
+| seer ps --stop PID stops one runtime with its shells | README Commands, help | Settings > Processes > Stop. The command stays. | T-549 |
 | seer update installs the latest release | README Commands, help | Version banner Update uses the same installer as seer update, off the UI thread. It shows progress, a retry on failure, and a reopen message on success. | T-541, ADR 0011 |
 | seer restart, or seer restart --yes, restarts your terminals on the installed Seer | help | Command only: seer restart asks before it ends local shells. Opening the app again restores the layout with the installed runtime. ADR 0011 keeps this separate from update. | R-457 |
 | A different version prints a message that tells you to run seer update | README Good to know | Banner names the room and local versions and offers Update. It takes priority over connection loss. Local terminal input continues. | T-541 |

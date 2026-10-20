@@ -1,3 +1,5 @@
+pub(crate) mod confirm;
+
 use gpui::{Div, FontWeight, Stateful, Styled, div, point, px, rgb};
 use gpui::{InteractiveElement, ParentElement, StatefulInteractiveElement};
 

@@ -22,7 +22,7 @@ mod lifecycle;
 pub(crate) use lifecycle::{
     leave, leave_room, perms, remove, remove_person, stop, stop_selected_room,
 };
-mod ps;
+pub(crate) mod ps;
 pub(crate) use ps::{PsAction, ps};
 mod restart;
 pub(crate) use restart::restart;
