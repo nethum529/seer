@@ -30,7 +30,7 @@ impl SeerWindow {
                 .when(self.appearance.section == section, |row| {
                     row.bg(rgb(palette::CHIP))
                 })
-                .hover(|row| row.bg(rgb(palette::HOVER)))
+                .hover(|row| row.bg(crate::appearance::fill(palette::HOVER, cx)))
                 .when(self.keys.ring(focus, window), |row| {
                     row.child(sidebar::outline())
                 })
