@@ -14,7 +14,7 @@ fn changed_shortcuts_save_reject_conflicts_and_reset(cx: &mut TestAppContext) {
     cx.simulate_resize(size(px(960.), px(640.)));
     cx.run_until_parked();
     click(cx, "settings-trigger");
-    cx.simulate_keystrokes("shift-tab enter tab enter");
+    cx.simulate_keystrokes("shift-tab shift-tab enter tab tab enter");
     cx.run_until_parked();
     assert!(cx.debug_bounds("Press new keys").is_some());
     let conflict = if cfg!(target_os = "macos") {
@@ -156,7 +156,7 @@ fn failed_shortcut_save_keeps_the_current_binding(cx: &mut TestAppContext) {
     cx.simulate_resize(size(px(960.), px(640.)));
     cx.run_until_parked();
     click(cx, "settings-trigger");
-    cx.simulate_keystrokes("shift-tab enter tab enter");
+    cx.simulate_keystrokes("shift-tab shift-tab enter tab tab enter");
     view.update(cx, |view, _| {
         view.appearance.path = Some(runtime.directory.path().to_owned())
     });

@@ -94,8 +94,8 @@ fn terminal_switch_shortcuts_can_be_changed_saved_and_reset(cx: &mut TestAppCont
     pump(cx);
     let button = cx.debug_bounds("settings-trigger").unwrap();
     cx.simulate_click(button.center(), gpui::Modifiers::default());
-    cx.simulate_keystrokes("shift-tab enter");
-    for _ in 0..5 {
+    cx.simulate_keystrokes("shift-tab shift-tab enter");
+    for _ in 0..6 {
         cx.simulate_keystrokes("tab");
     }
     cx.run_until_parked();
@@ -131,7 +131,7 @@ fn terminal_switch_shortcuts_can_be_changed_saved_and_reset(cx: &mut TestAppCont
     cx.simulate_click(button.center(), gpui::Modifiers::default());
     let button = cx.debug_bounds("settings-shortcuts").unwrap();
     cx.simulate_click(button.center(), gpui::Modifiers::default());
-    for _ in 0..5 {
+    for _ in 0..6 {
         cx.simulate_keystrokes("tab");
     }
     cx.run_until_parked();

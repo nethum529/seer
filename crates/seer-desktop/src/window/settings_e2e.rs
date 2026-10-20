@@ -287,7 +287,7 @@ fn shortcuts_are_readable_and_settings_keeps_terminal_input(cx: &mut TestAppCont
     cx.simulate_resize(size(px(960.), px(640.)));
     cx.run_until_parked();
     click(cx, "settings-trigger");
-    cx.simulate_keystrokes("shift-tab enter");
+    cx.simulate_keystrokes("shift-tab shift-tab enter");
     cx.run_until_parked();
     let new_label = if cfg!(target_os = "macos") {
         "New terminal: Cmd N"

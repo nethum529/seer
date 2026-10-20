@@ -11,7 +11,7 @@ mod invitation;
 mod local;
 mod panels;
 mod person_menu;
-mod processes;
+pub mod processes;
 mod prompt;
 mod render;
 pub mod rooms;

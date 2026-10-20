@@ -69,13 +69,15 @@ for state in sidebarStates {
     ]
 }
 if appearanceOnly { samples = [] }
+var darkSamples = Set<String>()
 var sampleColors: [String: [Double]] = [:]
 var captureWidths: [String: Double] = [:]
-for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json", "remove-samples.json", "share-all-samples.json"] {
+for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json", "remove-samples.json", "share-all-samples.json", "process-samples.json"] {
     let path = output + "/" + file
     if !FileManager.default.fileExists(atPath: path) { continue }
     let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]
     for row in rows {
+        if row["dark_ink"] as? Bool == true { darkSamples.insert(row["name"] as! String) }
         if let width = row["logical_width"] as? Double { captureWidths[row["capture"] as! String] = width }
         if let color = row["color"] as? [Double] { sampleColors[row["name"] as! String] = color.map { $0 / 255 } }
         let box = row["box"] as! [Double]
@@ -98,6 +100,7 @@ for (capture, name, box, probe) in samples {
                 let mean = channels.reduce(0, +) / 3
                 let reference = (background.redComponent + background.greenComponent + background.blueComponent) / 3
                 let contrast = reference > 0.5 ? reference - mean : mean - reference
+                if darkSamples.contains(name) { return contrast > 8.0 / 255 }
                 if let foreground = sampleColors[name] {
                     let dominant = foreground.indices.max { foreground[$0] < foreground[$1] }!
                     let other = channels.enumerated().filter { $0.offset != dominant }.map { $0.element }.max()!

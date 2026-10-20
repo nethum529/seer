@@ -10,6 +10,7 @@ impl SeerWindow {
         [
             ("settings-appearance", "Appearance", Section::Appearance),
             ("settings-shortcuts", "Shortcuts", Section::Shortcuts),
+            ("settings-processes", "Processes", Section::Processes),
         ]
         .into_iter()
         .enumerate()

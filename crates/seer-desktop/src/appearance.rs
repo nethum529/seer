@@ -18,11 +18,13 @@ impl Global for Glass {}
 pub(crate) enum Section {
     Appearance,
     Shortcuts,
+    Processes,
 }
 
 pub(crate) struct Appearance {
+    pub(crate) processes: crate::window::settings::processes::Processes,
     pub(crate) section: Section,
-    pub(crate) sections: [FocusHandle; 2],
+    pub(crate) sections: [FocusHandle; 3],
     pub(crate) shortcut_focus: Vec<FocusHandle>,
     pub(crate) shortcut_reset: Vec<FocusHandle>,
     pub(crate) shortcut_cancel: FocusHandle,
@@ -78,8 +80,10 @@ impl Appearance {
         let (bindings, shortcut_load_errors) = crate::shortcuts::Bindings::load(&mut settings);
         cx.set_global(bindings);
         let mut appearance = Self {
+            processes: crate::window::settings::processes::Processes::new(cx),
             section: Section::Appearance,
             sections: [
+                cx.focus_handle().tab_stop(true),
                 cx.focus_handle().tab_stop(true),
                 cx.focus_handle().tab_stop(true),
             ],

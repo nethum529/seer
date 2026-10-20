@@ -28,7 +28,7 @@ mod people;
 pub(crate) mod rename;
 mod reveal;
 mod room;
-mod settings;
+pub(crate) mod settings;
 pub(crate) mod sidebar_visibility;
 mod slide;
 mod start;
@@ -228,6 +228,10 @@ impl SeerWindow {
             cx.stop_propagation();
             return;
         }
+        self.focus_key(keystroke, window, cx);
+    }
+
+    fn focus_key(&mut self, keystroke: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
         if self.input.focus.is_focused(window) || self.editing.is_some() || self.menu.is_some() {
             return;
         }
@@ -440,3 +444,12 @@ mod remove_native_e2e;
 mod share_all_fixture;
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod share_all_native_e2e;
+
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+mod processes_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod processes_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod processes_pixel_samples;
