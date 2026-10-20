@@ -165,7 +165,7 @@ pub(crate) fn fill(color: u32, cx: &App) -> gpui::Rgba {
                     .opacity(base + (1. - base) * glass.darkness)
                     .into();
             }
-            crate::palette::RAISED => return gpui::rgba(0x080808f5),
+            crate::palette::HOVER => return gpui::rgb(crate::palette::CHIP_2),
             crate::palette::LINE | crate::palette::LINE_2 => return gpui::rgba(0xffffff12),
             _ => {}
         }
