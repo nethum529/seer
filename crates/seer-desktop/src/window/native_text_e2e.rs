@@ -99,6 +99,12 @@ pub(crate) fn prepare() -> Option<Fixture> {
                     return;
                 }
                 while let Ok(message) = codec::decode::<_, ClientMsg>(&mut socket) {
+                    if std::env::var_os("SHARE_ALL_QA").is_some() {
+                        if super::share_all_fixture::reply(&mut socket, &message).is_err() {
+                            break;
+                        }
+                        continue;
+                    }
                     let reply = match message {
                         ClientMsg::ListPeople => ServerMsg::People {
                             people: {
@@ -387,6 +393,11 @@ async fn exercise_room_qa(
 ) -> bool {
     if std::env::var_os("REMOVE_QA").is_some() {
         super::remove_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        return true;
+    }
+    if std::env::var_os("SHARE_ALL_QA").is_some() {
+        super::share_all_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+            .await;
         return true;
     }
     if std::env::var_os("VERSION_BANNER_QA").is_some() {

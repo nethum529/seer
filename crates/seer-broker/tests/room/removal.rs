@@ -35,9 +35,21 @@ fn departure_stops_live_control(leaving: bool) {
     let mut alice = join_room(room.address, "alice", ALICE_SECRET);
     let mut bob = join_room(room.address, "bob", BOB_SECRET);
     let mut other_bob = join_room(room.address, "bob", BOB_SECRET);
-    send(&mut alice, &ClientMsg::SetAllGrants { can_type: true });
+    send(
+        &mut alice,
+        &ClientMsg::SetAllGrants {
+            can_type: true,
+            request_id: None,
+        },
+    );
     wait_for_grant(&mut bob, true);
-    send(&mut other_bob, &ClientMsg::SetAllGrants { can_type: true });
+    send(
+        &mut other_bob,
+        &ClientMsg::SetAllGrants {
+            can_type: true,
+            request_id: None,
+        },
+    );
     wait_for(&mut other_bob, |m| *m == ServerMsg::GrantsUpdated);
     send(
         &mut bob,

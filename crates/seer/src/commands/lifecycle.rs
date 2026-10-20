@@ -149,7 +149,13 @@ fn wait_for_reply(
 pub(crate) fn perms(can_type: bool) -> Result<(), CommandError> {
     let server = selected_server()?;
     let (mut stream, _) = authenticate(&server)?;
-    send(&mut stream, &ClientMsg::SetAllGrants { can_type })?;
+    send(
+        &mut stream,
+        &ClientMsg::SetAllGrants {
+            can_type,
+            request_id: None,
+        },
+    )?;
     wait_for_completion(&mut stream, |reply| *reply == ServerMsg::GrantsUpdated)?;
     if can_type {
         println!("All current participants can type into your terminals.");

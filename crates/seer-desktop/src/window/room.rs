@@ -10,6 +10,7 @@ use crate::motion::Motion;
 
 mod commands;
 mod paint;
+mod share;
 mod sheet;
 pub(super) use self::paint::saved_row;
 
@@ -43,6 +44,8 @@ struct Menu {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MenuAction {
     Invite,
+    ShareAll,
+    StopSharing,
     Join,
     Room(RoomAction),
 }
@@ -50,6 +53,7 @@ enum MenuAction {
 #[derive(Clone)]
 enum Confirmation {
     Room(RoomAction, Option<Box<RoomSummary>>),
+    ShareAll,
     Terminal { pane: String, program: String },
     Remove { name: String },
 }
@@ -223,7 +227,7 @@ impl SeerWindow {
         window: &mut Window,
         cx: &mut Context<Self>,
     ) {
-        if self.room.pending || !self.room.open() || !self.room.actions().contains(&action) {
+        if self.room.pending || !self.room.open() || !self.room_actions().contains(&action) {
             return;
         }
         self.room.error = None;
@@ -241,6 +245,14 @@ impl SeerWindow {
             MenuAction::Invite => {
                 window.focus(&self.room.focus);
                 self.show_invite(&super::invite::OpenInvite, window, cx);
+                return;
+            }
+            MenuAction::ShareAll => {
+                self.confirm_share_all(keyboard, window, cx);
+                return;
+            }
+            MenuAction::StopSharing => {
+                self.run_all_grants(false, window, cx);
                 return;
             }
             MenuAction::Room(action) => action,

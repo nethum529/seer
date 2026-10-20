@@ -55,7 +55,7 @@ impl SeerWindow {
             Action::RoomMenu => None,
             _ => return,
         };
-        if pick.is_some_and(|action| !self.room.actions().contains(&action)) {
+        if pick.is_some_and(|action| !self.room_actions().contains(&action)) {
             return;
         }
         self.finish_name(true, false, window, cx);
@@ -93,7 +93,7 @@ impl SeerWindow {
 
     fn menu_key(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
         self.keys.mode = Mode::Keyboard;
-        let actions = self.room.actions();
+        let actions = self.room_actions();
         let Some(menu) = &mut self.room.menu else {
             return;
         };

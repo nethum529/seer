@@ -65,11 +65,29 @@ fn bulk_permissions_change_only_the_callers_grants_for_current_people() {
     let room = Room::start(false);
     let mut alice = join_room(room.address, "alice", ALICE_SECRET);
     let mut bob = join_room(room.address, "bob", BOB_SECRET);
-    send(&mut alice, &ClientMsg::SetAllGrants { can_type: true });
+    send(
+        &mut alice,
+        &ClientMsg::SetAllGrants {
+            can_type: true,
+            request_id: None,
+        },
+    );
     wait_for(&mut alice, |m| matches!(m, ServerMsg::GrantsUpdated));
-    send(&mut bob, &ClientMsg::SetAllGrants { can_type: true });
+    send(
+        &mut bob,
+        &ClientMsg::SetAllGrants {
+            can_type: true,
+            request_id: None,
+        },
+    );
     wait_for(&mut bob, |m| matches!(m, ServerMsg::GrantsUpdated));
-    send(&mut bob, &ClientMsg::SetAllGrants { can_type: false });
+    send(
+        &mut bob,
+        &ClientMsg::SetAllGrants {
+            can_type: false,
+            request_id: None,
+        },
+    );
     let revoked = wait_for(&mut bob, |m| {
         matches!(m, ServerMsg::Grants { can_type_here, you_may_type_into }
         if can_type_here.is_empty() && you_may_type_into == &["alice"])

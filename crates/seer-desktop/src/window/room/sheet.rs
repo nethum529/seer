@@ -16,6 +16,10 @@ impl SeerWindow {
                     format!("{name} leaves the room. Their shells keep running on their computer."),
                 )
             }
+            Confirmation::ShareAll => (
+                "Share control with everyone?".into(),
+                "Every person in this room can type into your terminals.".into(),
+            ),
             Confirmation::Terminal { program, .. } => (
                 "Close terminal?".into(),
                 format!(
@@ -29,6 +33,7 @@ impl SeerWindow {
             Confirmation::Room(action, _) => action_label(*action),
             Confirmation::Terminal { .. } => "Close terminal",
             Confirmation::Remove { .. } => "Remove",
+            Confirmation::ShareAll => "Share control",
         };
         let card = menu::sheet("room-confirm", width, cx)
             .p(px(20.))
@@ -92,8 +97,11 @@ impl SeerWindow {
                             },
                             &sheet.confirm,
                             Some(
-                                if matches!(sheet.action, Confirmation::Room(RoomAction::Start, _))
-                                {
+                                if matches!(
+                                    sheet.action,
+                                    Confirmation::Room(RoomAction::Start, _)
+                                        | Confirmation::ShareAll
+                                ) {
                                     palette::ACCENT
                                 } else {
                                     palette::DANGER
@@ -233,6 +241,7 @@ impl SeerWindow {
         match sheet.action.clone() {
             Confirmation::Room(action, _) => self.run_room_action(action, window, cx),
             Confirmation::Remove { name } => self.run_remove(name, window, cx),
+            Confirmation::ShareAll => self.run_all_grants(true, window, cx),
             Confirmation::Terminal { pane, .. } => {
                 self.send_close(&pane, cx);
                 self.close_room_sheet(self.keys.mode == Mode::Keyboard, window, cx);

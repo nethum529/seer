@@ -10,6 +10,7 @@ use crate::link::frames;
 use crate::link::{Messages, Terminal, lock};
 use transport::RoomEvent;
 
+mod control;
 pub(crate) mod transport;
 
 pub(crate) struct Room {
@@ -18,6 +19,11 @@ pub(crate) struct Room {
     you_may_type_into: BTreeSet<String>,
     confirmed: bool,
     pending: Option<(String, bool)>,
+    all_grants: Option<(
+        u64,
+        futures::channel::oneshot::Sender<Result<(), &'static str>>,
+    )>,
+    next_grants_id: u64,
     pub(crate) control_error: Option<&'static str>,
     pub(crate) people: Vec<Person>,
     pub(crate) selected: String,
@@ -52,6 +58,8 @@ impl Room {
             you_may_type_into: BTreeSet::new(),
             confirmed: false,
             pending: None,
+            all_grants: None,
+            next_grants_id: 0,
             control_error: None,
             people: vec![person],
             pane: None,
@@ -98,7 +106,10 @@ impl Room {
     }
 
     pub(crate) fn can_share(&self) -> bool {
-        self.writer.is_some() && self.confirmed && self.pending.is_none()
+        self.writer.is_some()
+            && self.confirmed
+            && self.pending.is_none()
+            && self.all_grants.is_none()
     }
 
     pub(crate) fn share_control(&mut self, user: &str) {
@@ -203,6 +214,7 @@ impl Room {
             | RoomEvent::Stopped
             | RoomEvent::Removed
             | RoomEvent::VersionMismatch(_) => {
+                self.finish_all_grants(Err("Room is offline. Try again."));
                 self.writer = None;
                 self.can_type_here.clear();
                 self.you_may_type_into.clear();
@@ -239,6 +251,9 @@ impl Room {
                 {
                     self.pending = None;
                 }
+            }
+            ServerMsg::AllGrantsResult { request_id, error } => {
+                self.all_grants_reply(request_id, error);
             }
             ServerMsg::Refused { .. } if self.pending.take().is_some() => {
                 self.control_error = Some("Share control was refused.");
