@@ -2,10 +2,18 @@ use seer_core::version::{major_minor, version_mismatch};
 
 /// The two versions in a refusal from a room server of another minor version.
 #[derive(Clone, Debug, Eq, PartialEq)]
-pub(crate) struct VersionRefusal {
-    pub(crate) server: String,
-    pub(crate) client: String,
+pub struct VersionRefusal {
+    pub server: String,
+    pub client: String,
 }
+
+impl std::fmt::Display for VersionRefusal {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter.write_str(&self.advice(false))
+    }
+}
+
+impl std::error::Error for VersionRefusal {}
 
 pub(crate) fn version_refusal(reason: &str) -> Option<VersionRefusal> {
     let (server, client) = version_mismatch(reason)?;

@@ -257,6 +257,10 @@ impl SeerWindow {
             cx.stop_propagation();
             return;
         }
+        if self.version_key(keystroke, window, cx) {
+            cx.stop_propagation();
+            return;
+        }
         if self.input.focus.is_focused(window) || self.editing.is_some() || self.menu.is_some() {
             return;
         }
@@ -266,7 +270,11 @@ impl SeerWindow {
                 Mode::Keyboard
             }
             "tab" if self.keys.tabs.is_focused(window) => {
-                window.focus(&self.input.focus);
+                window.focus(if self.room.version.can_update() {
+                    &self.room.version.focus
+                } else {
+                    &self.input.focus
+                });
                 Mode::Keyboard
             }
             "tab" => {
@@ -283,9 +291,13 @@ impl SeerWindow {
     fn receive(&mut self, event: io::Result<Event>, cx: &mut Context<Self>) {
         let room = matches!(event, Ok(Event::Room(_)));
         match &event {
+            Ok(Event::Room(crate::room::transport::RoomEvent::VersionMismatch(refusal))) => {
+                self.room.version.refused(refusal.clone());
+            }
             Ok(Event::Room(crate::room::transport::RoomEvent::Lost)) => self.room.lost = true,
             Ok(Event::Room(crate::room::transport::RoomEvent::Connected(_))) => {
-                self.room.lost = false
+                self.room.lost = false;
+                self.room.version.connected();
             }
             Ok(Event::Room(crate::room::transport::RoomEvent::Stopped)) => {
                 self.room.lost = false;
@@ -453,3 +465,8 @@ mod legacy_appearance_native_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod banner_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod version_mirror;
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod version_native_e2e;

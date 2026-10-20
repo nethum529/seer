@@ -58,16 +58,24 @@ pub(crate) fn prepare() -> Option<Fixture> {
         println!("native_text_pixels ... ignored (requires a macOS display)");
         return None;
     }
+    let evidence = std::env::var_os("TEXT_PIXEL_EVIDENCE")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|| root.join("captures"));
+    fs::create_dir_all(&evidence).unwrap();
+    let mirror = std::env::var_os("VERSION_BANNER_QA")
+        .map(|_| super::version_mirror::prepare(evidence.clone()));
     // SAFETY: this test entry runs on the main thread before it starts GPUI or any worker thread.
     unsafe {
         std::env::set_var("XDG_CONFIG_HOME", root.join("config"));
         std::env::set_var("XDG_STATE_HOME", root.join("state"));
         std::env::remove_var("SEER_USER_ID");
+        if let Some((url, _)) = &mirror {
+            std::env::set_var("SEER_UPDATE_URL", url);
+        }
     }
-    let evidence = std::env::var_os("TEXT_PIXEL_EVIDENCE")
-        .map(std::path::PathBuf::from)
-        .unwrap_or_else(|| root.join("captures"));
-    fs::create_dir_all(&evidence).unwrap();
+    if let Some((_, start)) = mirror {
+        start();
+    }
     let listener = TcpListener::bind("127.0.0.1:0").unwrap();
     let address = listener.local_addr().unwrap();
     thread::spawn(move || {
@@ -171,6 +179,16 @@ pub(crate) fn exercise(
 ) {
     cx.spawn(async move |cx| {
         let result = std::panic::AssertUnwindSafe(async {
+            if std::env::var_os("VERSION_BANNER_QA").is_some() {
+                super::version_native_e2e::exercise(
+                    window,
+                    &fixture.evidence,
+                    &fixture.capture,
+                    cx,
+                )
+                .await;
+                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
+            }
             if std::env::var_os("BANNER_QA").is_some() {
                 super::banner_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                     .await;

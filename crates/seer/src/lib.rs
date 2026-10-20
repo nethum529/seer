@@ -36,12 +36,27 @@ pub use invitation::{IssuedInvite, create_invite};
 pub use local::attach;
 pub use settings::Settings;
 pub use store::{ServerEntry, ServerStore};
+pub use version_skew::VersionRefusal;
 
 pub fn connect_room(server: &ServerEntry) -> std::io::Result<seer_net::Socket> {
-    let (room, _) =
-        commands::authenticate(server).map_err(|error| std::io::Error::other(error.message))?;
+    let room =
+        match commands::hello(server).map_err(|error| std::io::Error::other(error.message))? {
+            commands::Welcome::Accepted(room, _) => room,
+            commands::Welcome::Refused(reason) => {
+                return Err(match version_skew::version_refusal(&reason) {
+                    Some(refusal) => std::io::Error::other(refusal),
+                    None => std::io::Error::other(format!("refused: {reason}")),
+                });
+            }
+        };
     tui_link::prepare_room(&room)?;
     Ok(room)
+}
+
+pub fn update() -> Result<(), String> {
+    update::update()
+        .map(|_| ())
+        .map_err(|error| error.to_string())
 }
 
 pub fn run() -> ExitCode {

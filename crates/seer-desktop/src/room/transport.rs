@@ -18,6 +18,7 @@ use crate::link::{Event, Messages};
 
 pub(crate) enum RoomEvent {
     Connected(Sender<ClientMsg>),
+    VersionMismatch(seer::VersionRefusal),
     Message(ServerMsg),
     Lost,
     Stopped,
@@ -33,7 +34,17 @@ pub(super) fn start(server: ServerEntry, stopped: Arc<AtomicBool>) -> Messages {
     thread::spawn(move || {
         let mut wait = Duration::from_secs(1);
         while !stopped.load(Ordering::Acquire) && !sender.is_closed() {
-            if let Ok(socket) = seer::connect_room(&server) {
+            let connection = seer::connect_room(&server);
+            if let Err(error) = &connection
+                && let Some(refusal) = error
+                    .get_ref()
+                    .and_then(|error| error.downcast_ref::<seer::VersionRefusal>())
+            {
+                let _ = futures::executor::block_on(
+                    sender.send(Ok(Event::Room(RoomEvent::VersionMismatch(refusal.clone())))),
+                );
+            }
+            if let Ok(socket) = connection {
                 if matches!(read(socket, &mut sender), Ok(Disconnect::Stopped)) {
                     let _ = futures::executor::block_on(
                         sender.send(Ok(Event::Room(RoomEvent::Stopped))),

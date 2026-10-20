@@ -102,9 +102,9 @@ to R-454.
 | seer ps shows your Seer processes on this computer | README Commands, help | No place yet. The command stays. | R-453 |
 | seer ps --clean stops the windows that have no terminal | README Commands, help | No place yet. The command stays. | R-453 |
 | seer ps --stop PID stops one runtime with its shells | README Commands, help | No place yet. The command stays. | R-453 |
-| seer update installs the latest release | README Commands, help | Command only for install: seer update installs the app and CLI from one release under ADR 0011. Reopen the app to use it. R-458 adds the Update action. | R-457, R-458 |
+| seer update installs the latest release | README Commands, help | Version banner Update uses the same installer as seer update, off the UI thread. It shows progress, a retry on failure, and a reopen message on success. | T-541, ADR 0011 |
 | seer restart, or seer restart --yes, restarts your terminals on the installed Seer | help | Command only: seer restart asks before it ends local shells. Opening the app again restores the layout with the installed runtime. ADR 0011 keeps this separate from update. | R-457 |
-| A different version prints a message that tells you to run seer update | README Good to know | No place yet. A banner with an Update action. | R-458 |
+| A different version prints a message that tells you to run seer update | README Good to know | Banner names the room and local versions and offers Update. It takes priority over connection loss. Local terminal input continues. | T-541 |
 | seer help | help | Command only. The help lines about the TUI keys and the top right control go away with the TUI. | none |
 | The install line puts the binaries in ~/.local/bin without sudo | README Install | Placed: the install line adds Seer.app in ~/Applications on macOS, or the Linux app entry and icon, and the CLI in ~/.local/bin. Both register seer links. See ADR 0011. | R-457 |
 
