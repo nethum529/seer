@@ -29,6 +29,9 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                     if view.settings_open() {
                         return view.settings_key(&key, window, cx);
                     }
+                    if view.join_open() {
+                        return false;
+                    }
                     if key.key == "space" && !key.modifiers.control {
                         return false;
                     }

@@ -75,10 +75,10 @@ fn window_commands_open_settings_and_menus_without_shell_input(cx: &mut TestAppC
     cx.simulate_keystrokes("z");
     pump(cx);
     assert_eq!(runtime.input(), b"z", "the shell must keep working");
-    cx.update(|window, cx| {
+    cx.update(|_, cx| {
         view.update(cx, |view, cx| {
             view._messages = None;
-            view.content = Content::Join(cx.new(|cx| crate::join::Join::new(window, cx)));
+            view.content = Content::Start(super::start::StartScreen::new(cx));
             cx.notify();
         });
     });

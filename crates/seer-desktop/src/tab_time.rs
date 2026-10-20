@@ -29,7 +29,7 @@ pub(crate) fn refresh(cx: &mut Context<SeerWindow>) -> Task<()> {
                 .update(cx, |view, cx| {
                     let current: Vec<_> = match &view.content {
                         Content::Terminal(link, _) => link.terminals().iter().map(label).collect(),
-                        Content::Message(_) | Content::Join(_) => Vec::new(),
+                        Content::Message(_) | Content::Start(_) => Vec::new(),
                     };
                     if current != previous {
                         previous = current;

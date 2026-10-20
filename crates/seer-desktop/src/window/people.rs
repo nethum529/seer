@@ -76,7 +76,7 @@ impl SeerWindow {
     ) {
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.select_person(user),
-            Content::Message(_) | Content::Join(_) => Ok(()),
+            Content::Message(_) | Content::Start(_) => Ok(()),
         };
         self.input.reset();
         self.rows = Rows::default();

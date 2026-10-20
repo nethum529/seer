@@ -86,32 +86,27 @@ impl Render for SeerWindow {
                     }))
             })
             .child(top_bar::events(cx));
+        if let Some(join) = &self.join_screen {
+            return root
+                .child(join.clone())
+                .child(self.no_room_controls(window, cx))
+                .children(rooms)
+                .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
+                .children(settings)
+                .children(controls);
+        }
         let (link, name) = match &self.content {
-            Content::Join(join) => {
+            Content::Start(start) => {
                 return root
-                    .child(join.clone())
+                    .child(self.start_screen(start, window, cx))
                     .child(self.no_room_controls(window, cx))
                     .children(rooms)
                     .children(settings)
                     .children(controls);
             }
             Content::Message(message) => {
-                let content = if self.room.server.is_some() {
-                    self.empty_room(message, window, cx)
-                } else {
-                    div()
-                        .size_full()
-                        .flex()
-                        .items_center()
-                        .justify_center()
-                        .p(px(24.))
-                        .text_center()
-                        .text_color(rgb(palette::FAINT))
-                        .child(crate::label::text(message.clone()))
-                        .child(self.no_room_controls(window, cx))
-                };
                 return root
-                    .child(content)
+                    .child(self.message_content(message, window, cx))
                     .children(rooms)
                     .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
                     .children(settings)
@@ -354,6 +349,30 @@ impl Render for SeerWindow {
             .children(self.invite.as_ref().map(|sheet| sheet.view.clone()))
             .children(settings)
             .children(controls)
+    }
+}
+
+impl SeerWindow {
+    fn message_content(
+        &self,
+        message: &SharedString,
+        window: &Window,
+        cx: &mut Context<Self>,
+    ) -> Div {
+        if self.room.server.is_some() {
+            self.empty_room(message, window, cx)
+        } else {
+            div()
+                .size_full()
+                .flex()
+                .items_center()
+                .justify_center()
+                .p(px(24.))
+                .text_center()
+                .text_color(rgb(palette::FAINT))
+                .child(crate::label::text(message.clone()))
+                .child(self.no_room_controls(window, cx))
+        }
     }
 }
 

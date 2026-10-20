@@ -35,6 +35,7 @@ impl SeerWindow {
             || self.room.open()
             || self.room.modal()
             || self.invite.is_some()
+            || self.join_screen.is_some()
             || self.editing.is_some()
             || focused;
         let bar = &mut self.appearance.top_bar;
@@ -58,7 +59,8 @@ impl SeerWindow {
         #[cfg(target_os = "linux")]
         {
             let narrow = _window.viewport_size().width < px(NARROW)
-                && !matches!(self.content, Content::Join(_));
+                && self.join_screen.is_none()
+                && !matches!(self.content, Content::Start(_));
             Some(
                 chrome::window_controls(_opacity)
                     .absolute()

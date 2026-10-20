@@ -32,8 +32,8 @@ impl ServerStore {
         Self::load_from(&store_path()?)
     }
 
-    pub fn server_for_user(&self, user: &str) -> Option<&ServerEntry> {
-        self.servers.iter().find(|server| server.user_id == user)
+    pub fn servers(&self) -> &[ServerEntry] {
+        &self.servers
     }
 
     pub fn default_server(&self) -> Option<&ServerEntry> {

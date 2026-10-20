@@ -179,30 +179,35 @@ pub(crate) fn exercise(
 ) {
     cx.spawn(async move |cx| {
         let result = std::panic::AssertUnwindSafe(async {
-            if std::env::var_os("VERSION_BANNER_QA").is_some() {
-                super::version_native_e2e::exercise(
+            if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some() {
+                super::start_review_native_e2e::exercise(
                     window,
                     &fixture.evidence,
                     &fixture.capture,
                     cx,
                 )
                 .await;
-                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
+                return true;
             }
-            if std::env::var_os("BANNER_QA").is_some() {
-                super::banner_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+            if std::env::var_os("TEXT_PIXEL_START_SCREEN_ONLY").is_some() {
+                super::start_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
                     .await;
-                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
+                return measure(&fixture.capture, &fixture.evidence, "measure");
             }
-            if std::env::var_os("APPEARANCE_LEGACY_QA").is_some() {
-                super::legacy_appearance_native_e2e::exercise(
-                    window,
-                    &fixture._directory.path().join("config/seer/settings.toml"),
-                    &fixture.evidence,
-                    &fixture.capture,
-                    cx,
-                )
+            let server = seer::ServerStore::load()
+                .unwrap()
+                .default_server()
+                .unwrap()
+                .clone();
+            window
+                .update(cx, |view, window, cx| {
+                    view.pick_saved_room(server, window, cx)
+                })
+                .unwrap();
+            cx.background_executor()
+                .timer(Duration::from_millis(900))
                 .await;
+            if exercise_room_qa(window, &fixture, cx).await {
                 return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
             }
             if std::env::var_os("TEXT_PIXEL_START_ROOM_ONLY").is_some() {
@@ -358,10 +363,41 @@ pub(crate) fn exercise(
     .detach();
 }
 
+async fn exercise_room_qa(
+    window: gpui::WindowHandle<crate::window::SeerWindow>,
+    fixture: &Fixture,
+    cx: &mut gpui::AsyncApp,
+) -> bool {
+    if std::env::var_os("VERSION_BANNER_QA").is_some() {
+        super::version_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        return true;
+    }
+    if std::env::var_os("BANNER_QA").is_some() {
+        super::banner_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        return true;
+    }
+    if std::env::var_os("APPEARANCE_LEGACY_QA").is_some() {
+        super::legacy_appearance_native_e2e::exercise(
+            window,
+            &fixture._directory.path().join("config/seer/settings.toml"),
+            &fixture.evidence,
+            &fixture.capture,
+            cx,
+        )
+        .await;
+        return true;
+    }
+    false
+}
+
 pub(crate) fn window_options(
     mut options: gpui::WindowOptions,
     cx: &gpui::App,
 ) -> gpui::WindowOptions {
+    if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some() {
+        // Nonactivating panels can receive native keys while the test app is in the background.
+        options.kind = gpui::WindowKind::PopUp;
+    }
     if let Ok(secondary) = std::env::var("TEXT_PIXEL_SECONDARY") {
         let display = cx
             .displays()

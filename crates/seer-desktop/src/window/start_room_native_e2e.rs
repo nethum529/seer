@@ -1,6 +1,6 @@
 use std::{fs, path::Path, process::Command, time::Duration};
 
-use gpui::{AppContext, FontWeight, Keystroke, WindowHandle, px, size};
+use gpui::{FontWeight, Keystroke, WindowHandle, px, size};
 
 use super::shortcuts_native_e2e::{baseline_probe, text_width};
 
@@ -21,7 +21,7 @@ pub(super) async fn exercise(
             view.room = RoomUi::new(None, cx);
             view.server = None;
             view._messages = None;
-            view.content = Content::Join(cx.new(|cx| crate::join::Join::new(window, cx)));
+            view.content = Content::Start(super::start::StartScreen::new(cx));
             view.room.can_host = true;
             window.focus(&view.room.focus);
             cx.notify();

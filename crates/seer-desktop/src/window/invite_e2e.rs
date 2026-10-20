@@ -56,6 +56,15 @@ fn invite_stays_in_the_attached_room_after_a_cli_join(cx: &mut TestAppContext) {
         crate::assets::load_fonts(cx).unwrap();
         SeerWindow::new(window, cx)
     });
+    cx.run_until_parked();
+    let saved = cx.debug_bounds("saved-room-e2e").unwrap();
+    cx.simulate_click(saved.center(), gpui::Modifiers::default());
+    let deadline = Instant::now() + Duration::from_secs(5);
+    while cx.debug_bounds("terminal").is_none() {
+        cx.run_until_parked();
+        assert!(Instant::now() < deadline, "saved room did not open");
+        thread::sleep(Duration::from_millis(10));
+    }
     cli_join(&room_b);
     cx.simulate_keystrokes("tab");
     cx.dispatch_action(OpenInvite);

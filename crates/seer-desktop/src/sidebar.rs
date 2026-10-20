@@ -1,7 +1,7 @@
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    Context, Div, FocusHandle, Font, FontFeatures, FontWeight, InteractiveElement, KeyDownEvent,
-    MouseButton, ParentElement, Pixels, ScrollHandle, SharedString, Stateful,
+    Bounds, Context, Div, FocusHandle, Font, FontFeatures, FontWeight, InteractiveElement,
+    KeyDownEvent, MouseButton, ParentElement, Pixels, ScrollHandle, SharedString, Stateful,
     StatefulInteractiveElement, Styled, Window, div, point, px, relative, rgb,
 };
 use seer_core::proto::TerminalInfo;
@@ -47,29 +47,32 @@ impl Keys {
         let Some(item) = self.scroll.bounds_for_item(at) else {
             return;
         };
-        let view = self.scroll.bounds();
-        let max = self.scroll.max_offset();
-        let offset = self.scroll.offset();
-        let pad = px(STRIP_PAD);
-        let x = fit(
-            item.left() - pad,
-            item.right() + pad,
-            view.left(),
-            view.right(),
-            offset.x,
-        );
-        let y = fit(
-            item.top(),
-            item.bottom(),
-            view.top(),
-            view.bottom(),
-            offset.y,
-        );
-        self.scroll.set_offset(point(
-            x.clamp(-max.width, px(0.)),
-            y.clamp(-max.height, px(0.)),
-        ));
+        reveal(&self.scroll, item, px(STRIP_PAD));
     }
+}
+
+pub(crate) fn reveal(scroll: &ScrollHandle, item: Bounds<Pixels>, pad: Pixels) {
+    let view = scroll.bounds();
+    let max = scroll.max_offset();
+    let offset = scroll.offset();
+    let x = fit(
+        item.left() - pad,
+        item.right() + pad,
+        view.left(),
+        view.right(),
+        offset.x,
+    );
+    let y = fit(
+        item.top(),
+        item.bottom(),
+        view.top(),
+        view.bottom(),
+        offset.y,
+    );
+    scroll.set_offset(point(
+        x.clamp(-max.width, px(0.)),
+        y.clamp(-max.height, px(0.)),
+    ));
 }
 
 fn fit(start: Pixels, end: Pixels, view_start: Pixels, view_end: Pixels, offset: Pixels) -> Pixels {

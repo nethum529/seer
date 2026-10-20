@@ -134,7 +134,7 @@ impl SeerWindow {
             let title = editing.input.read(cx).text.clone();
             let result = match &mut self.content {
                 Content::Terminal(link, _) => link.rename(&editing.pane, title),
-                Content::Message(_) | Content::Join(_) => Ok(()),
+                Content::Message(_) | Content::Start(_) => Ok(()),
             };
             self.check(result, cx);
         }

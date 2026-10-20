@@ -11,6 +11,7 @@ use crate::motion::Motion;
 mod commands;
 mod paint;
 mod sheet;
+pub(super) use self::paint::saved_row;
 
 pub(super) const STOPPED: &str = "The room is stopped. Open the room menu to restore it.";
 const GUEST_STOPPED: &str = "The host stopped the room";
@@ -19,7 +20,7 @@ pub(super) struct RoomUi {
     pub(super) server: Option<ServerEntry>,
     pub(super) current: Option<RoomSummary>,
     pub(super) can_host: bool,
-    others: Vec<RoomSummary>,
+    pub(super) others: Vec<RoomSummary>,
     pub(super) focus: FocusHandle,
     anchor: Rc<Cell<Bounds<Pixels>>>,
     menu: Option<Menu>,
@@ -41,6 +42,7 @@ struct Menu {
 #[derive(Clone, Copy, PartialEq, Eq)]
 enum MenuAction {
     Invite,
+    Join,
     Room(RoomAction),
 }
 
@@ -79,23 +81,20 @@ impl RoomUi {
     }
 
     fn actions(&self) -> Vec<MenuAction> {
-        let Some(room) = &self.current else {
-            return if self.server.is_none() && self.can_host {
+        let mut actions = match &self.current {
+            None if self.server.is_none() && self.can_host => {
                 vec![MenuAction::Room(RoomAction::Start)]
-            } else {
-                Vec::new()
-            };
-        };
-        if !room.host {
-            vec![MenuAction::Room(RoomAction::Leave)]
-        } else if room.state == RoomState::Unreachable {
-            vec![
+            }
+            None => Vec::new(),
+            Some(room) if !room.host => vec![MenuAction::Room(RoomAction::Leave)],
+            Some(room) if room.state == RoomState::Unreachable => vec![
                 MenuAction::Room(RoomAction::Restore),
                 MenuAction::Room(RoomAction::StartNew),
-            ]
-        } else {
-            vec![MenuAction::Invite, MenuAction::Room(RoomAction::Stop)]
-        }
+            ],
+            Some(_) => vec![MenuAction::Invite, MenuAction::Room(RoomAction::Stop)],
+        };
+        actions.push(MenuAction::Join);
+        actions
     }
 
     pub(super) fn modal(&self) -> bool {
@@ -114,6 +113,7 @@ impl RoomUi {
 impl SeerWindow {
     pub(crate) fn room_blocks_terminal_pointer(&self) -> bool {
         self.appearance.motion.is_some()
+            || self.join_screen.is_some()
             || self.room.menu.is_some()
             || self.room.sheet.is_some()
             || self.people_menu.is_some()
@@ -129,16 +129,19 @@ impl SeerWindow {
     }
 
     pub(super) fn refresh_room(&mut self, cx: &mut Context<Self>) {
-        let Some(server) = self.room.server.clone() else {
+        let server = self.room.server.clone();
+        if server.is_none() && ServerStore::load().is_ok_and(|store| store.servers().is_empty()) {
             return;
-        };
+        }
         let work = cx.background_executor().spawn(async move {
             let mut others = seer::rooms::saved_rooms()?;
-            let current = others
-                .iter()
-                .position(|room| room.server.user_id == server.user_id)
-                .map(|index| others.remove(index))
-                .unwrap_or_else(|| seer::rooms::inspect_room(server));
+            let current = server.map(|server| {
+                others
+                    .iter()
+                    .position(|room| room.server.user_id == server.user_id)
+                    .map(|index| others.remove(index))
+                    .unwrap_or_else(|| seer::rooms::inspect_room(server))
+            });
             Ok::<_, io::Error>((current, others))
         });
         self.room.refresh = Some(cx.spawn(async move |view, cx| {
@@ -146,13 +149,14 @@ impl SeerWindow {
             let _ = view.update(cx, |view, cx| {
                 match result {
                     Ok((mut current, others)) => {
-                        if current.state == RoomState::Unreachable
+                        if let Some(current) = &mut current
+                            && current.state == RoomState::Unreachable
                             && let Some(previous) = &view.room.current
                         {
                             current.host |= previous.host;
                             current.people = previous.people.clone();
                         }
-                        view.room.current = Some(current);
+                        view.room.current = current;
                         view.room.others = others;
                     }
                     Err(error) => view.room.error = Some(error.to_string()),
@@ -227,21 +231,39 @@ impl SeerWindow {
             Mode::Pointer
         };
         self.close_room_menu(keyboard, false, window, cx);
-        let MenuAction::Room(action) = action else {
-            window.focus(&self.room.focus);
-            self.show_invite(&super::invite::OpenInvite, window, cx);
-            return;
+        let action = match action {
+            MenuAction::Join => {
+                self.open_join(None, window, cx);
+                return;
+            }
+            MenuAction::Invite => {
+                window.focus(&self.room.focus);
+                self.show_invite(&super::invite::OpenInvite, window, cx);
+                return;
+            }
+            MenuAction::Room(action) => action,
         };
         if action == RoomAction::Restore {
             self.run_room_action(action, window, cx);
             return;
         }
+        self.confirm_room_action(action, self.room.focus.clone(), keyboard, window, cx);
+    }
+
+    fn confirm_room_action(
+        &mut self,
+        action: RoomAction,
+        return_focus: FocusHandle,
+        keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         let cancel = cx.focus_handle();
         let confirm = cx.focus_handle();
         window.focus(&cancel);
         self.room.sheet = Some(Sheet {
             action: Confirmation::Room(action, self.room.current.clone().map(Box::new)),
-            return_focus: self.room.focus.clone(),
+            return_focus,
             cancel,
             confirm,
             motion: Motion::open(keyboard, 200),
@@ -263,83 +285,6 @@ impl SeerWindow {
         };
         if let Some(sheet) = &self.room.sheet {
             window.focus(&sheet.return_focus);
-        }
-        self.notify_room(cx);
-    }
-
-    pub(crate) fn room_key(
-        &mut self,
-        key: &Keystroke,
-        window: &mut Window,
-        cx: &mut Context<Self>,
-    ) -> bool {
-        if self.room.modal() {
-            self.sheet_key(key, window, cx);
-            return true;
-        }
-        if self.room.sheet.is_some() {
-            return true;
-        }
-        if self.room.open() {
-            self.menu_key(key, window, cx);
-            return true;
-        }
-        if self.room.focus.is_focused(window)
-            && matches!(key.key.as_str(), "enter" | "space" | "up" | "down")
-        {
-            self.open_room(true, window, cx);
-            return true;
-        }
-        false
-    }
-
-    fn menu_key(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
-        self.keys.mode = Mode::Keyboard;
-        let actions = self.room.actions();
-        let Some(menu) = &mut self.room.menu else {
-            return;
-        };
-        let selected = menu
-            .selected
-            .unwrap_or(0)
-            .min(actions.len().saturating_sub(1));
-        match key.key.as_str() {
-            "escape" | "tab" => self.close_room_menu(true, true, window, cx),
-            "enter" | "space" => {
-                if let Some(action) = actions.get(selected) {
-                    self.pick_room_action(*action, true, window, cx);
-                }
-            }
-            "up" | "down" | "home" | "end" => {
-                menu.selected = sidebar::step(&key.key, actions.len(), menu.selected);
-            }
-            _ => {}
-        }
-        self.notify_room(cx);
-    }
-
-    fn sheet_key(&mut self, key: &Keystroke, window: &mut Window, cx: &mut Context<Self>) {
-        self.keys.mode = Mode::Keyboard;
-        let Some(sheet) = &self.room.sheet else {
-            return;
-        };
-        match key.key.as_str() {
-            "escape" => self.close_room_sheet(true, window, cx),
-            "tab" => {
-                window.focus(if sheet.cancel.is_focused(window) {
-                    &sheet.confirm
-                } else {
-                    &sheet.cancel
-                });
-            }
-            "enter" | "space" if !self.room.pending => {
-                if sheet.confirm.is_focused(window) {
-                    self.run_confirmation(window, cx);
-                } else {
-                    self.close_room_sheet(true, window, cx);
-                }
-            }
-            _ => {}
         }
         self.notify_room(cx);
     }
@@ -387,11 +332,12 @@ impl SeerWindow {
                         if action == RoomAction::Restore {
                             view.open_room(view.keys.mode == Mode::Keyboard, window, cx);
                         }
-                        view.room.error = Some(if action == RoomAction::Start {
-                            "Could not start the room. Try again.".into()
-                        } else {
-                            error.to_string()
-                        });
+                        view.room.error =
+                            Some(if action == RoomAction::Start && view.room.can_host {
+                                "Could not start the room. Try again.".into()
+                            } else {
+                                error.to_string()
+                            });
                     }
                 }
                 view.notify_room(cx);
@@ -421,7 +367,7 @@ impl SeerWindow {
                 }
             }
             RoomAction::Leave => {
-                self.content = Content::Message(NO_ROOM.into());
+                self.content = Content::Start(super::start::StartScreen::new(cx));
                 self._messages = None;
                 self.server = None;
                 self.room.server = None;

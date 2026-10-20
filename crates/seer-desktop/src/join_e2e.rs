@@ -41,6 +41,10 @@ fn join_accepts_invite_lines_and_selects_the_system_name(cx: &mut TestAppContext
         crate::assets::load_fonts(cx).unwrap();
         SeerWindow::new(window, cx)
     });
+    cx.run_until_parked();
+    let join = cx.debug_bounds("start-join").unwrap();
+    cx.simulate_click(join.center(), gpui::Modifiers::default());
+    cx.run_until_parked();
     assert!(cx.debug_bounds("join-field").is_some());
     cx.simulate_input("bad invite");
     cx.simulate_keystrokes("enter");
