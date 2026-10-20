@@ -7,9 +7,7 @@ use std::time::{Duration, Instant};
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use seer_net::{Session, Socket, Stream};
 
-use crate::server::{
-    BrokerState, Handshake, INVALID_CREDENTIALS, authenticate, read_message, refuse,
-};
+use crate::server::{BrokerState, Handshake, authenticate, read_message, refuse};
 
 const HANDSHAKE_TIMEOUT: Duration = Duration::from_secs(5);
 
@@ -37,6 +35,8 @@ pub(crate) fn serve_runtime(
     generation: &str,
     session: Option<Session>,
 ) -> io::Result<()> {
+    let membership = broker.membership()?;
+    broker.require_member(user_id)?;
     let registration = match broker
         .runtimes()
         .publish(user_id, generation, stream.clone())
@@ -44,6 +44,7 @@ pub(crate) fn serve_runtime(
         Ok(registration) => registration,
         Err(error) => return refuse(&mut stream, &error.to_string()),
     };
+    drop(membership);
     // Every path after the registration must retire it. A runtime that is
     // left published locks that person out of the room for good.
     seer_core::debug_log!("runtime published user={user_id} generation={generation}");
@@ -124,12 +125,8 @@ pub(crate) fn claim_runtime_stream(
     credential: &str,
     token: &str,
 ) -> io::Result<()> {
-    if broker
-        .registry()
-        .authenticate(user_id, credential)?
-        .is_none()
-    {
-        return refuse(stream, INVALID_CREDENTIALS);
+    if authenticate(stream, broker.registry(), user_id, credential)?.is_none() {
+        return Ok(());
     }
     stream.set_read_timeout(None)?;
     if broker.runtimes().deliver(user_id, token, stream.clone()) {

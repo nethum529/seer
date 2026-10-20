@@ -55,8 +55,10 @@ impl<'a> Coordinator<'a> {
         let (event_sender, events) = mpsc::sync_channel(64);
         let reader = client.clone();
         let client = Arc::new(Mutex::new(Box::new(client) as Box<dyn Stream>));
+        let membership = broker.membership()?;
         let mut initial = lock_writer(&client)?;
         let attachment = broker.attach_client(&owner.user_id, Arc::clone(&client))?;
+        drop(membership);
         let client_id = attachment.client_id().to_owned();
         codec::encode(
             &mut *initial,
@@ -182,9 +184,23 @@ impl<'a> Coordinator<'a> {
     }
 
     fn client_event(&mut self, message: ClientMsg) -> io::Result<bool> {
+        if self
+            .broker
+            .registry()
+            .person(&self.owner.user_id)?
+            .is_none()
+        {
+            return Ok(true);
+        }
         match message {
+            ClientMsg::RemovePerson { name } => {
+                self.broker.remove_person(&self.owner.user_id, &name)?;
+                self.write(&ServerMsg::PersonRemoved { name })?;
+                Ok(false)
+            }
             ClientMsg::Stop => {
-                self.broker.require_host(&self.owner.user_id)?;
+                self.broker
+                    .require_host(&self.owner.user_id, "stop the server")?;
                 self.write(&ServerMsg::Bye {
                     reason: "server stopped".into(),
                 })?;

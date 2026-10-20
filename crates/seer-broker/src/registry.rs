@@ -1,3 +1,4 @@
+use std::collections::BTreeMap;
 use std::fs::{self, File, OpenOptions, Permissions};
 use std::io::{self, BufReader, BufWriter, Write};
 use std::os::unix::fs::{OpenOptionsExt, PermissionsExt};
@@ -36,6 +37,8 @@ struct SeatRecord {
 struct RegistryData {
     people: Vec<PersonRecord>,
     seats: Vec<SeatRecord>,
+    #[serde(default)]
+    removed: BTreeMap<String, String>,
 }
 
 pub(crate) struct Registry {
@@ -86,6 +89,7 @@ impl Registry {
             RegistryData {
                 people: load_json(&people_path)?,
                 seats: load_json(&seats_path)?,
+                ..RegistryData::default()
             }
         };
         let owner_identity = if data.people.is_empty() {
@@ -129,15 +133,24 @@ impl Registry {
         &self,
         user_id: &str,
         credential: &str,
-    ) -> io::Result<Option<PersonRecord>> {
+    ) -> io::Result<Result<PersonRecord, &'static str>> {
         let supplied_hash = credential_hash(credential);
         let data = self.lock()?;
-        Ok(data
-            .people
-            .iter()
-            .find(|person| person.user_id == user_id)
-            .filter(|person| hashes_equal(&person.credential_hash, &supplied_hash))
-            .cloned())
+        if let Some(person) = data.people.iter().find(|person| {
+            person.user_id == user_id && hashes_equal(&person.credential_hash, &supplied_hash)
+        }) {
+            return Ok(Ok(person.clone()));
+        }
+        let reason = if data
+            .removed
+            .get(user_id)
+            .is_some_and(|hash| hashes_equal(hash, &supplied_hash))
+        {
+            "The host removed you from this room. Ask the host for a new invite."
+        } else {
+            "invalid credentials"
+        };
+        Ok(Err(reason))
     }
 
     pub(crate) fn people(&self) -> io::Result<Vec<PersonRecord>> {
@@ -153,9 +166,15 @@ impl Registry {
             .cloned())
     }
 
-    pub(crate) fn remove_person(&self, user_id: &str) -> io::Result<()> {
+    pub(crate) fn remove_person(&self, user_id: &str, removed_by_host: bool) -> io::Result<()> {
         let mut data = self.lock()?;
         let mut next = data.clone();
+        if removed_by_host
+            && let Some(person) = next.people.iter().find(|person| person.user_id == user_id)
+        {
+            next.removed
+                .insert(user_id.to_owned(), person.credential_hash.clone());
+        }
         next.people.retain(|person| person.user_id != user_id);
         write_json_atomically(&self.state_dir.join(REGISTRY_FILE), &next)?;
         *data = next;

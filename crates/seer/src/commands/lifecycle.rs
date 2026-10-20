@@ -7,6 +7,23 @@ use crate::version_skew::{VersionRefusal, version_refusal};
 use seer_core::proto::{ClientMsg, ServerMsg};
 use std::io;
 
+pub(crate) fn remove(person: &str) -> Result<(), CommandError> {
+    let server = selected_server()?;
+    let (mut stream, _) = authenticate(&server)?;
+    send(
+        &mut stream,
+        &ClientMsg::RemovePerson {
+            name: person.to_owned(),
+        },
+    )?;
+    wait_for_completion(
+        &mut stream,
+        |reply| matches!(reply, ServerMsg::PersonRemoved { name } if name == person),
+    )?;
+    println!("Removed {person} from the room.");
+    Ok(())
+}
+
 pub(crate) fn leave() -> Result<(), CommandError> {
     leave_room(&selected_server()?)
 }

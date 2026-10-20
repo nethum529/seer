@@ -19,6 +19,7 @@ ureq = { version = "2.12", default-features = false, features = ["tls"] }
 
 [dev-dependencies]
 libc = "0.2"
+sha2 = "0.10"
 
 [[bin]]
 name = "seer-broker"

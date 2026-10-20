@@ -89,6 +89,7 @@ impl UserSession {
             | ClientMsg::MouseInto { .. }
             | ClientMsg::TypeInto { .. }
             | ClientMsg::InputInto { .. }
+            | ClientMsg::RemovePerson { .. }
             | ClientMsg::Stop
             | ClientMsg::Leave
             | ClientMsg::Detach => Ok(Vec::new()),

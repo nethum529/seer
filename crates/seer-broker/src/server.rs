@@ -25,7 +25,6 @@ const STATUS_INTERVAL: Duration = Duration::from_secs(1);
 const STATUS_TIMEOUT: Duration = Duration::from_millis(500);
 const ACTIVE_LIMIT_SECS: u64 = 60;
 const IDLE_LIMIT_SECS: u64 = 600;
-pub(crate) const INVALID_CREDENTIALS: &str = "invalid credentials";
 const EXPECTED_HELLO: &str = "expected Hello";
 const INVALID_MESSAGE: &str = "invalid message";
 
@@ -58,6 +57,7 @@ mod lifecycle;
 pub(crate) struct BrokerState {
     stopping: std::sync::atomic::AtomicBool,
     registry: Registry,
+    membership: Mutex<()>,
     pub(crate) grants: crate::grants::Grants,
     runtimes: RuntimeManager,
     attachments: Attachments,
@@ -78,6 +78,7 @@ impl BrokerState {
                 stopping: std::sync::atomic::AtomicBool::new(false),
                 grants: crate::grants::Grants::open(&config.state_dir, &registry.people()?)?,
                 registry,
+                membership: Mutex::new(()),
                 runtimes,
                 attachments: Attachments::default(),
                 published,
@@ -209,22 +210,6 @@ impl BrokerState {
                 .send_to_user(&person.user_id, &self.grants.message(&person.user_id)?)?;
         }
         Ok(())
-    }
-
-    pub(crate) fn attach_client(
-        &self,
-        user_id: &str,
-        writer: ClientWriter,
-    ) -> io::Result<AttachmentGuard<'_>> {
-        self.attachments.attach(user_id, writer)
-    }
-
-    pub(crate) fn clients(&self, user_id: &str, excluded: &str) -> io::Result<Vec<ClientInfo>> {
-        self.attachments.clients(user_id, excluded)
-    }
-
-    pub(crate) fn detach_client(&self, user_id: &str, client_id: &str) -> io::Result<bool> {
-        self.attachments.detach_client(user_id, client_id)
     }
 }
 
@@ -411,10 +396,10 @@ pub(crate) fn authenticate<S: Stream>(
     user_id: &str,
     credential: &str,
 ) -> io::Result<Option<PersonRecord>> {
-    let Some(person) = registry.authenticate(user_id, credential)? else {
-        return refuse(stream, INVALID_CREDENTIALS).map(|()| None);
-    };
-    Ok(Some(person))
+    match registry.authenticate(user_id, credential)? {
+        Ok(person) => Ok(Some(person)),
+        Err(reason) => refuse(stream, reason).map(|()| None),
+    }
 }
 
 fn join<S: Stream>(
