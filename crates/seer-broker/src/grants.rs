@@ -22,9 +22,15 @@ impl Grants {
         let directory = directory.join("grants");
         std::fs::create_dir_all(&directory)?;
         let mut owners = BTreeMap::new();
+        let members: BTreeSet<_> = people.iter().map(|person| &person.user_id).collect();
         for person in people {
-            let users: BTreeSet<String> =
-                load_json(&directory.join(format!("{}.json", person.user_id)))?;
+            let path = directory.join(format!("{}.json", person.user_id));
+            let mut users: BTreeSet<String> = load_json(&path)?;
+            let saved_count = users.len();
+            users.retain(|user| members.contains(user));
+            if users.len() != saved_count {
+                write_json_atomically(&path, &users)?;
+            }
             owners.insert(
                 person.user_id.clone(),
                 users
@@ -60,16 +66,17 @@ impl Grants {
             .filter(|(owner, users)| owner.as_str() == user || users.contains_key(user))
             .map(|(owner, _)| owner.clone())
             .collect();
+        let mut result = Ok(());
         for owner in owners {
-            self.update(&owner, |users| {
+            result = result.and(self.update(&owner, |users| {
                 if owner == user {
                     users.clear();
                 } else {
                     users.remove(user);
                 }
-            })?;
+            }));
         }
-        Ok(())
+        result
     }
 
     pub(crate) fn permits(&self, owner: &str, user: &str) -> io::Result<bool> {
@@ -89,22 +96,28 @@ impl Grants {
         let grants = owners.entry(owner.to_owned()).or_default();
         let mut users = grants.keys().cloned().collect();
         change(&mut users);
-        write_json_atomically(&self.directory.join(format!("{owner}.json")), &users)?;
+        let mut result =
+            write_json_atomically(&self.directory.join(format!("{owner}.json")), &users);
         let mut cancelled = Vec::new();
         for (user, grant) in grants.iter() {
             if !users.contains(user) {
-                cancelled.extend(grant.revoke()?);
+                match grant.revoke() {
+                    Ok(streams) => cancelled.extend(streams),
+                    Err(error) => result = result.and(Err(error)),
+                }
             }
         }
         grants.retain(|user, _| users.contains(user));
-        for user in users {
-            grants
-                .entry(user)
-                .or_insert_with(|| Arc::new(Permit::default()));
+        if result.is_ok() {
+            for user in users {
+                grants
+                    .entry(user)
+                    .or_insert_with(|| Arc::new(Permit::default()));
+            }
         }
         drop(owners);
         permit::cancel(cancelled);
-        Ok(())
+        result
     }
 
     pub(crate) fn message(&self, user: &str) -> io::Result<ServerMsg> {

@@ -142,6 +142,14 @@ pub(super) fn pending_viewer(
     publisher: &mut TcpStream,
     address: std::net::SocketAddr,
 ) -> TcpStream {
+    pending_request(publisher, address, ClientMsg::ObserveRuntime)
+}
+
+pub(super) fn pending_request(
+    publisher: &mut TcpStream,
+    address: std::net::SocketAddr,
+    request: ClientMsg,
+) -> TcpStream {
     loop {
         let ServerMsg::OpenStream { token } = decode(publisher) else {
             continue;
@@ -156,10 +164,7 @@ pub(super) fn pending_viewer(
                 token,
             },
         );
-        if matches!(
-            codec::decode::<_, ClientMsg>(&mut stream).unwrap(),
-            ClientMsg::ObserveRuntime
-        ) {
+        if codec::decode::<_, ClientMsg>(&mut stream).unwrap() == request {
             stream.set_read_timeout(None).unwrap();
             return stream;
         }

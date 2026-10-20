@@ -101,10 +101,6 @@ impl RoomAction {
     }
 }
 
-pub fn remove_person(server: &ServerEntry, person: &str) -> io::Result<()> {
-    commands::remove_person(server, person).map_err(command_error)
-}
-
 fn command_error(error: commands::CommandError) -> io::Error {
     io::Error::other(error.message)
 }

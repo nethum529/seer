@@ -12,6 +12,8 @@ mod backpressure;
 mod binary;
 #[path = "room/reconnect.rs"]
 mod reconnect;
+#[path = "room/removal.rs"]
+mod removal;
 #[path = "room/revocation.rs"]
 mod revocation;
 mod room;

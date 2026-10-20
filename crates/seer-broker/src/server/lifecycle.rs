@@ -57,10 +57,9 @@ impl BrokerState {
 
     pub(crate) fn leave(&self, user_id: &str, caller: &str) -> io::Result<()> {
         let membership = self.membership()?;
-        self.depart(user_id, caller, false)?;
+        let result = self.depart(user_id, caller, false);
         drop(membership);
-        self.publish_grants()?;
-        self.publish_people()
+        result.and(self.publish_grants()).and(self.publish_people())
     }
 
     pub(crate) fn remove_person(&self, host: &str, name: &str) -> io::Result<()> {
@@ -80,20 +79,21 @@ impl BrokerState {
                 "You cannot remove the host.",
             ));
         }
-        self.depart(&person.user_id, "", true)?;
+        let result = self.depart(&person.user_id, "", true);
         drop(membership);
-        self.publish_grants()?;
-        self.publish_people()
+        result.and(self.publish_grants()).and(self.publish_people())
     }
 
     fn depart(&self, user_id: &str, caller: &str, removed_by_host: bool) -> io::Result<()> {
         self.registry.remove_person(user_id, removed_by_host)?;
-        self.grants.remove_person(user_id)?;
-        self.runtimes.remove(user_id)?;
-        for client in self.attachments.clients(user_id, caller)? {
-            let _ = self.attachments.detach_client(user_id, &client.client_id);
-        }
-        Ok(())
+        let grants = self.grants.remove_person(user_id);
+        let runtime = self.runtimes.remove(user_id);
+        let attachments = self.attachments.clients(user_id, caller).map(|clients| {
+            for client in clients {
+                let _ = self.attachments.detach_client(user_id, &client.client_id);
+            }
+        });
+        grants.and(runtime).and(attachments)
     }
 
     pub(crate) fn require_host(&self, user_id: &str, action: &str) -> io::Result<()> {
