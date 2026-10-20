@@ -184,7 +184,7 @@ fn snapshot(capture: &Path, evidence: &Path, name: &str) {
     );
 }
 
-fn capture_level(window: &gpui::Window) {
+pub(super) fn capture_level(window: &gpui::Window) {
     use objc2::{msg_send, runtime::AnyObject};
     use raw_window_handle::{HasWindowHandle, RawWindowHandle};
     let RawWindowHandle::AppKit(handle) = HasWindowHandle::window_handle(window).unwrap().as_raw()
@@ -195,5 +195,6 @@ fn capture_level(window: &gpui::Window) {
     unsafe {
         let native: *mut AnyObject = msg_send![handle.ns_view.as_ptr().cast::<AnyObject>(), window];
         let _: () = msg_send![native, setLevel: 0isize];
+        let _: () = msg_send![native, setAcceptsMouseMovedEvents: true];
     }
 }

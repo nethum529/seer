@@ -118,6 +118,10 @@ impl Chord {
     }
 
     fn label(&self, platform: Platform) -> String {
+        self.labels(platform).join(" ")
+    }
+
+    fn labels(&self, platform: Platform) -> Vec<String> {
         let mut parts = Vec::new();
         for (flag, name) in [
             (CTRL, "Ctrl"),
@@ -146,7 +150,7 @@ impl Chord {
                 })
             }
         });
-        parts.join(" ")
+        parts
     }
 }
 

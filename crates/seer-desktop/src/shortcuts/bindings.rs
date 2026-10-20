@@ -165,6 +165,14 @@ impl Shortcut {
         }
     }
 
+    pub(crate) fn key_caps(&self, cx: &App) -> Vec<Vec<String>> {
+        let platform = Platform::current();
+        self.effective(platform, cx)
+            .iter()
+            .map(|chord| chord.labels(platform))
+            .collect()
+    }
+
     pub(crate) fn changed(&self, cx: &App) -> bool {
         cx.try_global::<Bindings>()
             .is_some_and(|bindings| bindings.0.contains_key(&self.action))
