@@ -171,6 +171,11 @@ pub(crate) fn exercise(
 ) {
     cx.spawn(async move |cx| {
         let result = std::panic::AssertUnwindSafe(async {
+            if std::env::var_os("BANNER_QA").is_some() {
+                super::banner_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+                    .await;
+                return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
+            }
             if std::env::var_os("APPEARANCE_LEGACY_QA").is_some() {
                 super::legacy_appearance_native_e2e::exercise(
                     window,

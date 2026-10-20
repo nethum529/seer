@@ -13,6 +13,7 @@ mod paint;
 mod sheet;
 
 pub(super) const STOPPED: &str = "The room is stopped. Open the room menu to restore it.";
+const GUEST_STOPPED: &str = "The host stopped the room";
 
 pub(super) struct RoomUi {
     pub(super) server: Option<ServerEntry>,
@@ -23,7 +24,8 @@ pub(super) struct RoomUi {
     anchor: Rc<Cell<Bounds<Pixels>>>,
     menu: Option<Menu>,
     sheet: Option<Sheet>,
-    pending: bool,
+    pub(super) pending: bool,
+    pub(super) lost: bool,
     error: Option<String>,
     refresh: Option<Task<()>>,
     action: Option<Task<()>>,
@@ -67,6 +69,7 @@ impl RoomUi {
             menu: None,
             sheet: None,
             pending: false,
+            lost: false,
             error: None,
             refresh: None,
             action: None,
@@ -395,7 +398,7 @@ impl SeerWindow {
         self.notify_room(cx);
     }
 
-    fn room_action_done(
+    pub(super) fn room_action_done(
         &mut self,
         action: RoomAction,
         opened: Option<(Opened, RoomSummary)>,
@@ -408,7 +411,8 @@ impl SeerWindow {
         self.input.reset();
         match action {
             RoomAction::Stop => {
-                self.content = Content::Message(STOPPED.into());
+                let host = self.room.current.as_ref().is_some_and(|room| room.host);
+                self.content = Content::Message(if host { STOPPED } else { GUEST_STOPPED }.into());
                 self._messages = None;
                 if let Some(room) = &mut self.room.current {
                     room.state = RoomState::Unreachable;
@@ -467,3 +471,7 @@ impl SeerWindow {
         }
     }
 }
+
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+#[path = "banner_e2e.rs"]
+mod banner_e2e;

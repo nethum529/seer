@@ -254,8 +254,9 @@ impl SeerWindow {
                     .p(px(24.))
                     .text_center()
                     .text_color(rgb(palette::FAINT))
-                    .child(if message.as_ref() == STOPPED {
+                    .child(if matches!(message.as_ref(), STOPPED | GUEST_STOPPED) {
                         div()
+                            .debug_selector(|| "stopped-room".into())
                             .flex()
                             .flex_col()
                             .gap(px(4.))
@@ -263,9 +264,15 @@ impl SeerWindow {
                                 div()
                                     .text_color(rgb(palette::TEXT_2))
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child(crate::label::text("The room is stopped")),
+                                    .child(crate::label::text(if message.as_ref() == STOPPED {
+                                        "The room is stopped"
+                                    } else {
+                                        GUEST_STOPPED
+                                    })),
                             )
-                            .child(crate::label::text("Open the room menu to restore it."))
+                            .when(message.as_ref() == STOPPED, |body| {
+                                body.child(crate::label::text("Open the room menu to restore it."))
+                            })
                     } else {
                         div().child(crate::label::text(message.clone()))
                     }),

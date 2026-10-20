@@ -20,6 +20,12 @@ pub(crate) enum RoomEvent {
     Connected(Sender<ClientMsg>),
     Message(ServerMsg),
     Lost,
+    Stopped,
+}
+
+enum Disconnect {
+    Lost,
+    Stopped,
 }
 
 pub(super) fn start(server: ServerEntry, stopped: Arc<AtomicBool>) -> Messages {
@@ -28,7 +34,12 @@ pub(super) fn start(server: ServerEntry, stopped: Arc<AtomicBool>) -> Messages {
         let mut wait = Duration::from_secs(1);
         while !stopped.load(Ordering::Acquire) && !sender.is_closed() {
             if let Ok(socket) = seer::connect_room(&server) {
-                let _ = read(socket, &mut sender);
+                if matches!(read(socket, &mut sender), Ok(Disconnect::Stopped)) {
+                    let _ = futures::executor::block_on(
+                        sender.send(Ok(Event::Room(RoomEvent::Stopped))),
+                    );
+                    break;
+                }
                 wait = Duration::from_secs(1);
             }
             if futures::executor::block_on(sender.send(Ok(Event::Room(RoomEvent::Lost)))).is_err() {
@@ -41,7 +52,7 @@ pub(super) fn start(server: ServerEntry, stopped: Arc<AtomicBool>) -> Messages {
     Box::pin(messages)
 }
 
-fn read(mut socket: Socket, sender: &mut EventSender<io::Result<Event>>) -> io::Result<()> {
+fn read(mut socket: Socket, sender: &mut EventSender<io::Result<Event>>) -> io::Result<Disconnect> {
     let (requests, outgoing) = mpsc::channel();
     let mut writer = socket.clone();
     thread::spawn(move || {
@@ -56,8 +67,12 @@ fn read(mut socket: Socket, sender: &mut EventSender<io::Result<Event>>) -> io::
         .map_err(|_| io::Error::other("window closed"))?;
     loop {
         let message: ServerMsg = codec::decode(&mut socket)?;
-        if matches!(message, ServerMsg::Bye { .. }) {
-            return Ok(());
+        if let ServerMsg::Bye { reason } = message {
+            return Ok(if reason == "server stopped" {
+                Disconnect::Stopped
+            } else {
+                Disconnect::Lost
+            });
         }
         futures::executor::block_on(sender.send(Ok(Event::Room(RoomEvent::Message(message)))))
             .map_err(|_| io::Error::other("window closed"))?;

@@ -19,6 +19,7 @@ use crate::sidebar::{self, Keys, Mode};
 use crate::tab_time;
 use crate::tip;
 
+mod banner;
 mod commands;
 mod invite;
 mod join;
@@ -281,6 +282,17 @@ impl SeerWindow {
 
     fn receive(&mut self, event: io::Result<Event>, cx: &mut Context<Self>) {
         let room = matches!(event, Ok(Event::Room(_)));
+        match &event {
+            Ok(Event::Room(crate::room::transport::RoomEvent::Lost)) => self.room.lost = true,
+            Ok(Event::Room(crate::room::transport::RoomEvent::Connected(_))) => {
+                self.room.lost = false
+            }
+            Ok(Event::Room(crate::room::transport::RoomEvent::Stopped)) => {
+                self.room.lost = false;
+                self.room_action_done(seer::rooms::RoomAction::Stop, None, cx);
+            }
+            _ => {}
+        }
         #[cfg(target_os = "macos")]
         let echo = matches!(event, Ok(Event::Screen)) && self.input.waiting_echo;
         #[cfg(target_os = "macos")]
@@ -438,3 +450,6 @@ mod appearance_pixel_samples;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod legacy_appearance_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod banner_native_e2e;
