@@ -64,3 +64,92 @@ fn settle(cx: &mut VisualTestContext) {
     });
     pump(cx);
 }
+
+#[gpui::test]
+fn popups_pin_only_their_top_bar_triggers(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    std::fs::write(
+        runtime.directory.path().join("settings.toml"),
+        "glass = false\nhide_top_bar = true\n",
+    )
+    .unwrap();
+    let (view, cx) = open_view(&runtime, cx);
+    for width in [960., 600.] {
+        cx.simulate_resize(size(px(width), px(640.)));
+        cx.simulate_mouse_move(point(px(400.), px(200.)), None, Modifiers::default());
+        cx.run_until_parked();
+        for (trigger, popup) in [
+            ("settings-trigger", "settings-dialog"),
+            ("room-trigger", "room-menu"),
+        ] {
+            if width < 720. {
+                cx.simulate_mouse_move(point(px(400.), px(10.)), None, Modifiers::default());
+                cx.run_until_parked();
+            }
+            let button = cx.debug_bounds(trigger).unwrap();
+            cx.simulate_click(button.center(), Modifiers::default());
+            cx.simulate_mouse_move(point(px(400.), px(200.)), None, Modifiers::default());
+            cx.run_until_parked();
+            assert!(
+                cx.debug_bounds(popup).is_some(),
+                "{popup} must open at width {width}"
+            );
+            assert_eq!(
+                opacity(&view, cx),
+                if width < 720. { 1. } else { 0. },
+                "{trigger} must pin only when its button is in the top bar"
+            );
+            cx.simulate_mouse_move(point(px(400.), px(10.)), None, Modifiers::default());
+            cx.run_until_parked();
+            assert_eq!(
+                opacity(&view, cx),
+                1.,
+                "hover must reveal the bar through {popup}"
+            );
+            cx.simulate_keystrokes("escape");
+            cx.simulate_mouse_move(point(px(400.), px(200.)), None, Modifiers::default());
+            cx.run_until_parked();
+        }
+    }
+}
+
+#[gpui::test]
+fn shell_menu_does_not_reveal_the_top_bar(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    std::fs::write(
+        runtime.directory.path().join("settings.toml"),
+        "glass = false\nhide_top_bar = true\n",
+    )
+    .unwrap();
+    let (view, cx) = open_view(&runtime, cx);
+    for width in [960., 600.] {
+        cx.simulate_resize(size(px(width), px(640.)));
+        cx.simulate_mouse_move(point(px(400.), px(200.)), None, Modifiers::default());
+        cx.run_until_parked();
+        cx.update(|window, cx| {
+            view.update(cx, |view, cx| {
+                let super::Content::Terminal(link, _) = &view.content else {
+                    panic!("terminal must be open")
+                };
+                let pane = link.shown().unwrap().to_owned();
+                let surface = if width < 720. {
+                    super::rename::Surface::Strip
+                } else {
+                    super::rename::Surface::Tab
+                };
+                view.name_menu(&pane, surface, point(px(60.), px(108.)), window, cx);
+            });
+        });
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("name-menu").is_some());
+        assert_eq!(opacity(&view, cx), 0.);
+        cx.simulate_keystrokes("escape");
+        cx.run_until_parked();
+    }
+}
+
+fn opacity(view: &gpui::Entity<super::SeerWindow>, cx: &mut VisualTestContext) -> f32 {
+    std::thread::sleep(std::time::Duration::from_millis(320));
+    cx.run_until_parked();
+    cx.update(|window, cx| view.update(cx, |view, cx| view.top_bar_opacity(window, cx)))
+}
