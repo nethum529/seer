@@ -127,12 +127,11 @@ impl SeerWindow {
                 )))
             })
             .children(self.room.others.iter().map(|room| room_row(room, false)))
-            .when(!self.room.actions().is_empty(), |menu| {
+            .when(!self.room_actions().is_empty(), |menu| {
                 menu.child(menu::separator())
             })
             .children(
-                self.room
-                    .actions()
+                self.room_actions()
                     .into_iter()
                     .enumerate()
                     .map(|(index, action)| {
@@ -162,12 +161,16 @@ impl SeerWindow {
                             .child(crate::label::text(match action {
                                 MenuAction::Invite => "Invite a person",
                                 MenuAction::Join => "Join a room",
+                                MenuAction::ShareAll => "Share control with everyone",
+                                MenuAction::StopSharing => "Stop sharing control",
                                 MenuAction::Room(action) => action_label(action),
                             }))
                     }),
             )
             .children(self.room.error.as_ref().map(|error| {
+                let label = error.clone();
                 div()
+                    .debug_selector(move || label.clone())
                     .p(px(8.))
                     .text_size(px(12.))
                     .text_color(rgb(palette::DANGER))
@@ -397,6 +400,8 @@ fn action_icon(action: MenuAction) -> &'static str {
     match action {
         MenuAction::Invite => "invite",
         MenuAction::Join => "invite",
+        MenuAction::ShareAll => "check",
+        MenuAction::StopSharing => "lock",
         MenuAction::Room(RoomAction::Start) => "fresh",
         MenuAction::Room(RoomAction::Stop) => "stop",
         MenuAction::Room(RoomAction::Leave) => "leave",
@@ -409,6 +414,8 @@ fn action_id(action: MenuAction) -> &'static str {
     match action {
         MenuAction::Invite => "room-invite",
         MenuAction::Join => "room-join",
+        MenuAction::ShareAll => "room-share-all",
+        MenuAction::StopSharing => "room-stop-sharing",
         MenuAction::Room(RoomAction::Start) => "room-start",
         MenuAction::Room(RoomAction::Stop) => "room-stop",
         MenuAction::Room(RoomAction::Leave) => "room-leave",
@@ -421,6 +428,8 @@ fn action_color(action: MenuAction) -> u32 {
     if matches!(
         action,
         MenuAction::Invite
+            | MenuAction::ShareAll
+            | MenuAction::StopSharing
             | MenuAction::Join
             | MenuAction::Room(RoomAction::Start | RoomAction::Restore)
     ) {

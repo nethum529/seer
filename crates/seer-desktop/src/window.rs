@@ -357,6 +357,8 @@ mod invite_e2e;
 #[cfg(all(test, not(feature = "native-text-e2e")))]
 mod room_invite_e2e;
 #[cfg(all(test, not(feature = "native-text-e2e")))]
+mod share_all_e2e;
+#[cfg(all(test, not(feature = "native-text-e2e")))]
 mod watch_e2e;
 
 #[cfg(all(test, not(feature = "native-text-e2e")))]
@@ -434,3 +436,7 @@ mod remove_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod remove_native_e2e;
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod share_all_fixture;
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod share_all_native_e2e;

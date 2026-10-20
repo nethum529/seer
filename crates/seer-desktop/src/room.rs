@@ -10,6 +10,7 @@ use crate::link::frames;
 use crate::link::{Messages, Terminal, lock};
 use transport::RoomEvent;
 
+mod control;
 pub(crate) mod transport;
 
 pub(crate) struct Room {
@@ -18,6 +19,7 @@ pub(crate) struct Room {
     you_may_type_into: BTreeSet<String>,
     confirmed: bool,
     pending: Option<(String, bool)>,
+    all_grants: Option<futures::channel::oneshot::Sender<Result<(), &'static str>>>,
     pub(crate) control_error: Option<&'static str>,
     pub(crate) people: Vec<Person>,
     pub(crate) selected: String,
@@ -52,6 +54,7 @@ impl Room {
             you_may_type_into: BTreeSet::new(),
             confirmed: false,
             pending: None,
+            all_grants: None,
             control_error: None,
             people: vec![person],
             pane: None,
@@ -98,7 +101,10 @@ impl Room {
     }
 
     pub(crate) fn can_share(&self) -> bool {
-        self.writer.is_some() && self.confirmed && self.pending.is_none()
+        self.writer.is_some()
+            && self.confirmed
+            && self.pending.is_none()
+            && self.all_grants.is_none()
     }
 
     pub(crate) fn share_control(&mut self, user: &str) {
@@ -203,6 +209,7 @@ impl Room {
             | RoomEvent::Stopped
             | RoomEvent::Removed
             | RoomEvent::VersionMismatch(_) => {
+                self.finish_all_grants(Err("Room is offline. Try again."));
                 self.writer = None;
                 self.can_type_here.clear();
                 self.you_may_type_into.clear();
@@ -239,6 +246,10 @@ impl Room {
                 {
                     self.pending = None;
                 }
+            }
+            ServerMsg::GrantsUpdated => self.finish_all_grants(Ok(())),
+            ServerMsg::Refused { .. } if self.all_grants.is_some() => {
+                self.finish_all_grants(Err("Share control was refused. Try again."));
             }
             ServerMsg::Refused { .. } if self.pending.take().is_some() => {
                 self.control_error = Some("Share control was refused.");
