@@ -179,6 +179,16 @@ pub(crate) fn exercise(
 ) {
     cx.spawn(async move |cx| {
         let result = std::panic::AssertUnwindSafe(async {
+            if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some() {
+                super::start_review_native_e2e::exercise(
+                    window,
+                    &fixture.evidence,
+                    &fixture.capture,
+                    cx,
+                )
+                .await;
+                return true;
+            }
             if std::env::var_os("VERSION_BANNER_QA").is_some() {
                 super::version_native_e2e::exercise(
                     window,
@@ -380,6 +390,10 @@ pub(crate) fn window_options(
     mut options: gpui::WindowOptions,
     cx: &gpui::App,
 ) -> gpui::WindowOptions {
+    if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some() {
+        // Nonactivating panels can receive native keys while the test app is in the background.
+        options.kind = gpui::WindowKind::PopUp;
+    }
     if let Ok(secondary) = std::env::var("TEXT_PIXEL_SECONDARY") {
         let display = cx
             .displays()

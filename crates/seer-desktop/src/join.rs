@@ -245,6 +245,7 @@ impl Render for Join {
                         .child(crate::label::text(error_text(error, window)))
                 }))
                 .child(actions),
+            None,
             window,
             cx,
         )
@@ -327,6 +328,7 @@ pub(crate) fn button(
 pub(crate) fn layout(
     title: &'static str,
     content: impl IntoElement,
+    scroll: Option<&gpui::ScrollHandle>,
     window: &Window,
     cx: &gpui::App,
 ) -> gpui::Div {
@@ -341,14 +343,16 @@ pub(crate) fn layout(
                 .flex_1()
                 .min_h_0()
                 .overflow_y_scroll()
+                .when_some(scroll, |area, scroll| area.track_scroll(scroll))
                 .px(px(24.))
                 .flex()
                 .justify_center()
+                .items_start()
                 .child(
                     div()
                         .w(px(360.))
                         .max_w_full()
-                        .mt(px((f32::from(window.viewport_size().height) - 44.) * 0.32))
+                        .pt(px((f32::from(window.viewport_size().height) - 44.) * 0.32))
                         .pb(px(24.))
                         .child(
                             div()

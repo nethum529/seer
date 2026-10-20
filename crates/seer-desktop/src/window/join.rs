@@ -11,13 +11,17 @@ use crate::{
 };
 
 impl SeerWindow {
+    pub(crate) fn join_open(&self) -> bool {
+        self.join_screen.is_some()
+    }
+
     pub(super) fn join_travel(
         &self,
         key: &gpui::Keystroke,
         window: &mut Window,
         cx: &mut Context<Self>,
     ) -> bool {
-        if self.join_screen.is_none() {
+        if !self.join_open() {
             return false;
         }
         if key.key == "escape" {

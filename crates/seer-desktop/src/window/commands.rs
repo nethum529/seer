@@ -10,7 +10,7 @@ impl SeerWindow {
         match shortcuts::action(Scope::Window, key, cx) {
             Some(Action::Settings) => self.open_settings(true, window, cx),
             Some(Action::PersonMenu) => {
-                if self.join_screen.is_none()
+                if !self.join_open()
                     && matches!(self.content, Content::Terminal(..))
                     && !self.room.modal()
                 {

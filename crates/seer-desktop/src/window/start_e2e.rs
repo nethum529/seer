@@ -140,6 +140,69 @@ fn room_menu_join_and_back_keep_the_terminal(cx: &mut TestAppContext) {
     assert!(cx.debug_bounds("terminal").is_some());
 }
 
+#[gpui::test]
+fn tab_keeps_each_saved_room_visible(cx: &mut TestAppContext) {
+    if std::env::var_os("SEER_START_SCROLL_CHILD").is_none() {
+        let directory = tempfile::tempdir().unwrap();
+        let output = Command::new(std::env::current_exe().unwrap())
+            .args([
+                "--exact",
+                "window::start_e2e::tab_keeps_each_saved_room_visible",
+            ])
+            .env("SEER_START_SCROLL_CHILD", "1")
+            .env("XDG_CONFIG_HOME", directory.path().join("config"))
+            .env("XDG_STATE_HOME", directory.path().join("state"))
+            .output()
+            .unwrap();
+        assert!(
+            output.status.success(),
+            "{}{}",
+            String::from_utf8_lossy(&output.stdout),
+            String::from_utf8_lossy(&output.stderr)
+        );
+        return;
+    }
+    let config =
+        std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap()).join("seer");
+    fs::create_dir_all(&config).unwrap();
+    let rooms: String = (1..=20).map(|at| format!("[[servers]]\nendpoint = '127.0.0.1:{at}'\nalias = 'Room {at:02}'\nuser_id = 'room-{at}'\nname = 'Host'\ncredential = 'fixture'\ncurrent = {}\n", at == 1)).collect();
+    fs::write(config.join("servers.toml"), rooms).unwrap();
+    for (width, height) in [(960., 640.), (320., 480.)] {
+        let (_, cx) = cx.add_window_view(|window, cx| {
+            crate::assets::load_fonts(cx).unwrap();
+            SeerWindow::new(window, cx)
+        });
+        cx.simulate_resize(gpui::size(gpui::px(width), gpui::px(height)));
+        cx.run_until_parked();
+        cx.simulate_keystrokes("tab");
+        for at in 1..=20 {
+            cx.simulate_keystrokes("tab");
+            cx.run_until_parked();
+            let row = cx
+                .debug_bounds(format!("saved-room-room-{at}").leak())
+                .unwrap();
+            assert!(
+                row.top() >= gpui::px(44.) && row.bottom() <= gpui::px(height),
+                "Room {at} and its ring must be fully visible at {width}x{height}: {row:?}"
+            );
+        }
+        for at in (1..20).rev() {
+            cx.simulate_keystrokes("shift-tab");
+            cx.run_until_parked();
+            let row = cx
+                .debug_bounds(format!("saved-room-room-{at}").leak())
+                .unwrap();
+            assert!(
+                row.top() >= gpui::px(44.) && row.bottom() <= gpui::px(height),
+                "Reverse Tab must reveal Room {at}: {row:?}"
+            );
+        }
+        cx.simulate_keystrokes("shift-tab shift-tab");
+        cx.run_until_parked();
+        assert!(cx.debug_bounds("start-room").unwrap().top() >= gpui::px(44.));
+    }
+}
+
 fn click(cx: &mut VisualTestContext, selector: &'static str) {
     let bounds = cx
         .debug_bounds(selector)

@@ -1,4 +1,5 @@
-use gpui::{FocusHandle, StatefulInteractiveElement};
+use gpui::{Bounds, FocusHandle, Pixels, StatefulInteractiveElement};
+use std::{cell::RefCell, rc::Rc};
 
 use super::*;
 
@@ -6,6 +7,8 @@ pub(crate) struct StartScreen {
     pub(super) host: FocusHandle,
     join: FocusHandle,
     pub(super) saved: Vec<(ServerEntry, FocusHandle)>,
+    scroll: ScrollHandle,
+    bounds: Rc<RefCell<Vec<Bounds<Pixels>>>>,
 }
 
 impl StartScreen {
@@ -16,6 +19,8 @@ impl StartScreen {
         Self {
             host: cx.focus_handle().tab_stop(true),
             join: cx.focus_handle().tab_stop(true),
+            scroll: ScrollHandle::new(),
+            bounds: Rc::default(),
             saved: servers
                 .into_iter()
                 .map(|server| (server, cx.focus_handle().tab_stop(true)))
@@ -57,29 +62,41 @@ impl SeerWindow {
                 )
                 .on_click(cx.listener(|view, _, window, cx| view.open_join(None, window, cx))),
             );
+        let bounds = start.bounds.clone();
+        let scroll = start.scroll.clone();
         crate::join::layout(
             "Seer",
             div().child(actions).when(!start.saved.is_empty(), |body| {
-                body.child(div().mt(px(24.)).flex().flex_col().gap(px(2.)).children(
-                    start.saved.iter().map(|(server, focus)| {
-                        let server = server.clone();
-                        let up = self.room.others.iter().any(|room| {
-                            room.server.user_id == server.user_id
-                                && room.state != seer::rooms::RoomState::Unreachable
-                        });
-                        room::saved_row(&server, up)
-                            .relative()
-                            .track_focus(focus)
-                            .hover(|row| row.bg(rgb(palette::HOVER)))
-                            .when(focus.is_focused(window), |row| {
-                                row.child(sidebar::outline())
-                            })
-                            .on_click(cx.listener(move |view, _, window, cx| {
-                                view.pick_saved_room(server.clone(), window, cx)
-                            }))
-                    }),
-                ))
+                body.child(
+                    div()
+                        .mt(px(24.))
+                        .flex()
+                        .flex_col()
+                        .gap(px(2.))
+                        .on_children_prepainted(move |rows, _, _| {
+                            *bounds.borrow_mut() =
+                                rows.into_iter().map(|row| row - scroll.offset()).collect();
+                        })
+                        .children(start.saved.iter().map(|(server, focus)| {
+                            let server = server.clone();
+                            let up = self.room.others.iter().any(|room| {
+                                room.server.user_id == server.user_id
+                                    && room.state != seer::rooms::RoomState::Unreachable
+                            });
+                            room::saved_row(&server, up)
+                                .relative()
+                                .track_focus(focus)
+                                .hover(|row| row.bg(rgb(palette::HOVER)))
+                                .when(focus.is_focused(window), |row| {
+                                    row.child(sidebar::outline())
+                                })
+                                .on_click(cx.listener(move |view, _, window, cx| {
+                                    view.pick_saved_room(server.clone(), window, cx)
+                                }))
+                        })),
+                )
             }),
+            Some(&start.scroll),
             window,
             cx,
         )
@@ -94,6 +111,28 @@ impl SeerWindow {
         let Content::Start(start) = &self.content else {
             return false;
         };
+        if key.key == "tab" {
+            if key.modifiers.shift {
+                window.focus_prev();
+            } else {
+                window.focus_next();
+            }
+            if let Some(at) = start
+                .saved
+                .iter()
+                .position(|(_, focus)| focus.is_focused(window))
+            {
+                if let Some(bounds) = start.bounds.borrow().get(at) {
+                    sidebar::reveal(&start.scroll, *bounds, px(0.));
+                }
+            } else if start.host.is_focused(window) || start.join.is_focused(window) {
+                start.scroll.set_offset(gpui::Point::default());
+            }
+            self.keys.mode = Mode::Keyboard;
+            cx.stop_propagation();
+            cx.notify();
+            return true;
+        }
         if matches!(key.key.as_str(), "enter" | "space") {
             if start.host.is_focused(window) {
                 self.start_room(window, cx);
