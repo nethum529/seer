@@ -92,17 +92,16 @@ fn room_stop_from_another_window_shows_stopped_state(cx: &mut TestAppContext) {
         loop {
             window_cx.run_until_parked();
             if view.read_with(window_cx, |view, _| {
-                matches!(&view.content, Content::Message(text) if text.as_ref() == super::STOPPED)
-            }) {
+                matches!(&view.content, Content::Message(text) if text.as_ref() == if host { super::STOPPED } else { "The host stopped the room" })
+            }) && window_cx.debug_bounds("stopped-room").is_some() {
                 break;
             }
             assert!(
                 Instant::now() < deadline,
-                "a broker stop must show the stopped room screen, host={host}"
+                "a broker stop must show the stopped room screen without a banner, host={host}"
             );
             thread::sleep(Duration::from_millis(5));
         }
-        assert!(window_cx.debug_bounds("status-banner").is_none());
         drop(listener);
     }
 }

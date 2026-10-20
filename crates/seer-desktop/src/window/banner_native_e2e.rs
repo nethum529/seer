@@ -22,6 +22,7 @@ pub(super) async fn exercise(
         ("banner-narrow", 680., true),
         ("banner-small", 320., true),
         ("stopped", 960., false),
+        ("guest-stopped", 960., false),
     ] {
         handle
             .update(cx, |view, window, cx| {
@@ -36,7 +37,8 @@ pub(super) async fn exercise(
                         cx,
                     );
                 }
-                if name == "stopped" {
+                if name.ends_with("stopped") {
+                    view.room.current.as_mut().unwrap().host = name == "stopped";
                     view.receive(Ok(Event::Room(RoomEvent::Stopped)), cx);
                 }
                 assert!(
@@ -52,6 +54,12 @@ pub(super) async fn exercise(
             let scale = window.scale_factor();
             println!("{name}: native scale {scale}, width {width}");
             let normal = FontWeight::NORMAL;
+            if name == "guest-stopped" {
+                let text = "The host stopped the room";
+                let weight = FontWeight::MEDIUM;
+                let x = 604. - text_width(window, text, 13., weight) / 2.;
+                samples.push(serde_json::json!({"capture":name,"name":"Guest stopped","logical_width":width,"box":[x,333.,text_width(window,"T",13.,weight).floor(),18.],"probe":baseline_probe(window,text,x,13.,weight)}));
+            }
             if name == "banner" {
                 for (label, text, x, y, height, weight) in [
                     ("Banner", "Cannot reach the room. Shells on this computer still run.", 260., 44., 34., normal),
