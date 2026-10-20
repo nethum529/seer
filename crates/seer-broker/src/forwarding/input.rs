@@ -6,7 +6,10 @@ impl Coordinator<'_> {
             ClientMsg::MouseInto { user, pane, mouse } => self.mouse_into(&user, &pane, mouse),
             ClientMsg::TypeInto { user, pane, bytes } => self.type_into(&user, &pane, bytes),
             ClientMsg::InputInto { user, pane, input } => self.input_into(&user, &pane, input),
-            ClientMsg::SetAllGrants { can_type } => self.set_all_grants(can_type),
+            ClientMsg::SetAllGrants {
+                can_type,
+                request_id,
+            } => self.all_grants_reply(can_type, request_id),
             ClientMsg::SetGrant { user, can_type } => self.set_grant(&user, can_type),
             _ => Err(io::Error::other("unsupported control message")),
         }
@@ -32,7 +35,20 @@ impl Coordinator<'_> {
         })
     }
 
-    pub(super) fn set_all_grants(&self, can_type: bool) -> io::Result<()> {
+    fn all_grants_reply(&self, can_type: bool, request_id: Option<u64>) -> io::Result<()> {
+        let result = self.set_all_grants(can_type);
+        if let Some(request_id) = request_id {
+            self.write(&ServerMsg::AllGrantsResult {
+                request_id,
+                error: result.err().map(|error| error.to_string()),
+            })
+        } else {
+            result?;
+            self.write(&ServerMsg::GrantsUpdated)
+        }
+    }
+
+    fn set_all_grants(&self, can_type: bool) -> io::Result<()> {
         let membership = self.broker.membership()?;
         self.broker.require_member(&self.owner.user_id)?;
         let users = if can_type {
@@ -48,8 +64,7 @@ impl Coordinator<'_> {
         };
         self.broker.grants.set_all(&self.owner.user_id, users)?;
         drop(membership);
-        self.broker.publish_grants()?;
-        self.write(&ServerMsg::GrantsUpdated)
+        self.broker.publish_grants()
     }
 
     pub(super) fn set_grant(&self, user: &str, can_type: bool) -> io::Result<()> {

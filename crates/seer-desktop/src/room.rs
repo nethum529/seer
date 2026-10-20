@@ -19,7 +19,11 @@ pub(crate) struct Room {
     you_may_type_into: BTreeSet<String>,
     confirmed: bool,
     pending: Option<(String, bool)>,
-    all_grants: Option<futures::channel::oneshot::Sender<Result<(), &'static str>>>,
+    all_grants: Option<(
+        u64,
+        futures::channel::oneshot::Sender<Result<(), &'static str>>,
+    )>,
+    next_grants_id: u64,
     pub(crate) control_error: Option<&'static str>,
     pub(crate) people: Vec<Person>,
     pub(crate) selected: String,
@@ -55,6 +59,7 @@ impl Room {
             confirmed: false,
             pending: None,
             all_grants: None,
+            next_grants_id: 0,
             control_error: None,
             people: vec![person],
             pane: None,
@@ -247,9 +252,8 @@ impl Room {
                     self.pending = None;
                 }
             }
-            ServerMsg::GrantsUpdated => self.finish_all_grants(Ok(())),
-            ServerMsg::Refused { .. } if self.all_grants.is_some() => {
-                self.finish_all_grants(Err("Share control was refused. Try again."));
+            ServerMsg::AllGrantsResult { request_id, error } => {
+                self.all_grants_reply(request_id, error);
             }
             ServerMsg::Refused { .. } if self.pending.take().is_some() => {
                 self.control_error = Some("Share control was refused.");

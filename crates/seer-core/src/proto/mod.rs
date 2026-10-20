@@ -152,6 +152,8 @@ pub enum ClientMsg {
     },
     SetAllGrants {
         can_type: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        request_id: Option<u64>,
     },
     SetGrant {
         user: String,
@@ -174,6 +176,10 @@ pub enum ServerMsg {
         programs: Option<Vec<String>>,
     },
     GrantsUpdated,
+    AllGrantsResult {
+        request_id: u64,
+        error: Option<String>,
+    },
     Terminals {
         user: String,
         terminals: Vec<TerminalInfo>,

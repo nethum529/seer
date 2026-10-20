@@ -87,16 +87,13 @@ pub fn client_summary(message: &ClientMsg) -> String {
         ClientMsg::RuntimeStream { user_id, .. } => format!("RuntimeStream user={user_id}"),
         ClientMsg::QueryTargets { user } => format!("QueryTargets user={user}"),
         ClientMsg::Terminals { user } => format!("Terminals user={user}"),
-        ClientMsg::TypeInto { user, pane, bytes } => {
-            format!("TypeInto user={user} pane={pane} bytes={}", bytes.len())
-        }
         ClientMsg::Stop => "Stop".to_owned(),
         ClientMsg::Leave => "Leave".to_owned(),
         ClientMsg::RemovePerson { name } => format!("RemovePerson name={name}"),
-        ClientMsg::SetAllGrants { can_type } => format!("SetAllGrants can_type={can_type}"),
-        ClientMsg::MouseInto { user, pane, mouse } => {
-            format!("MouseInto user={user} pane={pane} kind={:?}", mouse.kind)
-        }
+        ClientMsg::SetAllGrants {
+            can_type,
+            request_id,
+        } => format!("SetAllGrants can_type={can_type} request_id={request_id:?}"),
         ClientMsg::SetGrant { user, can_type } => {
             format!("SetGrant user={user} can_type={can_type}")
         }
@@ -111,6 +108,12 @@ pub fn client_summary(message: &ClientMsg) -> String {
 
 fn terminal_summary(message: &ClientMsg) -> String {
     match message {
+        ClientMsg::MouseInto { user, pane, mouse } => {
+            format!("MouseInto user={user} pane={pane} kind={:?}", mouse.kind)
+        }
+        ClientMsg::TypeInto { user, pane, bytes } => {
+            format!("TypeInto user={user} pane={pane} bytes={}", bytes.len())
+        }
         ClientMsg::InputInto { user, pane, input } => format!(
             "InputInto user={user} pane={pane} event={}",
             input_summary(&input.event)
@@ -188,6 +191,10 @@ pub fn server_summary(message: &ServerMsg) -> String {
             )
         }
         ServerMsg::GrantsUpdated => "GrantsUpdated".to_owned(),
+        ServerMsg::AllGrantsResult { request_id, error } => format!(
+            "AllGrantsResult request_id={request_id} refused={}",
+            error.is_some()
+        ),
         ServerMsg::Terminals { user, terminals } => terminals_summary(user, terminals),
         ServerMsg::Presence {
             user,
@@ -224,6 +231,14 @@ pub fn server_summary(message: &ServerMsg) -> String {
         ServerMsg::Targets { targets } => format!("Targets count={}", targets.len()),
         ServerMsg::Refused { reason } => format!("Refused reason={reason}"),
         ServerMsg::Bye { reason } => format!("Bye reason={reason}"),
+        ServerMsg::OpenStream { .. } => "OpenStream".to_owned(),
+        ServerMsg::PersonRemoved { name } => format!("PersonRemoved name={name}"),
+        _ => server_frame_summary(message),
+    }
+}
+
+fn server_frame_summary(message: &ServerMsg) -> String {
+    match message {
         ServerMsg::Tree { tree } => {
             let tabs: usize = tree.workspaces.iter().map(|w| w.tabs.len()).sum();
             let panes: usize = tree
@@ -254,8 +269,7 @@ pub fn server_summary(message: &ServerMsg) -> String {
             diff.shift,
             diff.cells.len()
         ),
-        ServerMsg::OpenStream { .. } => "OpenStream".to_owned(),
-        ServerMsg::PersonRemoved { name } => format!("PersonRemoved name={name}"),
+        _ => "ServerMsg".to_owned(),
     }
 }
 

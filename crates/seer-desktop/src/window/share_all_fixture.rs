@@ -36,7 +36,10 @@ pub(super) fn reply(socket: &mut TcpStream, message: &ClientMsg) -> io::Result<(
                 },
             )
         }
-        ClientMsg::SetAllGrants { can_type } => {
+        ClientMsg::SetAllGrants {
+            can_type,
+            request_id: Some(request_id),
+        } => {
             println!("native room received SetAllGrants can_type={can_type}");
             codec::encode(
                 socket,
@@ -49,7 +52,13 @@ pub(super) fn reply(socket: &mut TcpStream, message: &ClientMsg) -> io::Result<(
                     you_may_type_into: Vec::new(),
                 },
             )?;
-            codec::encode(socket, &ServerMsg::GrantsUpdated)
+            codec::encode(
+                socket,
+                &ServerMsg::AllGrantsResult {
+                    request_id: *request_id,
+                    error: None,
+                },
+            )
         }
         _ => Ok(()),
     }

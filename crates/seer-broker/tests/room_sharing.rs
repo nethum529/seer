@@ -429,8 +429,22 @@ fn shared_terminal_events_follow_confirmed_grants_and_revocation() {
     wait_for_grant(&mut bob, true);
     codec::encode(&mut bob, &input).expect("granted input");
     wait_for_capture(&capture, b"shared451");
-    send(&mut alice, &ClientMsg::SetAllGrants { can_type: false });
-    wait_for(&mut alice, |m| *m == ServerMsg::GrantsUpdated);
+    send(
+        &mut alice,
+        &ClientMsg::SetAllGrants {
+            can_type: false,
+            request_id: Some(11),
+        },
+    );
+    wait_for(&mut alice, |m| {
+        matches!(
+            m,
+            ServerMsg::AllGrantsResult {
+                request_id: 11,
+                error: None
+            }
+        )
+    });
     wait_for(
         &mut other_alice,
         |m| matches!(m, ServerMsg::Grants { can_type_here, .. } if can_type_here.is_empty()),
@@ -442,8 +456,22 @@ fn shared_terminal_events_follow_confirmed_grants_and_revocation() {
         std::fs::read(&capture).expect("input capture"),
         b"shared451"
     );
-    send(&mut alice, &ClientMsg::SetAllGrants { can_type: true });
-    wait_for(&mut alice, |m| *m == ServerMsg::GrantsUpdated);
+    send(
+        &mut alice,
+        &ClientMsg::SetAllGrants {
+            can_type: true,
+            request_id: Some(12),
+        },
+    );
+    wait_for(&mut alice, |m| {
+        matches!(
+            m,
+            ServerMsg::AllGrantsResult {
+                request_id: 12,
+                error: None
+            }
+        )
+    });
     wait_for_grant(&mut bob, true);
     codec::encode(&mut bob, &input).expect("all granted input");
     wait_for_capture(&capture, b"shared451shared451");
