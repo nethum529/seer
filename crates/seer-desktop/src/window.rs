@@ -287,6 +287,10 @@ impl SeerWindow {
             Ok(Event::Room(crate::room::transport::RoomEvent::Connected(_))) => {
                 self.room.lost = false
             }
+            Ok(Event::Room(crate::room::transport::RoomEvent::Stopped)) => {
+                self.room.lost = false;
+                self.room_action_done(seer::rooms::RoomAction::Stop, None, cx);
+            }
             _ => {}
         }
         #[cfg(target_os = "macos")]

@@ -397,7 +397,7 @@ impl SeerWindow {
         self.notify_room(cx);
     }
 
-    fn room_action_done(
+    pub(super) fn room_action_done(
         &mut self,
         action: RoomAction,
         opened: Option<(Opened, RoomSummary)>,

@@ -3,7 +3,7 @@ use std::{fs, path::Path, process::Command, time::Duration};
 use gpui::{FontWeight, WindowHandle, px, size};
 
 use super::{
-    Content, SeerWindow,
+    SeerWindow,
     shortcuts_native_e2e::{baseline_probe, text_width},
 };
 use crate::{link::Event, room::transport::RoomEvent};
@@ -37,9 +37,7 @@ pub(super) async fn exercise(
                     );
                 }
                 if name == "stopped" {
-                    view._messages = None;
-                    view.content = Content::Message(super::room::STOPPED.into());
-                    cx.notify();
+                    view.receive(Ok(Event::Room(RoomEvent::Stopped)), cx);
                 }
                 assert!(
                     view.input.focus.is_focused(window),

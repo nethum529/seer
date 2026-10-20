@@ -24,23 +24,7 @@ use crate::window::{
 fn room_drop_keeps_local_input_and_recovers_without_action(cx: &mut TestAppContext) {
     let room = Room::start();
     let runtime = Runtime::start();
-    let (view, cx) = open_view(&runtime, cx);
-    let mut messages = view.update(cx, |view, _| {
-        let Content::Terminal(link, _) = &mut view.content else {
-            panic!("terminal missing")
-        };
-        link.join_room(room.server.clone(), None)
-    });
-    let listener = cx.spawn({
-        let view = view.clone();
-        async move |mut cx| {
-            while let Some(event) = messages.next().await {
-                view.update(&mut cx, |view, cx| view.receive(event, cx))
-                    .unwrap();
-            }
-        }
-    });
-    wait(cx, || room.connected.load(Ordering::Acquire));
+    let (view, cx, listener) = join(&room, &runtime, cx);
     for width in [960., 680., 320.] {
         cx.simulate_resize(size(px(width), px(640.)));
         cx.run_until_parked();
@@ -91,32 +75,65 @@ fn room_drop_keeps_local_input_and_recovers_without_action(cx: &mut TestAppConte
             thread::sleep(Duration::from_millis(5));
         }
     }
-    let normal_top = cx.debug_bounds("terminal").unwrap().top();
-    view.update(cx, |view, cx| {
-        view.room.pending = true;
-        view.receive(
-            Ok(crate::link::Event::Room(
-                crate::room::transport::RoomEvent::Lost,
-            )),
-            cx,
-        );
-    });
-    cx.run_until_parked();
-    assert_eq!(
-        cx.debug_bounds("terminal").unwrap().top(),
-        normal_top,
-        "an intentional stop must not flash a lost connection banner"
-    );
-    view.update(cx, |view, cx| {
-        view.room.pending = false;
-        view.room_action_done(seer::rooms::RoomAction::Stop, None, cx);
-        cx.notify();
-    });
-    cx.run_until_parked();
-    view.read_with(cx, |view, _| {
-        assert!(matches!(&view.content, Content::Message(text) if text.as_ref() == super::STOPPED))
-    });
     drop(listener);
+}
+
+#[gpui::test]
+fn room_stop_from_another_window_shows_stopped_state(cx: &mut TestAppContext) {
+    for host in [false, true] {
+        let room = Room::start();
+        let runtime = Runtime::start();
+        let (view, window_cx, listener) = join(&room, &runtime, cx);
+        view.update(window_cx, |view, _| {
+            view.room.current.as_mut().unwrap().host = host;
+        });
+        room.stop.store(true, Ordering::Release);
+        let deadline = Instant::now() + Duration::from_secs(2);
+        loop {
+            window_cx.run_until_parked();
+            if view.read_with(window_cx, |view, _| {
+                matches!(&view.content, Content::Message(text) if text.as_ref() == super::STOPPED)
+            }) {
+                break;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "a broker stop must show the stopped room screen, host={host}"
+            );
+            thread::sleep(Duration::from_millis(5));
+        }
+        assert!(window_cx.debug_bounds("status-banner").is_none());
+        drop(listener);
+    }
+}
+
+fn join<'a>(
+    room: &Room,
+    runtime: &Runtime,
+    cx: &'a mut TestAppContext,
+) -> (
+    gpui::Entity<super::SeerWindow>,
+    &'a mut VisualTestContext,
+    gpui::Task<()>,
+) {
+    let (view, cx) = open_view(runtime, cx);
+    let mut messages = view.update(cx, |view, _| {
+        let Content::Terminal(link, _) = &mut view.content else {
+            panic!("terminal missing")
+        };
+        link.join_room(room.server.clone(), None)
+    });
+    let listener = cx.spawn({
+        let view = view.clone();
+        async move |mut cx| {
+            while let Some(event) = messages.next().await {
+                view.update(&mut cx, |view, cx| view.receive(event, cx))
+                    .unwrap();
+            }
+        }
+    });
+    wait(cx, || room.connected.load(Ordering::Acquire));
+    (view, cx, listener)
 }
 
 fn wait(cx: &mut VisualTestContext, ready: impl Fn() -> bool) {
@@ -136,6 +153,7 @@ struct Room {
     online: Arc<AtomicBool>,
     connected: Arc<AtomicBool>,
     done: Arc<AtomicBool>,
+    stop: Arc<AtomicBool>,
     worker: Option<thread::JoinHandle<()>>,
 }
 
@@ -147,6 +165,8 @@ impl Room {
         let online = Arc::new(AtomicBool::new(true));
         let connected = Arc::new(AtomicBool::new(false));
         let done = Arc::new(AtomicBool::new(false));
+        let stop = Arc::new(AtomicBool::new(false));
+        let stopping = stop.clone();
         let (up, joined, stopped) = (online.clone(), connected.clone(), done.clone());
         let worker = thread::spawn(move || {
             while !stopped.load(Ordering::Acquire) {
@@ -177,8 +197,23 @@ impl Room {
                     continue;
                 }
                 joined.store(true, Ordering::Release);
-                while up.load(Ordering::Acquire) && !stopped.load(Ordering::Acquire) {
+                while up.load(Ordering::Acquire)
+                    && !stopped.load(Ordering::Acquire)
+                    && !stopping.load(Ordering::Acquire)
+                {
                     thread::sleep(Duration::from_millis(5));
+                }
+                if stopping.load(Ordering::Acquire) {
+                    codec::encode(
+                        &mut stream,
+                        &ServerMsg::Bye {
+                            reason: "server stopped".into(),
+                        },
+                    )
+                    .unwrap();
+                    let _ = stream.shutdown(Shutdown::Both);
+                    joined.store(false, Ordering::Release);
+                    break;
                 }
                 let _ = stream.shutdown(Shutdown::Both);
                 joined.store(false, Ordering::Release);
@@ -189,6 +224,7 @@ impl Room {
             online,
             connected,
             done,
+            stop,
             worker: Some(worker),
         }
     }
