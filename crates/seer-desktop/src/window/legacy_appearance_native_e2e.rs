@@ -13,41 +13,106 @@ pub(super) async fn exercise(
     capture: &Path,
     cx: &mut gpui::AsyncApp,
 ) {
-    handle
-        .update(cx, |view, window, cx| view.open_settings(false, window, cx))
-        .unwrap();
-    pause(handle, cx).await;
-    snapshot(capture, evidence, "legacy-loaded");
-    fs::copy(settings, evidence.join("legacy-saved.toml")).unwrap();
-    let loaded = seer::Settings::load_from(settings).unwrap();
-    assert!(loaded.glass, "legacy settings must migrate to glass mode");
-    assert_eq!(loaded.picture_brightness, 0);
-    assert_eq!(loaded.glass_darkness, 100);
-    assert_eq!(loaded.glass_blur, seer::Settings::default().glass_blur);
-    assert!(!loaded.hide_top_bar);
-    handle
-        .update(cx, |view, _, _| {
-            assert!(view.appearance.settings.glass);
-            assert_eq!(
-                [0, 1, 2].map(|index| sliders::value(&view.appearance.settings, index)),
-                [0, 100, 12]
-            );
-        })
-        .unwrap();
-    let saved = fs::read(settings).unwrap();
+    let original = fs::read(settings).unwrap();
     let modified = fs::metadata(settings).unwrap().modified().unwrap();
-    seer::Settings::load_from(settings).unwrap();
+    let loaded = seer::Settings::load_from(settings).unwrap();
+    assert!(
+        !loaded.glass,
+        "legacy settings must keep Solid background on"
+    );
+    assert_eq!(loaded.picture_brightness, 18);
+    assert_eq!(loaded.glass_darkness, 0);
+    assert_eq!(loaded.glass_blur, 12);
+    assert!(!loaded.hide_top_bar);
+    assert_eq!(fs::read(settings).unwrap(), original);
     assert_eq!(
         fs::metadata(settings).unwrap().modified().unwrap(),
         modified
     );
+    pause(handle, cx).await;
+    snapshot(capture, evidence, "solid-window");
+    assert_grey(evidence);
+    handle
+        .update(cx, |view, window, cx| view.open_settings(true, window, cx))
+        .unwrap();
+    pause(handle, cx).await;
+    snapshot(capture, evidence, "solid-on");
     let mut samples = Vec::new();
     handle
         .update(cx, |view, window, _| {
-            super::appearance_pixel_samples::sliders(view, window, "legacy-loaded", &mut samples);
-            super::appearance_pixel_samples::neighbors(view, window, "legacy-loaded", &mut samples);
+            assert!(!view.appearance.settings.glass);
+            super::appearance_pixel_samples::neighbors(view, window, "solid-on", &mut samples);
         })
         .unwrap();
+    handle
+        .update(cx, |view, window, cx| {
+            window.activate_window();
+            cx.activate(true);
+            view.settings_key(&Keystroke::parse("tab").unwrap(), window, cx);
+        })
+        .unwrap();
+    pause(handle, cx).await;
+    handle
+        .update(cx, |_, _, _| {
+            super::sidebar_native_e2e::post_shortcut(0x31, 0)
+        })
+        .unwrap();
+    pause(handle, cx).await;
+    assert!(seer::Settings::load_from(settings).unwrap().glass);
+    snapshot(capture, evidence, "solid-keyboard");
+    handle
+        .update(cx, |view, window, cx| {
+            window.focus(&view.appearance.close);
+            view.keys.mode = crate::sidebar::Mode::Pointer;
+            cx.notify();
+        })
+        .unwrap();
+    pause(handle, cx).await;
+    snapshot(capture, evidence, "solid-off");
+    handle
+        .update(cx, |view, window, _| {
+            super::appearance_pixel_samples::neighbors(view, window, "solid-off", &mut samples);
+            super::appearance_pixel_samples::sliders(view, window, "solid-off", &mut samples);
+        })
+        .unwrap();
+    click_solid(handle, cx).await;
+    assert!(!seer::Settings::load_from(settings).unwrap().glass);
+    fs::copy(settings, evidence.join("solid-saved.toml")).unwrap();
+    click_solid(handle, cx).await;
+    handle
+        .update(cx, |view, _, cx| {
+            let mut settings = view.appearance.settings.clone();
+            settings.picture_brightness = 0;
+            settings.glass_darkness = 100;
+            settings.glass_blur = 12;
+            assert!(view.appearance.save(settings));
+            cx.notify();
+        })
+        .unwrap();
+    pause(handle, cx).await;
+    let mut results = slider_noops(handle, settings, evidence, capture, cx).await;
+    results.extend(pointer_feedback(handle, settings, evidence, capture, cx).await);
+    fs::write(
+        evidence.join("appearance-samples.json"),
+        serde_json::to_vec_pretty(&samples).unwrap(),
+    )
+    .unwrap();
+    fs::write(
+        evidence.join("legacy-checks.json"),
+        serde_json::to_vec_pretty(&results).unwrap(),
+    )
+    .unwrap();
+}
+
+async fn slider_noops(
+    handle: WindowHandle<SeerWindow>,
+    settings: &Path,
+    evidence: &Path,
+    capture: &Path,
+    cx: &mut gpui::AsyncApp,
+) -> Vec<serde_json::Value> {
+    let saved = fs::read(settings).unwrap();
+    let modified = fs::metadata(settings).unwrap().modified().unwrap();
     let viewport = handle
         .update(cx, |_, window, _| {
             Bounds::new(point(px(0.), px(0.)), window.viewport_size())
@@ -72,9 +137,7 @@ pub(super) async fn exercise(
         let after = format!("legacy-noop-{index}-after");
         snapshot(capture, evidence, &before);
         handle
-            .update(cx, |view, window, cx| {
-                adjust_noop(view, index, window, cx);
-            })
+            .update(cx, |view, window, cx| adjust_noop(view, index, window, cx))
             .unwrap();
         pause(handle, cx).await;
         snapshot(capture, evidence, &after);
@@ -87,17 +150,31 @@ pub(super) async fn exercise(
         );
         results.push(serde_json::json!({"slider":sliders::IDS[index],"noop_changed_pixels":changed,"saved_bytes_unchanged":true,"modified_time_unchanged":true}));
     }
-    results.extend(pointer_feedback(handle, settings, evidence, capture, cx).await);
-    fs::write(
-        evidence.join("appearance-samples.json"),
-        serde_json::to_vec_pretty(&samples).unwrap(),
-    )
-    .unwrap();
-    fs::write(
-        evidence.join("legacy-checks.json"),
-        serde_json::to_vec_pretty(&results).unwrap(),
-    )
-    .unwrap();
+    results
+}
+
+async fn click_solid(handle: WindowHandle<SeerWindow>, cx: &mut gpui::AsyncApp) {
+    handle
+        .update(cx, |view, window, _| {
+            let bounds = view.appearance.scroll.bounds_for_item(0).unwrap()
+                + view.appearance.scroll.offset();
+            let position = point(bounds.right() - px(30.), bounds.top() + px(16.));
+            post_mouse(window, position, 1);
+            post_mouse(window, position, 2);
+            post_mouse(window, point(px(900.), px(620.)), 5);
+        })
+        .unwrap();
+    pause(handle, cx).await;
+}
+
+fn assert_grey(evidence: &Path) {
+    let image = image::open(evidence.join("solid-window.png"))
+        .unwrap()
+        .to_rgb8();
+    let scale = image.width() / 960;
+    for (x, y, value) in [(800, 500, 0x1b), (200, 300, 0x22), (800, 20, 0x22)] {
+        assert_eq!(image.get_pixel(x * scale, y * scale).0, [value; 3]);
+    }
 }
 
 async fn pointer_feedback(

@@ -68,7 +68,7 @@ pub(super) async fn exercise(
                     for (index, value) in [18, 0, 12].into_iter().enumerate() {
                         view.set_adjustment(index, value, cx);
                     }
-                    view.appearance.scroll.scroll_to_top_of_item(index);
+                    view.appearance.scroll.scroll_to_top_of_item(index + 1);
                 })
                 .unwrap();
             pause(handle, cx).await;
@@ -156,7 +156,7 @@ pub(super) async fn exercise(
             }
             view.appearance.settings.picture = None;
             view.appearance.load_picture();
-            view.appearance.scroll.scroll_to_top_of_item(3);
+            view.appearance.scroll.scroll_to_top_of_item(4);
             cx.notify();
         })
         .unwrap();

@@ -93,6 +93,12 @@ to R-454.
 | seer leave removes you from the room and stops your terminals on this computer | README Commands, help | Placed: Leave room in the guest room menu, with a confirm sheet. It uses the CLI leave path. Execution passed QA on 2026-10-19: the host no longer lists the guest, and no guest runtime stays. The command stays. | R-456 |
 | seer stop stops the room server. Host only | README Commands, help | Placed: Stop room in the running host room menu, with a confirm sheet. It uses the CLI stop path. Linux execution passed QA on 2026-10-19. The command stays. | R-456 |
 
+## Appearance
+
+| Feature | Source | Window place, or reason | Item |
+| --- | --- | --- | --- |
+| Keep the plain grey window | Issue 545 | Built: Solid background is the first Appearance switch. It uses the existing glass setting. On hides the picture, blur, sliders, and picture chooser. Other switches stay available. Old glass=false files keep the grey palette. Keyboard and pointer changes are saved. | T-545 |
+
 ## Processes and updates
 
 | Feature | Source | Window place, or reason | Item |

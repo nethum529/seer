@@ -291,7 +291,7 @@ impl SeerWindow {
             if focus == &self.appearance.sliders[index]
                 || focus == &self.appearance.slider_reset[index]
             {
-                self.appearance.scroll.scroll_to_item(index);
+                self.appearance.scroll.scroll_to_item(index + 1);
                 return true;
             }
         }

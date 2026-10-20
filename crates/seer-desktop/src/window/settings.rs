@@ -13,6 +13,7 @@ pub(super) mod sliders;
 
 #[derive(Clone, Copy)]
 enum Toggle {
+    SolidBackground,
     UniformGlass,
     HideTopBar,
     HideLines,
@@ -153,15 +154,20 @@ impl SeerWindow {
         let appearance = &self.appearance;
         let mut controls = vec![&appearance.close];
         if appearance.section == Section::Appearance {
-            controls.extend(self.adjustment_focus());
+            controls.push(&appearance.solid);
+            if appearance.settings.glass {
+                controls.extend(self.adjustment_focus());
+            }
             controls.extend([
                 &appearance.uniform,
                 &appearance.hide_bar,
                 &appearance.hide_lines,
-                &appearance.choose,
             ]);
-            if appearance.settings.picture.is_some() {
-                controls.push(&appearance.reset);
+            if appearance.settings.glass {
+                controls.push(&appearance.choose);
+                if appearance.settings.picture.is_some() {
+                    controls.push(&appearance.reset);
+                }
             }
             controls.extend(appearance.sections.iter());
         } else {
@@ -197,6 +203,8 @@ impl SeerWindow {
             {
                 appearance.scroll.scroll_to_item(row);
             }
+        } else if focus == &appearance.solid {
+            appearance.scroll.scroll_to_item(0);
         } else if !self.reveal_adjustment(focus)
             && let Some(index) = [
                 &appearance.uniform,
@@ -208,9 +216,11 @@ impl SeerWindow {
             .iter()
             .position(|item| *item == focus)
         {
-            appearance
-                .scroll
-                .scroll_to_item(if index >= 3 { 7 } else { index + 3 });
+            appearance.scroll.scroll_to_item(if index >= 3 {
+                8
+            } else {
+                index + if appearance.settings.glass { 4 } else { 1 }
+            });
         }
     }
 
@@ -222,14 +232,18 @@ impl SeerWindow {
         cx.notify();
     }
 
-    fn toggle_appearance(&mut self, toggle: Toggle, cx: &mut Context<Self>) {
+    fn toggle_appearance(&mut self, toggle: Toggle, window: &mut Window, cx: &mut Context<Self>) {
         let mut settings = self.appearance.settings.clone();
         match toggle {
+            Toggle::SolidBackground => settings.glass = !settings.glass,
             Toggle::UniformGlass => settings.uniform_glass = !settings.uniform_glass,
             Toggle::HideTopBar => settings.hide_top_bar = !settings.hide_top_bar,
             Toggle::HideLines => settings.hide_lines = !settings.hide_lines,
         }
-        self.appearance.save(settings);
+        if self.appearance.save(settings) && matches!(toggle, Toggle::SolidBackground) {
+            window.focus(&self.appearance.solid);
+            self.appearance.scroll.set_offset(gpui::Point::default());
+        }
         cx.notify();
     }
 
@@ -245,7 +259,7 @@ impl SeerWindow {
             self.appearance.fallback = false;
             if self.appearance.reset.is_focused(window) {
                 window.focus(&self.appearance.choose);
-                self.appearance.scroll.scroll_to_item(7);
+                self.appearance.scroll.scroll_to_item(8);
             }
         }
         cx.notify();
