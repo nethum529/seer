@@ -35,7 +35,8 @@ impl BrokerState {
     }
 
     pub(crate) fn detach_client(&self, user_id: &str, client_id: &str) -> io::Result<bool> {
-        self.attachments.detach_client(user_id, client_id)
+        self.attachments
+            .detach_client(user_id, client_id, "detached")
     }
 
     pub(crate) fn membership(&self) -> io::Result<std::sync::MutexGuard<'_, ()>> {
@@ -90,7 +91,14 @@ impl BrokerState {
         let runtime = self.runtimes.remove(user_id);
         let attachments = self.attachments.clients(user_id, caller).map(|clients| {
             for client in clients {
-                let _ = self.attachments.detach_client(user_id, &client.client_id);
+                let reason = if removed_by_host {
+                    "removed by host"
+                } else {
+                    "detached"
+                };
+                let _ = self
+                    .attachments
+                    .detach_client(user_id, &client.client_id, reason);
             }
         });
         grants.and(runtime).and(attachments)

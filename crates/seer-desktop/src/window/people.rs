@@ -4,10 +4,13 @@ use seer_core::proto::{Person, PersonState};
 use super::*;
 use crate::{menu, motion::Motion};
 
+mod remove;
+
 pub(super) struct Menu {
     focus: FocusHandle,
     scroll: ScrollHandle,
     pub(super) highlighted: String,
+    removing: bool,
     pub(super) motion: Motion,
 }
 
@@ -40,6 +43,7 @@ impl SeerWindow {
                 focus,
                 scroll: ScrollHandle::new(),
                 highlighted: link.people.selected.clone(),
+                removing: false,
                 motion: Motion::open(keyboard, 150),
             });
         }
@@ -48,6 +52,7 @@ impl SeerWindow {
             && let Some(first) = link.people.people.first()
         {
             menu.highlighted.clone_from(&first.user_id);
+            menu.removing = false;
             menu.scroll.scroll_to_item(0);
         }
         self.keys.mode = if keyboard {
@@ -113,7 +118,9 @@ impl SeerWindow {
         };
         if matches!(key.key.as_str(), "enter" | "space") {
             let user = menu.highlighted.clone();
-            if key.key == "space"
+            if menu.removing {
+                self.confirm_remove(&user, true, window, cx);
+            } else if key.key == "space"
                 && !link
                     .people
                     .people
@@ -125,17 +132,7 @@ impl SeerWindow {
                 self.choose_person(&user, true, window, cx);
             }
         } else {
-            let people = &link.people.people;
-            let now = people
-                .iter()
-                .position(|person| person.user_id == menu.highlighted);
-            if let Some(at) = sidebar::step(&key.key, people.len(), now) {
-                menu.highlighted.clone_from(&people[at].user_id);
-                menu.motion.reopen(true, 0);
-                menu.scroll.scroll_to_item(at);
-                self.keys.mode = Mode::Keyboard;
-                self.notify_room(cx);
-            }
+            self.step_person(&key.key, cx);
         }
         true
     }
@@ -184,7 +181,7 @@ impl SeerWindow {
                                 person,
                                 at == 0,
                                 person.user_id == link.people.selected,
-                                person.user_id == menu.highlighted,
+                                person.user_id == menu.highlighted && !menu.removing,
                                 link.people.activity(&person.user_id),
                                 cx,
                             ))
@@ -193,7 +190,15 @@ impl SeerWindow {
                                     person,
                                     &link.people,
                                     menu.highlighted == person.user_id
+                                        && !menu.removing
                                         && self.keys.mode == Mode::Keyboard,
+                                    cx,
+                                ))
+                            })
+                            .when(link.people.can_remove(&person.user_id), |row| {
+                                row.child(remove::item(
+                                    person,
+                                    menu.highlighted == person.user_id && menu.removing,
                                     cx,
                                 ))
                             })
@@ -254,9 +259,10 @@ fn person_row(
         .when(highlighted, |row| row.bg(rgb(palette::CHIP)))
         .on_mouse_move(cx.listener(move |view, _, _, cx| {
             if let Some(menu) = &mut view.people_menu
-                && menu.highlighted != hover_user
+                && (menu.highlighted != hover_user || menu.removing)
             {
                 menu.highlighted.clone_from(&hover_user);
+                menu.removing = false;
                 view.keys.mode = Mode::Pointer;
                 view.notify_room(cx);
             }
@@ -414,6 +420,7 @@ fn share_switch(
                 cx.stop_propagation();
                 if let Some(menu) = &mut view.people_menu {
                     menu.highlighted.clone_from(&user);
+                    menu.removing = false;
                 }
                 view.share_control(&user, cx);
             }),

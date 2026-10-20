@@ -62,6 +62,7 @@ When a PR decides or builds a row, it updates the row.
 | With a grant, type and use the mouse in the terminals of another person | README People | Built: the terminal area uses the same input events for local and granted remote terminals. Revoke stops remote input. Viewer scrollback stays local. | R-449, R-451 |
 | seer perms --on: every person in the room can type into your terminals | README Commands, help | No place yet. The command stays. | R-453 |
 | seer perms --off: remove every grant | README People, README Commands, help | No place yet. The command stays. | R-453 |
+| seer remove NAME removes one person. Host only | Issue 539, help | Built: Remove is the last action for each other person in the host person menu. The shared sheet names the person, focuses Cancel, and keeps failure and retry in the sheet. The removed window shows the host removal message. Local shells keep running. The window and command use the same remove path. | T-539 |
 | seer peek NAME opens Seer with that person selected | README Commands, help | Built: the command opens the desktop with that room and person selected. | R-450 |
 
 ## Own terminals

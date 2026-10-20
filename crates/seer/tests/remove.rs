@@ -74,8 +74,13 @@ fn host_removes_one_person_without_stopping_their_local_shell() {
             if people.len() == 2 && !people.iter().any(|p| p.user_id == guest_id))
         });
     }
-    assert_closed(&mut guest);
-    assert_closed(&mut other_guest);
+    for stream in [&mut guest, &mut other_guest] {
+        wait_for(
+            stream,
+            |message| matches!(message, ServerMsg::Bye { reason } if reason == "removed by host"),
+        );
+        assert_closed(stream);
+    }
     send(
         &mut bob,
         &ClientMsg::TypeInto {

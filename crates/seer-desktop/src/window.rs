@@ -266,6 +266,9 @@ impl SeerWindow {
                 self.room.lost = false;
                 self.room.version.connected();
             }
+            Ok(Event::Room(crate::room::transport::RoomEvent::Removed)) => {
+                self.removed_from_room(cx);
+            }
             Ok(Event::Room(crate::room::transport::RoomEvent::Stopped)) => {
                 self.room.lost = false;
                 self.room_action_done(seer::rooms::RoomAction::Stop, None, cx);
@@ -425,3 +428,9 @@ mod start_native_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod start_review_native_e2e;
+
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+mod remove_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod remove_native_e2e;

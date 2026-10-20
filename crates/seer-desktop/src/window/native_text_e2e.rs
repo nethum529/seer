@@ -101,19 +101,36 @@ pub(crate) fn prepare() -> Option<Fixture> {
                 while let Ok(message) = codec::decode::<_, ClientMsg>(&mut socket) {
                     let reply = match message {
                         ClientMsg::ListPeople => ServerMsg::People {
-                            people: vec![Person {
-                                user_id: "host".into(),
-                                name: "Host".into(),
-                                host: true,
-                                online: true,
-                                idle_secs: 0,
-                                attached_clients: 2,
-                                peekable: true,
-                                state: PersonState::Active,
-                                tabs: 1,
-                                foreground: "shell".into(),
-                            }],
+                            people: {
+                                let mut people = vec![Person {
+                                    user_id: "host".into(),
+                                    name: "Host".into(),
+                                    host: true,
+                                    online: true,
+                                    idle_secs: 0,
+                                    attached_clients: 2,
+                                    peekable: true,
+                                    state: PersonState::Active,
+                                    tabs: 1,
+                                    foreground: "shell".into(),
+                                }];
+                                if std::env::var_os("REMOVE_QA").is_some() {
+                                    let mut guest = people[0].clone();
+                                    guest.user_id = "guest".into();
+                                    guest.name = "Guest".into();
+                                    guest.host = false;
+                                    people.push(guest);
+                                }
+                                people
+                            },
                         },
+                        ClientMsg::RemovePerson { .. }
+                            if std::env::var_os("REMOVE_QA").is_some() =>
+                        {
+                            ServerMsg::Refused {
+                                reason: "Could not remove Guest. Try again.".into(),
+                            }
+                        }
                         _ => continue,
                     };
                     if codec::encode(&mut socket, &reply).is_err() {
@@ -368,6 +385,10 @@ async fn exercise_room_qa(
     fixture: &Fixture,
     cx: &mut gpui::AsyncApp,
 ) -> bool {
+    if std::env::var_os("REMOVE_QA").is_some() {
+        super::remove_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        return true;
+    }
     if std::env::var_os("VERSION_BANNER_QA").is_some() {
         super::version_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
         return true;

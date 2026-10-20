@@ -19,6 +19,27 @@ impl SeerWindow {
         );
     }
 
+    pub(in crate::window) fn removed_from_room(&mut self, cx: &mut Context<Self>) {
+        self.room.lost = false;
+        self.room.pending = false;
+        self.room.refresh = None;
+        self.room.action = None;
+        self.room.menu = None;
+        self.room.sheet = None;
+        self.room.error = None;
+        self.people_menu = None;
+        self.menu = None;
+        self.invite = None;
+        self.input.reset();
+        self.content = Content::Message(REMOVED.into());
+        self._messages = None;
+        if let Some(room) = &mut self.room.current {
+            room.state = RoomState::Unreachable;
+            room.people.clear();
+        }
+        self.notify_room(cx);
+    }
+
     pub(in crate::window) fn room_command(
         &mut self,
         action: Action,

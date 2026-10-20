@@ -87,6 +87,16 @@ impl Room {
         self.can_type_here.contains(user)
     }
 
+    pub(crate) fn can_remove(&self, user: &str) -> bool {
+        self.writer.is_some()
+            && self.people.first().is_some_and(|person| person.host)
+            && user != self.own
+            && self
+                .people
+                .iter()
+                .any(|person| person.user_id == user && !person.host)
+    }
+
     pub(crate) fn can_share(&self) -> bool {
         self.writer.is_some() && self.confirmed && self.pending.is_none()
     }
@@ -189,7 +199,10 @@ impl Room {
                 self.send(ClientMsg::ListPeople);
             }
             RoomEvent::Message(message) => self.message(message),
-            RoomEvent::Lost | RoomEvent::Stopped | RoomEvent::VersionMismatch(_) => {
+            RoomEvent::Lost
+            | RoomEvent::Stopped
+            | RoomEvent::Removed
+            | RoomEvent::VersionMismatch(_) => {
                 self.writer = None;
                 self.can_type_here.clear();
                 self.you_may_type_into.clear();
