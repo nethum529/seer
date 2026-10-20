@@ -1,149 +1,93 @@
 # Seer
 
+Share live terminals with your friends. Each person runs their own
+terminals on their own computer.
+
 ![Seer launch video: nethum starts a room, kyler joins, and nethum types into the agent in the terminal of kyler](docs/images/seer-launch.gif)
 
-Seer shares live terminals in a room. One person hosts the room. Each
-person runs their own terminals on their own computer.
+## How it works
 
-- Your terminals use your own files, tools, shell, and logins.
-- Everyone in the room can watch the terminals of everyone else.
-- One grant, "can type here", lets another person type into your
-  terminals.
+One person hosts a room. Friends join with one pasted line. Everyone
+can watch the terminals of everyone else. You choose who can type in
+yours.
+
+```mermaid
+flowchart LR
+    subgraph host["Host computer (Linux)"]
+        room(("Room"))
+        hostTerms["Host terminals"]
+    end
+    subgraph you["Your computer"]
+        yourTerms["Your terminals"]
+    end
+    subgraph friend["Friend computer"]
+        friendTerms["Friend terminals"]
+    end
+    hostTerms <--> room
+    yourTerms <--> room
+    friendTerms <--> room
+```
+
+- Your terminals use your own files, tools, and logins.
+- The room only moves screens and keys. Pick a host you trust.
+- Your terminals keep running if you close Seer or lose the room.
 - Linux and macOS. Version 0.6.0.
-
-![A macOS terminal watched from a Linux computer, with the people picker open at the top right](docs/images/watch-macos-from-linux.png)
 
 ## Install
 
     curl -fsSL https://raw.githubusercontent.com/nethum529/seer-releases/main/install.sh | sh
 
-- The installer adds the desktop app and the CLI. It does not use sudo.
-- macOS: Seer.app is in ~/Applications. Open it from Launchpad or Spotlight.
-- Linux x86_64: open Seer from the app list. It needs glibc 2.35 or newer,
-  xdg-utils, and a graphics driver that GPUI supports.
-- CLI binaries stay in ~/.local/bin. Bare seer still opens the TUI during
-  the desktop move.
-- You do not need Rust, Git, or a GitHub account.
-- Restart the terminal if the installer asks you to.
+- macOS: open Seer from Launchpad or Spotlight.
+- Linux x86_64: open Seer from your app list. It needs glibc 2.35 or
+  newer.
+- The installer also adds the `seer` command. It does not need sudo.
 
 ## Host a room
 
-The room server runs on Linux only.
+You can host on Linux only. In Seer, select Start a room, or run
+`seer start`.
 
-    seer start
-
-The command prints a join line. Send it to a friend. A join line works
-one time and expires in 1 hour. The line is the credential for the
-room, so send it the way you send a password.
-
-Make a new line, with a life of 1 to 168 hours:
-
-    seer invite --hours 24
+To invite a friend, open the room menu and select Invite a person.
+Send them the line. A line works one time and expires after 1 hour.
+Keep it secret like a password.
 
 ## Join a room
 
-Paste the line from the host into your terminal.
+In Seer, select Join a room and paste the line. You can also paste it
+in a terminal. A friend without Seer gets a line that installs Seer
+and joins in one step.
 
-- With Seer installed, the line starts with `seer join`.
-- Without Seer, use the install line that the host sends with it. It
-  installs Seer and joins in one step.
+## Use Seer
 
-Then select a name. Press Enter to accept your system user name.
-
-## Open Seer
-
-    seer
-
-![A Linux terminal watched from a macOS computer](docs/images/watch-linux-from-macos.png)
-
-- Type or paste to send input to the selected terminal.
-- All keys go to the terminal. Seer has no prefix key.
-- Click a terminal to select it. Drag to select and copy text.
-
-## People and permissions
-
-Left click the control at the top right to open the people picker.
-
-![The people picker, with the typing permission, the people in the room, and the room address](docs/images/people-picker.png)
-
-- The first line shows your typing permission for the person you watch.
-- The list shows every person, with the host marked.
-- Select a person to see their live terminals.
-- A terminal takes its name from its foreground program. A shell uses
-  the name "shell" and the state "idle". Other programs are "busy".
-
-Right click a person row to open their menu. It shows their presence,
-idle time, and terminals. Use j and k to select, Enter to watch, and
-Space to give or remove your "can type here" grant. The box changes
-when the room server confirms it.
-
-A grant is for one person and for one direction. It permits that
-person to type and to use the mouse in your terminals. It permits
-nothing more. No person in the room can open, close, select, or
-resize your terminals. Remove a grant with Space, or remove every
-grant at one time with `seer perms --off`.
-
-Right click the top right control for the session panel. Use it to
-open, close, or select a terminal, copy the join line, go back, and
-quit Seer.
+- Select a person to watch their live terminals.
+- Type in your own terminal as usual. All keys go to it.
+- To let a person type in your terminals, open their menu and turn on
+  Share control. It is for that person only. They cannot open, close,
+  or resize your terminals.
+- The host can remove a person from that person's menu.
 
 ## Commands
 
-- `seer` opens the people and terminals screen. `seer attach` is the
-  same.
-- `seer start` opens a new room. The people of the old room are
-  removed. `seer start --restore` reopens the old room with its people.
-- `seer invite --hours N` makes a new join line.
+The app does most things. Use the `seer` command to start, join, and
+manage a room. Run `seer help` for the full list.
+
+- `seer start` starts a new room. `seer start --restore` opens the
+  last room again.
+- `seer invite --hours 24` makes a join line that lasts 24 hours
+  (1 to 168).
 - `seer join <line>` joins a room.
-- `seer perms --on` lets every person in the room type into your
-  terminals. `seer perms --off` removes every grant.
-- `seer peek <person>` opens Seer with that person selected.
-- `seer list` lists your saved rooms and people.
-- `seer detach` disconnects a selected client. Its terminals continue.
-- `seer leave` removes you from the room and stops your terminals on
-  this computer. The room stays open for the others.
-- `seer remove <person>` removes one person from the room. Only the host
-  can do this. Their connections and grants end. Their local shells keep
-  running. They need a new invite to join again.
-- `seer stop` stops the room server. Only the host can do this. Other
-  people keep their terminals.
-- `seer ps` shows your Seer processes on this computer. `seer ps
-  --clean` stops the windows that have no terminal. `seer ps --stop
-  <pid>` stops one runtime with its shells.
-- `seer update` installs the latest app and CLI from one release. Close
-  and open the app to use the new version. Existing shells keep running.
-- `seer restart` asks before it ends local shells. Open Seer again to
-  restore the layout with new shells on the installed runtime.
-- `seer exit` leaves Seer from inside a Seer terminal.
+- `seer perms --on` lets everyone in the room now type in your
+  terminals. `seer perms --off` stops it.
+- `seer leave` leaves the room.
+- `seer remove <person>` and `seer stop` are for the host only.
+- `seer update` installs the latest version. Everyone in a room must
+  use the same version.
 
-## Good to know
+## More
 
-- Your local shells continue when you close the Seer window or lose
-  the room connection. Open Seer again to return to them.
-- A restart of the computer or the runtime restores the saved layout
-  with new shells. The old programs do not come back.
-- One computer at a time can publish the terminals of one person.
-- All persons must use the same major and minor version. A different
-  version prints a message that tells you to run `seer update`.
-- Remote connections are encrypted from end to end. A join line gives
-  access to the room and to nothing else on the host computer: not
-  ssh, not the other ports, not the other services. See
-  [ADR 0002](docs/adr/0002-builtin-connect.md).
-- The host is trusted. The host computer moves the data of the room.
-- Seer controls use Catppuccin Mocha colors when COLORTERM is
-  truecolor, and 16 colors if not. Terminal output keeps the colors of
-  your own terminal.
-- Your terminal must permit clipboard access to copy the join line.
-- There is no chat. An agent inbox is planned but not built.
-
-## Known faults
-
-- `seer stop` fails with a buffer error and the room server continues.
-  Stop the server process by hand. See issue 436.
-
-## Build from source
-
-    cargo build --workspace
-
-Read [CONTRIBUTING.md](CONTRIBUTING.md) before a change. The decisions
-are in docs/adr/. The research is in docs/research/.
+- [How Seer works](docs/architecture.md)
+- [Safe connections](docs/adr/0002-builtin-connect.md): a join line
+  opens the room and nothing else on the host computer.
+- [Install and update details](docs/adr/0011-desktop-install-and-update.md)
+- [Build from source](docs/development.md) and
+  [contribute](CONTRIBUTING.md)
