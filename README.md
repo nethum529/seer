@@ -64,6 +64,8 @@ and joins in one step.
 - To let a person type in your terminals, open their menu and turn on
   Share control. It is for that person only. They cannot open, close,
   or resize your terminals.
+- To let everyone type, open the room menu and select Share control
+  with everyone. Stop sharing control ends it for all.
 - The host can remove a person from that person's menu.
 
 ## Commands
