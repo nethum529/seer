@@ -17,11 +17,12 @@ pub(crate) struct Processes {
 pub(in crate::window) struct Row {
     pub(in crate::window) process: Process,
     pub(in crate::window) focus: FocusHandle,
+    pub(in crate::window) used_by_this_window: bool,
 }
 
 impl Row {
     pub(in crate::window) fn can_stop(&self) -> bool {
-        self.process.kind() == Kind::Runtime && !self.process.used_by(std::process::id())
+        self.process.kind() == Kind::Runtime && !self.used_by_this_window
     }
 }
 
@@ -63,6 +64,10 @@ impl SeerWindow {
         action: Option<ProcessAction>,
         cx: &mut Context<Self>,
     ) {
+        let serving_runtime = match &self.content {
+            Content::Terminal(link, _) => link.runtime_pid(),
+            _ => None,
+        };
         let state = &mut self.appearance.processes;
         if state.busy {
             return;
@@ -74,7 +79,7 @@ impl SeerWindow {
                 Some(ProcessAction::Clean) => seer::processes::clean()
                     .map(|_| ())
                     .map_err(|_| "Could not clean up the windows. Try again.".to_owned()),
-                Some(ProcessAction::Stop(pid)) => seer::processes::stop(pid)
+                Some(ProcessAction::Stop(pid)) => seer::processes::stop(pid, serving_runtime)
                     .map(|_| ())
                     .map_err(|_| "Could not stop this runtime. Try again.".to_owned()),
                 None => Ok(()),
@@ -99,7 +104,13 @@ impl SeerWindow {
                                     || cx.focus_handle().tab_stop(true),
                                     |row| row.focus.clone(),
                                 );
-                            Row { process, focus }
+                            let used_by_this_window = process.kind() == Kind::Runtime
+                                && Some(process.pid()) == serving_runtime;
+                            Row {
+                                process,
+                                focus,
+                                used_by_this_window,
+                            }
                         })
                         .collect();
                 } else {

@@ -146,6 +146,9 @@ pub(super) fn record(view: &SeerWindow, window: &Window, evidence: &Path, captur
             }
         }
         for (index, row) in view.appearance.processes.rows.iter().enumerate() {
+            if capture == "processes-no-answer" && !row.used_by_this_window {
+                continue;
+            }
             let bounds = scroll.bounds_for_item(index + 1).unwrap() + scroll.offset();
             if bounds.top() < scroll.bounds().top() || bounds.bottom() > scroll.bounds().bottom() {
                 continue;
@@ -175,7 +178,7 @@ pub(super) fn record(view: &SeerWindow, window: &Window, evidence: &Path, captur
                 12.,
                 FontWeight::NORMAL,
             );
-            if row.process.description() != "-" {
+            if row.process.description() != "-" && capture != "processes-no-answer" {
                 sample(
                     &format!("Row {index} detail"),
                     &row.process.description(),
@@ -207,7 +210,7 @@ pub(super) fn record(view: &SeerWindow, window: &Window, evidence: &Path, captur
                     13.,
                     FontWeight::MEDIUM,
                 );
-            } else if row.process.used_by(std::process::id()) {
+            } else if row.used_by_this_window {
                 sample(
                     "Used by this window",
                     "Used by this window",

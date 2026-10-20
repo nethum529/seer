@@ -84,10 +84,6 @@ impl Process {
         display::describe(&self.detail)
     }
 
-    pub fn used_by(&self, pid: u32) -> bool {
-        matches!(&self.detail, Detail::Runtime { status: Some(RuntimeStatus::Counts { windows, .. }), .. } if windows.contains(&pid))
-    }
-
     pub fn can_clean(&self) -> bool {
         matches!(&self.detail, Detail::Window { terminal: None })
     }
@@ -269,13 +265,10 @@ pub fn clean() -> Result<usize, String> {
     crate::commands::ps::clean(&processes).map_err(|error| error.message)
 }
 
-pub fn stop(pid: u32) -> Result<usize, String> {
-    let processes = list().map_err(|error| error.to_string())?;
-    if processes
-        .iter()
-        .any(|process| process.pid() == pid && process.used_by(std::process::id()))
-    {
+pub fn stop(pid: u32, serving_runtime: Option<u32>) -> Result<usize, String> {
+    if Some(pid) == serving_runtime {
         return Err("This runtime is used by this window.".into());
     }
+    let processes = list().map_err(|error| error.to_string())?;
     crate::commands::ps::stop_runtime(&processes, pid).map_err(|error| error.message)
 }

@@ -9,7 +9,8 @@ let appearanceOnly = CommandLine.arguments[1] == "measure-appearance"
 if CommandLine.arguments[1] != "measure" && !appearanceOnly {
     let pid = Int32(CommandLine.arguments[1])!
     let windows = CGWindowListCopyWindowInfo([.optionOnScreenOnly, .excludeDesktopElements], kCGNullWindowID) as! [[String: Any]]
-    let window = windows.first { ($0[kCGWindowOwnerPID as String] as? Int32) == pid && ($0[kCGWindowLayer as String] as? Int) == 0 }!
+    let processPanel = ProcessInfo.processInfo.environment["PROCESSES_QA"] != nil
+    let window = windows.first { ($0[kCGWindowOwnerPID as String] as? Int32) == pid && (($0[kCGWindowLayer as String] as? Int) == 0 || processPanel) }!
     let id = CGWindowID(window[kCGWindowNumber as String] as! Int)
     typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
     let library = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY)!

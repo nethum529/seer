@@ -10,7 +10,7 @@ use std::time::{Duration, Instant};
 use crate::UserSession;
 
 mod connection;
-mod peer;
+pub(crate) mod peer;
 mod raw;
 mod restart;
 mod room_link;

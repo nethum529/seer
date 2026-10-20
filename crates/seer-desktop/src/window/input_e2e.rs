@@ -18,6 +18,10 @@ pub(super) struct Runtime {
 }
 
 impl Runtime {
+    pub(super) fn pid(&self) -> u32 {
+        self.child.id()
+    }
+
     pub(super) fn start() -> Self {
         Self::start_with_output("Ready\r\n")
     }

@@ -126,7 +126,7 @@ impl SeerWindow {
                             .child(crate::label::text(pid.to_string())),
                     )
                     .child(div().flex_1())
-                    .when(process.used_by(std::process::id()), |header| {
+                    .when(row.used_by_this_window, |header| {
                         header.child(
                             div()
                                 .id("process-used")

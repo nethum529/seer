@@ -200,17 +200,21 @@ pub(crate) fn prepare() -> Option<Fixture> {
         .stderr(Stdio::null())
         .spawn()
         .unwrap());
-    let deadline = Instant::now() + Duration::from_secs(10);
-    while !state.join("socket").exists() {
-        assert!(Instant::now() < deadline && runtime.0.try_wait().unwrap().is_none());
-        thread::sleep(Duration::from_millis(20));
-    }
+    wait_runtime(&mut runtime, &state.join("socket"));
     Some(Fixture {
         _runtime: runtime,
         _directory: directory,
         evidence,
         capture,
     })
+}
+
+fn wait_runtime(runtime: &mut App, socket: &std::path::Path) {
+    let deadline = Instant::now() + Duration::from_secs(10);
+    while !socket.exists() {
+        assert!(Instant::now() < deadline && runtime.0.try_wait().unwrap().is_none());
+        thread::sleep(Duration::from_millis(20));
+    }
 }
 
 pub(crate) fn exercise(
@@ -455,7 +459,9 @@ pub(crate) fn window_options(
     mut options: gpui::WindowOptions,
     cx: &gpui::App,
 ) -> gpui::WindowOptions {
-    if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some() {
+    if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some()
+        || std::env::var_os("PROCESSES_QA").is_some()
+    {
         // Nonactivating panels can receive native keys while the test app is in the background.
         options.kind = gpui::WindowKind::PopUp;
     }

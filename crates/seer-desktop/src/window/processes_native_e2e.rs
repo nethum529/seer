@@ -136,6 +136,7 @@ while 'Tree' not in read(): pass
     wait(handle, "process-used", cx).await;
     wait(handle, &format!("process-stop-{}", runtime.0), cx).await;
     snapshot(handle, evidence, capture, "processes-rows", cx).await;
+    check_no_answer(handle, evidence, capture, cx).await;
     for width in [321., 479.] {
         handle
             .update(cx, |_, window, _| {
@@ -168,6 +169,57 @@ while 'Tree' not in read(): pass
     drop(runtime);
     snapshot(handle, evidence, capture, "processes-after", cx).await;
     key(handle, "escape", cx).await;
+}
+
+async fn check_no_answer(
+    handle: WindowHandle<SeerWindow>,
+    evidence: &Path,
+    capture: &Path,
+    cx: &mut gpui::AsyncApp,
+) {
+    let pid = handle
+        .update(cx, |view, _, _| match &view.content {
+            super::Content::Terminal(link, _) => link.runtime_pid().unwrap(),
+            _ => panic!("the window must have a runtime"),
+        })
+        .unwrap();
+    struct Resume(u32);
+    impl Drop for Resume {
+        fn drop(&mut self) {
+            let _ = Command::new("/bin/kill")
+                .args(["-CONT", &self.0.to_string()])
+                .status();
+        }
+    }
+    assert!(
+        Command::new("/bin/kill")
+            .args(["-STOP", &pid.to_string()])
+            .status()
+            .unwrap()
+            .success()
+    );
+    let resume = Resume(pid);
+    click(handle, "processes-refresh", cx).await;
+    wait(handle, "processes-idle", cx).await;
+    handle
+        .update(cx, |view, _, _| {
+            let row = view
+                .appearance
+                .processes
+                .rows
+                .iter()
+                .find(|row| row.process.pid() == pid)
+                .unwrap();
+            assert_eq!(row.process.description(), "no answer");
+            assert!(row.used_by_this_window);
+            assert!(!row.can_stop());
+        })
+        .unwrap();
+    assert!(seer::processes::stop(pid, Some(pid)).is_err());
+    snapshot(handle, evidence, capture, "processes-no-answer", cx).await;
+    drop(resume);
+    click(handle, "processes-refresh", cx).await;
+    wait(handle, "processes-idle", cx).await;
 }
 
 async fn check_stop(
@@ -401,7 +453,7 @@ async fn wait(handle: WindowHandle<SeerWindow>, selector: &str, cx: &mut gpui::A
                     .processes
                     .rows
                     .iter()
-                    .any(|row| row.process.used_by(std::process::id())),
+                    .any(|row| row.used_by_this_window),
                 _ => view.appearance.processes.rows.iter().any(|row| {
                     format!("process-stop-{}", row.process.pid()) == selector && row.can_stop()
                 }),

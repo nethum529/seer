@@ -24,6 +24,7 @@ pub use login_shell::LOGIN_SHELL;
 pub use pane_grid::{Cell, Color, PaneGrid};
 pub use pane_host::PaneHost;
 pub use pty::PtySession;
+pub use server::peer::peer_pid;
 pub use server::{bind, serve};
 pub use user_session::UserSession;
 
