@@ -8,8 +8,11 @@ use seer_core::proto::{ClientMsg, ServerMsg};
 use std::io;
 
 pub(crate) fn remove(person: &str) -> Result<(), CommandError> {
-    let server = selected_server()?;
-    let (mut stream, _) = authenticate(&server)?;
+    remove_person(&selected_server()?, person)
+}
+
+pub(crate) fn remove_person(server: &ServerEntry, person: &str) -> Result<(), CommandError> {
+    let (mut stream, _) = authenticate(server)?;
     send(
         &mut stream,
         &ClientMsg::RemovePerson {

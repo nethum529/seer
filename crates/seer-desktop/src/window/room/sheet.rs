@@ -9,6 +9,13 @@ impl SeerWindow {
         let sheet = self.room.sheet.as_ref()?;
         let (title, body) = match &sheet.action {
             Confirmation::Room(action, room) => confirm_copy(*action, room.as_deref()),
+            Confirmation::Remove { name } => {
+                let name = chrome::capitalize(name);
+                (
+                    format!("Remove {name}?"),
+                    format!("{name} leaves the room. Their shells keep running on their computer."),
+                )
+            }
             Confirmation::Terminal { program, .. } => (
                 "Close terminal?".into(),
                 format!(
@@ -21,12 +28,17 @@ impl SeerWindow {
         let label = match &sheet.action {
             Confirmation::Room(action, _) => action_label(*action),
             Confirmation::Terminal { .. } => "Close terminal",
+            Confirmation::Remove { .. } => "Remove",
         };
         let card = menu::sheet("room-confirm", width, cx)
             .p(px(20.))
             .on_mouse_down(MouseButton::Left, |_, _, cx| cx.stop_propagation())
             .child(
                 div()
+                    .debug_selector({
+                        let title = title.clone();
+                        move || title.clone()
+                    })
                     .text_size(px(15.))
                     .line_height(px(20.))
                     .font_weight(FontWeight::SEMIBOLD)
@@ -139,12 +151,88 @@ impl SeerWindow {
         });
     }
 
+    pub(in crate::window) fn confirm_remove(
+        &mut self,
+        user: &str,
+        keyboard: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
+        let Content::Terminal(link, _) = &self.content else {
+            return;
+        };
+        if self.room.pending
+            || self.room.modal()
+            || self.room.server.is_none()
+            || !link.people.can_remove(user)
+        {
+            return;
+        }
+        let Some(person) = link
+            .people
+            .people
+            .iter()
+            .find(|person| person.user_id == user)
+        else {
+            return;
+        };
+        let name = person.name.clone();
+        let cancel = cx.focus_handle();
+        let confirm = cx.focus_handle();
+        self.people_menu = None;
+        self.keys.mode = if keyboard {
+            Mode::Keyboard
+        } else {
+            Mode::Pointer
+        };
+        self.room.error = None;
+        self.room.sheet = Some(Sheet {
+            action: Confirmation::Remove { name },
+            return_focus: self.keys.who.clone(),
+            cancel: cancel.clone(),
+            confirm,
+            motion: Motion::open(keyboard, 200),
+        });
+        window.focus(&cancel);
+        self.notify_room(cx);
+    }
+
+    fn run_remove(&mut self, name: String, window: &mut Window, cx: &mut Context<Self>) {
+        if self.room.pending {
+            return;
+        }
+        let Some(server) = self.room.server.clone() else {
+            return;
+        };
+        self.room.pending = true;
+        self.room.error = None;
+        if let Some(sheet) = &self.room.sheet {
+            window.focus(&sheet.confirm);
+        }
+        let work = cx
+            .background_executor()
+            .spawn(async move { seer::rooms::remove_person(&server, &name) });
+        self.room.action = Some(cx.spawn_in(window, async move |view, cx| {
+            let result = work.await;
+            let _ = view.update_in(cx, |view, window, cx| {
+                view.room.pending = false;
+                match result {
+                    Ok(()) => view.close_room_sheet(view.keys.mode == Mode::Keyboard, window, cx),
+                    Err(error) => view.room.error = Some(error.to_string()),
+                }
+                view.notify_room(cx);
+            });
+        }));
+        self.notify_room(cx);
+    }
+
     pub(super) fn run_confirmation(&mut self, window: &mut Window, cx: &mut Context<Self>) {
         let Some(sheet) = &self.room.sheet else {
             return;
         };
         match sheet.action.clone() {
             Confirmation::Room(action, _) => self.run_room_action(action, window, cx),
+            Confirmation::Remove { name } => self.run_remove(name, window, cx),
             Confirmation::Terminal { pane, .. } => {
                 self.send_close(&pane, cx);
                 self.close_room_sheet(self.keys.mode == Mode::Keyboard, window, cx);

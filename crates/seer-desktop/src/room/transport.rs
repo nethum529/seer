@@ -22,11 +22,13 @@ pub(crate) enum RoomEvent {
     Message(ServerMsg),
     Lost,
     Stopped,
+    Removed,
 }
 
 enum Disconnect {
     Lost,
     Stopped,
+    Removed,
 }
 
 pub(super) fn start(server: ServerEntry, stopped: Arc<AtomicBool>) -> Messages {
@@ -45,10 +47,13 @@ pub(super) fn start(server: ServerEntry, stopped: Arc<AtomicBool>) -> Messages {
                 );
             }
             if let Ok(socket) = connection {
-                if matches!(read(socket, &mut sender), Ok(Disconnect::Stopped)) {
-                    let _ = futures::executor::block_on(
-                        sender.send(Ok(Event::Room(RoomEvent::Stopped))),
-                    );
+                let event = match read(socket, &mut sender) {
+                    Ok(Disconnect::Stopped) => Some(RoomEvent::Stopped),
+                    Ok(Disconnect::Removed) => Some(RoomEvent::Removed),
+                    _ => None,
+                };
+                if let Some(event) = event {
+                    let _ = futures::executor::block_on(sender.send(Ok(Event::Room(event))));
                     break;
                 }
                 wait = Duration::from_secs(1);
@@ -79,10 +84,10 @@ fn read(mut socket: Socket, sender: &mut EventSender<io::Result<Event>>) -> io::
     loop {
         let message: ServerMsg = codec::decode(&mut socket)?;
         if let ServerMsg::Bye { reason } = message {
-            return Ok(if reason == "server stopped" {
-                Disconnect::Stopped
-            } else {
-                Disconnect::Lost
+            return Ok(match reason.as_str() {
+                "server stopped" => Disconnect::Stopped,
+                "removed by host" => Disconnect::Removed,
+                _ => Disconnect::Lost,
             });
         }
         futures::executor::block_on(sender.send(Ok(Event::Room(RoomEvent::Message(message)))))

@@ -71,7 +71,7 @@ for state in sidebarStates {
 if appearanceOnly { samples = [] }
 var sampleColors: [String: [Double]] = [:]
 var captureWidths: [String: Double] = [:]
-for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json"] {
+for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json", "remove-samples.json"] {
     let path = output + "/" + file
     if !FileManager.default.fileExists(atPath: path) { continue }
     let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]

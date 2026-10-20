@@ -86,7 +86,12 @@ impl Attachments {
         Ok(clients.into_iter().map(|(_, client)| client).collect())
     }
 
-    pub(crate) fn detach_client(&self, user_id: &str, client_id: &str) -> io::Result<bool> {
+    pub(crate) fn detach_client(
+        &self,
+        user_id: &str,
+        client_id: &str,
+        reason: &str,
+    ) -> io::Result<bool> {
         let writer = {
             let mut people = self.lock()?;
             let Some(clients) = people.get_mut(user_id) else {
@@ -104,7 +109,7 @@ impl Attachments {
         let send_result = codec::encode(
             &mut *stream,
             &ServerMsg::Bye {
-                reason: "detached".into(),
+                reason: reason.into(),
             },
         );
         let shutdown_result = stream.shutdown(Shutdown::Both);

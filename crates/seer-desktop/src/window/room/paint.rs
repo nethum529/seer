@@ -203,6 +203,17 @@ impl SeerWindow {
             .unwrap_or_default();
         let narrow = window.viewport_size().width < px(NARROW);
         let button = self.room_button(&name, narrow, window, cx);
+        let ended = matches!(message.as_ref(), STOPPED | GUEST_STOPPED | REMOVED);
+        let notice = if message.as_ref() == REMOVED {
+            "removed-room"
+        } else {
+            "stopped-room"
+        };
+        let title = if message.as_ref() == STOPPED {
+            SharedString::from("The room is stopped")
+        } else {
+            message.clone()
+        };
         let main = div()
             .flex_1()
             .min_w_0()
@@ -259,9 +270,9 @@ impl SeerWindow {
                     .p(px(24.))
                     .text_center()
                     .text_color(rgb(palette::FAINT))
-                    .child(if matches!(message.as_ref(), STOPPED | GUEST_STOPPED) {
+                    .child(if ended {
                         div()
-                            .debug_selector(|| "stopped-room".into())
+                            .debug_selector(move || notice.into())
                             .flex()
                             .flex_col()
                             .gap(px(4.))
@@ -269,12 +280,15 @@ impl SeerWindow {
                                 div()
                                     .text_color(rgb(palette::TEXT_2))
                                     .font_weight(FontWeight::MEDIUM)
-                                    .child(crate::label::text(if message.as_ref() == STOPPED {
-                                        "The room is stopped"
-                                    } else {
-                                        GUEST_STOPPED
-                                    })),
+                                    .debug_selector({
+                                        let title = title.clone();
+                                        move || title.to_string()
+                                    })
+                                    .child(crate::label::text(title)),
                             )
+                            .when(message.as_ref() == REMOVED, |body| {
+                                body.child(crate::label::text("Ask the host for a new invite."))
+                            })
                             .when(message.as_ref() == STOPPED, |body| {
                                 body.child(crate::label::text("Open the room menu to restore it."))
                             })

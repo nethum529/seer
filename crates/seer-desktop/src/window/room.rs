@@ -14,6 +14,7 @@ mod sheet;
 pub(super) use self::paint::saved_row;
 
 pub(super) const STOPPED: &str = "The room is stopped. Open the room menu to restore it.";
+pub(super) const REMOVED: &str = "The host removed you from this room";
 const GUEST_STOPPED: &str = "The host stopped the room";
 
 pub(super) struct RoomUi {
@@ -50,6 +51,7 @@ enum MenuAction {
 enum Confirmation {
     Room(RoomAction, Option<Box<RoomSummary>>),
     Terminal { pane: String, program: String },
+    Remove { name: String },
 }
 
 struct Sheet {
