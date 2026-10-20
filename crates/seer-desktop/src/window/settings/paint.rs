@@ -135,9 +135,18 @@ impl SeerWindow {
                             })
                             .when(self.appearance.section == Section::Appearance, |content| {
                                 content
-                                    .children(
-                                        (0..3).map(|index| self.adjustment_row(index, window, cx)),
-                                    )
+                                    .child(self.appearance_control(
+                                        Toggle::SolidBackground,
+                                        window,
+                                        cx,
+                                    ))
+                                    .when(self.appearance.settings.glass, |content| {
+                                        content.children(
+                                            (0..3).map(|index| {
+                                                self.adjustment_row(index, window, cx)
+                                            }),
+                                        )
+                                    })
                                     .child(self.appearance_control(
                                         Toggle::UniformGlass,
                                         window,
@@ -148,8 +157,11 @@ impl SeerWindow {
                                         self.appearance_control(Toggle::HideLines, window, cx)
                                             .mb(px(12.)),
                                     )
-                                    .child(self.picture_control())
-                                    .child(self.picture_actions(window, cx))
+                                    .when(self.appearance.settings.glass, |content| {
+                                        content
+                                            .child(self.picture_control())
+                                            .child(self.picture_actions(window, cx))
+                                    })
                                     .children(self.appearance.error.as_ref().map(|error| {
                                         detail(error).text_color(rgb(palette::DANGER))
                                     }))
@@ -189,6 +201,12 @@ impl SeerWindow {
     fn appearance_control(&self, toggle: Toggle, window: &Window, cx: &mut Context<Self>) -> Div {
         let appearance = &self.appearance;
         let (id, label, enabled, focus) = match toggle {
+            Toggle::SolidBackground => (
+                "solid-background-toggle",
+                "Solid background",
+                !appearance.settings.glass,
+                &appearance.solid,
+            ),
             Toggle::UniformGlass => (
                 "uniform-glass-toggle",
                 "Uniform glass",
@@ -249,9 +267,9 @@ impl SeerWindow {
                         )
                     })
                     .child(crate::menu::switch_track(enabled))
-                    .on_click(
-                        cx.listener(move |view, _, _, cx| view.toggle_appearance(toggle, cx)),
-                    ),
+                    .on_click(cx.listener(move |view, _, window, cx| {
+                        view.toggle_appearance(toggle, window, cx)
+                    })),
             )
     }
 

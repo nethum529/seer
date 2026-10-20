@@ -87,32 +87,48 @@ pub(super) fn neighbors(
     ] {
         measure(window, capture, label, [x, y, 32.], (size, weight), samples);
     }
-    for (index, label) in [
-        (3, "Uniform glass"),
-        (4, "Hide top bar"),
-        (5, "Hide lines"),
-        (6, "Background picture"),
-        (7, "Choose picture"),
-    ] {
+    let glass = view.appearance.settings.glass;
+    let start = if glass { 4 } else { 1 };
+    let mut rows = vec![(0, "Solid background", Some(!glass))];
+    rows.extend([
+        (
+            start,
+            "Uniform glass",
+            Some(view.appearance.settings.uniform_glass),
+        ),
+        (
+            start + 1,
+            "Hide top bar",
+            Some(view.appearance.settings.hide_top_bar),
+        ),
+        (
+            start + 2,
+            "Hide lines",
+            Some(view.appearance.settings.hide_lines),
+        ),
+    ]);
+    if glass {
+        rows.extend([(7, "Background picture", None), (8, "Choose picture", None)]);
+    }
+    for (index, label, on) in rows {
         let bounds = view.appearance.scroll.bounds_for_item(index).unwrap()
             + view.appearance.scroll.offset();
+        let viewport = view.appearance.scroll.bounds();
+        if bounds.top() < viewport.top() || bounds.bottom() > viewport.bottom() {
+            continue;
+        }
         let x = f32::from(bounds.left());
         let y = f32::from(bounds.top());
-        let height = if index == 6 { 18. } else { 32. };
+        let height = if index == 7 { 18. } else { 32. };
         sample(
             window,
             capture,
             label,
-            [x + if index == 7 { 14. } else { 0. }, y, height],
+            [x + if index == 8 { 14. } else { 0. }, y, height],
             FontWeight::MEDIUM,
             samples,
         );
-        if index < 6 {
-            let on = match index {
-                3 => view.appearance.settings.uniform_glass,
-                4 => view.appearance.settings.hide_top_bar,
-                _ => view.appearance.settings.hide_lines,
-            };
+        if let Some(on) = on {
             sample(
                 window,
                 capture,

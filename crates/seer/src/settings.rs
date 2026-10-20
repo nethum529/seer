@@ -50,13 +50,6 @@ impl Settings {
                 settings.picture_brightness = settings.picture_brightness.min(100);
                 settings.glass_darkness = settings.glass_darkness.min(100);
                 settings.glass_blur = settings.glass_blur.min(40);
-                if !settings.glass {
-                    settings.glass = true;
-                    settings.picture_brightness = 0;
-                    settings.glass_darkness = 100;
-                    settings.glass_blur = Self::default().glass_blur;
-                    settings.save_to(path)?;
-                }
                 Ok(settings)
             }
             Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(Self::default()),

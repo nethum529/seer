@@ -3,6 +3,76 @@ use gpui::{Modifiers, TestAppContext, VisualTestContext, point, px, size};
 use super::input_e2e::{Runtime, open_view};
 
 #[gpui::test]
+fn solid_background_loads_and_saves_with_keyboard_and_pointer(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    let path = runtime.directory.path().join("settings.toml");
+    let legacy = "glass = false\npicture_brightness = 37\nglass_darkness = 61\nglass_blur = 24\n";
+    std::fs::write(&path, legacy).unwrap();
+    let (view, cx) = open_view(&runtime, cx);
+    cx.run_until_parked();
+    assert_eq!(std::fs::read_to_string(&path).unwrap(), legacy);
+    click(cx, "settings-trigger");
+    assert!(cx.debug_bounds("solid-background-toggle").is_some());
+    for id in [
+        "picture-brightness",
+        "glass-darkness",
+        "glass-blur",
+        "choose-picture",
+    ] {
+        assert!(cx.debug_bounds(id).is_none());
+    }
+    cx.simulate_keystrokes("tab");
+    activate(cx, "space");
+    assert!(cx.debug_bounds("picture-brightness").is_some());
+    assert!(seer::Settings::load_from(&path).unwrap().glass);
+    click(cx, "solid-background-toggle");
+    assert!(!seer::Settings::load_from(&path).unwrap().glass);
+    for id in [
+        "uniform-glass-toggle",
+        "hide-top-bar-toggle",
+        "hide-lines-toggle",
+    ] {
+        click(cx, id);
+    }
+    view.update(cx, |view, cx| {
+        view.appearance = crate::appearance::Appearance::load(Some(path.clone()), cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click(cx, "settings-trigger");
+    let saved = seer::Settings::load_from(&path).unwrap();
+    assert!(!saved.glass);
+    assert_eq!(
+        [
+            saved.picture_brightness,
+            saved.glass_darkness,
+            saved.glass_blur
+        ],
+        [37, 61, 24]
+    );
+    assert!(!saved.uniform_glass);
+    assert!(!saved.hide_top_bar);
+    assert!(saved.hide_lines);
+    cx.simulate_keystrokes("tab");
+    activate(cx, "enter");
+    assert!(cx.debug_bounds("choose-picture").is_some());
+    assert!(seer::Settings::load_from(&path).unwrap().glass);
+    let mut converted = saved;
+    converted.glass = true;
+    converted.picture_brightness = 0;
+    converted.glass_darkness = 100;
+    converted.save_to(&path).unwrap();
+    view.update(cx, |view, cx| {
+        view.appearance = crate::appearance::Appearance::load(Some(path.clone()), cx);
+        cx.notify();
+    });
+    cx.run_until_parked();
+    click(cx, "settings-trigger");
+    click(cx, "solid-background-toggle");
+    assert!(!seer::Settings::load_from(&path).unwrap().glass);
+}
+
+#[gpui::test]
 fn appearance_slider_values_survive_restart(cx: &mut TestAppContext) {
     let runtime = Runtime::start();
     let (view, cx) = open_view(&runtime, cx);
@@ -27,12 +97,8 @@ fn appearance_slider_values_survive_restart(cx: &mut TestAppContext) {
         cx.notify();
     });
     click(cx, "settings-trigger");
-    for id in ["picture-brightness", "glass-darkness", "glass-blur"] {
-        cx.simulate_keystrokes(if id == "picture-brightness" {
-            "tab"
-        } else {
-            "tab tab"
-        });
+    for _ in 0..3 {
+        cx.simulate_keystrokes("tab tab");
         cx.simulate_keystrokes("right");
         cx.run_until_parked();
     }
@@ -108,6 +174,14 @@ fn appearance_survives_reopen_and_missing_picture_keeps_the_window(cx: &mut Test
     cx.simulate_keystrokes("end");
     assert!(cx.debug_bounds("settings-dialog").is_some());
     assert!(cx.debug_bounds("picture-fallback").is_some());
+    let viewport = cx.debug_bounds("settings-content").unwrap();
+    cx.simulate_event(gpui::ScrollWheelEvent {
+        position: viewport.center(),
+        delta: gpui::ScrollDelta::Pixels(point(px(0.), px(-400.))),
+        modifiers: Modifiers::default(),
+        touch_phase: gpui::TouchPhase::Moved,
+    });
+    cx.run_until_parked();
     click(cx, "default-picture");
     assert!(seer::Settings::load_from(&path).unwrap().picture.is_none());
     click(cx, "settings-close");
@@ -172,6 +246,7 @@ fn narrow_settings_keeps_each_keyboard_control_in_view(cx: &mut TestAppContext) 
     cx.run_until_parked();
     click(cx, "settings-trigger");
     for (key, id) in [
+        ("tab", "solid-background-toggle"),
         ("tab", "picture-brightness"),
         ("tab", "reset-brightness"),
         ("tab", "glass-darkness"),
@@ -245,5 +320,14 @@ fn shortcuts_are_readable_and_settings_keeps_terminal_input(cx: &mut TestAppCont
 fn click(cx: &mut VisualTestContext, id: &'static str) {
     let bounds = cx.debug_bounds(id).expect("control must be visible");
     cx.simulate_click(bounds.center(), Modifiers::default());
+    cx.run_until_parked();
+}
+
+fn activate(cx: &mut VisualTestContext, key: &str) {
+    cx.run_until_parked();
+    cx.simulate_keystrokes(key);
+    cx.simulate_event(gpui::KeyUpEvent {
+        keystroke: gpui::Keystroke::parse(key).unwrap(),
+    });
     cx.run_until_parked();
 }
