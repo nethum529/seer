@@ -351,6 +351,7 @@ pub(super) fn open_view<'a>(
             people_menu: None,
             invite: None,
             server: None,
+            join_screen: None,
             _join: None,
             _tab_time: None,
             _messages: Some(cx.spawn(async move |view, cx| {

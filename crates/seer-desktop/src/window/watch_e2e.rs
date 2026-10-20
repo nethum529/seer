@@ -271,6 +271,7 @@ pub(super) fn open_view<'a>(
                 cx,
             ),
             room: room::RoomUi::new(Some(room.server.clone()), cx),
+            join_screen: None,
             _join: None,
             _tab_time: None,
             editing: None,

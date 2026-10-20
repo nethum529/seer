@@ -1,6 +1,24 @@
 use super::*;
 
 impl SeerWindow {
+    pub(in crate::window) fn start_room(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.room.pending || self.room.modal() {
+            return;
+        }
+        let Content::Start(start) = &self.content else {
+            return;
+        };
+        let focus = start.host.clone();
+        self.room.error = None;
+        self.confirm_room_action(
+            RoomAction::Start,
+            focus,
+            self.keys.mode == Mode::Keyboard,
+            window,
+            cx,
+        );
+    }
+
     pub(in crate::window) fn room_command(
         &mut self,
         action: Action,

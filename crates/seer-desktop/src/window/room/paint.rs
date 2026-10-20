@@ -10,6 +10,10 @@ impl SeerWindow {
         window: &Window,
         cx: &mut Context<Self>,
     ) -> Div {
+        let name = self.room.server.as_ref().map_or_else(
+            || "No room".to_owned(),
+            |server| chrome::capitalize(&server.alias),
+        );
         div()
             .absolute()
             .right(px(8.))
@@ -17,7 +21,7 @@ impl SeerWindow {
             .flex()
             .items_center()
             .gap(px(2.))
-            .child(self.room_button("No room", false, window, cx))
+            .child(self.room_button(&name, false, window, cx))
             .child(self.settings_button(window, cx))
     }
 
@@ -157,6 +161,7 @@ impl SeerWindow {
                             )))
                             .child(crate::label::text(match action {
                                 MenuAction::Invite => "Invite a person",
+                                MenuAction::Join => "Join a room",
                                 MenuAction::Room(action) => action_label(action),
                             }))
                     }),
@@ -316,69 +321,52 @@ impl SeerWindow {
     }
 }
 
+pub(in crate::window) fn saved_row(server: &ServerEntry, up: bool) -> Stateful<Div> {
+    let id = SharedString::from(format!("saved-room-{}", server.user_id));
+    menu::item(id.clone(), 36.)
+        .debug_selector(move || id.to_string())
+        .child(cap_icon(
+            div()
+                .w(px(22.))
+                .flex_none()
+                .flex()
+                .justify_center()
+                .child(chrome::room_dot(up)),
+        ))
+        .child(
+            sidebar::one_line(div())
+                .flex_1()
+                .min_w_0()
+                .child(crate::label::text(chrome::capitalize(&server.alias))),
+        )
+}
+
 fn room_row(room: &RoomSummary, current: bool) -> Stateful<Div> {
     let up = room.state != RoomState::Unreachable;
     let status = if current && up {
-        format!("{} people", room.people.len())
+        match room.people.len() {
+            1 => "1 person".into(),
+            count => format!("{count} people"),
+        }
     } else if current && room.host {
         "Stopped".into()
     } else {
         chrome::capitalize(room.state.label())
     };
-    menu::item(
-        gpui::SharedString::from(format!("saved-room-{}", room.server.user_id)),
-        36.,
-    )
-    .child(cap_icon(
-        div()
-            .w(px(22.))
-            .flex_none()
-            .flex()
-            .justify_center()
-            .child(chrome::room_dot(up)),
-    ))
-    .child(
-        div()
-            .flex_1()
-            .min_w_0()
-            .flex()
-            .items_center()
-            .gap(px(6.))
-            .text_color(rgb(if current {
-                palette::TEXT
-            } else {
-                palette::TEXT_2
-            }))
-            .child(
-                sidebar::one_line(div())
-                    .flex_none()
-                    .max_w(px(112.))
-                    .child(crate::label::text(chrome::capitalize(room.room_name()))),
-            )
-            .when(current, |row| {
-                row.child(
-                    sidebar::one_line(div())
-                        .text_size(px(12.))
-                        .font_weight(FontWeight::NORMAL)
-                        .font_family("JetBrains Mono")
-                        .text_color(rgb(palette::FAINT))
-                        .child(crate::label::text(room.address().to_owned())),
-                )
-            }),
-    )
-    .child(
-        div()
-            .flex_none()
-            .text_size(px(12.))
-            .font_weight(FontWeight::NORMAL)
-            .text_color(rgb(palette::FAINT))
-            .child(crate::label::text(status)),
-    )
-    .child(cap_icon(
-        div().w(px(16.)).flex_none().when(current, |slot| {
-            slot.child(chrome::icon("check", palette::TEXT))
-        }),
-    ))
+    saved_row(&room.server, up)
+        .text_color(rgb(if current {
+            palette::TEXT
+        } else {
+            palette::TEXT_2
+        }))
+        .child(
+            div()
+                .flex_none()
+                .text_size(px(12.))
+                .font_weight(FontWeight::NORMAL)
+                .text_color(rgb(palette::FAINT))
+                .child(crate::label::text(status)),
+        )
 }
 
 pub(super) fn action_label(action: RoomAction) -> &'static str {
@@ -394,6 +382,7 @@ pub(super) fn action_label(action: RoomAction) -> &'static str {
 fn action_icon(action: MenuAction) -> &'static str {
     match action {
         MenuAction::Invite => "invite",
+        MenuAction::Join => "invite",
         MenuAction::Room(RoomAction::Start) => "fresh",
         MenuAction::Room(RoomAction::Stop) => "stop",
         MenuAction::Room(RoomAction::Leave) => "leave",
@@ -405,6 +394,7 @@ fn action_icon(action: MenuAction) -> &'static str {
 fn action_id(action: MenuAction) -> &'static str {
     match action {
         MenuAction::Invite => "room-invite",
+        MenuAction::Join => "room-join",
         MenuAction::Room(RoomAction::Start) => "room-start",
         MenuAction::Room(RoomAction::Stop) => "room-stop",
         MenuAction::Room(RoomAction::Leave) => "room-leave",
@@ -416,7 +406,9 @@ fn action_id(action: MenuAction) -> &'static str {
 fn action_color(action: MenuAction) -> u32 {
     if matches!(
         action,
-        MenuAction::Invite | MenuAction::Room(RoomAction::Start | RoomAction::Restore)
+        MenuAction::Invite
+            | MenuAction::Join
+            | MenuAction::Room(RoomAction::Start | RoomAction::Restore)
     ) {
         palette::TEXT_2
     } else {

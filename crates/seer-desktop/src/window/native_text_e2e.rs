@@ -205,6 +205,24 @@ pub(crate) fn exercise(
                 .await;
                 return measure(&fixture.capture, &fixture.evidence, "measure-appearance");
             }
+            if std::env::var_os("TEXT_PIXEL_START_SCREEN_ONLY").is_some() {
+                super::start_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
+                    .await;
+                return measure(&fixture.capture, &fixture.evidence, "measure");
+            }
+            let server = seer::ServerStore::load()
+                .unwrap()
+                .default_server()
+                .unwrap()
+                .clone();
+            window
+                .update(cx, |view, window, cx| {
+                    view.pick_saved_room(server, window, cx)
+                })
+                .unwrap();
+            cx.background_executor()
+                .timer(Duration::from_millis(900))
+                .await;
             if std::env::var_os("TEXT_PIXEL_START_ROOM_ONLY").is_some() {
                 super::start_room_native_e2e::exercise(
                     window,

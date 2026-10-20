@@ -129,7 +129,7 @@ impl SeerWindow {
         };
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.input(event),
-            Content::Message(_) | Content::Join(_) => Ok(()),
+            Content::Message(_) | Content::Start(_) => Ok(()),
         };
         self.check(result, cx);
         if changed {
@@ -387,7 +387,7 @@ impl SeerWindow {
                         }
                     })
             }
-            Content::Message(_) | Content::Join(_) => false,
+            Content::Message(_) | Content::Start(_) => false,
         }
     }
 

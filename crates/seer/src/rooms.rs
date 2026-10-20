@@ -34,10 +34,6 @@ impl RoomSummary {
     pub fn room_name(&self) -> &str {
         &self.server.alias
     }
-
-    pub fn address(&self) -> &str {
-        &self.server.endpoint
-    }
 }
 
 pub fn saved_rooms() -> io::Result<Vec<RoomSummary>> {

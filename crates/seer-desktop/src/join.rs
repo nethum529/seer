@@ -11,7 +11,10 @@ use crate::{
     palette,
 };
 
-pub(crate) struct Joined(pub(crate) ServerEntry);
+pub(crate) enum Event {
+    Joined(ServerEntry),
+    Back,
+}
 
 pub(crate) struct Join {
     field: Entity<NameInput>,
@@ -24,7 +27,7 @@ pub(crate) struct Join {
     task: Option<Task<()>>,
 }
 
-impl EventEmitter<Joined> for Join {}
+impl EventEmitter<Event> for Join {}
 
 impl Join {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
@@ -71,7 +74,7 @@ impl Join {
     ) {
         match event {
             Finished::Save => self.submit(window, cx),
-            Finished::Cancel => self.back(window, cx),
+            Finished::Cancel => self.go_back(window, cx),
             Finished::Changed => {
                 self.error = None;
                 cx.notify();
@@ -106,8 +109,12 @@ impl Join {
         cx.notify();
     }
 
-    fn back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
-        if self.busy || self.invitation.is_none() {
+    pub(crate) fn go_back(&mut self, window: &mut Window, cx: &mut Context<Self>) {
+        if self.busy {
+            return;
+        }
+        if self.invitation.is_none() {
+            cx.emit(Event::Back);
             return;
         }
         self.invitation = None;
@@ -144,7 +151,7 @@ impl Join {
                     Ok(server) => {
                         view.invitation = None;
                         view.field(String::new(), false, window, cx);
-                        cx.emit(Joined(server));
+                        cx.emit(Event::Joined(server));
                     }
                     Err(error) => {
                         if matches!(error, JoinError::InvalidSeat) {
@@ -187,18 +194,16 @@ impl Render for Join {
             .justify_end()
             .gap(px(8.))
             .mt(px(20.))
-            .when(name, |row| {
-                row.child(
-                    button("join-back", "Back", &self.back, false, busy, window)
-                        .on_click(cx.listener(|view, _, window, cx| view.back(window, cx)))
-                        .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
-                            if event.keystroke.key == "enter" || event.keystroke.key == "space" {
-                                view.back(window, cx);
-                                cx.stop_propagation();
-                            }
-                        })),
-                )
-            })
+            .child(
+                button("join-back", "Back", &self.back, false, busy, window)
+                    .on_click(cx.listener(|view, _, window, cx| view.go_back(window, cx)))
+                    .on_key_down(cx.listener(|view, event: &KeyDownEvent, window, cx| {
+                        if event.keystroke.key == "enter" || event.keystroke.key == "space" {
+                            view.go_back(window, cx);
+                            cx.stop_propagation();
+                        }
+                    })),
+            )
             .child(
                 button("join-submit", label, &self.submit, true, busy, window)
                     .when(busy, |button| button.opacity(0.6))
@@ -210,61 +215,39 @@ impl Render for Join {
                         }
                     })),
             );
-        div()
-            .size_full()
-            .flex()
-            .flex_col()
-            .child(chrome::bar(cx).pl(px(20.)).child(chrome::lights()))
-            .child(
-                div()
-                    .flex_1()
-                    .min_h_0()
-                    .px(px(24.))
-                    .flex()
-                    .justify_center()
-                    .child(
+        layout(
+            if name {
+                "Choose your name"
+            } else {
+                "Join a room"
+            },
+            div()
+                .when(!name, |form| {
+                    form.child(
                         div()
-                            .w(px(360.))
-                            .max_w_full()
-                            .mt(px((f32::from(window.viewport_size().height) - 44.) * 0.32))
-                            .child(
-                                div()
-                                    .mb(px(24.))
-                                    .font_family("Inter Display")
-                                    .text_size(px(22.))
-                                    .line_height(px(28.))
-                                    .font_weight(FontWeight::SEMIBOLD)
-                                    .child(crate::label::text(if name {
-                                        "Choose your name"
-                                    } else {
-                                        "Join a room"
-                                    })),
-                            )
-                            .when(!name, |form| {
-                                form.child(
-                                    div()
-                                        .mb(px(8.))
-                                        .text_size(px(12.))
-                                        .line_height(px(16.))
-                                        .font_weight(FontWeight::MEDIUM)
-                                        .text_color(rgb(palette::MUTED))
-                                        .child(crate::label::text("Invite from the host")),
-                                )
-                            })
-                            .child(self.field.clone())
-                            .children(self.error.as_ref().map(|error| {
-                                div()
-                                    .id("join-error")
-                                    .debug_selector(|| "join-error".into())
-                                    .mt(px(8.))
-                                    .text_size(px(12.))
-                                    .line_height(px(16.))
-                                    .text_color(rgb(0xf87171))
-                                    .child(crate::label::text(error_text(error, window)))
-                            }))
-                            .child(actions),
-                    ),
-            )
+                            .mb(px(8.))
+                            .text_size(px(12.))
+                            .line_height(px(16.))
+                            .font_weight(FontWeight::MEDIUM)
+                            .text_color(rgb(palette::MUTED))
+                            .child(crate::label::text("Invite from the host")),
+                    )
+                })
+                .child(self.field.clone())
+                .children(self.error.as_ref().map(|error| {
+                    div()
+                        .id("join-error")
+                        .debug_selector(|| "join-error".into())
+                        .mt(px(8.))
+                        .text_size(px(12.))
+                        .line_height(px(16.))
+                        .text_color(rgb(palette::DANGER))
+                        .child(crate::label::text(error_text(error, window)))
+                }))
+                .child(actions),
+            window,
+            cx,
+        )
     }
 }
 
@@ -298,7 +281,7 @@ fn error_text(error: &JoinError, window: &Window) -> String {
     text
 }
 
-fn button(
+pub(crate) fn button(
     id: &'static str,
     label: &'static str,
     focus: &FocusHandle,
@@ -339,4 +322,44 @@ fn button(
             gpui::transparent_black()
         })
         .child(crate::label::text(label))
+}
+
+pub(crate) fn layout(
+    title: &'static str,
+    content: impl IntoElement,
+    window: &Window,
+    cx: &gpui::App,
+) -> gpui::Div {
+    div()
+        .size_full()
+        .flex()
+        .flex_col()
+        .child(chrome::bar(cx).pl(px(20.)).child(chrome::lights()))
+        .child(
+            div()
+                .id("entry-content")
+                .flex_1()
+                .min_h_0()
+                .overflow_y_scroll()
+                .px(px(24.))
+                .flex()
+                .justify_center()
+                .child(
+                    div()
+                        .w(px(360.))
+                        .max_w_full()
+                        .mt(px((f32::from(window.viewport_size().height) - 44.) * 0.32))
+                        .pb(px(24.))
+                        .child(
+                            div()
+                                .mb(px(24.))
+                                .font_family("Inter Display")
+                                .text_size(px(22.))
+                                .line_height(px(28.))
+                                .font_weight(FontWeight::SEMIBOLD)
+                                .child(crate::label::text(title)),
+                        )
+                        .child(content),
+                ),
+        )
 }

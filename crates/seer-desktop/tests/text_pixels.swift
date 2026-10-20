@@ -21,7 +21,7 @@ if CommandLine.arguments[1] != "measure" && !appearanceOnly {
 }
 var table = "Label | Scale | Above capitals | Below baseline | Difference\n"
 var failures = 0
-let startRoomOnly = ProcessInfo.processInfo.environment["TEXT_PIXEL_START_ROOM_ONLY"] != nil
+let startRoomOnly = ProcessInfo.processInfo.environment["TEXT_PIXEL_START_ROOM_ONLY"] != nil || ProcessInfo.processInfo.environment["TEXT_PIXEL_START_SCREEN_ONLY"] != nil
 let sidebarStates = startRoomOnly ? [] : ["shown-lines", "hidden-lines", "shown-no-lines", "hidden-no-lines"]
 var samples: [(String, String, [Double], [Double])] = startRoomOnly ? [] : [
     ("main", "Sidebar name", [44, 52, 10, 36], [44, 10]),
@@ -37,8 +37,8 @@ var samples: [(String, String, [Double], [Double])] = startRoomOnly ? [] : [
     ("settings", "Settings title", [321, 65, 10, 32], [321, 10]),
     ("settings", "Settings row", [321, 128, 9, 18], [321, 4]),
     ("main", "Room trigger", [44, 602.5, 8, 32], [44, 8]),
-    ("room", "Room name", [53, 476.5, 8, 36], [53, 8]),
-    ("room", "Room action", [53, 521.5, 8, 36], [53, 8]),
+    ("room", "Room name", [53, 440.5, 8, 36], [53, 8]),
+    ("room", "Room action", [53, 485.5, 8, 36], [53, 8]),
     ("sheet", "Sheet title", [301, 262, 9, 20], [339, 3]),
     ("sheet", "Sheet button", [500, 346, 9, 32], [541, 2]),
     ("context", "Menu item", [99, 113, 9, 32], [99, 9]),
@@ -71,7 +71,7 @@ for state in sidebarStates {
 if appearanceOnly { samples = [] }
 var sampleColors: [String: [Double]] = [:]
 var captureWidths: [String: Double] = [:]
-for file in ["shortcut-samples.json", "start-room-samples.json", "appearance-samples.json", "banner-samples.json"] {
+for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json"] {
     let path = output + "/" + file
     if !FileManager.default.fileExists(atPath: path) { continue }
     let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]

@@ -35,7 +35,7 @@ impl SeerWindow {
         self.rows = Rows::default();
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.new_terminal(),
-            Content::Message(_) | Content::Join(_) => return,
+            Content::Message(_) | Content::Start(_) => return,
         };
         self.check(result, cx);
         window.focus(&self.input.focus);
@@ -118,7 +118,7 @@ impl SeerWindow {
     pub(super) fn send_close(&mut self, pane: &str, cx: &mut Context<Self>) {
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.close_terminal(pane),
-            Content::Message(_) | Content::Join(_) => Ok(()),
+            Content::Message(_) | Content::Start(_) => Ok(()),
         };
         self.check(result, cx);
     }

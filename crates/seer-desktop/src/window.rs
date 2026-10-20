@@ -3,9 +3,9 @@ use std::io;
 use futures::StreamExt;
 use gpui::prelude::FluentBuilder;
 use gpui::{
-    AppContext, Context, Div, Entity, Font, FontWeight, InteractiveElement, IntoElement,
-    KeyDownEvent, Keystroke, MouseButton, ParentElement, Render, ScrollHandle, SharedString,
-    Stateful, Styled, Subscription, Task, Window, div, px, relative, rgb,
+    Context, Div, Entity, Font, FontWeight, InteractiveElement, IntoElement, KeyDownEvent,
+    Keystroke, MouseButton, ParentElement, Render, ScrollHandle, SharedString, Stateful, Styled,
+    Subscription, Task, Window, div, px, relative, rgb,
 };
 use seer::{ServerEntry, ServerStore};
 
@@ -31,24 +31,25 @@ mod room;
 mod settings;
 pub(crate) mod sidebar_visibility;
 mod slide;
+mod start;
 mod switch;
 pub(crate) mod terminals;
 pub(crate) mod top_bar;
 use rename::Surface;
 
-const NO_ROOM: &str = "To join a room, paste the line from the host into your terminal.";
 const LINK_LOST: &str = "The link to your terminals stopped. Open Seer again.";
 // The design's narrow layout starts below this window width.
 const NARROW: f32 = 720.;
 
 pub(crate) enum Content {
-    Join(Entity<crate::join::Join>),
+    Start(start::StartScreen),
     Message(SharedString),
     Terminal(Box<Link>, SharedString),
 }
 
 pub(crate) struct SeerWindow {
     pub(crate) content: Content,
+    join_screen: Option<Entity<crate::join::Join>>,
     font: Font,
     ui_font: SharedString,
     pub(crate) keys: Keys,
@@ -69,29 +70,8 @@ pub(crate) struct SeerWindow {
 impl SeerWindow {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let font = screen::terminal_font();
-        let saved = selected_server().ok().flatten();
-        let stopped = saved.as_ref().and_then(seer::rooms::stopped_host);
-        let (content, messages, server) = match stopped.as_ref().map_or_else(open, |_| Ok(None)) {
-            Ok(Some((link, server, messages))) => (
-                Content::Terminal(Box::new(link), server.name.clone().into()),
-                Some(messages),
-                Some(server),
-            ),
-            Ok(None) => (
-                if stopped.is_some() {
-                    Content::Message(room::STOPPED.into())
-                } else {
-                    Content::Join(cx.new(|cx| crate::join::Join::new(window, cx)))
-                },
-                None,
-                None,
-            ),
-            Err(error) => (
-                Content::Message(format!("Could not open your terminals: {error}").into()),
-                None,
-                None,
-            ),
-        };
+        let start = start::StartScreen::new(cx);
+        window.focus(&start.host);
         let keys = Keys {
             tabs: cx.focus_handle().tab_stop(true),
             who: cx.focus_handle().tab_stop(true),
@@ -100,41 +80,25 @@ impl SeerWindow {
             mode: Mode::Pointer,
         };
         let input = Input::new(window, cx);
-        if !matches!(content, Content::Join(_)) {
-            window.focus(&input.focus);
-        }
-        let subscription = match &content {
-            Content::Join(join) => Some(cx.subscribe_in(
-                join,
-                window,
-                |view, _, joined: &crate::join::Joined, window, cx| {
-                    view.joined(joined.0.clone(), window, cx)
-                },
-            )),
-            _ => None,
-        };
         let mut view = Self {
-            content,
+            content: Content::Start(start),
+            join_screen: None,
             font,
             ui_font: "Inter".into(),
             keys,
             input,
             rows: Rows::default(),
             appearance: crate::appearance::Appearance::load(seer::Settings::path().ok(), cx),
-            room: room::RoomUi::new(server.clone().or(saved), cx),
+            room: room::RoomUi::new(None, cx),
             editing: None,
             menu: None,
             people_menu: None,
             invite: None,
-            server,
+            server: None,
             _messages: None,
-            _join: subscription,
+            _join: None,
             _tab_time: Some(tab_time::refresh(cx)),
         };
-        view.room.current = stopped;
-        if let Some(messages) = messages {
-            view.listen(messages, cx);
-        }
         view.refresh_room(cx);
         view
     }
@@ -159,14 +123,14 @@ impl SeerWindow {
     pub(crate) fn screen(&mut self) -> Option<(&Terminal, &mut Rows)> {
         match &self.content {
             Content::Terminal(link, _) => Some((link.terminal(), &mut self.rows)),
-            Content::Message(_) | Content::Join(_) => None,
+            Content::Message(_) | Content::Start(_) => None,
         }
     }
 
     pub(crate) fn resize(&mut self, cols: u16, rows: u16, cx: &mut Context<Self>) {
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.resize(cols, rows),
-            Content::Message(_) | Content::Join(_) => Ok(()),
+            Content::Message(_) | Content::Start(_) => Ok(()),
         };
         self.check(result, cx);
     }
@@ -176,7 +140,7 @@ impl SeerWindow {
         self.rows = Rows::default();
         let result = match &mut self.content {
             Content::Terminal(link, _) => link.select(pane),
-            Content::Message(_) | Content::Join(_) => Ok(()),
+            Content::Message(_) | Content::Start(_) => Ok(()),
         };
         self.check(result, cx);
         self.notify_room(cx);
@@ -239,6 +203,9 @@ impl SeerWindow {
             return;
         }
         if self.join_travel(keystroke, window, cx) {
+            return;
+        }
+        if self.start_key(keystroke, window, cx) {
             return;
         }
         if self.sidebar_key(keystroke, window, cx) {
@@ -343,7 +310,7 @@ impl SeerWindow {
                 }
                 result
             }
-            Content::Message(_) | Content::Join(_) => Ok(()),
+            Content::Message(_) | Content::Start(_) => Ok(()),
         };
         self.check(result, cx);
         if room {
@@ -372,27 +339,6 @@ impl SeerWindow {
 }
 
 type Opened = (Link, ServerEntry, Messages);
-
-fn selected_server() -> io::Result<Option<seer::ServerEntry>> {
-    let store = ServerStore::load()?;
-    let user = std::env::args().skip_while(|arg| arg != "--user").nth(1);
-    let selected = match user {
-        Some(user) => Some(
-            store
-                .server_for_user(&user)
-                .ok_or_else(|| io::Error::other("This room is not saved"))?,
-        ),
-        None => store.default_server(),
-    };
-    Ok(selected.cloned())
-}
-
-fn open() -> io::Result<Option<Opened>> {
-    selected_server()?
-        .as_ref()
-        .map(join::open_server)
-        .transpose()
-}
 
 #[cfg(all(test, not(feature = "native-text-e2e")))]
 mod edit_keys_e2e;
@@ -470,3 +416,9 @@ mod banner_native_e2e;
 mod version_mirror;
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod version_native_e2e;
+
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+mod start_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod start_native_e2e;
