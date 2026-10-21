@@ -9,8 +9,7 @@ pub(crate) fn default_font() -> Font {
     font
 }
 
-pub(crate) fn load(cx: &App) -> (Font, f32) {
-    let settings = crate::terminal_config::load();
+pub(crate) fn load(cx: &App, settings: &crate::terminal_config::TerminalSettings) -> (Font, f32) {
     let mut font = default_font();
     if !settings.families.is_empty() {
         let names = cx.text_system().all_font_names();

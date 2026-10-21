@@ -73,7 +73,9 @@ pub(crate) struct SeerWindow {
 
 impl SeerWindow {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let (font, font_size) = crate::terminal_font::load(cx);
+        let settings = crate::terminal_config::load();
+        cx.set_global(settings.colors);
+        let (font, font_size) = crate::terminal_font::load(cx, &settings);
         let start = start::StartScreen::new(cx);
         window.focus(&start.host);
         let keys = Keys {
@@ -461,3 +463,8 @@ mod processes_pixel_samples;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod font_native_e2e;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod color_fixture;
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod color_native_e2e;

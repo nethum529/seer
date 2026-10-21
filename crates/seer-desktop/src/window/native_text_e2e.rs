@@ -1,5 +1,7 @@
 use futures::FutureExt;
+mod options;
 use gpui::{Keystroke, point, px};
+pub(crate) use options::window_options;
 use seer_core::Tree;
 use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, codec};
 use std::fs;
@@ -79,6 +81,7 @@ pub(crate) fn prepare() -> Option<Fixture> {
         }
     }
     super::font_native_e2e::prepare(root);
+    super::color_fixture::prepare(root);
     let mirror = std::env::var_os("VERSION_BANNER_QA")
         .map(|_| super::version_mirror::prepare(evidence.clone()));
     // SAFETY: this test entry runs on the main thread before it starts GPUI or any worker thread.
@@ -412,6 +415,10 @@ async fn exercise_room_qa(
     let evidence = &fixture.evidence;
     let capture = &fixture.capture;
     let root = fixture._directory.path();
+    if std::env::var_os("COLOR_QA").is_some() {
+        super::color_native_e2e::exercise(window, evidence, capture, cx).await;
+        return true;
+    }
     if std::env::var_os("FONT_QA").is_some() {
         super::font_native_e2e::exercise(window, evidence, capture, cx).await;
         return true;
@@ -453,38 +460,6 @@ async fn exercise_room_qa(
         return true;
     }
     false
-}
-
-pub(crate) fn window_options(
-    mut options: gpui::WindowOptions,
-    cx: &gpui::App,
-) -> gpui::WindowOptions {
-    if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some()
-        || std::env::var_os("PROCESSES_QA").is_some()
-        || std::env::var_os("SHORTCUT_KEYS_QA").is_some()
-    {
-        // Nonactivating panels can receive native keys while the test app is in the background.
-        options.kind = gpui::WindowKind::PopUp;
-    }
-    if let Ok(secondary) = std::env::var("TEXT_PIXEL_SECONDARY") {
-        let display = cx
-            .displays()
-            .into_iter()
-            .find(|display| {
-                display.id() != cx.primary_display().unwrap().id()
-                    && (secondary == "1" || u32::from(display.id()).to_string() == secondary)
-            })
-            .expect("a secondary native display is required");
-        options.display_id = Some(display.id());
-        let mut bounds =
-            gpui::Bounds::centered(Some(display.id()), gpui::size(px(960.), px(640.)), cx);
-        if std::env::var_os("SHORTCUT_KEYS_QA").is_some() || std::env::var_os("FONT_QA").is_some() {
-            // GPUI 0.2.2 adds the macOS display origin when it creates a window.
-            bounds.origin -= display.bounds().origin;
-        }
-        options.window_bounds = Some(gpui::WindowBounds::Windowed(bounds));
-    }
-    options
 }
 
 fn measure(capture: &std::path::Path, evidence: &std::path::Path, mode: &str) -> bool {
