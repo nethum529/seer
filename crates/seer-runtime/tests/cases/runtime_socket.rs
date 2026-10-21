@@ -42,8 +42,7 @@ fn serves_cells_and_preserves_the_tree_after_disconnect() {
         .expect("read timeout must set");
 
     let created_tree = tree(read_message(&mut stream));
-    assert_eq!(created_tree.workspaces[0].tabs.len(), 1);
-    assert_eq!(created_tree.workspaces[0].tabs[0].panes.len(), 1);
+    assert_single_terminal(&created_tree);
     assert!(wait_for_cells(&mut stream));
 
     drop(stream);
@@ -127,8 +126,7 @@ fn broadcasts_to_concurrent_connections() {
 
     let mut owner = connect_with_timeout(&socket_path);
     let created = read_until_tree(&mut owner);
-    assert_eq!(created.workspaces[0].tabs.len(), 1);
-    assert_eq!(created.workspaces[0].tabs[0].panes.len(), 1);
+    assert_single_terminal(&created);
     let first_tab = created.workspaces[0].tabs[0].id.clone();
     let first_pane = created.workspaces[0].tabs[0].panes[0].id.clone();
     assert!(wait_for_cells(&mut owner));
@@ -256,7 +254,6 @@ fn broadcasts_to_concurrent_connections() {
             rows: 40,
         },
     );
-    // A read-only viewer never sizes a pane, so the owner resize wins.
     let owner_resized = read_until_tree(&mut owner);
     assert_eq!(
         owner_resized.workspaces[0].tabs[0].panes[0].size,
@@ -307,6 +304,11 @@ fn broadcasts_to_concurrent_connections() {
 
     drop(owner);
     let _ = runtime.stop();
+}
+
+fn assert_single_terminal(tree: &seer_core::Tree) {
+    assert_eq!(tree.workspaces[0].tabs.len(), 1);
+    assert_eq!(tree.workspaces[0].tabs[0].panes.len(), 1);
 }
 
 #[test]
