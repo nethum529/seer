@@ -54,18 +54,11 @@ fn pick_and_type(cx: &mut TestAppContext, keyboard: bool) {
             click(cx, 100., 151.);
         }
         pump(cx);
-        assert!(view.read_with(cx, |view, _| {
-            view.people_menu
-                .as_ref()
-                .is_none_or(|menu| menu.motion.closing())
-        }));
+        assert!(cx.debug_bounds("Kyler: Host").is_none());
         cx.simulate_keystrokes("space");
         pump(cx);
         assert!(
-            view.read_with(cx, |view, _| view
-                .people_menu
-                .as_ref()
-                .is_none_or(|menu| menu.motion.closing())),
+            cx.debug_bounds("Kyler: Host").is_none(),
             "a typed space must not reopen People: keyboard={keyboard}, control={control}"
         );
         cx.update(|window, cx| assert!(view.read(cx).input.focus.is_focused(window)));
@@ -144,11 +137,7 @@ fn people_escape_restores_focus_before_open(cx: &mut TestAppContext) {
                     "Escape must restore {origin}, keyboard={keyboard}"
                 )
             });
-            assert!(view.read_with(cx, |view, _| {
-                view.people_menu
-                    .as_ref()
-                    .is_none_or(|menu| menu.motion.closing())
-            }));
+            assert!(cx.debug_bounds("Kyler: Host").is_none());
         }
     }
     assert!(runtime.input().is_empty());
