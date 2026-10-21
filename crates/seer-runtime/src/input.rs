@@ -10,7 +10,7 @@ pub(crate) fn encode_key(key: KeyInput, mode: TermMode) -> Vec<u8> {
     let bytes = match key.code {
         KeyCode::Char(character) => encode_character(character, key.modifiers),
         KeyCode::Backspace => modified_control(127, key.modifiers),
-        KeyCode::Enter => modified_control(13, key.modifiers),
+        KeyCode::Enter | KeyCode::KeypadEnter => modified_control(13, key.modifiers),
         KeyCode::Tab => modified_control(9, key.modifiers),
         KeyCode::Escape => modified_control(27, key.modifiers),
         KeyCode::BackTab => back_tab(key.modifiers),
@@ -42,6 +42,7 @@ fn disambiguated_key(mut key: KeyInput) -> Option<Vec<u8>> {
         KeyCode::Escape => 27,
         KeyCode::Backspace if has_modifiers(key.modifiers) => 127,
         KeyCode::Enter if has_modifiers(key.modifiers) => 13,
+        KeyCode::KeypadEnter => 57414,
         KeyCode::Tab if has_modifiers(key.modifiers) => 9,
         _ => return None,
     };

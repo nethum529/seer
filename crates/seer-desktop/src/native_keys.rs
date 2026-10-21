@@ -16,13 +16,18 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
     let block = RcBlock::new(move |event: NonNull<NSEvent>| {
         // AppKit supplies a live event for the duration of this main-thread callback.
         let native = unsafe { event.as_ref() };
-        let Some(key) = key(native) else {
-            return event.as_ptr();
-        };
         let mut app = app.clone();
         let handled = app
             .update_window(handle, |_, window, cx| {
                 view.update(cx, |view, cx| {
+                    let option_as_alt = cx
+                        .global::<crate::terminal_config::OptionAsAlt>()
+                        .active(native.modifierFlags().bits())
+                        && view.input.focus.is_focused(window)
+                        && !view.input.composition.marked();
+                    let Some(key) = key(native, option_as_alt) else {
+                        return false;
+                    };
                     if !window.is_window_active() || view.invite_open() {
                         return false;
                     }
@@ -32,18 +37,10 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                     if view.join_open() {
                         return false;
                     }
-                    if key.key == "space" && !key.modifiers.control {
+                    if key.key == "space" && !key.modifiers.control && !option_as_alt {
                         return false;
                     }
-                    if key.modifiers.platform
-                        && crate::shortcuts::action(crate::shortcuts::Scope::Window, &key, cx)
-                            .is_none()
-                        && crate::shortcuts::action(crate::shortcuts::Scope::Terminal, &key, cx)
-                            .is_none()
-                        && crate::shortcuts::action(crate::shortcuts::Scope::Tabs, &key, cx)
-                            .is_none()
-                        && !crate::shortcuts::released(&key, cx)
-                    {
+                    if key.modifiers.platform && !command_key(&key, cx) {
                         return false;
                     }
                     if view.window_command_key(&key, window, cx)
@@ -65,7 +62,7 @@ pub(crate) fn install(window: &Window, cx: &Context<SeerWindow>) -> Option<Nativ
                     if !view.input.focus.is_focused(window) || view.input.composition.marked() {
                         return false;
                     }
-                    view.terminal_key(&key, cx);
+                    view.terminal_key_with_alt(&key, option_as_alt, cx);
                     true
                 })
                 .unwrap_or(false)
@@ -85,7 +82,15 @@ impl Drop for NativeKeys {
     }
 }
 
-fn key(event: &NSEvent) -> Option<Keystroke> {
+fn command_key(key: &Keystroke, cx: &gpui::App) -> bool {
+    use crate::shortcuts::{self, Scope};
+    [Scope::Window, Scope::Terminal, Scope::Tabs]
+        .into_iter()
+        .any(|scope| shortcuts::action(scope, key, cx).is_some())
+        || shortcuts::released(key, cx)
+}
+
+fn key(event: &NSEvent, option_as_alt: bool) -> Option<Keystroke> {
     let flags = event.modifierFlags();
     let command = flags.contains(NSEventModifierFlags::Command);
     let shift = flags.contains(NSEventModifierFlags::Shift);
@@ -95,6 +100,17 @@ fn key(event: &NSEvent) -> Option<Keystroke> {
     // F20 and Option+Shift+Tab as text. Carbon virtual key codes do not vary by layout.
     let key = if let Some((_, key)) = KEYS.iter().find(|(code, _)| *code == event.keyCode()) {
         (*key).to_owned()
+    } else if option_as_alt {
+        event
+            .charactersByApplyingModifiers(
+                flags
+                    & !(NSEventModifierFlags::Option
+                        | NSEventModifierFlags::Shift
+                        | NSEventModifierFlags::Control
+                        | NSEventModifierFlags::Command),
+            )?
+            .to_string()
+            .to_lowercase()
     } else if control || command {
         event
             .charactersIgnoringModifiers()?
@@ -107,7 +123,12 @@ fn key(event: &NSEvent) -> Option<Keystroke> {
         key,
         // Alacritty uses NSEvent.characters after its default key bindings.
         // GPUI omits this text when Control is held.
-        key_char: event.characters().map(|text| text.to_string()),
+        key_char: if option_as_alt {
+            event.charactersByApplyingModifiers(flags & !NSEventModifierFlags::Option)
+        } else {
+            event.characters()
+        }
+        .map(|text| text.to_string()),
         modifiers: Modifiers {
             shift,
             alt,

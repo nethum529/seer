@@ -1,4 +1,5 @@
 use futures::FutureExt;
+mod option_alt;
 mod options;
 use gpui::{Keystroke, point, px};
 pub(crate) use options::window_options;
@@ -81,6 +82,7 @@ pub(crate) fn prepare() -> Option<Fixture> {
         }
     }
     super::font_native_e2e::prepare(root);
+    option_alt::prepare(root);
     super::color_fixture::prepare(root);
     let mirror = std::env::var_os("VERSION_BANNER_QA")
         .map(|_| super::version_mirror::prepare(evidence.clone()));
@@ -195,7 +197,9 @@ pub(crate) fn prepare() -> Option<Fixture> {
     );
     let mut runtime = App(Command::new(runtime_binary)
         .arg(state.join("socket"))
-        .args(["host", "/bin/sh", "pixels"])
+        .arg("host")
+        .arg(option_alt::shell(root, &evidence))
+        .arg("pixels")
         .env_remove("SEER_ROOM_ENDPOINT")
         .env_remove("SEER_SNAPSHOT_DIR")
         .stdout(Stdio::null())
@@ -415,6 +419,10 @@ async fn exercise_room_qa(
     let evidence = &fixture.evidence;
     let capture = &fixture.capture;
     let root = fixture._directory.path();
+    if std::env::var_os("OPTION_QA").is_some() {
+        option_alt::exercise(window, evidence, cx).await;
+        return true;
+    }
     if std::env::var_os("COLOR_QA").is_some() {
         super::color_native_e2e::exercise(window, evidence, capture, cx).await;
         return true;

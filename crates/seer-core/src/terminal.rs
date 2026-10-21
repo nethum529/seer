@@ -67,6 +67,7 @@ pub enum KeyCode {
     Escape,
     Function(u8),
     Char(char),
+    KeypadEnter,
 }
 
 #[derive(Clone, Copy, Debug, Default, Deserialize, Eq, PartialEq, Serialize)]
