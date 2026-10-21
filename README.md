@@ -3,7 +3,7 @@
 Share live terminals with your friends. Each person runs their own
 terminals on their own computer.
 
-https://github.com/user-attachments/assets/b68a9286-df29-47d5-9b9a-3d62c1918708
+https://github.com/user-attachments/assets/cb75450e-8e4e-4e32-93b7-e37482a9cd55
 
 ## How it works
 
