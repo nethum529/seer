@@ -100,6 +100,7 @@ impl SeerWindow {
             window,
             cx,
         )
+        .when(self.room.modal(), |screen| screen.invisible())
     }
 
     pub(super) fn start_key(
