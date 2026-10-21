@@ -31,13 +31,7 @@ impl Render for SeerWindow {
                 }
             });
         }
-        // Pane IDs belong to one runtime, so GPUI state must belong to its person.
-        let person = match &self.content {
-            Content::Terminal(link, _) => link.people.selected.clone(),
-            _ => String::new(),
-        };
         let root = div()
-            .id(SharedString::from(person))
             .size_full()
             .relative()
             .overflow_hidden()
@@ -128,6 +122,8 @@ impl Render for SeerWindow {
                 .map_or(name.as_ref(), |person| &person.name),
         )
         .into();
+        // Pane IDs belong to one runtime. Global overlays keep their own identity.
+        let person = &link.people.selected;
         let readonly = link.remote();
         let can_input = link.can_input();
         let person_open = self
@@ -171,6 +167,7 @@ impl Render for SeerWindow {
             self.keys.hover(),
             cx,
         )
+        .id(SharedString::from(format!("title:{person}")))
         .opacity(if reclaim { 1. } else { top_bar_opacity });
         if window.viewport_size().width < px(NARROW) {
             return root
@@ -198,6 +195,7 @@ impl Render for SeerWindow {
                                         window,
                                         person_open,
                                     )
+                                    .id(SharedString::from(format!("person:{person}")))
                                     .when(person_open, |who| who.bg(rgb(palette::SELECTED)))
                                     .min_w_0()
                                     .max_w(window.viewport_size().width * 0.25)
@@ -243,9 +241,12 @@ impl Render for SeerWindow {
                                         .h(window.viewport_size().height)
                                 })
                                 .when(!terminals.is_empty(), |main| {
-                                    main.child(sidebar::strip(
-                                        terminals, shown, labels, &self.keys, window, cx,
-                                    ))
+                                    main.child(
+                                        sidebar::strip(
+                                            terminals, shown, labels, &self.keys, window, cx,
+                                        )
+                                        .id(SharedString::from(format!("strip:{person}"))),
+                                    )
                                 })
                                 .children(self.status_banner(window, cx))
                                 .child(terminal),
@@ -276,13 +277,13 @@ impl Render for SeerWindow {
                 view.open_people(false, window, cx);
             }),
         );
-        let side = sidebar::sidebar(who, terminals, shown, labels, &self.keys, window, cx).child(
-            chrome::footer(
+        let side = sidebar::sidebar(who, terminals, shown, labels, &self.keys, window, cx)
+            .id(SharedString::from(format!("sidebar:{person}")))
+            .child(chrome::footer(
                 self.room_button(link.room(), false, window, cx),
                 self.settings_button(window, cx),
                 cx,
-            ),
-        );
+            ));
         let side = div().flex_none().w(sidebar_width).h_full().relative().when(
             sidebar_width > px(0.),
             |container| {
