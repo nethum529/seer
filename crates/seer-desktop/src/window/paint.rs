@@ -151,6 +151,19 @@ impl Render for SeerWindow {
                 })
                 .into_any_element()
         };
+        let title = terminals
+            .iter()
+            .find(|terminal| Some(terminal.pane.as_str()) == shown)
+            .cloned();
+        let title = heading(
+            title.as_ref(),
+            labels,
+            readonly.then_some(&name),
+            &self.ui_font,
+            self.keys.hover(),
+            cx,
+        )
+        .opacity(if reclaim { 1. } else { top_bar_opacity });
         if window.viewport_size().width < px(NARROW) {
             return root
                 .child(
@@ -190,7 +203,7 @@ impl Render for SeerWindow {
                                         }),
                                     ),
                                 )
-                                .child(div().flex_1())
+                                .child(top_bar::centered_title(title))
                                 .child(
                                     div()
                                         .min_w_0()
@@ -237,10 +250,6 @@ impl Render for SeerWindow {
                 .children(settings)
                 .children(controls);
         }
-        let title = terminals
-            .iter()
-            .find(|terminal| Some(terminal.pane.as_str()) == shown)
-            .cloned();
         let who = sidebar::who(
             &name,
             (22., 11.),
@@ -275,28 +284,24 @@ impl Render for SeerWindow {
                 )
             },
         );
-        let title = heading(
-            title.as_ref(),
-            labels,
-            readonly.then_some(&name),
-            &self.ui_font,
-            self.keys.hover(),
-            cx,
-        );
+        let title_inset = sidebar_width.max(px(if readonly { 180. } else { 88. }));
         let heading = chrome::bar(cx)
             .when(reclaim, |bar| bar.opacity(top_bar_opacity))
             .relative()
-            .justify_center()
             .px(px(14.))
             .child(
-                title
-                    .opacity(if reclaim { 1. } else { top_bar_opacity })
-                    .max_w(
-                        (window.viewport_size().width
-                            - sidebar_width
-                            - px(if readonly { 180. } else { 28. }))
-                        .max(px(0.)),
-                    ),
+                div()
+                    .absolute()
+                    .left(title_inset - sidebar_width)
+                    .right(title_inset)
+                    .top_0()
+                    .bottom_0()
+                    .flex()
+                    .items_center()
+                    .justify_center()
+                    .child(title.max_w(
+                        (window.viewport_size().width - title_inset * 2.).clamp(px(0.), px(520.)),
+                    )),
             )
             .when(readonly, |bar| {
                 bar.child(
@@ -396,11 +401,13 @@ fn heading(
         hover && !labels.readonly && !terminal.is_some_and(|terminal| labels.active(terminal)),
     )
     .max_w(px(520.))
+    .min_w_0()
     .h(px(28.))
     .px(px(8.))
     .rounded(px(6.))
     .flex()
     .items_center()
+    .text_center()
     .font_weight(FontWeight::MEDIUM)
     .gap(px(6.))
     .when_some(person, |title, name| {

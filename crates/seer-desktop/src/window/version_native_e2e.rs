@@ -201,7 +201,7 @@ async fn record(
             }
             if name == "mismatch" {
                 for (label, text, x, y, height, weight) in [
-                    ("Title", "Shell", 604. - text_width(window, "Shell", 13., FontWeight::MEDIUM) / 2., 7.5, 28., FontWeight::MEDIUM),
+                    ("Title", "Shell", 480. - text_width(window, "Shell", 13., FontWeight::MEDIUM) / 2., 7.5, 28., FontWeight::MEDIUM),
                     ("Sidebar name", "Host", 44., 52., 36., FontWeight::SEMIBOLD),
                     ("Sidebar tab", "Shell", 44., 92., 33., FontWeight::MEDIUM),
                     ("New terminal", "New terminal", 44., 131., 32., FontWeight::MEDIUM),

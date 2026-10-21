@@ -29,7 +29,7 @@ var samples: [(String, String, [Double], [Double])] = startRoomOnly ? [] : [
     ("main", "Sidebar avatar", [22, 59, 9, 22], [22, 9]),
     ("main", "Sidebar tab", [44, 92, 8, 33], [68, 6]),
     ("main", "New terminal", [44, 131, 9, 32], [44, 9]),
-    ("main", "Top bar title", [590, 7.5, 8, 28], [613, 6]),
+    ("main", "Top bar title", [466, 7.5, 8, 28], [489, 6]),
     ("people", "Person name", [53, 97, 10, 36], [53, 10]),
     ("people", "Person avatar", [28, 104, 8, 22], [28, 8]),
     ("people", "Badge", [89, 97, 8, 36], [89, 8]),
@@ -53,7 +53,7 @@ for capture in (startRoomOnly ? [] : ["toggle-show", "toggle-show-repeat"]) {
         (capture, capture + " tab", [44, 92, 8, 33], [68, 6]),
         (capture, capture + " New terminal", [44, 131, 9, 32], [44, 9]),
         (capture, capture + " room", [44, 602.5, 8, 32], [44, 8]),
-        (capture, capture + " title", [590, 7.5, 8, 28], [613, 6]),
+        (capture, capture + " title", [466, 7.5, 8, 28], [489, 6]),
     ]
 }
 for capture in (startRoomOnly ? [] : ["toggle-hide", "toggle-hide-repeat"]) {
