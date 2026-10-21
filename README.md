@@ -3,7 +3,9 @@
 Share live terminals with your friends. Each person runs their own
 terminals on their own computer.
 
-![Seer launch video: nethum starts a room, kyler joins, and nethum types into the agent in the terminal of kyler](docs/images/seer-launch.gif)
+[![Seer demo video: Nethum starts a room on Linux, Kyler joins from a Mac, and Kyler types into the Claude terminal of Nethum](docs/images/seer-demo.jpg)](docs/images/seer-demo.mp4)
+
+[Watch the demo](docs/images/seer-demo.mp4) (84 s, with sound).
 
 ## How it works
 
