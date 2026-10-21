@@ -9,7 +9,7 @@ pub(super) struct OpenSheet {
     pub(super) view: Entity<InviteSheet>,
     _events: Subscription,
     _updates: Subscription,
-    restore: Option<FocusHandle>,
+    restore: FocusHandle,
 }
 
 impl SeerWindow {
@@ -36,13 +36,11 @@ impl SeerWindow {
         let Some(server) = self.server.clone() else {
             return;
         };
-        let restore = window.focused(cx);
+        let restore = self.input.focus.clone();
         let view = cx.new(|cx| InviteSheet::new(server, keyboard, window, cx));
         let events = cx.subscribe_in(&view, window, |view, _, _: &Closed, window, cx| {
-            if let Some(sheet) = view.invite.take()
-                && let Some(focus) = sheet.restore
-            {
-                window.focus(&focus);
+            if let Some(sheet) = view.invite.take() {
+                window.focus(&sheet.restore);
             }
             view.notify_invite(cx);
         });

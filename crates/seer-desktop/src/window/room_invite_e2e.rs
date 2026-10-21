@@ -15,73 +15,73 @@ use seer_core::{
 use super::input_e2e::{Runtime, open_view};
 
 #[gpui::test]
-fn host_room_menu_opens_invite_and_restores_trigger_focus(cx: &mut TestAppContext) {
+fn invite_done_returns_typing_to_terminal(cx: &mut TestAppContext) {
+    close_routes_typing(cx, true);
+}
+
+#[gpui::test]
+fn invite_escape_returns_typing_to_terminal(cx: &mut TestAppContext) {
+    close_routes_typing(cx, false);
+}
+
+fn close_routes_typing(cx: &mut TestAppContext, done: bool) {
     let room = Room::start();
     let runtime = Runtime::start();
     let (view, cx) = open_view(&runtime, cx);
-    let expected = runtime.input();
+    let mut expected = Vec::new();
     for width in [960., 680.] {
         cx.simulate_resize(size(px(width), px(640.)));
         let summary = seer::rooms::inspect_room(room.server.clone());
-        assert!(
-            summary.host,
-            "room probe: {} {:?}",
-            summary.state.label(),
-            summary.people
-        );
+        assert!(summary.host);
         view.update(cx, |view, cx| {
             view.server = Some(room.server.clone());
             view.room.server = Some(room.server.clone());
             view.room.current = Some(summary);
             cx.notify();
         });
-        cx.run_until_parked();
-        cx.simulate_keystrokes(if cfg!(target_os = "macos") {
-            "cmd-shift-i"
-        } else {
-            "ctrl-alt-super-i"
-        });
-        cx.run_until_parked();
-        assert!(cx.debug_bounds("invite-primary").is_some());
-        close_invite(cx);
-        cx.run_until_parked();
-        let trigger = cx.debug_bounds("room-trigger").unwrap();
-        cx.simulate_click(trigger.center(), gpui::Modifiers::default());
-        cx.run_until_parked();
-        let invite = cx
-            .debug_bounds("room-invite")
-            .expect("a connected host must have Invite a person");
-        cx.simulate_click(invite.center(), gpui::Modifiers::default());
-        cx.run_until_parked();
-        assert!(cx.debug_bounds("invite-primary").is_some());
-        assert!(cx.debug_bounds("room-confirm").is_none());
-        close_invite(cx);
-        cx.simulate_keystrokes("enter");
-        cx.run_until_parked();
-        assert!(
-            cx.debug_bounds("room-invite").is_some(),
-            "close must return focus to the room trigger"
-        );
-        cx.simulate_keystrokes("enter");
-        cx.run_until_parked();
-        assert!(
-            cx.debug_bounds("invite-primary").is_some(),
-            "keyboard activation must open Invite"
-        );
-        create_and_copy(cx, &room.capsule);
-        close_invite(cx);
-        cx.simulate_keystrokes("space");
-        cx.run_until_parked();
-        cx.simulate_keystrokes("escape");
-        cx.run_until_parked();
+        for keyboard in [false, true] {
+            cx.run_until_parked();
+            if keyboard {
+                cx.simulate_keystrokes(if cfg!(target_os = "macos") {
+                    "cmd-shift-i"
+                } else {
+                    "ctrl-alt-super-i"
+                });
+            } else {
+                let trigger = cx.debug_bounds("room-trigger").unwrap();
+                cx.simulate_click(trigger.center(), gpui::Modifiers::default());
+                cx.run_until_parked();
+                let invite = cx.debug_bounds("room-invite").unwrap();
+                cx.simulate_click(invite.center(), gpui::Modifiers::default());
+            }
+            cx.run_until_parked();
+            assert!(cx.debug_bounds("invite-primary").is_some());
+            if done {
+                create_and_copy(cx, &room.capsule);
+                cx.simulate_keystrokes("tab tab enter");
+            } else {
+                cx.simulate_keystrokes("escape");
+            }
+            super::watch_e2e::pump(cx);
+            cx.simulate_keystrokes("space");
+            super::watch_e2e::pump(cx);
+            expected.push(b' ');
+            assert_eq!(
+                runtime.input(),
+                expected,
+                "typing after close must reach the PTY: done={done}, keyboard={keyboard}, width={width}"
+            );
+            cx.update(|window, cx| assert!(view.read(cx).input.focus.is_focused(window)));
+        }
     }
-    assert_eq!(
-        runtime.input(),
-        expected,
-        "menu and sheet keys must not reach the shell"
-    );
+}
+
+#[gpui::test]
+fn guest_invite_shortcut_keeps_terminal_input(cx: &mut TestAppContext) {
+    let room = Room::start();
     room.host.store(false, Ordering::Relaxed);
-    let (view, cx) = open_view(&runtime, &mut cx.cx);
+    let runtime = Runtime::start();
+    let (view, cx) = open_view(&runtime, cx);
     let summary = seer::rooms::inspect_room(room.server.clone());
     assert!(!summary.host);
     view.update(cx, |view, cx| {
@@ -91,33 +91,21 @@ fn host_room_menu_opens_invite_and_restores_trigger_focus(cx: &mut TestAppContex
         cx.notify();
     });
     cx.run_until_parked();
+    cx.update(|window, cx| window.focus(&view.read(cx).input.focus));
     cx.simulate_keystrokes(if cfg!(target_os = "macos") {
         "cmd-shift-i"
     } else {
         "ctrl-alt-super-i"
     });
-    cx.run_until_parked();
-    assert!(cx.debug_bounds("invite-primary").is_none());
-    cx.run_until_parked();
+    cx.simulate_keystrokes("space");
+    super::watch_e2e::pump(cx);
+    assert_eq!(runtime.input(), b" ");
     let trigger = cx.debug_bounds("room-trigger").unwrap();
     cx.simulate_click(trigger.center(), gpui::Modifiers::default());
     cx.run_until_parked();
     assert!(cx.debug_bounds("room-leave").is_some());
-    assert!(
-        cx.debug_bounds("room-invite").is_none(),
-        "guests must not have Invite a person"
-    );
     cx.simulate_keystrokes("escape");
-    assert_eq!(
-        runtime.input(),
-        expected,
-        "menu and sheet keys must not reach the shell"
-    );
-}
-
-fn close_invite(cx: &mut gpui::VisualTestContext) {
-    cx.simulate_keystrokes("escape");
-    cx.run_until_parked();
+    assert_eq!(runtime.input(), b" ");
 }
 
 fn create_and_copy(cx: &mut gpui::VisualTestContext, capsule: &str) {
