@@ -375,7 +375,8 @@ pub(super) fn open_view<'a>(
         window.focus(&keys.tabs);
         SeerWindow {
             content: Content::Terminal(Box::new(link), "You".into()),
-            font: screen::terminal_font(),
+            font: crate::terminal_font::default_font(),
+            font_size: crate::terminal_font::DEFAULT_SIZE,
             ui_font: "Inter".into(),
             keys,
             input: Input::new(window, cx),

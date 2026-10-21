@@ -25,7 +25,7 @@ fn lines(cell: &mut DeviceCell<'_>, arms: [u8; 4]) {
     let [left, right, up, down] = arms;
     let h = left.max(right);
     let v = up.max(down);
-    let t = cell.stroke();
+    let t = cell.stroke;
     let xb = bands(cell.width, t, v);
     let yb = bands(cell.height, t, h);
     let (xlo, xhi) = (xb[0].0, xb[xb.len() - 1].1);
@@ -49,7 +49,7 @@ fn lines(cell: &mut DeviceCell<'_>, arms: [u8; 4]) {
 
 fn arm(cell: &mut DeviceCell<'_>, side: usize, weight: u8, end: f32) {
     let length = if side < 2 { cell.height } else { cell.width };
-    for (lo, hi) in bands(length, cell.stroke(), weight) {
+    for (lo, hi) in bands(length, cell.stroke, weight) {
         match side {
             0 => cell.rect(0., lo, end, hi),
             1 => cell.rect(end, lo, cell.width, hi),
@@ -60,7 +60,7 @@ fn arm(cell: &mut DeviceCell<'_>, side: usize, weight: u8, end: f32) {
 }
 
 fn double_join(cell: &mut DeviceCell<'_>, arms: [u8; 4], xlo: f32, xhi: f32, ylo: f32, yhi: f32) {
-    let t = cell.stroke();
+    let t = cell.stroke;
     if arms[0] == 0 {
         cell.rect(xlo, ylo, xlo + t, yhi);
     }
@@ -82,7 +82,7 @@ fn dashed(cell: &mut DeviceCell<'_>, ch: char) {
     } else {
         (2, index >= 0x254e)
     };
-    let t = cell.stroke() * if index % 2 == 1 { 2. } else { 1. };
+    let t = cell.stroke * if index % 2 == 1 { 2. } else { 1. };
     let length = if vertical { cell.height } else { cell.width };
     let cross = if vertical { cell.width } else { cell.height };
     let gap = (length / 8.).floor().max(1.);
@@ -99,7 +99,7 @@ fn dashed(cell: &mut DeviceCell<'_>, ch: char) {
 }
 
 fn rounded(cell: &mut DeviceCell<'_>, ch: char) {
-    let t = cell.stroke();
+    let t = cell.stroke;
     let x = ((cell.width - t) / 2.).floor() + t / 2.;
     let y = ((cell.height - t) / 2.).floor() + t / 2.;
     let right = matches!(ch, '\u{256d}' | '\u{2570}');
@@ -116,7 +116,7 @@ fn rounded(cell: &mut DeviceCell<'_>, ch: char) {
 }
 
 fn diagonal(cell: &mut DeviceCell<'_>, ch: char) {
-    let mut path = PathBuilder::stroke(px(cell.stroke() / cell.scale));
+    let mut path = PathBuilder::stroke(px(cell.stroke / cell.scale));
     if ch != '\u{2572}' {
         path.move_to(cell.point(0., cell.height));
         path.line_to(cell.point(cell.width, 0.));

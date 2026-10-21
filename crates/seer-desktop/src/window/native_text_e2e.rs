@@ -1,13 +1,12 @@
 use futures::FutureExt;
 use gpui::{Keystroke, point, px};
+use seer_core::Tree;
+use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, codec};
 use std::fs;
 use std::net::TcpListener;
 use std::process::{Child, Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant};
-
-use seer_core::Tree;
-use seer_core::proto::{ClientMsg, Person, PersonState, ServerMsg, codec};
 
 struct App(Child);
 
@@ -17,7 +16,6 @@ impl Drop for App {
         let _ = self.0.wait();
     }
 }
-
 pub(crate) struct Fixture {
     _runtime: App,
     _directory: tempfile::TempDir,
@@ -80,6 +78,7 @@ pub(crate) fn prepare() -> Option<Fixture> {
             );
         }
     }
+    super::font_native_e2e::prepare(root);
     let mirror = std::env::var_os("VERSION_BANNER_QA")
         .map(|_| super::version_mirror::prepare(evidence.clone()));
     // SAFETY: this test entry runs on the main thread before it starts GPUI or any worker thread.
@@ -208,7 +207,6 @@ pub(crate) fn prepare() -> Option<Fixture> {
         capture,
     })
 }
-
 fn wait_runtime(runtime: &mut App, socket: &std::path::Path) {
     let deadline = Instant::now() + Duration::from_secs(10);
     while !socket.exists() {
@@ -216,7 +214,6 @@ fn wait_runtime(runtime: &mut App, socket: &std::path::Path) {
         thread::sleep(Duration::from_millis(20));
     }
 }
-
 pub(crate) fn exercise(
     window: gpui::WindowHandle<crate::window::SeerWindow>,
     fixture: Fixture,
@@ -407,7 +404,6 @@ pub(crate) fn exercise(
     })
     .detach();
 }
-
 async fn exercise_room_qa(
     window: gpui::WindowHandle<crate::window::SeerWindow>,
     fixture: &Fixture,
@@ -416,6 +412,10 @@ async fn exercise_room_qa(
     let evidence = &fixture.evidence;
     let capture = &fixture.capture;
     let root = fixture._directory.path();
+    if std::env::var_os("FONT_QA").is_some() {
+        super::font_native_e2e::exercise(window, evidence, capture, cx).await;
+        return true;
+    }
     if std::env::var_os("REMOVE_QA").is_some() {
         super::remove_native_e2e::exercise(window, evidence, capture, cx).await;
         return true;
@@ -478,7 +478,7 @@ pub(crate) fn window_options(
         options.display_id = Some(display.id());
         let mut bounds =
             gpui::Bounds::centered(Some(display.id()), gpui::size(px(960.), px(640.)), cx);
-        if std::env::var_os("SHORTCUT_KEYS_QA").is_some() {
+        if std::env::var_os("SHORTCUT_KEYS_QA").is_some() || std::env::var_os("FONT_QA").is_some() {
             // GPUI 0.2.2 adds the macOS display origin when it creates a window.
             bounds.origin -= display.bounds().origin;
         }

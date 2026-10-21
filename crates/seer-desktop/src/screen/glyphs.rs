@@ -36,6 +36,7 @@ impl Glyphs {
             width: (f32::from(bounds.right()) * scale).round() - left,
             height: (f32::from(bounds.bottom()) * scale).round() - top,
             scale,
+            stroke: (f32::from(bounds.size.width) * scale / 8.).round().max(1.),
             color,
         };
         if ch >= '\u{2580}' {
@@ -57,6 +58,7 @@ struct DeviceCell<'a> {
     width: f32,
     height: f32,
     scale: f32,
+    stroke: f32,
     color: Rgba,
 }
 
@@ -85,10 +87,6 @@ impl DeviceCell<'_> {
         if let Ok(path) = builder.build() {
             self.glyphs.paths.push((path, self.color));
         }
-    }
-
-    fn stroke(&self) -> f32 {
-        (self.width / 8.).round().max(1.)
     }
 
     fn block(&mut self, ch: char) {

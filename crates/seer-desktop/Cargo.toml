@@ -11,12 +11,15 @@ futures = "0.3"
 gpui = "=0.2.2"
 image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 serde_json = "1"
+toml = "0.9"
+font-kit = { package = "zed-font-kit", version = "0.14.1-zed" }
 seer = { path = "../seer" }
 seer-core = { path = "../seer-core" }
 seer-net = { path = "../seer-net" }
 seer-runtime = { path = "../seer-runtime" }
 
 [target.'cfg(target_os = "macos")'.dependencies]
+plist = "1"
 block2 = "0.6"
 objc2 = "0.6"
 objc2-app-kit = { version = "0.3", default-features = false, features = ["NSEvent", "NSView", "NSWindow", "NSButton", "NSControl", "NSWorkspace", "NSAccessibility", "block2", "objc2-quartz-core"] }

@@ -30,6 +30,8 @@ mod screen;
 mod shortcuts;
 mod sidebar;
 mod tab_time;
+mod terminal_config;
+mod terminal_font;
 mod tip;
 mod urls;
 mod window;

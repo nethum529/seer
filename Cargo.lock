@@ -6888,6 +6888,7 @@ dependencies = [
  "image",
  "objc2",
  "objc2-app-kit",
+ "plist",
  "raw-window-handle",
  "seer",
  "seer-core",
@@ -6895,6 +6896,8 @@ dependencies = [
  "seer-runtime",
  "serde_json",
  "tempfile",
+ "toml 0.9.12+spec-1.1.0",
+ "zed-font-kit",
 ]
 
 [[package]]
