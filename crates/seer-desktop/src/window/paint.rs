@@ -192,6 +192,7 @@ impl Render for SeerWindow {
                                     )
                                     .when(person_open, |who| who.bg(rgb(palette::SELECTED)))
                                     .min_w_0()
+                                    .max_w(window.viewport_size().width * 0.25)
                                     .h(px(32.))
                                     .pl(px(5.))
                                     .pr(px(6.))
