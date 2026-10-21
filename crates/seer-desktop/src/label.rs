@@ -67,17 +67,21 @@ pub(crate) fn origin(
 }
 
 pub(crate) fn cap_height(line: &ShapedLine, window: &Window) -> Pixels {
+    let capital = line
+        .text
+        .chars()
+        .find(|ch| ch.is_uppercase())
+        .unwrap_or('H');
+    capital_height(line, capital, window)
+}
+
+pub(crate) fn capital_height(line: &ShapedLine, capital: char, window: &Window) -> Pixels {
     line.runs.first().map_or(line.ascent - line.descent, |run| {
         let text = window.text_system();
         // GPUI 0.2.2 returns vertical advances instead of glyph bounds on Linux.
         if cfg!(target_os = "linux") {
             return text.cap_height(run.font_id, line.font_size);
         }
-        let capital = line
-            .text
-            .chars()
-            .find(|ch| ch.is_uppercase())
-            .unwrap_or('H');
         text.typographic_bounds(run.font_id, line.font_size, capital)
             .map_or_else(
                 |_| text.cap_height(run.font_id, line.font_size),

@@ -148,12 +148,15 @@ impl Render for SeerWindow {
             )
             .into_any_element()
         } else {
-            self.terminal(Screen::new(cx.entity(), self.font.clone()), cx)
-                .relative()
-                .when(shown.is_none(), |terminal| {
-                    terminal.child(empty_terminal("No terminals").absolute().inset_0())
-                })
-                .into_any_element()
+            self.terminal(
+                Screen::new(cx.entity(), self.font.clone(), self.font_size),
+                cx,
+            )
+            .relative()
+            .when(shown.is_none(), |terminal| {
+                terminal.child(empty_terminal("No terminals").absolute().inset_0())
+            })
+            .into_any_element()
         };
         let title = terminals
             .iter()

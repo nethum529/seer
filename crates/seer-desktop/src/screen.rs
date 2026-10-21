@@ -2,7 +2,7 @@ use gpui::{
     App, BorderStyle, Bounds, Element, ElementId, ElementInputHandler, Entity, Font, FontStyle,
     FontWeight, GlobalElementId, InspectorElementId, IntoElement, LayoutId, PaintQuad, Pixels,
     Point, Rgba, ShapedLine, StrikethroughStyle, Style, TextRun, UnderlineStyle, Window, fill,
-    font, outline, point, px, relative, size,
+    outline, point, px, relative, size,
 };
 use seer_core::{Cell, Cursor, CursorShape};
 
@@ -14,23 +14,19 @@ mod glyphs;
 
 use glyphs::Glyphs;
 
-const FONT_SIZE: f32 = 12.5;
-const LINE_HEIGHT: f32 = 19.;
-
-pub(crate) fn terminal_font() -> Font {
-    let mut font = font("JetBrains Mono");
-    font.features = gpui::FontFeatures::disable_ligatures();
-    font
-}
-
 pub(crate) struct Screen {
     view: Entity<SeerWindow>,
     font: Font,
+    font_size: f32,
 }
 
 impl Screen {
-    pub(crate) fn new(view: Entity<SeerWindow>, font: Font) -> Self {
-        Self { view, font }
+    pub(crate) fn new(view: Entity<SeerWindow>, font: Font, font_size: f32) -> Self {
+        Self {
+            view,
+            font,
+            font_size,
+        }
     }
 }
 
@@ -163,7 +159,7 @@ impl Element for Screen {
             let Some((terminal, rows)) = view.screen() else {
                 return Painted::default();
             };
-            rows.paint(terminal, grid, &self.font, focused, window)
+            rows.paint(terminal, grid, &self.font, self.font_size, focused, window)
         })
     }
 
@@ -208,7 +204,7 @@ impl Element for Screen {
             }
         }
         for (origin, line) in &painted.lines {
-            line.paint(*origin, painted.line_height, window, cx).ok();
+            crate::terminal_font::paint(line, *origin, painted.line_height, window, cx);
         }
         painted.glyphs.paint(window);
         if let Some(cursor) = painted.cursor.take() {
@@ -243,12 +239,19 @@ impl Element for Screen {
                 } else {
                     let text = cell.character.to_string();
                     let run = text_run(&cell, gpui::rgb(palette::WINDOW), text.len(), &self.font);
-                    let line =
-                        window
-                            .text_system()
-                            .shape_line(text.into(), px(FONT_SIZE), &[run], None);
-                    line.paint(cursor.origin, painted.line_height, window, cx)
-                        .ok();
+                    let line = window.text_system().shape_line(
+                        text.into(),
+                        px(self.font_size),
+                        &[run],
+                        None,
+                    );
+                    crate::terminal_font::paint(
+                        &line,
+                        cursor.origin,
+                        painted.line_height,
+                        window,
+                        cx,
+                    );
                 }
             }
         }
@@ -268,28 +271,29 @@ impl Element for Screen {
                 }),
                 strikethrough: None,
             };
-            let line = window
-                .text_system()
-                .shape_line(preedit.into(), px(FONT_SIZE), &[run], None);
+            let line =
+                window
+                    .text_system()
+                    .shape_line(preedit.into(), px(self.font_size), &[run], None);
             window.paint_quad(fill(
                 Bounds::new(cursor.origin, size(line.width, painted.line_height)),
                 gpui::rgb(palette::WINDOW),
             ));
-            line.paint(cursor.origin, painted.line_height, window, cx)
-                .ok();
+            crate::terminal_font::paint(&line, cursor.origin, painted.line_height, window, cx);
         }
     }
 }
 
 impl Screen {
     fn grid(&self, bounds: Bounds<Pixels>, window: &Window) -> Grid {
-        let font_size = px(FONT_SIZE);
+        let font_size = px(self.font_size);
         let text_system = window.text_system();
         let font_id = text_system.resolve_font(&self.font);
         let cell_width = text_system
             .advance(font_id, font_size, 'm')
             .map_or(font_size * 0.6, |advance| advance.width);
-        let line_height = px(LINE_HEIGHT);
+        let scale = window.scale_factor();
+        let line_height = (font_size * crate::terminal_font::LINE_RATIO * scale).ceil() / scale;
         Grid {
             origin: bounds.origin,
             cell_width,
@@ -307,6 +311,7 @@ impl Rows {
         terminal: &Terminal,
         grid: Grid,
         font: &Font,
+        font_size: f32,
         focused: bool,
         window: &mut Window,
     ) -> Painted {
@@ -334,7 +339,7 @@ impl Rows {
             (changed, terminal.cursor())
         };
         for (index, cells) in changed {
-            self.shaped[index] = shape(&cells, &grid, index, font, window);
+            self.shaped[index] = shape(&cells, &grid, index, font, font_size, window);
         }
         let mut painted = Painted {
             line_height: grid.line_height,
@@ -356,11 +361,18 @@ impl Rows {
     }
 }
 
-fn shape(cells: &[Cell], grid: &Grid, index: usize, font: &Font, window: &Window) -> Shaped {
+fn shape(
+    cells: &[Cell],
+    grid: &Grid,
+    index: usize,
+    font: &Font,
+    font_size: f32,
+    window: &Window,
+) -> Shaped {
     let row = row(cells, grid, index, font);
     let line = window.text_system().shape_line(
         row.text.into(),
-        px(FONT_SIZE),
+        px(font_size),
         &row.runs,
         Some(grid.cell_width),
     );

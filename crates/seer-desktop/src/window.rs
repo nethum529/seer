@@ -52,6 +52,7 @@ pub(crate) struct SeerWindow {
     pub(crate) content: Content,
     join_screen: Option<Entity<crate::join::Join>>,
     font: Font,
+    font_size: f32,
     ui_font: SharedString,
     pub(crate) keys: Keys,
     pub(crate) input: Input,
@@ -70,7 +71,7 @@ pub(crate) struct SeerWindow {
 
 impl SeerWindow {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
-        let font = screen::terminal_font();
+        let (font, font_size) = crate::terminal_font::load(cx);
         let start = start::StartScreen::new(cx);
         window.focus(&start.host);
         let keys = Keys {
@@ -85,6 +86,7 @@ impl SeerWindow {
             content: Content::Start(start),
             join_screen: None,
             font,
+            font_size,
             ui_font: "Inter".into(),
             keys,
             input,
@@ -454,3 +456,6 @@ mod processes_native_e2e;
 
 #[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
 mod processes_pixel_samples;
+
+#[cfg(all(test, feature = "native-text-e2e", target_os = "macos"))]
+mod font_native_e2e;

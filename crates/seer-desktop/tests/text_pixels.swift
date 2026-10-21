@@ -73,7 +73,7 @@ if appearanceOnly { samples = [] }
 var darkSamples = Set<String>()
 var sampleColors: [String: [Double]] = [:]
 var captureWidths: [String: Double] = [:]
-for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json", "remove-samples.json", "share-all-samples.json", "process-samples.json"] {
+for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json", "remove-samples.json", "share-all-samples.json", "process-samples.json", "font-samples.json"] {
     let path = output + "/" + file
     if !FileManager.default.fileExists(atPath: path) { continue }
     let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]
@@ -148,6 +148,55 @@ for state in (appearanceOnly ? [] : sidebarStates) {
     table += "\(state) | top inset \(inset) | side inset \(rowInset) | tab aligned \(aligned)\n"
     if abs(inset - rowInset) > 0.5 || !aligned { failures += 1 }
 }
+if ProcessInfo.processInfo.environment["FONT_QA"] != nil {
+    let grid = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: output + "/font-grid.json"))) as! [String: Any]
+    let image = NSBitmapImageRep(data: try! Data(contentsOf: URL(fileURLWithPath: output + "/font.png")))!
+    let scale = Double(image.pixelsWide) / 960
+    let x = grid["x"] as! Double * scale
+    let y = grid["y"] as! Double * scale
+    let w = grid["width"] as! Double * scale
+    let h = grid["height"] as! Double * scale
+    func ink(_ x: Int, _ y: Int) -> Bool {
+        let color = image.colorAt(x: x, y: y)!.usingColorSpace(.deviceRGB)!
+        return color.redComponent > 0.2 && abs(color.redComponent - color.greenComponent) < 0.02
+    }
+    var offsets: [Int] = []
+    for col in [0, 1, 2, 3, 5, 6, 7, 8] {
+        let left = Int((x + Double(col) * w).rounded())
+        let right = Int((x + Double(col + 1) * w).rounded())
+        let columns = (left..<right).filter { column in
+            (Int(y.rounded())..<Int((y + h).rounded())).contains { ink(column, $0) }
+        }
+        precondition(!columns.isEmpty, "missing terminal capital")
+        offsets.append(columns.first! - left)
+    }
+    let aligned = offsets.max()! - offsets.min()! <= 1
+    table += "Terminal cell alignment | \(scale) | offsets \(offsets) | aligned \(aligned)\n"
+    if !aligned { failures += 1 }
+    let horizontalY = Int((y + 3.5 * h).rounded(.down))
+    let horizontal = (Int((x + 0.5 * w).rounded(.down))..<Int((x + 4.5 * w).rounded(.down))).allSatisfy { column in
+        (-1...1).contains { ink(column, horizontalY + $0) }
+    }
+    let verticalX = Int((x + 2.5 * w).rounded(.down))
+    let vertical = (Int((y + 3.5 * h).rounded(.down))..<Int((y + 5.5 * h).rounded(.down))).allSatisfy { row in
+        (-1...1).contains { ink(verticalX + $0, row) }
+    }
+    let strokeBand = Int(ceil(w / 8)) + 2
+    let strokes = (0..<5).map { col in
+        let left = (x + Double(col) * w).rounded()
+        let right = (x + Double(col + 1) * w).rounded()
+        let probeX = Int((left + (right - left) * (col == 4 ? 0.25 : 0.75)).rounded(.down))
+        return (-strokeBand...strokeBand).filter { ink(probeX, horizontalY + $0) }.count
+    }
+    let uniform = Set(strokes).count == 1 && strokes[0] > 0
+    table += "Terminal box strokes | \(scale) | widths \(strokes) | uniform \(uniform)\n"
+    if !uniform { failures += 1 }
+    table += "Terminal box joins | \(scale) | horizontal \(horizontal) | vertical \(vertical)\n"
+    if !horizontal || !vertical { failures += 1 }
+    let crop = image.cgImage!.cropping(to: CGRect(x: x - w, y: y - h, width: 12 * w, height: 8 * h))!
+    try! NSBitmapImageRep(cgImage: crop).representation(using: .png, properties: [:])!.write(to: URL(fileURLWithPath: output + "/crop-terminal.png"))
+}
 try! table.write(toFile: output + "/measurements.txt", atomically: true, encoding: .utf8)
-print(table + "Failed checks: \(failures) / \(samples.count + (appearanceOnly ? 0 : sidebarStates.count))")
+let checkCount = samples.count + (appearanceOnly ? 0 : sidebarStates.count) + (ProcessInfo.processInfo.environment["FONT_QA"] == nil ? 0 : 3)
+print(table + "Failed checks: \(failures) / \(checkCount)")
 exit(failures == 0 ? 0 : 1)
