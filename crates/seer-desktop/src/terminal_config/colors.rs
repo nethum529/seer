@@ -10,16 +10,24 @@ fn hex(value: &str) -> Option<u32> {
         .flatten()
 }
 
-fn rgb(value: &str) -> Option<u32> {
-    let value = value.trim();
+fn kitty_value(value: &str) -> String {
+    let value = value.trim().to_ascii_lowercase();
+    let comment = if value.starts_with('#') { ' ' } else { '#' };
+    value
+        .split_once(comment)
+        .map_or(value.as_str(), |(color, _)| color)
+        .trim()
+        .to_string()
+}
+
+fn rgb(value: &str, ghostty: bool) -> Option<u32> {
+    let kitty = (!ghostty).then(|| kitty_value(value));
+    let value = kitty.as_deref().unwrap_or(value).trim();
+    if let Some(value) = value.strip_prefix("rgbi:") {
+        return channels(value, |part| intensity(part, ghostty));
+    }
     if let Some(value) = value.strip_prefix("rgb:") {
-        let channels: Vec<_> = value.split('/').collect();
-        if channels.len() != 3 {
-            return None;
-        }
-        return channels
-            .into_iter()
-            .try_fold(0, |color, part| Some(color << 8 | component(part)?));
+        return channels(value, |part| component(part, ghostty));
     }
     if let Some(value) = value.strip_prefix('#').or_else(|| {
         value
@@ -32,7 +40,7 @@ fn rgb(value: &str) -> Option<u32> {
         }
         let width = value.len() / 3;
         return value.as_bytes().chunks(width).try_fold(0, |color, part| {
-            Some(color << 8 | component(std::str::from_utf8(part).ok()?)?)
+            Some(color << 8 | component(std::str::from_utf8(part).ok()?, ghostty)?)
         });
     }
     let name: String = value
@@ -48,13 +56,72 @@ fn rgb(value: &str) -> Option<u32> {
         })
 }
 
-fn component(value: &str) -> Option<u32> {
+fn channels(value: &str, convert: impl Fn(&str) -> Option<u32>) -> Option<u32> {
+    let mut parts = value.split('/');
+    let color = (0..3).try_fold(0, |color, _| Some(color << 8 | convert(parts.next()?)?))?;
+    parts.next().is_none().then_some(color)
+}
+
+fn component(value: &str, ghostty: bool) -> Option<u32> {
     if value.is_empty() || value.len() > 4 || !value.bytes().all(|ch| ch.is_ascii_hexdigit()) {
         return None;
     }
     let number = u32::from_str_radix(value, 16).ok()?;
     let maximum = (1 << (value.len() * 4)) - 1;
-    Some((number * 255 + maximum / 2) / maximum)
+    Some(if ghostty || value.len() == 1 {
+        number * 255 / maximum
+    } else {
+        number >> (value.len() * 4 - 8)
+    })
+}
+
+fn intensity(value: &str, ghostty: bool) -> Option<u32> {
+    let number = if ghostty {
+        fraction(value)?
+    } else {
+        value.trim_start().parse::<f64>().ok()?
+    };
+    if number.is_nan() || (ghostty && !(0. ..=1.).contains(&number)) {
+        return None;
+    }
+    let byte = number.clamp(0., 1.) * 255.;
+    Some(if ghostty {
+        byte as u32
+    } else {
+        byte.round() as u32
+    })
+}
+
+fn fraction(value: &str) -> Option<f64> {
+    let unsigned = value.strip_prefix(['+', '-']).unwrap_or(value);
+    let (whole, part) = unsigned.split_once('.').unwrap_or((unsigned, ""));
+    if whole.is_empty() && part.is_empty() {
+        return None;
+    }
+    if !whole
+        .bytes()
+        .chain(part.bytes())
+        .all(|byte| byte.is_ascii_digit())
+    {
+        return None;
+    }
+    let whole = if whole.is_empty() {
+        0.
+    } else {
+        whole.parse::<f64>().ok()?
+    };
+    let part = &part[..part.len().min(15)];
+    let decimal = if part.is_empty() {
+        0.
+    } else {
+        part.parse::<f64>().ok()? / 10_f64.powi(part.len() as i32)
+    };
+    let magnitude = whole + decimal;
+    Some(if value.starts_with('-') {
+        -magnitude
+    } else {
+        magnitude
+    })
 }
 
 fn palette_index(value: &str) -> Option<usize> {
@@ -80,7 +147,7 @@ pub(super) fn line(colors: &mut TerminalColors, key: &str, value: &str, ghostty:
         })
     {
         if let Some(index) = palette_index(index)
-            && let Some(color) = rgb(value.trim())
+            && let Some(color) = rgb(value, ghostty)
         {
             colors.ansi[index] = color;
         }
@@ -93,7 +160,7 @@ pub(super) fn line(colors: &mut TerminalColors, key: &str, value: &str, ghostty:
         "cursor" if !ghostty => &mut colors.cursor,
         _ => return,
     };
-    if let Some(color) = rgb(value) {
+    if let Some(color) = rgb(value, ghostty) {
         *field = Some(color);
     }
 }

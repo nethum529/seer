@@ -20,7 +20,10 @@ not change. Restart the window after a config change.
 | iTerm2 | Ansi 0 Color through Ansi 15 Color, Foreground Color, Background Color, Cursor Color | RGB component dictionaries in the same default profile as Normal Font |
 
 Ghostty and kitty accept RGB hex values, X11 color names, and rgb:R/G/B
-components with one to four hex digits per channel. Ghostty also accepts
+components with one to four hex digits per channel. They also accept rgbi:R/G/B
+decimal intensity values. Ghostty requires values from 0 to 1 and truncates
+when it converts to bytes. kitty clamps values to that range and rounds.
+kitty color values can have trailing comments. Ghostty also accepts
 hex without a prefix. Ghostty palette indices accept decimal, 0x, 0o, and 0b.
 Alacritty accepts #RRGGBB and 0xRRGGBB. iTerm2 accepts XML and binary plist
 files. Its sRGB, P3, and legacy Calibrated colors convert to sRGB for drawing.

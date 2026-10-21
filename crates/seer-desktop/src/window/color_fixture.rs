@@ -45,20 +45,10 @@ pub(super) fn prepare(root: &Path) {
             alacritty.push_str(&format!("{name} = '#{:06x}'\n", ANSI[offset + i]));
         }
     }
+    if special(&case, &config, &ghostty, &kitty) {
+        return;
+    }
     match case.as_str() {
-        "ghostty-named" => write(
-            &config.join("ghostty/config"),
-            &ghostty
-                .replace("#d0e0f0", "Light Blue")
-                .replace("203040", "gray10")
-                .replace("#e0a060", "gold")
-                .replace("0=#182838", "0x0=navy")
-                .replace("1=#b04050", "0b1=#b45"),
-        ),
-        "kitty-rgb" => write(
-            &config.join("kitty/kitty.conf"),
-            &kitty.replace("#d0e0f0", "rgb:d0/e0/f0"),
-        ),
         "ghostty" | "precedence" => write(&config.join("ghostty/config"), &ghostty),
         "ghostty-includes" => {
             write(
@@ -172,7 +162,100 @@ try! PropertyListSerialization.data(fromPropertyList:root, format:.xml, options:
     }
 }
 
+fn special(case: &str, config: &Path, ghostty: &str, kitty: &str) -> bool {
+    match case {
+        "kitty-comments" => write(
+            &config.join("kitty/kitty.conf"),
+            include_str!("color_fixtures/kitty-comments.conf"),
+        ),
+        "ghostty-rgbi" => write(
+            &config.join("ghostty/config"),
+            include_str!("color_fixtures/ghostty-rgbi.conf"),
+        ),
+        "kitty-rgbi" => write(
+            &config.join("kitty/kitty.conf"),
+            include_str!("color_fixtures/kitty-rgbi.conf"),
+        ),
+        "ghostty-precision" => write(
+            &config.join("ghostty/config"),
+            &ghostty.replace("#182838", "#18f28f38f"),
+        ),
+        "kitty-precision" => write(
+            &config.join("kitty/kitty.conf"),
+            &kitty.replace("#182838", "#18f28f38f"),
+        ),
+        "ghostty-intensity" => write(
+            &config.join("ghostty/config"),
+            &format!(
+                "{ghostty}foreground = rgbi:.5/.5/.5\npalette = 7=rgbi:-1/2/.5\npalette = 8=rgbi:NaN/0/0\npalette = 10=rgbi:1e-1/.2/.3\n"
+            ),
+        ),
+        "kitty-intensity" => write(
+            &config.join("kitty/kitty.conf"),
+            &format!(
+                "{kitty}foreground rgbi:.5/.5/.5\ncolor7 rgbi:-1/2/.5\ncolor8 rgbi:NaN/0/0\ncolor10 rgbi:1e-1/.2/.3\n"
+            ),
+        ),
+        "ghostty-named" => write(
+            &config.join("ghostty/config"),
+            &ghostty
+                .replace("#d0e0f0", "Light Blue")
+                .replace("203040", "gray10")
+                .replace("#e0a060", "gold")
+                .replace("0=#182838", "0x0=navy")
+                .replace("1=#b04050", "0b1=#b45"),
+        ),
+        "kitty-rgb" => write(
+            &config.join("kitty/kitty.conf"),
+            &kitty.replace("#d0e0f0", "rgb:d0/e0/f0"),
+        ),
+        _ => return false,
+    }
+    true
+}
+
 fn write(path: &Path, text: &str) {
     fs::create_dir_all(path.parent().unwrap()).unwrap();
     fs::write(path, text).unwrap();
+}
+
+pub(super) fn expected(case: &str, defaults: bool) -> ([u32; 16], u32, u32, u32) {
+    let mut ansi = if defaults { DEFAULTS } else { ANSI };
+    if case == "partial" {
+        ansi[1] = ANSI[1];
+    }
+    if case == "ghostty-named" {
+        ansi[0] = 0x000080;
+        ansi[1] = 0xbb4455;
+    }
+    if case == "kitty-intensity" {
+        ansi[7] = 0x00ff80;
+        ansi[10] = 0x1a334d;
+    }
+    let fg = if case == "ghostty-intensity" {
+        0x7f7f7f
+    } else if case == "kitty-intensity" {
+        0x808080
+    } else if case == "ghostty-named" {
+        0xadd8e6
+    } else if defaults {
+        0xd4d4d4
+    } else {
+        FG
+    };
+    let bg = if case == "ghostty-named" {
+        0x1a1a1a
+    } else if defaults {
+        0x1b1b1b
+    } else {
+        BG
+    };
+    let cursor = if case == "ghostty-named" {
+        0xffd700
+    } else if defaults {
+        0xd4d4d4
+    } else {
+        CURSOR
+    };
+    (ansi, fg, bg, cursor)
 }

@@ -64,17 +64,13 @@ pub(super) async fn exercise(
             assert!(scale == 1. || scale == 2.);
             let case = std::env::var("COLOR_QA").unwrap();
             let defaults = matches!(case.as_str(), "none" | "unreadable" | "malformed" | "partial");
-            let mut ansi = if defaults { fixture::DEFAULTS } else { fixture::ANSI };
-            if case == "partial" { ansi[1] = fixture::ANSI[1]; }
-            if case == "ghostty-named" { ansi[0] = 0x000080; ansi[1] = 0xbb4455; }
-            let fg = if case == "ghostty-named" { 0xadd8e6 } else if defaults { 0xd4d4d4 } else { fixture::FG };
-            let bg = if case == "ghostty-named" { 0x1a1a1a } else if defaults { 0x1b1b1b } else { fixture::BG };
-            let cursor = if case == "ghostty-named" { 0xffd700 } else if defaults { 0xd4d4d4 } else { fixture::CURSOR };
+            let (ansi, fg, bg, cursor) = fixture::expected(&case, defaults);
             let mut pixels = Vec::new();
             let mut check = |col: f32, row: f32, color: u32, label: &str| {
                 let actual = image.get_pixel(((x+w*col)*scale).floor() as u32, ((y+h*row)*scale).floor() as u32).0;
                 let expected = [(color>>16) as u8, (color>>8) as u8, color as u8];
-                assert!(actual.iter().zip(expected).all(|(a,b)| a.abs_diff(b) <= 3), "{name} {label}: actual {actual:?}, expected {expected:?}");
+                let tolerance = if case.ends_with("-precision") || case.ends_with("-intensity") { 0 } else { 3 };
+                assert!(actual.iter().zip(expected).all(|(a,b)| a.abs_diff(b) <= tolerance), "{name} {label}: actual {actual:?}, expected {expected:?}");
                 pixels.push(serde_json::json!({"label":label,"column":col,"row":row,"actual":actual,"expected":expected}));
             };
             for (i,color) in ansi.iter().enumerate() {
