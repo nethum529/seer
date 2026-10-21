@@ -27,6 +27,8 @@ not infer Ghostty's keyboard-layout default when its setting is absent.
 
 Option Backspace sends ESC DEL, including after Kitty keyboard negotiation.
 Other configured Alt keys keep the Alt modifier in Kitty flag 1 sequences.
+Configured Option keypad Enter sends ESC followed by native ETX (03) in
+legacy mode, and CSI 57414;3u in Kitty flag 1 mode.
 This setting belongs to the sender's window. When you type into another
 person's terminal with a grant, your setting applies to your input.
 Linux, the TUI, custom key bindings, and live reload do not change.

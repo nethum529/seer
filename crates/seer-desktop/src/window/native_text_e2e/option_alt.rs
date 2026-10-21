@@ -205,6 +205,7 @@ pub(super) async fn exercise(
                     "\u{bf}",
                 ),
                 ("Enter", 0x24, 0, "\x1b\r", "\x1b[13;3u", "\r"),
+                ("Keypad Enter", 0x4c, 0, "\x1b\x03", "\x1b[57414;3u", "\x03"),
                 ("Backspace", 0x33, 0, "\x1b\x7f", "\x1b\x7f", "\x1b\x7f"),
             ] {
                 post(handle, key, (1 << 19) | flag | extra, cx);

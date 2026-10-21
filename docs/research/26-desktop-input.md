@@ -130,6 +130,11 @@ keeping Shift and Control. It sends ESC plus that text as legacy bytes and
 keeps Alt on the key used for Kitty flag 1. The other side still goes to
 AppKit. Marked composition is never intercepted. Option Backspace keeps
 ESC DEL in both modes, as required by the existing rule above.
+Configured Option keypad Enter keeps the native ETX byte (03) after ESC
+in legacy mode. It carries a distinct KeypadEnter code to the runtime,
+which sends CSI 57414;3u in Kitty flag 1 mode. This matches Alacritty's
+native text prefix and numpad key encoding. With no setting, modified
+keypad Enter still follows the native text path described above.
 
 Conversion runs before the shared local and remote input route. The sender
 supplies the legacy bytes and negotiated modifiers. The receiver does not

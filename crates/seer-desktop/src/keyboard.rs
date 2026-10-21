@@ -36,12 +36,21 @@ pub(crate) fn event(key: &Keystroke) -> Option<InputEvent> {
 }
 
 pub(crate) fn option_as_alt_event(key: &Keystroke) -> Option<InputEvent> {
-    let Some(code) = text_key(key) else {
+    let code = match key.key.as_str() {
+        "keypadenter" => Some(KeyCode::KeypadEnter),
+        "space" => Some(KeyCode::Char(' ')),
+        _ => text_key(key),
+    };
+    let Some(code) = code else {
         return event(key);
     };
     let mut native = key.clone();
     native.modifiers.alt = false;
-    let text = control_key(&native).or_else(|| key.key_char.clone())?;
+    let text = if code == KeyCode::KeypadEnter {
+        key.key_char.clone()
+    } else {
+        control_key(&native).or_else(|| key.key_char.clone())
+    }?;
     let text = format!("\x1b{text}");
     if code == KeyCode::Backspace && !key.modifiers.control && !key.modifiers.shift {
         return Some(InputEvent::Text(text));
@@ -71,7 +80,7 @@ fn text_key(key: &Keystroke) -> Option<KeyCode> {
         "backspace" => KeyCode::Backspace,
         "tab" => KeyCode::Tab,
         "escape" => KeyCode::Escape,
-        "space" => KeyCode::Char(' '),
+        "space" if key.modifiers.control => KeyCode::Char(' '),
         _ if key.key.chars().count() == 1 => KeyCode::Char(key.key.chars().next()?),
         _ => return None,
     })
