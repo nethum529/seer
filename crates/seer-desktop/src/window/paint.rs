@@ -3,6 +3,8 @@ use gpui::StyledImage;
 
 impl Render for SeerWindow {
     fn render(&mut self, window: &mut Window, cx: &mut Context<Self>) -> impl IntoElement {
+        #[cfg(test)]
+        cx.set_global(crate::tip::PaintedTips::default());
         let reclaim = self.appearance.settings.hide_lines && self.appearance.settings.hide_top_bar;
         cx.set_global(crate::appearance::Glass {
             enabled: self.appearance.settings.glass,
@@ -29,7 +31,13 @@ impl Render for SeerWindow {
                 }
             });
         }
+        // Pane IDs belong to one runtime, so GPUI state must belong to its person.
+        let person = match &self.content {
+            Content::Terminal(link, _) => link.people.selected.clone(),
+            _ => String::new(),
+        };
         let root = div()
+            .id(SharedString::from(person))
             .size_full()
             .relative()
             .overflow_hidden()

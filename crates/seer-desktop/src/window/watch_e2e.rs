@@ -241,6 +241,120 @@ pub(super) fn pump(cx: &mut gpui::VisualTestContext) {
     }
 }
 
+#[gpui::test]
+fn sidebar_tooltips_follow_the_selected_machine(cx: &mut TestAppContext) {
+    let runtime = Runtime::start();
+    let picture = runtime.directory.path().join("picture.png");
+    image::RgbaImage::new(1, 2048).save(&picture).unwrap();
+    std::fs::write(
+        runtime.directory.path().join("settings.toml"),
+        format!(
+            "glass = false\nhide_top_bar = false\npicture = '{}'\n",
+            picture.display()
+        ),
+    )
+    .unwrap();
+    let room = Room::start();
+    let (view, cx) = open_view(&runtime, &room, cx);
+    pump(cx);
+    let local_name = view.read_with(cx, |view, _| {
+        let Content::Terminal(link, _) = &view.content else {
+            panic!("terminal required")
+        };
+        super::rename::display_name(link.terminals().first().unwrap())
+    });
+    assert_ne!(local_name, "Claude");
+    for width in [960., 480.] {
+        for shown in [true, false] {
+            check_machine_tooltips(width, shown, &view, &room, &local_name, cx);
+        }
+    }
+}
+
+fn check_machine_tooltips(
+    width: f32,
+    shown: bool,
+    view: &Entity<SeerWindow>,
+    room: &Room,
+    local_name: &str,
+    cx: &mut gpui::VisualTestContext,
+) {
+    cx.simulate_resize(gpui::size(px(width), px(640.)));
+    pump(cx);
+    let people = if cfg!(target_os = "macos") {
+        "cmd-shift-e"
+    } else {
+        "ctrl-alt-super-e"
+    };
+    cx.simulate_keystrokes(&format!("{people} down enter"));
+    pump(cx);
+    room.messages
+        .send(ServerMsg::Terminals {
+            user: "Kyler".into(),
+            terminals: vec![TerminalInfo {
+                pane: "w1:p1".into(),
+                title: Some("Claude".into()),
+                ..terminal()
+            }],
+        })
+        .unwrap();
+    pump(cx);
+    let row = gpui::point(px(70.), px(if width > 500. { 110. } else { 66. }));
+    cx.simulate_mouse_move(
+        gpui::point(px(400.), px(10.)),
+        None,
+        gpui::Modifiers::default(),
+    );
+    cx.simulate_mouse_move(row, None, gpui::Modifiers::default());
+    cx.run_until_parked();
+    cx.executor()
+        .advance_clock(Duration::from_millis(if shown { 600 } else { 100 }));
+    cx.run_until_parked();
+    let remote_tip = cx.update(|_, cx| crate::tip::terminal_help("Claude", cx));
+    assert_eq!(
+        painted_tip(&remote_tip, cx),
+        shown,
+        "remote hover must work: width={width}, shown={shown}"
+    );
+    cx.simulate_keystrokes(&format!("{people} enter"));
+    pump(cx);
+    assert!(view.read_with(
+        cx,
+        |view, _| matches!(&view.content, Content::Terminal(link, _) if !link.remote())
+    ));
+    cx.executor().advance_clock(Duration::from_millis(600));
+    cx.run_until_parked();
+    assert!(
+        !painted_tip(&remote_tip, cx),
+        "remote tooltip must close on return"
+    );
+    cx.simulate_mouse_move(
+        gpui::point(px(400.), px(300.)),
+        None,
+        gpui::Modifiers::default(),
+    );
+    cx.run_until_parked();
+    cx.simulate_mouse_move(
+        gpui::point(px(400.), px(10.)),
+        None,
+        gpui::Modifiers::default(),
+    );
+    cx.simulate_mouse_move(row, None, gpui::Modifiers::default());
+    cx.run_until_parked();
+    cx.executor().advance_clock(Duration::from_millis(600));
+    cx.run_until_parked();
+    let local_tip = cx.update(|_, cx| crate::tip::terminal_help(local_name, cx));
+    let painted = cx.update(|_, cx| cx.global::<crate::tip::PaintedTips>().0.clone());
+    assert!(
+        painted.contains(&local_tip),
+        "local tooltip must name the local terminal: {painted:?}"
+    );
+}
+
+fn painted_tip(text: &SharedString, cx: &mut gpui::VisualTestContext) -> bool {
+    cx.update(|_, cx| cx.global::<crate::tip::PaintedTips>().0.contains(text))
+}
+
 pub(super) fn open_view<'a>(
     runtime: &Runtime,
     room: &Room,
