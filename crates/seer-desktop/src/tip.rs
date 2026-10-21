@@ -7,6 +7,15 @@ use gpui::{
 
 use crate::palette;
 
+#[cfg(test)]
+use gpui::BorrowAppContext;
+
+#[cfg(test)]
+#[derive(Default)]
+pub(crate) struct PaintedTips(pub(crate) Vec<SharedString>);
+#[cfg(test)]
+impl gpui::Global for PaintedTips {}
+
 const GAP: f32 = 4.;
 const MAX_WIDTH: f32 = 280.;
 
@@ -26,10 +35,27 @@ impl Render for Tip {
     // gpui puts the tooltip corner on the pointer. The padding moves the tip
     // below the pointer, so it does not hide the text under the pointer.
     fn render(&mut self, _: &mut Window, _: &mut Context<Self>) -> impl IntoElement {
-        div()
+        let tip = div()
             .pl(px(8.))
             .pt(px(20.))
-            .child(tip(self.text.clone(), self.font.clone()))
+            .child(tip(self.text.clone(), self.font.clone()));
+        #[cfg(test)]
+        let tip = {
+            let text = self.text.clone();
+            tip.child(
+                gpui::canvas(
+                    |_, _, _| (),
+                    move |_, _, _, cx| {
+                        cx.update_default_global::<PaintedTips, _>(|tips, _| {
+                            tips.0.push(text.clone())
+                        });
+                    },
+                )
+                .absolute()
+                .size_full(),
+            )
+        };
+        tip
     }
 }
 
