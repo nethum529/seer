@@ -25,7 +25,10 @@ Config locations and syntax:
   kitty/kitty.conf in $XDG_CONFIG_HOME, $HOME/.config, or $XDG_CONFIG_DIRS.
   The last variable defaults to /etc/xdg. Seer reads font_family and font_size
   in key value syntax. Family names and the family, postscript_name, full_name,
-  and system font selectors are accepted. File includes load in place.
+  and system font selectors are accepted. A following line with a leading
+  backslash continues the current line. File includes load in place. A missing
+  or unreadable include is skipped; the parent settings stay. An unreadable
+  main config still uses the Seer defaults.
   [kitty paths](https://sw.kovidgoyal.net/kitty/invocation/#cmdoption-kitty-config),
   [config syntax](https://sw.kovidgoyal.net/kitty/conf/), and
   [font selectors](https://sw.kovidgoyal.net/kitty/kittens/choose-fonts/).

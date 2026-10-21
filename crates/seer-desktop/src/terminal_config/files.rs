@@ -15,21 +15,21 @@ pub(super) fn lines(path: &Path, ghostty: bool, depth: usize) -> io::Result<Vec<
     let contents = fs::read_to_string(path)?;
     let mut values = Vec::new();
     let mut includes = Vec::new();
-    let mut continued = String::new();
-    for line in contents.lines() {
-        continued.push_str(line.trim());
-        if !ghostty && continued.ends_with('\\') {
-            continued.pop();
-            continue;
+    let mut physical = contents.lines().peekable();
+    while let Some(line) = physical.next() {
+        let mut line = line.trim_start().to_string();
+        if !ghostty {
+            while let Some(next) = physical.next_if(|line| line.trim_start().starts_with('\\')) {
+                line.push_str(&next.trim_start()[1..]);
+            }
         }
-        let line = std::mem::take(&mut continued);
         let Some((key, value)) = pair(&line, ghostty) else {
             continue;
         };
         if ghostty && key == "config-file" {
             includes.push(value.to_string());
         } else if !ghostty && key == "include" {
-            values.extend(lines(&include_path(path, value), false, depth + 1)?);
+            values.extend(lines(&include_path(path, value), false, depth + 1).unwrap_or_default());
         } else {
             values.push((key.to_string(), value.to_string()));
         }

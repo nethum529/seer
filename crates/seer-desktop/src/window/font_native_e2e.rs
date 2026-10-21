@@ -52,6 +52,20 @@ pub(super) fn prepare(root: &Path) {
             );
             write(&config.join("alacritty/font.toml"), &alacritty);
         }
+        "kitty-continuation" => write(
+            &config.join("kitty/kitty.conf"),
+            include_str!("../../tests/fixtures/kitty-continuation.conf"),
+        ),
+        "kitty-missing-include" | "kitty-unreadable-include" => {
+            write(
+                &config.join("kitty/kitty.conf"),
+                include_str!("../../tests/fixtures/kitty-missing-include.conf"),
+            );
+            if case == "kitty-unreadable-include" {
+                fs::create_dir_all(config.join("kitty/optional-machine.conf")).unwrap();
+            }
+        }
+        "kitty-unreadable" => fs::create_dir_all(config.join("kitty/kitty.conf")).unwrap(),
         "kitty" => write(&config.join("kitty/kitty.conf"), &kitty),
         "alacritty" => write(&config.join("alacritty/alacritty.toml"), &alacritty),
         "iterm2" | "iterm2-binary" => {
