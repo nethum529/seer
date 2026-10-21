@@ -410,22 +410,11 @@ fn heading(
     .text_center()
     .font_weight(FontWeight::MEDIUM)
     .gap(px(6.))
-    .when_some(person, |title, name| {
-        title
-            .child(
-                sidebar::one_line(div())
-                    .font_weight(FontWeight::NORMAL)
-                    .text_color(rgb(palette::MUTED))
-                    .child(crate::label::text(name.clone())),
-            )
-            .when(terminal.is_some(), |title| {
-                title.child(
-                    div()
-                        .font_weight(FontWeight::NORMAL)
-                        .text_color(rgb(palette::FAINTER))
-                        .child(crate::label::text("/")),
-                )
-            })
+    .when_some(person, |heading, name| {
+        heading.child(read_only_title::title(
+            name.clone(),
+            terminal.map(|terminal| rename::display_name(terminal).into()),
+        ))
     })
     .on_mouse_down(
         MouseButton::Left,
@@ -438,7 +427,9 @@ fn heading(
             }
         }),
     )
-    .children(terminal.map(|terminal| rename::label(terminal, Surface::Title, labels)))
+    .when(person.is_none(), |heading| {
+        heading.children(terminal.map(|terminal| rename::label(terminal, Surface::Title, labels)))
+    })
 }
 
 fn empty_terminal(text: &'static str) -> Div {

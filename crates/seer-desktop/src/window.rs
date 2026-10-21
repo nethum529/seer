@@ -25,6 +25,7 @@ mod invite;
 mod join;
 mod paint;
 mod people;
+mod read_only_title;
 pub(crate) mod rename;
 mod reveal;
 mod room;
