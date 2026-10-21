@@ -192,3 +192,15 @@ pub(crate) fn reclaim_top(cx: &App) -> bool {
     cx.try_global::<Glass>()
         .is_some_and(|glass| glass.reclaim_top)
 }
+
+pub(crate) fn terminal_fill(cx: &App) -> gpui::Rgba {
+    let colors = crate::palette::terminal(cx);
+    if colors.background.is_none() {
+        return fill(crate::palette::WINDOW, cx);
+    }
+    let mut background = colors.background();
+    if let Some(glass) = cx.try_global::<Glass>().filter(|glass| glass.enabled) {
+        background.a = glass.darkness;
+    }
+    background
+}

@@ -82,7 +82,7 @@ impl SeerWindow {
         let mut area = div()
             .id("terminal")
             .debug_selector(|| "terminal".into())
-            .bg(crate::appearance::fill(crate::palette::WINDOW, cx))
+            .bg(crate::appearance::terminal_fill(cx))
             .track_focus(&self.input.focus)
             .flex_1()
             .min_h_0()

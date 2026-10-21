@@ -159,7 +159,14 @@ impl Element for Screen {
             let Some((terminal, rows)) = view.screen() else {
                 return Painted::default();
             };
-            rows.paint(terminal, grid, &self.font, self.font_size, focused, window)
+            rows.paint(
+                terminal,
+                grid,
+                (&self.font, self.font_size),
+                focused,
+                window,
+                &palette::terminal(cx),
+            )
         })
     }
 
@@ -173,6 +180,7 @@ impl Element for Screen {
         window: &mut Window,
         cx: &mut App,
     ) {
+        let colors = palette::terminal(cx);
         let view = self.view.read(cx);
         let focus = view.input.focus.clone();
         let preedit = view.input.composition.text.clone();
@@ -232,13 +240,13 @@ impl Element for Screen {
                     glyphs.add(
                         cell.character,
                         cursor,
-                        gpui::rgb(palette::WINDOW),
+                        colors.background(),
                         window.scale_factor(),
                     );
                     glyphs.paint(window);
                 } else {
                     let text = cell.character.to_string();
-                    let run = text_run(&cell, gpui::rgb(palette::WINDOW), text.len(), &self.font);
+                    let run = text_run(&cell, colors.background(), text.len(), &self.font);
                     let line = window.text_system().shape_line(
                         text.into(),
                         px(self.font_size),
@@ -262,7 +270,7 @@ impl Element for Screen {
             let run = TextRun {
                 len,
                 font: self.font.clone(),
-                color: palette::cursor().into(),
+                color: colors.cursor().into(),
                 background_color: None,
                 underline: Some(UnderlineStyle {
                     color: None,
@@ -277,7 +285,7 @@ impl Element for Screen {
                     .shape_line(preedit.into(), px(self.font_size), &[run], None);
             window.paint_quad(fill(
                 Bounds::new(cursor.origin, size(line.width, painted.line_height)),
-                gpui::rgb(palette::WINDOW),
+                colors.background(),
             ));
             crate::terminal_font::paint(&line, cursor.origin, painted.line_height, window, cx);
         }
@@ -310,10 +318,10 @@ impl Rows {
         &mut self,
         terminal: &Terminal,
         grid: Grid,
-        font: &Font,
-        font_size: f32,
+        (font, font_size): (&Font, f32),
         focused: bool,
         window: &mut Window,
+        colors: &palette::TerminalColors,
     ) -> Painted {
         let (changed, at) = {
             let mut held = lock(terminal);
@@ -339,11 +347,11 @@ impl Rows {
             (changed, terminal.cursor())
         };
         for (index, cells) in changed {
-            self.shaped[index] = shape(&cells, &grid, index, font, font_size, window);
+            self.shaped[index] = shape(&cells, &grid, index, font, font_size, window, colors);
         }
         let mut painted = Painted {
             line_height: grid.line_height,
-            cursor: cursor(at, &grid, focused),
+            cursor: cursor(at, &grid, focused, colors),
             ..Painted::default()
         };
         for (index, shaped) in self.shaped.iter().enumerate() {
@@ -368,8 +376,9 @@ fn shape(
     font: &Font,
     font_size: f32,
     window: &Window,
+    colors: &palette::TerminalColors,
 ) -> Shaped {
-    let row = row(cells, grid, index, font);
+    let row = row(cells, grid, index, font, colors);
     let line = window.text_system().shape_line(
         row.text.into(),
         px(font_size),
@@ -383,10 +392,16 @@ fn shape(
     }
 }
 
-fn row(cells: &[Cell], grid: &Grid, index: usize, font: &Font) -> Row {
+fn row(
+    cells: &[Cell],
+    grid: &Grid,
+    index: usize,
+    font: &Font,
+    colors: &palette::TerminalColors,
+) -> Row {
     let mut row = Row::default();
     for (column, cell) in cells.iter().take(grid.cols).enumerate() {
-        let (fg, bg) = palette::cell_colors(cell);
+        let (fg, bg) = colors.cell_colors(cell);
         let builtin = glyphs::contains(cell.character);
         if builtin && !cell.hidden {
             row.glyphs
@@ -441,13 +456,18 @@ fn text_run(cell: &Cell, color: Rgba, len: usize, font: &Font) -> TextRun {
     }
 }
 
-fn cursor(cursor: Cursor, grid: &Grid, focused: bool) -> Option<PaintQuad> {
+fn cursor(
+    cursor: Cursor,
+    grid: &Grid,
+    focused: bool,
+    colors: &palette::TerminalColors,
+) -> Option<PaintQuad> {
     let column = usize::from(cursor.column);
     let row = usize::from(cursor.row);
     (cursor.visible && column < grid.cols && row < grid.rows).then(|| {
         let mut bounds = grid.cell(column, row, 1);
         if !focused || cursor.shape == CursorShape::HollowBlock {
-            return outline(bounds, palette::cursor(), BorderStyle::Solid);
+            return outline(bounds, colors.cursor(), BorderStyle::Solid);
         }
         match cursor.shape {
             CursorShape::Beam => bounds.size.width = px(1.),
@@ -457,7 +477,7 @@ fn cursor(cursor: Cursor, grid: &Grid, focused: bool) -> Option<PaintQuad> {
             }
             _ => {}
         }
-        fill(bounds, palette::cursor())
+        fill(bounds, colors.cursor())
     })
 }
 

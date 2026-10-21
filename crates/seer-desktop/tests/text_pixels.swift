@@ -15,7 +15,12 @@ if CommandLine.arguments[1] != "measure" && !appearanceOnly {
     typealias Capture = @convention(c) (CGRect, UInt32, UInt32, UInt32) -> Unmanaged<CGImage>?
     let library = dlopen("/System/Library/Frameworks/CoreGraphics.framework/CoreGraphics", RTLD_LAZY)!
     let capture = unsafeBitCast(dlsym(library, "CGWindowListCreateImage")!, to: Capture.self)
-    let image = capture(.null, 1 << 3, id, (1 << 0) | (1 << 3))!.takeRetainedValue()
+    var image = capture(.null, 1 << 3, id, (1 << 0) | (1 << 3))!.takeRetainedValue()
+    if ProcessInfo.processInfo.environment["COLOR_QA"] != nil {
+        let context = CGContext(data: nil, width: image.width, height: image.height, bitsPerComponent: 8, bytesPerRow: 0, space: CGColorSpace(name: CGColorSpace.sRGB)!, bitmapInfo: CGImageAlphaInfo.premultipliedLast.rawValue)!
+        context.draw(image, in: CGRect(x: 0, y: 0, width: image.width, height: image.height))
+        image = context.makeImage()!
+    }
     let data = NSBitmapImageRep(cgImage: image).representation(using: .png, properties: [:])!
     try! data.write(to: URL(fileURLWithPath: output + "/" + CommandLine.arguments[3] + ".png"))
     exit(0)
@@ -73,7 +78,7 @@ if appearanceOnly { samples = [] }
 var darkSamples = Set<String>()
 var sampleColors: [String: [Double]] = [:]
 var captureWidths: [String: Double] = [:]
-for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json", "remove-samples.json", "share-all-samples.json", "process-samples.json", "font-samples.json"] {
+for file in ["shortcut-samples.json", "start-room-samples.json", "start-screen-samples.json", "appearance-samples.json", "banner-samples.json", "remove-samples.json", "share-all-samples.json", "process-samples.json", "font-samples.json", "color-samples.json"] {
     let path = output + "/" + file
     if !FileManager.default.fileExists(atPath: path) { continue }
     let rows = try! JSONSerialization.jsonObject(with: Data(contentsOf: URL(fileURLWithPath: path))) as! [[String: Any]]
@@ -102,6 +107,7 @@ for (capture, name, box, probe) in samples {
                 let reference = (background.redComponent + background.greenComponent + background.blueComponent) / 3
                 let contrast = reference > 0.5 ? reference - mean : mean - reference
                 if darkSamples.contains(name) { return contrast > 8.0 / 255 }
+                if capture.hasPrefix("colors-") { return contrast > 8.0 / 255 }
                 if let foreground = sampleColors[name] {
                     let dominant = foreground.indices.max { foreground[$0] < foreground[$1] }!
                     let other = channels.enumerated().filter { $0.offset != dominant }.map { $0.element }.max()!

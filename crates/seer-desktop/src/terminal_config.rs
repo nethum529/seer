@@ -3,19 +3,21 @@ use std::{
     path::{Path, PathBuf},
 };
 
+mod colors;
 mod files;
 
 #[derive(Default)]
-pub(crate) struct FontSettings {
+pub(crate) struct TerminalSettings {
     pub(crate) families: Vec<String>,
     pub(crate) size: Option<f32>,
+    pub(crate) colors: crate::palette::TerminalColors,
 }
 
-pub(crate) fn load() -> FontSettings {
+pub(crate) fn load() -> TerminalSettings {
     read().unwrap_or_default()
 }
 
-fn read() -> io::Result<FontSettings> {
+fn read() -> io::Result<TerminalSettings> {
     let home = env::var_os("HOME")
         .filter(|value| !value.is_empty())
         .map(PathBuf::from);
@@ -47,7 +49,8 @@ fn read() -> io::Result<FontSettings> {
     if let Some(path) = alacritty_path(config.as_deref(), home.as_deref()) {
         let values = files::toml(&path, 0)?;
         let font = values.get("font");
-        return Ok(FontSettings {
+        return Ok(TerminalSettings {
+            colors: colors::alacritty(&values),
             families: font
                 .and_then(|font| font.get("normal"))
                 .and_then(|normal| normal.get("family"))
@@ -68,7 +71,7 @@ fn read() -> io::Result<FontSettings> {
     if let Some(home) = home {
         return iterm_font(&home.join("Library/Preferences/com.googlecode.iterm2.plist"));
     }
-    Ok(FontSettings::default())
+    Ok(TerminalSettings::default())
 }
 
 fn present(path: &Path) -> bool {
@@ -109,9 +112,10 @@ fn alacritty_path(config: Option<&Path>, home: Option<&Path>) -> Option<PathBuf>
         .find(|path| present(path))
 }
 
-fn ghostty_font(values: Vec<(String, String)>) -> FontSettings {
-    let mut font = FontSettings::default();
+fn ghostty_font(values: Vec<(String, String)>) -> TerminalSettings {
+    let mut font = TerminalSettings::default();
     for (key, value) in values {
+        colors::line(&mut font.colors, &key, &value, true);
         match key.as_str() {
             "font-family" if value.is_empty() => font.families.clear(),
             "font-family" => font.families.push(value),
@@ -122,9 +126,10 @@ fn ghostty_font(values: Vec<(String, String)>) -> FontSettings {
     font
 }
 
-fn kitty_font(values: Vec<(String, String)>) -> FontSettings {
-    let mut font = FontSettings::default();
+fn kitty_font(values: Vec<(String, String)>) -> TerminalSettings {
+    let mut font = TerminalSettings::default();
     for (key, value) in values {
+        colors::line(&mut font.colors, &key, &value, false);
         match key.as_str() {
             "font_family" => font.families = files::font_selector(&value).into_iter().collect(),
             "font_size" => font.size = value.parse().ok(),
@@ -135,14 +140,14 @@ fn kitty_font(values: Vec<(String, String)>) -> FontSettings {
 }
 
 #[cfg(target_os = "macos")]
-fn iterm_font(path: &Path) -> io::Result<FontSettings> {
+fn iterm_font(path: &Path) -> io::Result<TerminalSettings> {
     let value = plist::Value::from_file(path).map_err(io::Error::other)?;
     let root = value
         .as_dictionary()
         .ok_or_else(|| io::Error::other("invalid preferences"))?;
     let profiles = root.get("New Bookmarks").and_then(plist::Value::as_array);
     let Some(profiles) = profiles else {
-        return Ok(FontSettings::default());
+        return Ok(TerminalSettings::default());
     };
     let default = root
         .get("Default Bookmark Guid")
@@ -158,12 +163,13 @@ fn iterm_font(path: &Path) -> io::Result<FontSettings> {
     } else {
         profiles.first()
     };
+    let profile = profile.and_then(plist::Value::as_dictionary);
     let description = profile
-        .and_then(plist::Value::as_dictionary)
         .and_then(|profile| profile.get("Normal Font"))
         .and_then(plist::Value::as_string);
     let mut words = description.unwrap_or_default().split_whitespace();
-    Ok(FontSettings {
+    Ok(TerminalSettings {
+        colors: profile.map(colors::iterm).unwrap_or_default(),
         families: words.next().map(String::from).into_iter().collect(),
         size: words.next().and_then(|size| size.parse().ok()),
     })

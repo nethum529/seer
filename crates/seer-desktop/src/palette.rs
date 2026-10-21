@@ -30,56 +30,88 @@ const ANSI: [u32; 16] = [
 ];
 const CUBE: [u8; 6] = [0, 95, 135, 175, 215, 255];
 
-pub(crate) fn cursor() -> Rgba {
-    rgb(TEXT_2)
+#[derive(Clone, Copy)]
+pub(crate) struct TerminalColors {
+    pub(crate) ansi: [u32; 16],
+    pub(crate) foreground: Option<u32>,
+    pub(crate) background: Option<u32>,
+    pub(crate) cursor: Option<u32>,
 }
 
-pub(crate) fn cell_colors(cell: &Cell) -> (Rgba, Option<Rgba>) {
-    let mut fg = match cell.fg {
-        Color::Default if cell.bold => rgb(TEXT),
-        Color::Default => rgb(TEXT_2),
-        color => terminal_color(color),
-    };
-    let mut bg = match cell.bg {
-        Color::Default => None,
-        color => Some(terminal_color(color)),
-    };
-    if cell.inverse {
-        let swapped = bg.unwrap_or(rgb(WINDOW));
-        bg = Some(fg);
-        fg = swapped;
-    }
-    let behind = bg.unwrap_or(rgb(WINDOW));
-    if cell.hidden {
-        fg.a = 0.;
-    } else if cell.dim {
-        fg = halfway(fg, behind);
-    }
-    (fg, bg)
-}
+impl gpui::Global for TerminalColors {}
 
-fn terminal_color(color: Color) -> Rgba {
-    match color {
-        Color::Default => rgb(TEXT_2),
-        Color::Indexed(index) => rgb(indexed(index)),
-        Color::Rgb { red, green, blue } => rgb(pack(red, green, blue)),
-    }
-}
-
-fn indexed(index: u8) -> u32 {
-    match index {
-        0..=15 => ANSI[usize::from(index)],
-        16..=231 => {
-            let cube = index - 16;
-            pack(
-                CUBE[usize::from(cube / 36)],
-                CUBE[usize::from(cube / 6 % 6)],
-                CUBE[usize::from(cube % 6)],
-            )
+impl Default for TerminalColors {
+    fn default() -> Self {
+        Self {
+            ansi: ANSI,
+            foreground: None,
+            background: None,
+            cursor: None,
         }
-        _ => {
-            let gray = 8 + (index - 232) * 10;
-            pack(gray, gray, gray)
+    }
+}
+
+pub(crate) fn terminal(cx: &gpui::App) -> TerminalColors {
+    cx.try_global::<TerminalColors>()
+        .copied()
+        .unwrap_or_default()
+}
+
+impl TerminalColors {
+    pub(crate) fn background(&self) -> Rgba {
+        rgb(self.background.unwrap_or(WINDOW))
+    }
+
+    pub(crate) fn cursor(&self) -> Rgba {
+        rgb(self.cursor.unwrap_or(TEXT_2))
+    }
+
+    pub(crate) fn cell_colors(&self, cell: &Cell) -> (Rgba, Option<Rgba>) {
+        let mut fg = match cell.fg {
+            Color::Default if cell.bold => rgb(self.foreground.unwrap_or(TEXT)),
+            color => self.color(color),
+        };
+        let mut bg = match cell.bg {
+            Color::Default => None,
+            color => Some(self.color(color)),
+        };
+        if cell.inverse {
+            let swapped = bg.unwrap_or(self.background());
+            bg = Some(fg);
+            fg = swapped;
+        }
+        let behind = bg.unwrap_or(self.background());
+        if cell.hidden {
+            fg.a = 0.;
+        } else if cell.dim {
+            fg = halfway(fg, behind);
+        }
+        (fg, bg)
+    }
+
+    fn color(&self, color: Color) -> Rgba {
+        match color {
+            Color::Default => rgb(self.foreground.unwrap_or(TEXT_2)),
+            Color::Indexed(index) => rgb(self.indexed(index)),
+            Color::Rgb { red, green, blue } => rgb(pack(red, green, blue)),
+        }
+    }
+
+    fn indexed(&self, index: u8) -> u32 {
+        match index {
+            0..=15 => self.ansi[usize::from(index)],
+            16..=231 => {
+                let cube = index - 16;
+                pack(
+                    CUBE[usize::from(cube / 36)],
+                    CUBE[usize::from(cube / 6 % 6)],
+                    CUBE[usize::from(cube % 6)],
+                )
+            }
+            _ => {
+                let gray = 8 + (index - 232) * 10;
+                pack(gray, gray, gray)
+            }
         }
     }
 }
