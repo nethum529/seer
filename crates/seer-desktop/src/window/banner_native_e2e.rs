@@ -68,7 +68,7 @@ pub(super) async fn exercise(
                     ("Sidebar tab", "Shell", 44., 92., 33., FontWeight::MEDIUM),
                     ("New terminal", "New terminal", 44., 131., 32., FontWeight::MEDIUM),
                 ] {
-                    let x = if label == "Title" { 604. - text_width(window, text, 13., weight) / 2. } else { x };
+                    let x = if label == "Title" { 480. - text_width(window, text, 13., weight) / 2. } else { x };
                     samples.push(serde_json::json!({"capture": name, "name":label, "logical_width":width, "box":[x,y,text_width(window,&text[..1],13.,weight).floor().max(2.),height], "probe":baseline_probe(window,text,x,13.,weight)}));
                 }
             }

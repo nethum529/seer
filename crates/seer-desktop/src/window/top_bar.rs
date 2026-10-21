@@ -1,6 +1,37 @@
 use super::reveal::Reveal;
 use super::*;
 
+pub(super) fn centered_title(title: impl IntoElement) -> impl IntoElement {
+    let title = title.into_any_element();
+    gpui::canvas(
+        move |bounds, window, cx| {
+            let width = window.viewport_size().width;
+            let inset = bounds.left().max(width - bounds.right());
+            let available = (width - inset * 2.).max(px(0.));
+            let mut title = div()
+                .w(available)
+                .h(bounds.size.height)
+                .flex()
+                .items_center()
+                .justify_center()
+                .overflow_hidden()
+                .child(title)
+                .into_any_element();
+            title.prepaint_as_root(
+                gpui::point(inset, bounds.top()),
+                gpui::size(available.into(), bounds.size.height.into()),
+                window,
+                cx,
+            );
+            title
+        },
+        |_, mut title, window, cx| title.paint(window, cx),
+    )
+    .flex_1()
+    .min_w_0()
+    .h_full()
+}
+
 pub(crate) struct TopBar {
     motion: Reveal,
     pub(super) hovered: bool,
