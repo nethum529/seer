@@ -8,6 +8,7 @@ mod remove;
 
 pub(super) struct Menu {
     focus: FocusHandle,
+    return_focus: Option<FocusHandle>,
     scroll: ScrollHandle,
     pub(super) highlighted: String,
     removing: bool,
@@ -31,16 +32,21 @@ impl SeerWindow {
         };
         if let Some(menu) = &mut self.people_menu {
             if !keyboard && !menu.motion.closing() {
-                self.close_people(keyboard, window, cx);
+                self.close_people(keyboard, false, window, cx);
                 return;
+            }
+            if menu.motion.closing() {
+                menu.return_focus = window.focused(cx);
             }
             menu.motion.reopen(keyboard, 150);
             window.focus(&menu.focus);
         } else {
+            let return_focus = window.focused(cx);
             let focus = cx.focus_handle();
             window.focus(&focus);
             self.people_menu = Some(Menu {
                 focus,
+                return_focus,
                 scroll: ScrollHandle::new(),
                 highlighted: link.people.selected.clone(),
                 removing: false,
@@ -63,11 +69,22 @@ impl SeerWindow {
         self.notify_room(cx);
     }
 
-    fn close_people(&mut self, keyboard: bool, window: &mut Window, cx: &mut Context<Self>) {
+    fn close_people(
+        &mut self,
+        keyboard: bool,
+        picked: bool,
+        window: &mut Window,
+        cx: &mut Context<Self>,
+    ) {
         if let Some(menu) = &mut self.people_menu {
             menu.motion.close(keyboard, 80);
         }
-        window.focus(&self.keys.who);
+        let previous = self
+            .people_menu
+            .as_ref()
+            .and_then(|menu| menu.return_focus.as_ref())
+            .unwrap_or(&self.keys.who);
+        window.focus(if picked { &self.input.focus } else { previous });
         self.keys.mode = if keyboard { Mode::Quiet } else { Mode::Pointer };
         self.notify_room(cx);
     }
@@ -86,7 +103,7 @@ impl SeerWindow {
         self.input.reset();
         self.rows = Rows::default();
         self.check(result, cx);
-        self.close_people(keyboard, window, cx);
+        self.close_people(keyboard, true, window, cx);
     }
 
     pub(super) fn people_key(
@@ -109,7 +126,7 @@ impl SeerWindow {
             return false;
         }
         if matches!(key.key.as_str(), "escape" | "tab") {
-            self.close_people(true, window, cx);
+            self.close_people(true, false, window, cx);
             return true;
         }
         let (Some(menu), Content::Terminal(link, _)) = (&mut self.people_menu, &self.content)
@@ -222,7 +239,7 @@ impl SeerWindow {
                         MouseButton::Left,
                         cx.listener(|view, _, window, cx| {
                             cx.stop_propagation();
-                            view.close_people(false, window, cx);
+                            view.close_people(false, false, window, cx);
                         }),
                     )
                 })

@@ -25,6 +25,8 @@ mod invite;
 mod join;
 mod paint;
 mod people;
+#[cfg(all(test, not(feature = "native-text-e2e")))]
+mod people_e2e;
 mod read_only_title;
 pub(crate) mod rename;
 mod reveal;
