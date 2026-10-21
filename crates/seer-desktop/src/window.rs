@@ -75,6 +75,8 @@ impl SeerWindow {
     pub(crate) fn new(window: &mut Window, cx: &mut Context<Self>) -> Self {
         let settings = crate::terminal_config::load();
         cx.set_global(settings.colors);
+        #[cfg(target_os = "macos")]
+        cx.set_global(settings.option_as_alt);
         let (font, font_size) = crate::terminal_font::load(cx, &settings);
         let start = start::StartScreen::new(cx);
         window.focus(&start.host);

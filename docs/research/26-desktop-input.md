@@ -100,9 +100,9 @@ encoding, and associated text flags are not supported.
 The alacritty_terminal pin fixes upstream issue 9071 / PR 9073; remove it after a release includes the fix.
 
 On macOS, Option Backspace keeps its legacy ESC DEL word deletion binding
-in negotiated mode. This rule stays on the sending desktop. For keys that
-carry legacy bytes, the desktop clears Option from the key used in
-negotiated mode. The owner approved this difference from Alacritty 0.17.0
+in negotiated mode. This rule stays on the sending desktop. With native
+Option text, the desktop clears Option from keys that carry legacy bytes
+before negotiated encoding. The owner approved this difference from Alacritty 0.17.0
 defaults, which send plain DEL in that mode. Other checked edit keys
 follow those defaults. The checks cover separate Control, Option or Alt,
 and Shift modifiers with Backspace, Delete, arrows, Home, End, Enter, and
@@ -113,6 +113,36 @@ The GPUI e2e checks use a real local runtime and PTY. A separate fish 4
 check types two words, deletes the second word, and reads the resulting
 command line. Set SEER_TEST_FISH to the fish executable to run that check.
 The raw capture check guards legacy bytes as well as negotiated bytes.
+
+## Option as Alt from terminal app config
+
+T-579, checked on 2026-10-21.
+
+The existing font and color loader also reads explicit macOS Option as Alt
+settings. App order, file paths, includes, and iTerm2 profile selection stay
+in that loader. See [terminal keys](../guide/terminal-keys.md) for the values.
+No setting, an invalid value, or an unreadable selected config keeps native
+Option text. Ghostty's implicit keyboard-layout default is not imported.
+
+The native key monitor reads the left and right Option device bits from
+NSEvent. For a configured side, it gets text with Option removed while
+keeping Shift and Control. It sends ESC plus that text as legacy bytes and
+keeps Alt on the key used for Kitty flag 1. The other side still goes to
+AppKit. Marked composition is never intercepted. Option Backspace keeps
+ESC DEL in both modes, as required by the existing rule above.
+
+Conversion runs before the shared local and remote input route. The sender
+supplies the legacy bytes and negotiated modifiers. The receiver does not
+read the sender's config or apply its own Option preference.
+
+The native-text-e2e harness uses isolated HOME and XDG directories. Its
+Option cases post native macOS key events to the app and assert the bytes
+read by a raw shell in a real local runtime. They cover both sides, each
+side alone, off, native composition, config includes, app precedence,
+unreadable config, XML and binary iTerm2 profiles, and Kitty flag 1.
+The first check failed before the change: Option B sent e288ab instead of
+1b62 with Ghostty configured for both sides. Source references and raw byte
+evidence are listed in the T-579 report.
 
 ## Input latency
 

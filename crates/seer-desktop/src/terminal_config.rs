@@ -5,11 +5,18 @@ use std::{
 
 mod colors;
 mod files;
+#[cfg(target_os = "macos")]
+mod option_alt;
+
+#[cfg(target_os = "macos")]
+pub(crate) use option_alt::OptionAsAlt;
 
 #[derive(Default)]
 pub(crate) struct TerminalSettings {
     pub(crate) families: Vec<String>,
     pub(crate) size: Option<f32>,
+    #[cfg(target_os = "macos")]
+    pub(crate) option_as_alt: OptionAsAlt,
     pub(crate) colors: crate::palette::TerminalColors,
 }
 
@@ -51,6 +58,8 @@ fn read() -> io::Result<TerminalSettings> {
         let font = values.get("font");
         return Ok(TerminalSettings {
             colors: colors::alacritty(&values),
+            #[cfg(target_os = "macos")]
+            option_as_alt: OptionAsAlt::alacritty(&values),
             families: font
                 .and_then(|font| font.get("normal"))
                 .and_then(|normal| normal.get("family"))
@@ -120,6 +129,8 @@ fn ghostty_font(values: Vec<(String, String)>) -> TerminalSettings {
             "font-family" if value.is_empty() => font.families.clear(),
             "font-family" => font.families.push(value),
             "font-size" => font.size = value.parse().ok(),
+            #[cfg(target_os = "macos")]
+            "macos-option-as-alt" => font.option_as_alt = OptionAsAlt::ghostty(&value),
             _ => {}
         }
     }
@@ -133,6 +144,8 @@ fn kitty_font(values: Vec<(String, String)>) -> TerminalSettings {
         match key.as_str() {
             "font_family" => font.families = files::font_selector(&value).into_iter().collect(),
             "font_size" => font.size = value.parse().ok(),
+            #[cfg(target_os = "macos")]
+            "macos_option_as_alt" => font.option_as_alt = OptionAsAlt::kitty(&value),
             _ => {}
         }
     }
@@ -170,6 +183,7 @@ fn iterm_font(path: &Path) -> io::Result<TerminalSettings> {
     let mut words = description.unwrap_or_default().split_whitespace();
     Ok(TerminalSettings {
         colors: profile.map(colors::iterm).unwrap_or_default(),
+        option_as_alt: profile.map(OptionAsAlt::iterm).unwrap_or_default(),
         families: words.next().map(String::from).into_iter().collect(),
         size: words.next().and_then(|size| size.parse().ok()),
     })

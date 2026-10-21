@@ -162,6 +162,15 @@ impl SeerWindow {
     }
 
     pub(crate) fn terminal_key(&mut self, key: &Keystroke, cx: &mut Context<Self>) {
+        self.terminal_key_with_alt(key, false, cx);
+    }
+
+    pub(crate) fn terminal_key_with_alt(
+        &mut self,
+        key: &Keystroke,
+        option_as_alt: bool,
+        cx: &mut Context<Self>,
+    ) {
         if self.input.composition.marked() {
             return;
         }
@@ -177,7 +186,9 @@ impl SeerWindow {
                 _ => {}
             }
             cx.stop_propagation();
-        } else if let Some(event) = if shortcuts::released(key, cx) {
+        } else if let Some(event) = if option_as_alt && !key.modifiers.platform {
+            keyboard::option_as_alt_event(key)
+        } else if shortcuts::released(key, cx) {
             keyboard::released_event(key)
         } else {
             keyboard::event(key)

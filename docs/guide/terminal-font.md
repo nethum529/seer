@@ -10,7 +10,8 @@ If the selected config cannot be read, has no font settings, or names a font
 that is not installed, Seer uses JetBrains Mono at 12.5 with a 19 logical pixel row.
 A missing size or family keeps the Seer default for that field. Invalid sizes
 also use the Seer default. Sizes must be finite, above 0, and at most 256 points.
-Colors use the same selected config; see [terminal colors](terminal-colors.md).
+Colors and the macOS Option key use the same selected config; see
+[terminal colors](terminal-colors.md) and [terminal keys](terminal-keys.md).
 Font styles and live reload are not imported.
 
 Config locations and syntax:
