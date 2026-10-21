@@ -86,6 +86,7 @@ impl SeerWindow {
         };
         let label = format!("{}: {keys}", shortcut.name);
         let focus = &self.appearance.shortcut_focus[index];
+        let group: SharedString = format!("shortcut-keys-{index}").into();
         let narrow = window.viewport_size().width < px(NARROW);
         let message = self
             .appearance
@@ -138,27 +139,40 @@ impl SeerWindow {
                             .min_w_0()
                             .max_w_full()
                             .debug_selector(move || keys.clone())
-                            .min_h(px(32.))
-                            .px(px(8.))
-                            .rounded(px(8.))
+                            .group(group.clone())
+                            .min_h(px(22.))
+                            .rounded(px(5.))
                             .flex()
+                            .flex_wrap()
                             .items_center()
-                            .bg(rgb(palette::CHIP))
+                            .gap(px(4.))
+                            .text_size(px(12.))
+                            .line_height(px(16.))
                             .text_color(rgb(palette::MUTED))
-                            .hover(|key| key.bg(rgb(palette::CHIP_2)))
+                            .children(if capturing {
+                                vec![key_cap("Press new keys".into(), group, cx).into_any_element()]
+                            } else {
+                                shortcut
+                                    .key_caps(cx)
+                                    .into_iter()
+                                    .enumerate()
+                                    .flat_map(|(index, keys)| {
+                                        let separator = (index > 0).then(|| {
+                                            div().child(crate::label::text("/")).into_any_element()
+                                        });
+                                        separator.into_iter().chain(keys.into_iter().map(|key| {
+                                            key_cap(key, group.clone(), cx).into_any_element()
+                                        }))
+                                    })
+                                    .collect()
+                            })
                             .when(self.keys.ring(focus, window), |key| {
                                 key.child(
-                                    sidebar::outline().debug_selector(|| "shortcut-focused".into()),
+                                    sidebar::outline()
+                                        .rounded(px(5.))
+                                        .debug_selector(|| "shortcut-focused".into()),
                                 )
-                            })
-                            .child(crate::label::tooltip(
-                                if capturing {
-                                    "Press new keys".to_owned()
-                                } else {
-                                    shortcut.effective_keys(shortcuts::Platform::current(), cx)
-                                }
-                                .into(),
-                            )),
+                            }),
                     )
                     .when(capturing, |controls| {
                         controls.child(
@@ -247,4 +261,22 @@ impl SeerWindow {
                 )
             })
     }
+}
+
+fn key_cap(key: String, group: SharedString, cx: &gpui::App) -> Div {
+    div()
+        .relative()
+        .flex_none()
+        .h(px(22.))
+        .min_w(px(26.))
+        .px(px(6.))
+        .rounded(px(5.))
+        .border_1()
+        .border_color(crate::appearance::fill(palette::LINE_2, cx))
+        .bg(crate::appearance::fill(palette::HOVER, cx))
+        .group_hover(group, |cap| cap.bg(rgb(palette::SELECTED)))
+        .flex()
+        .items_center()
+        .justify_center()
+        .child(crate::label::text(key))
 }

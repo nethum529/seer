@@ -1,6 +1,6 @@
 use super::{
     Content, SeerWindow,
-    shortcuts_native_e2e::{baseline_probe, text_width},
+    shortcuts_native_e2e::{baseline_probe, cap_samples, text_width},
 };
 use crate::appearance::Section;
 use gpui::{FontWeight, Keystroke, WindowHandle};
@@ -69,36 +69,16 @@ pub(super) async fn exercise(
                 .await;
         }
         let name = format!("rebind-{state}");
-        handle.update(cx, |view, window, cx| {
-            let row = 1;
-            let bounds = view.appearance.scroll.bounds_for_item(row).unwrap() + view.appearance.scroll.offset();
-            let x = f32::from(bounds.left());
-            let y = f32::from(bounds.top());
-            let right = f32::from(bounds.right());
-            let capturing = view.appearance.capture == Some(0);
-            assert_eq!(capturing, matches!(state, "capture" | "conflict" | "reserved" | "unsupported" | "save-error"));
-            if state == "conflict" { assert!(view.appearance.shortcut_error.as_ref().unwrap().1.contains("Show or hide sidebar")); }
-            if state == "reserved" { assert!(view.appearance.shortcut_error.as_ref().unwrap().1.contains("Reserved for terminal input")); }
-            let keys = if capturing { "Press new keys".to_owned() } else { crate::shortcuts::SHORTCUTS[0].effective_keys(crate::shortcuts::Platform::current(), cx) };
-            if !capturing { assert_eq!(keys, "Cmd Y"); }
-            let action = if capturing { "Cancel" } else { "Reset" };
-            let action_width = text_width(window, action, 13., FontWeight::MEDIUM) + 16.;
-            let key_width = text_width(window, &keys, 13., FontWeight::NORMAL);
-            let mut sample = |text: &str, left: f32, top: f32, height: f32, weight: FontWeight, label: &str| {
-                let first = &text[..text.chars().next().unwrap().len_utf8()];
-                samples.push(serde_json::json!({"capture": name, "name": format!("{state}: {label}"), "box": [left,top,text_width(window,first,13.,weight).floor().max(2.),height], "probe": baseline_probe(window,text,left,13.,weight), "color": if label == "message" && state != "capture" { Some([248,113,113]) } else { None }}));
-            };
-            sample("New terminal",x,y,32.,FontWeight::MEDIUM,"name");
-            sample(&keys,right-action_width-8.-8.-key_width,y,32.,FontWeight::NORMAL,"keys");
-            sample(action,right-action_width+8.,y,32.,FontWeight::MEDIUM,action);
-            if capturing {
-                let text = view.appearance.shortcut_error.as_ref().map_or("Escape cancels", |(_, text)| text.as_str());
-                sample(text,x,y+36.,32.,FontWeight::NORMAL,"message");
-            }
-            cx.notify();
-            window.refresh();
-            if let Some(frame) = &view.input.frame { frame.request(cx); }
-        }).unwrap();
+        handle
+            .update(cx, |view, window, cx| {
+                samples.extend(rebind_samples(view, window, &name, state, cx));
+                cx.notify();
+                window.refresh();
+                if let Some(frame) = &view.input.frame {
+                    frame.request(cx);
+                }
+            })
+            .unwrap();
         cx.background_executor()
             .timer(Duration::from_millis(60))
             .await;
@@ -114,32 +94,34 @@ pub(super) async fn exercise(
             String::from_utf8_lossy(&output.stderr)
         );
     }
-    for width in [321., 479., 600.] {
-        handle
-            .update(cx, |view, window, cx| {
-                window.resize(gpui::size(gpui::px(width), gpui::px(640.)));
-                view.start_capture(0, window, cx);
-                view.appearance.scroll.set_offset(gpui::Point::default());
-            })
-            .unwrap();
-        for state in ["capture", "conflict"] {
-            if state == "conflict" {
-                handle
-                    .update(cx, |_, _, _| {
-                        super::sidebar_native_e2e::post_shortcut(0x0b, 1 << 20)
-                    })
-                    .unwrap();
-            }
-            cx.background_executor()
-                .timer(Duration::from_millis(250))
-                .await;
-            let output = Command::new(capture)
-                .arg(std::process::id().to_string())
-                .arg(evidence)
-                .arg(format!("rebind-{state}-{width}"))
-                .output()
+    if std::env::var_os("SHORTCUT_KEYS_QA").is_none() {
+        for width in [321., 479., 600.] {
+            handle
+                .update(cx, |view, window, cx| {
+                    window.resize(gpui::size(gpui::px(width), gpui::px(640.)));
+                    view.start_capture(0, window, cx);
+                    view.appearance.scroll.set_offset(gpui::Point::default());
+                })
                 .unwrap();
-            assert!(output.status.success());
+            for state in ["capture", "conflict"] {
+                if state == "conflict" {
+                    handle
+                        .update(cx, |_, _, _| {
+                            super::sidebar_native_e2e::post_shortcut(0x0b, 1 << 20)
+                        })
+                        .unwrap();
+                }
+                cx.background_executor()
+                    .timer(Duration::from_millis(250))
+                    .await;
+                let output = Command::new(capture)
+                    .arg(std::process::id().to_string())
+                    .arg(evidence)
+                    .arg(format!("rebind-{state}-{width}"))
+                    .output()
+                    .unwrap();
+                assert!(output.status.success());
+            }
         }
     }
     handle
@@ -176,4 +158,98 @@ pub(super) async fn exercise(
         })
         .unwrap();
     fs::write(evidence.join("native-rebind.txt"), "Cmd B rejected as a conflict. Native Cmd Space rejected as reserved. Native Cmd Y captured, saved, reloaded, and used to create a terminal. Reset restored the default.\n").unwrap();
+}
+
+fn rebind_samples(
+    view: &SeerWindow,
+    window: &gpui::Window,
+    name: &str,
+    state: &str,
+    cx: &gpui::App,
+) -> Vec<serde_json::Value> {
+    let mut samples = Vec::new();
+    let row = 1;
+    let bounds =
+        view.appearance.scroll.bounds_for_item(row).unwrap() + view.appearance.scroll.offset();
+    let x = f32::from(bounds.left());
+    let y = f32::from(bounds.top());
+    let right = f32::from(bounds.right());
+    let capturing = view.appearance.capture == Some(0);
+    assert_eq!(
+        capturing,
+        matches!(
+            state,
+            "capture" | "conflict" | "reserved" | "unsupported" | "save-error"
+        )
+    );
+    if state == "conflict" {
+        assert!(
+            view.appearance
+                .shortcut_error
+                .as_ref()
+                .unwrap()
+                .1
+                .contains("Show or hide sidebar")
+        );
+    }
+    if state == "reserved" {
+        assert!(
+            view.appearance
+                .shortcut_error
+                .as_ref()
+                .unwrap()
+                .1
+                .contains("Reserved for terminal input")
+        );
+    }
+    let keys = if capturing {
+        "Press new keys".to_owned()
+    } else {
+        crate::shortcuts::SHORTCUTS[0].effective_keys(crate::shortcuts::Platform::current(), cx)
+    };
+    if !capturing {
+        assert_eq!(keys, "Cmd Y");
+    }
+    let action = if capturing { "Cancel" } else { "Reset" };
+    let action_width = text_width(window, action, 13., FontWeight::MEDIUM) + 16.;
+    let caps = if capturing {
+        vec![vec![keys.clone()]]
+    } else {
+        crate::shortcuts::SHORTCUTS[0].key_caps(cx)
+    };
+    samples.extend(cap_samples(
+        window,
+        &caps,
+        right - action_width - 8.,
+        y,
+        name,
+        &format!("{state}: keys"),
+    ));
+    let mut sample = |text: &str,
+                      left: f32,
+                      top: f32,
+                      height: f32,
+                      weight: FontWeight,
+                      label: &str| {
+        let first = &text[..text.chars().next().unwrap().len_utf8()];
+        samples.push(serde_json::json!({"capture": name, "name": format!("{state}: {label}"), "box": [left,top,text_width(window,first,13.,weight).floor().max(2.),height], "probe": baseline_probe(window,text,left,13.,weight), "color": if label == "message" && state != "capture" { Some([248,113,113]) } else { None }}));
+    };
+    sample("New terminal", x, y, 32., FontWeight::MEDIUM, "name");
+    sample(
+        action,
+        right - action_width + 8.,
+        y,
+        32.,
+        FontWeight::MEDIUM,
+        action,
+    );
+    if capturing {
+        let text = view
+            .appearance
+            .shortcut_error
+            .as_ref()
+            .map_or("Escape cancels", |(_, text)| text.as_str());
+        sample(text, x, y + 36., 32., FontWeight::NORMAL, "message");
+    }
+    samples
 }

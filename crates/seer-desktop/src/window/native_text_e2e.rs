@@ -413,40 +413,40 @@ async fn exercise_room_qa(
     fixture: &Fixture,
     cx: &mut gpui::AsyncApp,
 ) -> bool {
+    let evidence = &fixture.evidence;
+    let capture = &fixture.capture;
+    let root = fixture._directory.path();
     if std::env::var_os("REMOVE_QA").is_some() {
-        super::remove_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        super::remove_native_e2e::exercise(window, evidence, capture, cx).await;
         return true;
     }
     if std::env::var_os("SHARE_ALL_QA").is_some() {
-        super::share_all_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx)
-            .await;
+        super::share_all_native_e2e::exercise(window, evidence, capture, cx).await;
         return true;
     }
     if std::env::var_os("PROCESSES_QA").is_some() {
-        super::processes_native_e2e::exercise(
-            window,
-            fixture._directory.path(),
-            &fixture.evidence,
-            &fixture.capture,
-            cx,
-        )
-        .await;
+        super::processes_native_e2e::exercise(window, root, evidence, capture, cx).await;
+        return true;
+    }
+    if std::env::var_os("SHORTCUT_KEYS_QA").is_some() {
+        super::shortcuts_native_e2e::exercise(window, evidence, capture, cx).await;
+        super::rebind_native_e2e::exercise(window, evidence, capture, cx).await;
         return true;
     }
     if std::env::var_os("VERSION_BANNER_QA").is_some() {
-        super::version_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        super::version_native_e2e::exercise(window, evidence, capture, cx).await;
         return true;
     }
     if std::env::var_os("BANNER_QA").is_some() {
-        super::banner_native_e2e::exercise(window, &fixture.evidence, &fixture.capture, cx).await;
+        super::banner_native_e2e::exercise(window, evidence, capture, cx).await;
         return true;
     }
     if std::env::var_os("APPEARANCE_LEGACY_QA").is_some() {
         super::legacy_appearance_native_e2e::exercise(
             window,
-            &fixture._directory.path().join("config/seer/settings.toml"),
-            &fixture.evidence,
-            &fixture.capture,
+            &root.join("config/seer/settings.toml"),
+            evidence,
+            capture,
             cx,
         )
         .await;
@@ -461,6 +461,7 @@ pub(crate) fn window_options(
 ) -> gpui::WindowOptions {
     if std::env::var_os("TEXT_PIXEL_START_REVIEW_ONLY").is_some()
         || std::env::var_os("PROCESSES_QA").is_some()
+        || std::env::var_os("SHORTCUT_KEYS_QA").is_some()
     {
         // Nonactivating panels can receive native keys while the test app is in the background.
         options.kind = gpui::WindowKind::PopUp;
@@ -475,11 +476,13 @@ pub(crate) fn window_options(
             })
             .expect("a secondary native display is required");
         options.display_id = Some(display.id());
-        options.window_bounds = Some(gpui::WindowBounds::Windowed(gpui::Bounds::centered(
-            Some(display.id()),
-            gpui::size(px(960.), px(640.)),
-            cx,
-        )));
+        let mut bounds =
+            gpui::Bounds::centered(Some(display.id()), gpui::size(px(960.), px(640.)), cx);
+        if std::env::var_os("SHORTCUT_KEYS_QA").is_some() {
+            // GPUI 0.2.2 adds the macOS display origin when it creates a window.
+            bounds.origin -= display.bounds().origin;
+        }
+        options.window_bounds = Some(gpui::WindowBounds::Windowed(bounds));
     }
     options
 }
