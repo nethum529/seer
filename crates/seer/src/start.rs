@@ -390,6 +390,13 @@ fn save_owner(
 ) -> io::Result<()> {
     let path = config_dir.join("servers.toml");
     let mut store = crate::store::ServerStore::load_from(&path)?;
+    for server in store
+        .servers
+        .iter()
+        .filter(|server| server.endpoint == config.published_addr && server.user_id != user_id)
+    {
+        crate::local::forget(&server.user_id)?;
+    }
     store
         .servers
         .retain(|server| server.endpoint != config.published_addr);

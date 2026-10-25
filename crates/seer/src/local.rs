@@ -38,9 +38,26 @@ pub fn attach(server: &ServerEntry) -> io::Result<Attached> {
     }
     let generation = generation();
     let mut child = start(&directory, &socket, server, &generation)?;
-    let ready = connect_until_ready(&socket, &generation, &mut child, &directory)?;
-    write_private(&directory.join("runtime.pid"), &child.id().to_string())?;
-    attach_stream(server, ready)
+    let attached =
+        connect_until_ready(&socket, &generation, &mut child, &directory).and_then(|ready| {
+            write_private(&directory.join("runtime.pid"), &child.id().to_string())?;
+            attach_stream(server, ready)
+        });
+    if attached.is_err() {
+        if let Ok(processes) = crate::processes::list() {
+            let _ = crate::commands::ps::stop_runtime(&processes, child.id());
+        }
+        let _ = child.kill();
+        let _ = child.wait();
+        if UnixStream::connect(&socket).is_err() {
+            let _ = remove_runtime_files(&socket);
+        }
+    } else {
+        thread::spawn(move || {
+            let _ = child.wait();
+        });
+    }
+    attached
 }
 
 // The local link, the terminal tree, and the standing notice for a runtime of
@@ -307,14 +324,43 @@ pub(crate) fn runtime_answers(user_id: &str) -> bool {
 pub(crate) fn stop(user_id: &str) -> io::Result<bool> {
     let directory = state_dir()?.join("runtimes").join(user_id);
     let socket = directory.join("socket");
-    if connect(&socket, None).is_err() {
-        return Ok(false);
+    let processes = crate::processes::list()?;
+    if let Some(runtime) = processes.iter().find(|process| {
+        matches!(&process.detail, crate::processes::Detail::Runtime { socket: found, .. } if *found == socket)
+    }) {
+        crate::commands::ps::stop_runtime(&processes, runtime.pid())
+            .map_err(|error| io::Error::other(error.message))?;
+        return Ok(true);
     }
-    let Some(pid) = read_pid(&directory.join("runtime.pid")) else {
-        return Ok(false);
+    if UnixStream::connect(&socket).is_ok() {
+        return Err(io::Error::other(
+            "The runtime could not be identified. Run seer ps.",
+        ));
+    }
+    remove_runtime_files(&socket)?;
+    Ok(false)
+}
+
+pub(crate) fn forget(user_id: &str) -> io::Result<()> {
+    stop(user_id)?;
+    let directory = state_dir()?.join("runtimes").join(user_id);
+    match fs::remove_dir_all(directory) {
+        Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(()),
+        result => result,
+    }
+}
+
+pub(crate) fn remove_runtime_files(socket: &Path) -> io::Result<()> {
+    let Some(directory) = socket.parent() else {
+        return Ok(());
     };
-    stop_pid(pid, || connect(&socket, None).is_ok())?;
-    Ok(true)
+    for path in [socket.to_path_buf(), directory.join("runtime.pid")] {
+        match fs::remove_file(path) {
+            Err(error) if error.kind() != io::ErrorKind::NotFound => return Err(error),
+            _ => {}
+        }
+    }
+    Ok(())
 }
 
 // A negative pid names a process group.
@@ -342,10 +388,6 @@ fn wait_while(condition: &impl Fn() -> bool, limit: Duration) -> bool {
 pub(crate) fn process_alive(pid: i32) -> bool {
     // SAFETY: kill with signal 0 only checks that the process exists.
     unsafe { libc::kill(pid, 0) == 0 }
-}
-
-fn read_pid(path: &Path) -> Option<i32> {
-    fs::read_to_string(path).ok()?.trim().parse().ok()
 }
 
 fn signal(pid: i32, number: i32) -> io::Result<()> {

@@ -1,6 +1,6 @@
 use super::{CommandError, print_columns};
 use crate::local;
-use crate::processes::{self, Kind, Process, Snapshot};
+use crate::processes::{self, Detail, Kind, Process, Snapshot};
 
 #[derive(Debug, Eq, PartialEq)]
 pub(crate) enum PsAction {
@@ -83,16 +83,20 @@ pub(crate) fn stop_runtime(processes: &[Process], pid: u32) -> Result<usize, Com
             process.kind.name()
         )));
     }
-    let shells = processes::children(pid).map_err(CommandError::system)?;
+    let descendants = processes::descendants(pid).map_err(CommandError::system)?;
+    let shells = descendants
+        .iter()
+        .filter(|child| child.parent == pid)
+        .count();
     if !stop_process(&process.snapshot)? {
         return Err(CommandError::usage(format!(
             "PID {pid} is not that runtime any more. Run seer ps again."
         )));
     }
-    for shell in &shells {
-        stop_process(shell)?;
+    for child in descendants.iter().rev() {
+        stop_process(child)?;
     }
-    let left = shells
+    let left = descendants
         .iter()
         .filter(|shell| processes::is_same(shell))
         .count();
@@ -102,7 +106,10 @@ pub(crate) fn stop_runtime(processes: &[Process], pid: u32) -> Result<usize, Com
             count(left, "shell")
         )));
     }
-    Ok(shells.len())
+    if let Detail::Runtime { socket, .. } = &process.detail {
+        local::remove_runtime_files(socket).map_err(CommandError::system)?;
+    }
+    Ok(shells)
 }
 
 // Returns false when the PID no longer names the listed process.
@@ -111,8 +118,8 @@ fn stop_process(snapshot: &Snapshot) -> Result<bool, CommandError> {
         return Ok(false);
     }
     let pid = i32::try_from(snapshot.pid).map_err(CommandError::system)?;
-    local::stop_pid(pid, || local::process_alive(pid)).map_err(CommandError::system)?;
-    if local::process_alive(pid) {
+    local::stop_pid(pid, || processes::is_same(snapshot)).map_err(CommandError::system)?;
+    if processes::is_same(snapshot) {
         return Err(CommandError::usage(format!("PID {pid} did not stop.")));
     }
     Ok(true)
