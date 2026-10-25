@@ -36,13 +36,13 @@ pub(crate) fn leave_room(server: &ServerEntry) -> Result<(), CommandError> {
     let (mut stream, _) = authenticate(server)?;
     send(&mut stream, &ClientMsg::Leave)?;
     wait_for_completion(&mut stream, |reply| matches!(reply, ServerMsg::Bye { .. }))?;
+    crate::local::forget(&server.user_id).map_err(CommandError::system)?;
     let mut store = ServerStore::load().map_err(CommandError::system)?;
     store
         .servers
         .retain(|entry| entry.user_id != server.user_id);
     store.save().map_err(CommandError::system)?;
     println!("Left {}. The room stays open for the others.", server.alias);
-    crate::local::stop(&server.user_id).map_err(CommandError::system)?;
     Ok(())
 }
 
@@ -75,6 +75,7 @@ pub(crate) fn stop_selected_room(server: &ServerEntry) -> Result<(), CommandErro
             }
         }
         Err(StopFailure::Unavailable(error)) => {
+            crate::start::stop_hosted_room(&server.endpoint).map_err(CommandError::system)?;
             stop_local_runtime(server)?;
             return Err(error);
         }

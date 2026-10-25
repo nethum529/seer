@@ -124,11 +124,23 @@ pub fn list() -> io::Result<Vec<Process>> {
     Ok(processes)
 }
 
-pub(crate) fn children(pid: u32) -> io::Result<Vec<Snapshot>> {
-    Ok(own_rows()?
-        .into_iter()
-        .filter(|row| row.parent == pid)
-        .collect())
+pub(crate) fn descendants(pid: u32) -> io::Result<Vec<Snapshot>> {
+    let mut rows = own_rows()?;
+    let mut parents = vec![pid];
+    let mut descendants = Vec::new();
+    while let Some(parent) = parents.pop() {
+        let mut index = 0;
+        while index < rows.len() {
+            if rows[index].parent != parent {
+                index += 1;
+                continue;
+            }
+            let child = rows.swap_remove(index);
+            parents.push(child.pid);
+            descendants.push(child);
+        }
+    }
+    Ok(descendants)
 }
 
 // PIDs are reused. A signal may go only to the process that was listed, so
