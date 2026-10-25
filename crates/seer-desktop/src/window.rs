@@ -109,6 +109,15 @@ impl SeerWindow {
             _tab_time: Some(tab_time::refresh(cx)),
         };
         view.refresh_room(cx);
+        if let Some(user) = std::env::args().skip_while(|arg| arg != "--user").nth(1)
+            && let Content::Start(start) = &view.content
+            && let Some((server, _)) = start
+                .saved
+                .iter()
+                .find(|(server, _)| server.user_id == user)
+        {
+            view.pick_saved_room(server.clone(), window, cx);
+        }
         view
     }
 

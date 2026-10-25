@@ -5,12 +5,16 @@ pub(super) fn accept_loop(listener: TcpListener, broker: Arc<BrokerState>) -> io
     listener.set_nonblocking(true)?;
     while !broker.is_stopping() {
         match listener.accept() {
-            Ok((connection, address)) => spawn_connection(
-                Socket::from(connection),
-                Arc::clone(&broker),
-                ConnectionKey::direct(address),
-                None,
-            ),
+            Ok((connection, address)) => {
+                // macOS inherits the listener's nonblocking flag on accepted sockets.
+                connection.set_nonblocking(false)?;
+                spawn_connection(
+                    Socket::from(connection),
+                    Arc::clone(&broker),
+                    ConnectionKey::direct(address),
+                    None,
+                );
+            }
             Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
                 thread::sleep(Duration::from_millis(25));
             }

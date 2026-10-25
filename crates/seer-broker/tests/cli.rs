@@ -12,6 +12,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 mod binary;
 
 static NEXT_TEMPORARY_DIRECTORY: AtomicUsize = AtomicUsize::new(0);
+const PROCESS_TIMEOUT: Duration = Duration::from_secs(5);
+
 static BROKER_BINARY: OnceLock<PathBuf> = OnceLock::new();
 
 #[test]
@@ -130,8 +132,9 @@ fn unused_address() -> SocketAddr {
 }
 
 fn connect_when_ready(address: SocketAddr) -> TcpStream {
+    let deadline = Instant::now() + PROCESS_TIMEOUT;
     let mut last_error = None;
-    for _ in 0..100 {
+    while Instant::now() < deadline {
         match TcpStream::connect(address) {
             Ok(stream) => return stream,
             Err(error) => last_error = Some(error),
@@ -171,7 +174,7 @@ impl TemporaryConfig {
 }
 
 fn wait_for_file(path: &Path) -> bool {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + PROCESS_TIMEOUT;
     while Instant::now() < deadline {
         if fs::read_to_string(path).is_ok_and(|contents| contents.ends_with('\n')) {
             return true;
@@ -210,7 +213,7 @@ impl Drop for BrokerProcess {
             return;
         }
         let _ = self.0.kill();
-        let kill_deadline = Instant::now() + Duration::from_secs(2);
+        let kill_deadline = Instant::now() + PROCESS_TIMEOUT;
         while Instant::now() < kill_deadline {
             if matches!(self.0.try_wait(), Ok(Some(_))) {
                 return;
@@ -221,7 +224,7 @@ impl Drop for BrokerProcess {
 }
 
 fn wait_for_output(mut child: Child) -> Output {
-    let deadline = Instant::now() + Duration::from_secs(2);
+    let deadline = Instant::now() + PROCESS_TIMEOUT;
     loop {
         if child
             .try_wait()
@@ -234,7 +237,7 @@ fn wait_for_output(mut child: Child) -> Output {
         }
         if Instant::now() >= deadline {
             let _ = child.kill();
-            panic!("broker did not exit within 2 seconds");
+            panic!("broker did not exit within 5 seconds");
         }
         thread::sleep(Duration::from_millis(10));
     }

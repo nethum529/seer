@@ -21,7 +21,6 @@ const GUEST_STOPPED: &str = "The host stopped the room";
 pub(super) struct RoomUi {
     pub(super) server: Option<ServerEntry>,
     pub(super) current: Option<RoomSummary>,
-    pub(super) can_host: bool,
     pub(super) others: Vec<RoomSummary>,
     pub(super) focus: FocusHandle,
     anchor: Rc<Cell<Bounds<Pixels>>>,
@@ -71,7 +70,6 @@ impl RoomUi {
         Self {
             server,
             current: None,
-            can_host: cfg!(target_os = "linux"),
             others: Vec::new(),
             focus: cx.focus_handle().tab_stop(true),
             anchor: Rc::default(),
@@ -88,7 +86,7 @@ impl RoomUi {
 
     fn actions(&self) -> Vec<MenuAction> {
         let mut actions = match &self.current {
-            None if self.server.is_none() && self.can_host => {
+            None if self.server.is_none() => {
                 vec![MenuAction::Room(RoomAction::Start)]
             }
             None => Vec::new(),
@@ -346,12 +344,11 @@ impl SeerWindow {
                         if action == RoomAction::Restore {
                             view.open_room(view.keys.mode == Mode::Keyboard, window, cx);
                         }
-                        view.room.error =
-                            Some(if action == RoomAction::Start && view.room.can_host {
-                                "Could not start the room. Try again.".into()
-                            } else {
-                                error.to_string()
-                            });
+                        view.room.error = Some(if action == RoomAction::Start {
+                            "Could not start the room. Try again.".into()
+                        } else {
+                            error.to_string()
+                        });
                     }
                 }
                 view.notify_room(cx);

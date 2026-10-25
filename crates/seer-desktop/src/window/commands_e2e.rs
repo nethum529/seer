@@ -59,13 +59,6 @@ fn window_commands_open_settings_and_menus_without_shell_input(cx: &mut TestAppC
         cx.debug_bounds("invite-primary").is_none(),
         "no room cannot invite"
     );
-    if cfg!(target_os = "macos") {
-        cx.simulate_keystrokes("cmd-shift-r");
-        cx.run_until_parked();
-        view.read_with(cx, |view, _| {
-            assert!(!view.room.modal(), "macOS cannot host")
-        });
-    }
     pump(cx);
     assert_eq!(
         runtime.input(),

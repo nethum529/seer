@@ -1,12 +1,10 @@
 use std::io::{self, BufRead, Write};
 
-use seer_core::proto::{ClientInfo, ClientMsg};
+use seer_core::proto::ClientInfo;
 
 use crate::store::ServerStore;
 
-use super::{
-    CommandError, ServerEntry, authenticate, people_reply, print_close_names, receive_reply, send,
-};
+use super::{CommandError, ServerEntry, print_close_names};
 
 pub(super) fn select_client(clients: &[ClientInfo]) -> Result<ClientInfo, CommandError> {
     match clients {
@@ -121,14 +119,11 @@ fn pick_server(
 
 pub(crate) fn peek(target: &str) -> Result<(), CommandError> {
     let server = selected_server()?;
-    let (mut stream, _) = authenticate(&server)?;
-    send(&mut stream, &ClientMsg::ListPeople)?;
-    let people = people_reply(receive_reply(&mut stream)?)?;
+    let people = super::people(&server)?;
     let Some(person) = people.iter().find(|person| person.name == target) else {
         print_close_names(target, &people);
         return Err(CommandError::usage(format!("no person named {target}")));
     };
-    drop(stream);
     crate::desktop::peek(&server, &person.name).map_err(CommandError::system)
 }
 
@@ -138,7 +133,6 @@ pub(crate) fn attach_bare() -> Result<(), CommandError> {
         .servers
         .is_empty()
     {
-        #[cfg(target_os = "linux")]
         crate::start::restore_owner().map_err(CommandError::system)?;
     }
     super::attach()

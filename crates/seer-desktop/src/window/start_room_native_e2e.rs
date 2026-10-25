@@ -12,6 +12,10 @@ pub(super) async fn exercise(
     capture: &Path,
     cx: &mut gpui::AsyncApp,
 ) {
+    let config = std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap())
+        .join("seer/broker.toml");
+    fs::create_dir_all(config.parent().unwrap()).unwrap();
+    fs::write(config, "invalid config").unwrap();
     handle
         .update(cx, |view, window, cx| {
             window.resize(size(px(960.), px(640.)));
@@ -22,7 +26,6 @@ pub(super) async fn exercise(
             view.server = None;
             view._messages = None;
             view.content = Content::Start(super::start::StartScreen::new(cx));
-            view.room.can_host = true;
             window.focus(&view.room.focus);
             cx.notify();
         })
@@ -77,7 +80,11 @@ pub(super) async fn exercise(
     )
     .unwrap();
     let path = evidence.join("start-room-fixture.txt");
-    fs::write(path, "The native fixture enables the Linux menu on macOS for pixel checks only. Confirm uses the macOS refusal to show the retry state.\n").unwrap();
+    fs::write(
+        path,
+        "The native fixture uses an invalid broker config to show the retry state.\n",
+    )
+    .unwrap();
 }
 
 fn text_samples(capture: &str, window: &gpui::Window) -> Vec<serde_json::Value> {

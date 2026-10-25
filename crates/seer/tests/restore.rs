@@ -1,5 +1,3 @@
-#![cfg(target_os = "linux")]
-
 use seer_core::proto::{ClientMsg, ServerMsg, codec};
 use std::fs;
 use std::io::Write;

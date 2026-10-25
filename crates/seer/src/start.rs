@@ -1,23 +1,9 @@
-#[cfg(target_os = "linux")]
 use serde::{Deserialize, Serialize};
 use std::process::ExitCode;
-#[cfg(target_os = "linux")]
+mod listener;
 mod restore;
-#[cfg(target_os = "linux")]
 mod stop;
-#[cfg(target_os = "linux")]
 pub(crate) use restore::restore_owner;
-#[cfg(target_os = "linux")]
-pub(crate) use stop::{configured_room, hosts_room, stop_hosted_broker, stop_hosted_room};
-#[cfg(target_os = "macos")]
-pub(crate) fn hosts_room(_endpoint: &str) -> bool {
-    false
-}
-#[cfg(target_os = "macos")]
-pub(crate) fn stop_hosted_room(_endpoint: &str) -> std::io::Result<bool> {
-    Ok(false)
-}
-#[cfg(target_os = "linux")]
 use std::{
     env,
     fs::{self, File, OpenOptions},
@@ -32,13 +18,10 @@ use std::{
     thread,
     time::{Duration, Instant},
 };
-#[cfg(target_os = "linux")]
+pub(crate) use stop::{configured_room, hosts_room, stop_hosted_broker, stop_hosted_room};
 const PORT: u16 = 7321;
-#[cfg(target_os = "linux")]
 const START_TIMEOUT: Duration = Duration::from_secs(5);
-#[cfg(target_os = "linux")]
 const POLL_INTERVAL: Duration = Duration::from_millis(25);
-#[cfg(target_os = "linux")]
 #[derive(Deserialize, Serialize)]
 struct BrokerConfig {
     listen: SocketAddr,
@@ -49,14 +32,7 @@ struct BrokerConfig {
     state_dir: PathBuf,
 }
 pub fn run(restore: bool) -> ExitCode {
-    #[cfg(target_os = "macos")]
-    {
-        let _ = restore;
-        eprintln!("the server runs on Linux only");
-        ExitCode::FAILURE
-    }
-    #[cfg(target_os = "linux")]
-    match run_linux(restore) {
+    match run_host(restore) {
         Ok(()) => ExitCode::SUCCESS,
         Err(error) => {
             eprintln!("{error}");
@@ -65,20 +41,18 @@ pub fn run(restore: bool) -> ExitCode {
     }
 }
 
-#[cfg(target_os = "linux")]
-pub(crate) fn run_linux(restore: bool) -> io::Result<()> {
+pub(crate) fn run_host(restore: bool) -> io::Result<()> {
     run_with_name(restore, true)
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn run_window() -> io::Result<()> {
     run_with_name(false, false)
 }
 
-#[cfg(target_os = "linux")]
 fn run_with_name(restore: bool, ask_name: bool) -> io::Result<()> {
     let config_dir = config_dir()?;
     secure_directory(&config_dir)?;
+    let _startup = crate::local::StartupLock::hold(&config_dir.join("broker-startup.lock"))?;
     let config_path = config_dir.join("broker.toml");
     let (config, mut first_start) = load_or_create_config(&config_path, ask_name)?;
     let started = Instant::now();
@@ -105,7 +79,6 @@ fn run_with_name(restore: bool, ask_name: bool) -> io::Result<()> {
     }
     start_broker(&config_path, &config, &config_dir, first_start, started)
 }
-#[cfg(target_os = "linux")]
 fn config_dir() -> io::Result<PathBuf> {
     if let Some(path) = env::var_os("XDG_CONFIG_HOME") {
         return Ok(PathBuf::from(path).join("seer"));
@@ -114,7 +87,6 @@ fn config_dir() -> io::Result<PathBuf> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
     Ok(PathBuf::from(home).join(".config/seer"))
 }
-#[cfg(target_os = "linux")]
 fn state_dir() -> io::Result<PathBuf> {
     if let Some(path) = env::var_os("XDG_STATE_HOME") {
         return Ok(PathBuf::from(path).join("seer"));
@@ -123,12 +95,10 @@ fn state_dir() -> io::Result<PathBuf> {
         .ok_or_else(|| io::Error::new(io::ErrorKind::NotFound, "HOME is not set"))?;
     Ok(PathBuf::from(home).join(".local/state/seer"))
 }
-#[cfg(target_os = "linux")]
 fn secure_directory(path: &Path) -> io::Result<()> {
     fs::create_dir_all(path)?;
     fs::set_permissions(path, fs::Permissions::from_mode(0o700))
 }
-#[cfg(target_os = "linux")]
 fn load_or_create_config(path: &Path, ask_name: bool) -> io::Result<(BrokerConfig, bool)> {
     match fs::read_to_string(path) {
         Ok(contents) => toml::from_str(&contents)
@@ -142,7 +112,6 @@ fn load_or_create_config(path: &Path, ask_name: bool) -> io::Result<(BrokerConfi
         Err(error) => Err(error),
     }
 }
-#[cfg(target_os = "linux")]
 fn prompt_config(ask_name: bool) -> io::Result<BrokerConfig> {
     let login = env::var("USER")
         .or_else(|_| env::var("LOGNAME"))
@@ -161,22 +130,33 @@ fn prompt_config(ask_name: bool) -> io::Result<BrokerConfig> {
         state_dir: state_dir()?,
     })
 }
-#[cfg(target_os = "linux")]
 fn remote_enabled() -> bool {
     true
 }
-#[cfg(target_os = "linux")]
 fn host_name() -> String {
-    env::var("HOSTNAME")
+    if let Some(name) = env::var("HOSTNAME")
         .ok()
-        .filter(|value| !value.is_empty())
-        .or_else(|| fs::read_to_string("/proc/sys/kernel/hostname").ok())
-        .or_else(|| fs::read_to_string("/etc/hostname").ok())
-        .map(|value| value.trim().to_owned())
-        .filter(|value| !value.is_empty())
-        .unwrap_or_else(|| "localhost".to_owned())
+        .filter(|name| !name.trim().is_empty())
+    {
+        return name.trim().to_owned();
+    }
+    let mut bytes = [0_u8; 256];
+    // Safety: bytes is a valid writable hostname buffer.
+    let status = unsafe { libc::gethostname(bytes.as_mut_ptr().cast(), bytes.len()) };
+    if status != 0 {
+        return "localhost".to_owned();
+    }
+    let length = bytes
+        .iter()
+        .position(|byte| *byte == 0)
+        .unwrap_or(bytes.len());
+    let name = String::from_utf8_lossy(&bytes[..length]).trim().to_owned();
+    if name.is_empty() {
+        "localhost".to_owned()
+    } else {
+        name
+    }
 }
-#[cfg(target_os = "linux")]
 fn prompt(label: &str, default: &str) -> io::Result<String> {
     print!("{label} [{default}]: ");
     io::stdout().flush()?;
@@ -189,15 +169,12 @@ fn prompt(label: &str, default: &str) -> io::Result<String> {
         value.to_owned()
     })
 }
-#[cfg(target_os = "linux")]
 fn toml_text(value: &impl Serialize) -> io::Result<String> {
     toml::to_string_pretty(value).map_err(invalid_data)
 }
-#[cfg(target_os = "linux")]
 fn invalid_data(error: impl std::error::Error + Send + Sync + 'static) -> io::Error {
     io::Error::new(io::ErrorKind::InvalidData, error)
 }
-#[cfg(target_os = "linux")]
 fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     let mut file = OpenOptions::new()
         .write(true)
@@ -208,75 +185,30 @@ fn write_private(path: &Path, contents: &[u8]) -> io::Result<()> {
     file.set_permissions(fs::Permissions::from_mode(0o600))?;
     file.write_all(contents)
 }
-#[cfg(target_os = "linux")]
 fn running_broker(config: &BrokerConfig) -> bool {
     live_broker(config).is_some()
 }
-#[cfg(target_os = "linux")]
 fn live_broker(config: &BrokerConfig) -> Option<i32> {
     let pid = broker_pid(config)?;
-    (owns_listen_socket(pid, config.listen) && port_accepts(config.listen)).then_some(pid)
+    (listener::owns_listen_socket(pid, config.listen) && port_accepts(config.listen)).then_some(pid)
 }
-#[cfg(target_os = "linux")]
 fn broker_pid(config: &BrokerConfig) -> Option<i32> {
     let pid_path = config.state_dir.join("broker.pid");
-    fs::read_to_string(pid_path).ok()?.trim().parse().ok()
+    let pid = fs::read_to_string(pid_path).ok()?.trim().parse().ok()?;
+    (pid > 0).then_some(pid)
 }
-#[cfg(target_os = "linux")]
-fn owns_listen_socket(pid: i32, listen: SocketAddr) -> bool {
-    let Ok(entries) = fs::read_dir(format!("/proc/{pid}/fd")) else {
-        return false;
-    };
-    let listening = listening_inodes(listen.port());
-    entries.filter_map(Result::ok).any(|entry| {
-        fs::read_link(entry.path())
-            .ok()
-            .and_then(|target| socket_inode(&target))
-            .is_some_and(|inode| listening.contains(&inode))
-    })
-}
-#[cfg(target_os = "linux")]
-fn listening_inodes(port: u16) -> Vec<String> {
-    ["/proc/net/tcp", "/proc/net/tcp6"]
-        .iter()
-        .filter_map(|path| fs::read_to_string(path).ok())
-        .flat_map(|table| {
-            table
-                .lines()
-                .skip(1)
-                .filter_map(move |line| listening_inode(line, port))
-                .collect::<Vec<_>>()
-        })
-        .collect()
-}
-#[cfg(target_os = "linux")]
-fn listening_inode(line: &str, port: u16) -> Option<String> {
-    let fields: Vec<_> = line.split_whitespace().collect();
-    let local_port = fields.get(1)?.rsplit_once(':')?.1;
-    let parsed_port = u16::from_str_radix(local_port, 16).ok()?;
-    if parsed_port == port && fields.get(3) == Some(&"0A") {
-        fields.get(9).map(|inode| (*inode).to_owned())
-    } else {
-        None
-    }
-}
-#[cfg(target_os = "linux")]
-fn socket_inode(path: &Path) -> Option<String> {
-    path.to_str()?
-        .strip_prefix("socket:[")?
-        .strip_suffix(']')
-        .map(str::to_owned)
-}
-#[cfg(target_os = "linux")]
 fn port_accepts(listen: SocketAddr) -> bool {
-    let address = if listen.ip().is_unspecified() {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
-    } else {
-        listen
+    let address = match listen.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
+        }
+        IpAddr::V6(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), listen.port())
+        }
+        _ => listen,
     };
     TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok()
 }
-#[cfg(target_os = "linux")]
 fn start_broker(
     config_path: &Path,
     config: &BrokerConfig,
@@ -302,6 +234,9 @@ fn start_broker(
         print_log_tail(&log_path);
         return Err(error);
     }
+    let _reaper = thread::spawn(move || {
+        let _ = child.wait();
+    });
     println!("Server started.");
     println!("You are {}.", config.owner_name);
     println!("Ready in {:.2} s.", started.elapsed().as_secs_f64());
@@ -316,7 +251,6 @@ fn start_broker(
     }
     result
 }
-#[cfg(target_os = "linux")]
 #[allow(clippy::too_many_arguments)] // Startup needs these values to clean up one child on each error.
 fn complete_start(
     child: &mut Child,
@@ -339,7 +273,6 @@ fn complete_start(
         format!("{}\n", child.id()).as_bytes(),
     )
 }
-#[cfg(target_os = "linux")]
 fn find_broker() -> io::Result<PathBuf> {
     let executable = env::current_exe()?;
     if let Some(candidate) = executable.parent().map(|parent| parent.join("seer-broker"))
@@ -360,7 +293,6 @@ fn find_broker() -> io::Result<PathBuf> {
         "seer-broker was not found",
     ))
 }
-#[cfg(target_os = "linux")]
 fn open_log(path: &Path) -> io::Result<(File, u64)> {
     let log = OpenOptions::new()
         .read(true)
@@ -372,7 +304,6 @@ fn open_log(path: &Path) -> io::Result<(File, u64)> {
     let start = log.metadata()?.len();
     Ok((log, start))
 }
-#[cfg(target_os = "linux")]
 fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> {
     let stderr = log.try_clone()?;
     let mut command = Command::new(broker);
@@ -393,7 +324,6 @@ fn spawn_detached(broker: &Path, config: &Path, log: File) -> io::Result<Child> 
     }
     command.spawn()
 }
-#[cfg(target_os = "linux")]
 fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io::Result<()> {
     loop {
         if let Some(status) = child.try_wait()? {
@@ -401,7 +331,7 @@ fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io
                 "seer-broker exited with {status}"
             )));
         }
-        if port_accepts(listen) {
+        if listener::owns_listen_socket(child.id().cast_signed(), listen) && port_accepts(listen) {
             return Ok(());
         }
         if Instant::now() >= deadline {
@@ -413,7 +343,6 @@ fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io
         thread::sleep(POLL_INTERVAL);
     }
 }
-#[cfg(target_os = "linux")]
 fn stop_child(child: &mut Child) {
     let pid = child.id().cast_signed();
     // Safety: kill receives the process group ID created by setsid.
@@ -423,7 +352,6 @@ fn stop_child(child: &mut Child) {
     let _ = child.kill();
     let _ = child.wait();
 }
-#[cfg(target_os = "linux")]
 fn wait_for_owner_identity(
     path: &Path,
     start: u64,
@@ -446,7 +374,6 @@ fn wait_for_owner_identity(
         thread::sleep(POLL_INTERVAL);
     }
 }
-#[cfg(target_os = "linux")]
 fn strip_owner_credential(path: &Path) -> io::Result<()> {
     let contents = fs::read_to_string(path)?;
     let filtered = contents
@@ -455,7 +382,6 @@ fn strip_owner_credential(path: &Path) -> io::Result<()> {
         .collect::<String>();
     write_private(path, filtered.as_bytes())
 }
-#[cfg(target_os = "linux")]
 fn save_owner(
     config_dir: &Path,
     config: &BrokerConfig,
@@ -477,7 +403,6 @@ fn save_owner(
     });
     store.save_to(&path)
 }
-#[cfg(target_os = "linux")]
 fn print_log_tail(path: &Path) {
     let Ok(contents) = fs::read_to_string(path) else {
         return;

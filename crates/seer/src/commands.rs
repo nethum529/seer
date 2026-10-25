@@ -11,7 +11,7 @@ use crate::store::{ServerEntry, ServerStore};
 use crate::tui;
 
 pub(crate) use exit::exit;
-pub(crate) use handshake::{Welcome, authenticate, hello};
+pub(crate) use handshake::{Welcome, authenticate, finish_request, hello};
 pub(crate) use selection::{attach_bare, peek, selected_server};
 mod exit;
 mod handshake;
@@ -55,21 +55,24 @@ impl CommandError {
 pub(crate) fn detach() -> Result<(), CommandError> {
     let server = selected_server()?;
     let (mut stream, _) = authenticate(&server)?;
-    send(
-        &mut stream,
-        &ClientMsg::DetachClient {
-            client_id: String::new(),
-        },
-    )?;
-    let clients = receive_clients(&mut stream)?;
-    let client = select_client(&clients)?;
-    send(
-        &mut stream,
-        &ClientMsg::DetachClient {
-            client_id: client.client_id,
-        },
-    )?;
-    receive_clients(&mut stream)?;
+    let reply = (|| {
+        send(
+            &mut stream,
+            &ClientMsg::DetachClient {
+                client_id: String::new(),
+            },
+        )?;
+        let clients = receive_clients(&mut stream)?;
+        let client = select_client(&clients)?;
+        send(
+            &mut stream,
+            &ClientMsg::DetachClient {
+                client_id: client.client_id,
+            },
+        )?;
+        receive_clients(&mut stream)
+    })();
+    finish_request(stream, reply)?;
     print_detached(&server.alias);
     Ok(())
 }
@@ -108,7 +111,6 @@ pub(crate) fn invite(hours: Option<&str>) -> Result<(), CommandError> {
     Ok(())
 }
 
-#[cfg(target_os = "linux")]
 pub(crate) fn first_invite(first_start: bool) -> Result<(), CommandError> {
     if first_start { invite(None) } else { Ok(()) }
 }
@@ -220,7 +222,8 @@ fn edit_distance_at_most_one(left: &[u8], right: &[u8]) -> bool {
 pub(crate) fn people(server: &ServerEntry) -> Result<Vec<Person>, CommandError> {
     let (mut stream, _) = authenticate(server)?;
     send(&mut stream, &ClientMsg::ListPeople)?;
-    people_reply(receive_reply(&mut stream)?)
+    let reply = receive_reply(&mut stream).and_then(people_reply);
+    finish_request(stream, reply)
 }
 
 fn people_reply(reply: ServerMsg) -> Result<Vec<Person>, CommandError> {
@@ -325,7 +328,10 @@ fn finish_session(
     server: &ServerEntry,
 ) -> Result<(), CommandError> {
     if !terminal {
-        return Ok(());
+        return match room {
+            Some(room) => finish_request(room, Ok(())),
+            None => Ok(()),
+        };
     }
     #[cfg(debug_assertions)]
     if let Ok(directory) = crate::local::runtime_directory(&server.user_id) {

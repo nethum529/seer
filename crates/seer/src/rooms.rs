@@ -105,22 +105,15 @@ fn command_error(error: commands::CommandError) -> io::Error {
     io::Error::other(error.message)
 }
 
-#[cfg(target_os = "linux")]
 fn configured_room(server: &ServerEntry) -> bool {
     crate::start::configured_room(&server.endpoint, &server.name)
 }
 
-#[cfg(target_os = "macos")]
-fn configured_room(_: &ServerEntry) -> bool {
-    false
-}
-
-#[cfg(target_os = "linux")]
 fn start_saved(server: &ServerEntry, restore: bool) -> io::Result<()> {
     if !configured_room(server) {
         return Err(io::Error::other("This room is hosted on another computer."));
     }
-    crate::start::run_linux(restore)
+    crate::start::run_host(restore)
 }
 
 pub fn stopped_host(server: &ServerEntry) -> Option<RoomSummary> {
@@ -131,17 +124,6 @@ pub fn stopped_host(server: &ServerEntry) -> Option<RoomSummary> {
     (room.host && room.state == RoomState::Unreachable).then_some(room)
 }
 
-#[cfg(target_os = "macos")]
-fn start_saved(_: &ServerEntry, _: bool) -> io::Result<()> {
-    Err(io::Error::other("The room server runs on Linux only."))
-}
-
-#[cfg(target_os = "linux")]
 fn start_room() -> io::Result<()> {
     crate::start::run_window()
-}
-
-#[cfg(target_os = "macos")]
-fn start_room() -> io::Result<()> {
-    Err(io::Error::other("The room server runs on Linux only."))
 }

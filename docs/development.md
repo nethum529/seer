@@ -10,8 +10,8 @@ Install these tools:
 - `cargo-udeps` for the unused dependency gate.
 
 The client and local runtime target Linux and macOS. Each participant runs
-their own PTYs and shells. The room host command, seer start, currently runs
-on Linux only. A Linux test run does not verify the macOS build or execution.
+their own PTYs and shells. The room host command, seer start, runs on Linux
+and macOS. A Linux test run does not verify the macOS build or execution.
 
 ## Build
 
@@ -64,7 +64,7 @@ complexity rules.
 
 ## Run a local two-person session
 
-This check needs a Linux room host. Use three terminal windows. Give each
+This check needs a Linux or macOS room host. Use three terminal windows. Give each
 person separate config and state paths. Set both paths on every command so
 the check cannot attach to or stop your normal runtime. Use a machine with
 port 7321 free, or an isolated test environment.
@@ -142,6 +142,24 @@ crate tests normally. Do not skip the start and restore tests when the live
 port is busy.
 
 On macOS, port 7321 must also be free when the workspace runs the start tests.
+
+### The macOS host check
+
+Run this local cross-target check on Linux when cargo-zigbuild is installed:
+
+```sh
+cargo-zigbuild clippy -p seer --target aarch64-apple-darwin --all-targets -- -D warnings
+```
+
+The release workflow runs the full workspace Clippy check on its macOS runner:
+
+```sh
+cargo +1.98.0 clippy --workspace --all-targets -- -D warnings
+```
+
+The cross-target check needs a compatible C toolchain. A real Mac is required
+for the build and the hosting check. Start a room there, join from Linux,
+check attach and peek, then stop each local runtime and the hosted room.
 
 ### A Unix socket path is too long
 
