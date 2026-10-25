@@ -2,7 +2,10 @@ use seer_core::Tree;
 use seer_core::proto::{ClientMsg, ServerMsg};
 use seer_net::Socket;
 
-use super::{CommandError, connect, receive_reply, send, unexpected_reply};
+use super::{
+    CommandError, NETWORK_TIMEOUT, connect, receive_reply, receive_reply_before, send,
+    unexpected_reply,
+};
 use crate::store::ServerEntry;
 use crate::version_skew::{refusal_message, version_refusal};
 
@@ -51,6 +54,31 @@ pub(super) fn probe_room_version(endpoint: &str) -> Result<Option<String>, Comma
         Welcome::Refused(reason) if version_refusal(&reason).is_some() => {
             Ok(Some(refusal_message(&reason, false)))
         }
+        Welcome::Accepted(stream, _) => finish_request(stream, Ok(None)),
         _ => Ok(None),
+    }
+}
+
+pub(crate) fn finish_request<T>(
+    mut stream: Socket,
+    reply: Result<T, CommandError>,
+) -> Result<T, CommandError> {
+    let closed = close_request(&mut stream);
+    reply.and_then(|value| closed.map(|()| value))
+}
+
+fn close_request(stream: &mut Socket) -> Result<(), CommandError> {
+    if matches!(stream, Socket::Tcp(_)) {
+        return Ok(());
+    }
+    // iroh uses a local adapter. Remote EOF confirms the broker released this attachment.
+    send(stream, &ClientMsg::Detach)?;
+    let deadline = std::time::Instant::now() + NETWORK_TIMEOUT;
+    loop {
+        match receive_reply_before(stream, deadline) {
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::UnexpectedEof => return Ok(()),
+            Err(error) => return Err(CommandError::system(error)),
+        }
     }
 }

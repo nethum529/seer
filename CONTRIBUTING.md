@@ -132,8 +132,9 @@ for an isolated two-person check on one machine.
 ## macOS notes
 
 - The workspace builds on macOS.
-- The client runs on macOS. The broker, runtimes, PTYs, and shells run on Linux.
-- `seer start` runs on Linux only.
+- The broker and client run on Linux and macOS.
+- Each person runs their own runtime, PTYs, and shells.
+- `seer start` can host a room on either system.
 - Port 7321 must be free for the `seer start` tests.
 - Unix socket paths must stay short. The runtime rejects a path over 99 bytes.
   Use short temporary paths and a short XDG_RUNTIME_DIR value.

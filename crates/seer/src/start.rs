@@ -1,5 +1,6 @@
 use serde::{Deserialize, Serialize};
 use std::process::ExitCode;
+mod listener;
 mod restore;
 mod stop;
 pub(crate) use restore::restore_owner;
@@ -51,6 +52,7 @@ pub(crate) fn run_window() -> io::Result<()> {
 fn run_with_name(restore: bool, ask_name: bool) -> io::Result<()> {
     let config_dir = config_dir()?;
     secure_directory(&config_dir)?;
+    let _startup = crate::local::StartupLock::hold(&config_dir.join("broker-startup.lock"))?;
     let config_path = config_dir.join("broker.toml");
     let (config, mut first_start) = load_or_create_config(&config_path, ask_name)?;
     let started = Instant::now();
@@ -188,7 +190,7 @@ fn running_broker(config: &BrokerConfig) -> bool {
 }
 fn live_broker(config: &BrokerConfig) -> Option<i32> {
     let pid = broker_pid(config)?;
-    (crate::local::process_alive(pid) && port_accepts(config.listen)).then_some(pid)
+    (listener::owns_listen_socket(pid, config.listen) && port_accepts(config.listen)).then_some(pid)
 }
 fn broker_pid(config: &BrokerConfig) -> Option<i32> {
     let pid_path = config.state_dir.join("broker.pid");
@@ -196,10 +198,14 @@ fn broker_pid(config: &BrokerConfig) -> Option<i32> {
     (pid > 0).then_some(pid)
 }
 fn port_accepts(listen: SocketAddr) -> bool {
-    let address = if listen.ip().is_unspecified() {
-        SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
-    } else {
-        listen
+    let address = match listen.ip() {
+        IpAddr::V4(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V4(Ipv4Addr::LOCALHOST), listen.port())
+        }
+        IpAddr::V6(ip) if ip.is_unspecified() => {
+            SocketAddr::new(IpAddr::V6(std::net::Ipv6Addr::LOCALHOST), listen.port())
+        }
+        _ => listen,
     };
     TcpStream::connect_timeout(&address, Duration::from_millis(100)).is_ok()
 }
@@ -228,6 +234,9 @@ fn start_broker(
         print_log_tail(&log_path);
         return Err(error);
     }
+    let _reaper = thread::spawn(move || {
+        let _ = child.wait();
+    });
     println!("Server started.");
     println!("You are {}.", config.owner_name);
     println!("Ready in {:.2} s.", started.elapsed().as_secs_f64());
@@ -322,7 +331,7 @@ fn wait_for_port(child: &mut Child, listen: SocketAddr, deadline: Instant) -> io
                 "seer-broker exited with {status}"
             )));
         }
-        if port_accepts(listen) {
+        if listener::owns_listen_socket(child.id().cast_signed(), listen) && port_accepts(listen) {
             return Ok(());
         }
         if Instant::now() >= deadline {

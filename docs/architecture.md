@@ -17,7 +17,7 @@ ADR 0009 defines this model from version 0.5.0.
 
 ## Process model
 
-The room host runs these server processes on Linux or macOS:
+The broker runs on the room host. Each person runs their own runtime:
 
 ```text
 Room host (Linux or macOS)

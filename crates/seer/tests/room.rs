@@ -1,5 +1,3 @@
-#![cfg(target_os = "linux")]
-
 use std::fs;
 use std::io::Write;
 use std::net::TcpListener;
@@ -180,4 +178,66 @@ fn restore_keeps_the_members() {
 
     assert_eq!(host.people_on_disk(), ["alice", "bob"]);
     assert!(host.run(&["list"]).contains("bob"));
+}
+
+#[test]
+fn simultaneous_starts_share_one_room_and_a_working_owner() {
+    let host = Host::new("concurrent");
+    fs::write(
+        host.root.join("seer-broker"),
+        format!(
+            "#!/bin/sh\nsleep 0.2\nexec '{}' \"$@\"\n",
+            env!("CARGO_BIN_EXE_seer-broker")
+        ),
+    )
+    .expect("delayed launcher must be written");
+    let barrier = std::sync::Barrier::new(4);
+    std::thread::scope(|scope| {
+        let starts: Vec<_> = (0..4)
+            .map(|_| {
+                scope.spawn(|| {
+                    barrier.wait();
+                    host.run_as("", "alice", &["start"])
+                })
+            })
+            .collect();
+        for start in starts {
+            let output = start.join().expect("start thread must finish");
+            assert!(
+                output.status.success(),
+                "{}",
+                String::from_utf8_lossy(&output.stderr)
+            );
+        }
+    });
+    assert!(host.run(&["invite"]).contains("Seat ready."));
+    assert_eq!(host.people_on_disk(), ["alice"]);
+}
+
+#[test]
+fn remote_list_commands_release_their_attachments_before_exit() {
+    let host = Host::new("remote-list");
+    let config = host.root.join("c/seer/broker.toml");
+    let contents = fs::read_to_string(&config).expect("broker config must be readable");
+    fs::write(&config, contents.replace("remote = false", "remote = true"))
+        .expect("remote broker config must be written");
+    host.run(&["start"]);
+    let invitation = host.run(&["invite"]);
+    let capsule = invitation
+        .split_whitespace()
+        .find(|word| word.starts_with("SEER2-"))
+        .expect("remote invite must be present");
+    assert!(host.join_as_bob(capsule).status.success());
+    for index in 0..12 {
+        let command = if index % 2 == 0 { "detach" } else { "stop" };
+        let rejected = host.run_as("bob", "bob", &[command]);
+        assert!(!rejected.status.success(), "{command} must be refused");
+        let output = host.run_as("bob", "bob", &["list"]);
+        let text = String::from_utf8_lossy(&output.stdout);
+        assert!(output.status.success(), "{text}");
+        assert!(
+            text.split_whitespace().any(|word| word == "detached"),
+            "a finished command must release its attachment: {text}"
+        );
+    }
 }

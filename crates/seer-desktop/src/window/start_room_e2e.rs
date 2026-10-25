@@ -56,22 +56,11 @@ fn start_room_from_an_empty_window(cx: &mut TestAppContext) {
         .expect("a window with no room needs a room menu");
     cx.simulate_click(trigger.center(), gpui::Modifiers::default());
     cx.run_until_parked();
-    if !cfg!(target_os = "linux") {
-        assert!(
-            cx.debug_bounds("room-start").is_none(),
-            "this computer cannot host"
-        );
-        view.update(cx, |view, cx| {
-            view.room.can_host = true;
-            cx.notify();
-        });
-        cx.run_until_parked();
-    }
     let runtime = Runtime::start();
     let (mut original, _) = runtime.connect();
     assert!(
         cx.debug_bounds("room-start").is_some(),
-        "Linux must offer Start a room"
+        "Seer must offer Start a room"
     );
     cx.simulate_keystrokes("escape");
     cx.simulate_keystrokes(if cfg!(target_os = "macos") {
@@ -87,9 +76,6 @@ fn start_room_from_an_empty_window(cx: &mut TestAppContext) {
         cx.debug_bounds("room-confirm").is_none(),
         "Cancel has initial focus"
     );
-    if !cfg!(target_os = "linux") {
-        return;
-    }
     cx.simulate_keystrokes("enter home enter");
     cx.run_until_parked();
     let config = std::path::PathBuf::from(std::env::var_os("XDG_CONFIG_HOME").unwrap())

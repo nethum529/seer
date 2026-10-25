@@ -81,7 +81,8 @@ iroh), WireGuard libraries (wrong boundary, no traversal).
   connection. A mapping to uid 0 is refused. The broker continues
   to serve other users.
 - The multiplayer MVP server runs on Linux or macOS. Clients can also run on
-  Linux or macOS. PTYs and agent processes stay on the host.
+  Linux or macOS. Since ADR 0009, each person runs PTYs and agent
+  processes on their own computer.
 
 ### Identity and invite
 

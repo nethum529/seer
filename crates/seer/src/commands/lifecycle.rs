@@ -1,6 +1,6 @@
 use super::{
-    CommandError, NETWORK_TIMEOUT, Welcome, authenticate, hello, receive_reply_before,
-    selected_server, send, unexpected_reply,
+    CommandError, NETWORK_TIMEOUT, Welcome, authenticate, finish_request, hello,
+    receive_reply_before, selected_server, send, unexpected_reply,
 };
 use crate::store::{ServerEntry, ServerStore};
 use crate::version_skew::{VersionRefusal, version_refusal};
@@ -19,10 +19,11 @@ pub(crate) fn remove_person(server: &ServerEntry, person: &str) -> Result<(), Co
             name: person.to_owned(),
         },
     )?;
-    wait_for_completion(
+    let reply = wait_for_completion(
         &mut stream,
         |reply| matches!(reply, ServerMsg::PersonRemoved { name } if name == person),
-    )?;
+    );
+    finish_request(stream, reply)?;
     println!("Removed {person} from the room.");
     Ok(())
 }
@@ -73,12 +74,21 @@ pub(crate) fn stop_selected_room(server: &ServerEntry) -> Result<(), CommandErro
                 }));
             }
         }
+        Err(StopFailure::Unavailable(error)) => {
+            stop_local_runtime(server)?;
+            return Err(error);
+        }
         Err(StopFailure::Command(error)) => return Err(error),
     }
+    stop_local_runtime(server)?;
+    println!("Room server stopped.");
+    Ok(())
+}
+
+fn stop_local_runtime(server: &ServerEntry) -> Result<(), CommandError> {
     if crate::local::stop(&server.user_id).map_err(CommandError::system)? {
         println!("Your terminals on this computer stopped.");
     }
-    println!("Room server stopped.");
     Ok(())
 }
 
@@ -88,6 +98,7 @@ enum StopFailure {
     VersionRefused(VersionRefusal),
     NoAnswer,
     Command(CommandError),
+    Unavailable(CommandError),
 }
 
 impl From<CommandError> for StopFailure {
@@ -97,7 +108,7 @@ impl From<CommandError> for StopFailure {
 }
 
 fn stop_room(server: &ServerEntry) -> Result<(), StopFailure> {
-    let mut stream = match hello(server)? {
+    let mut stream = match hello(server).map_err(StopFailure::Unavailable)? {
         Welcome::Accepted(stream, _) => stream,
         Welcome::Refused(reason) => {
             return Err(match version_refusal(&reason) {
@@ -110,6 +121,9 @@ fn stop_room(server: &ServerEntry) -> Result<(), StopFailure> {
     match wait_for_reply(&mut stream, |reply| matches!(reply, ServerMsg::Bye { .. })) {
         Err(error) if error.kind() == io::ErrorKind::UnexpectedEof => {
             return Err(StopFailure::NoAnswer);
+        }
+        Ok(Err(error)) => {
+            return finish_request(stream, Err(error)).map_err(StopFailure::Command);
         }
         result => result.map_err(CommandError::system)??,
     }
@@ -155,7 +169,8 @@ pub(crate) fn perms(can_type: bool) -> Result<(), CommandError> {
             request_id: None,
         },
     )?;
-    wait_for_completion(&mut stream, |reply| *reply == ServerMsg::GrantsUpdated)?;
+    let reply = wait_for_completion(&mut stream, |reply| *reply == ServerMsg::GrantsUpdated);
+    finish_request(stream, reply)?;
     if can_type {
         println!("All current participants can type into your terminals.");
     } else {

@@ -1,4 +1,6 @@
-#![cfg(target_os = "linux")]
+#[path = "support/process.rs"]
+mod process;
+use process::{process_exists, wait_for_process_end};
 
 #[path = "start/cases.rs"]
 mod cases;
@@ -304,14 +306,7 @@ fn stop_process_group(pid: i32) {
     unsafe {
         libc::kill(-pid, libc::SIGKILL);
     }
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while process_exists(pid) && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
-    }
-    assert!(
-        !process_exists(pid),
-        "fake broker must stop by the deadline"
-    );
+    wait_for_process_end(pid);
 }
 
 fn stop_process(pid: i32) {
@@ -319,22 +314,5 @@ fn stop_process(pid: i32) {
     unsafe {
         libc::kill(pid, libc::SIGKILL);
     }
-    let deadline = Instant::now() + Duration::from_secs(2);
-    while process_exists(pid) && Instant::now() < deadline {
-        thread::sleep(Duration::from_millis(10));
-    }
-    assert!(
-        !process_exists(pid),
-        "fake worker must stop by the deadline"
-    );
-}
-
-fn process_exists(pid: i32) -> bool {
-    if let Ok(stat) = fs::read_to_string(format!("/proc/{pid}/stat"))
-        && stat.split_whitespace().nth(2) == Some("Z")
-    {
-        return false;
-    }
-    // Safety: signal zero checks a process without changing it.
-    unsafe { libc::kill(pid, 0) == 0 }
+    wait_for_process_end(pid);
 }

@@ -20,7 +20,9 @@ pub(crate) fn process_exists(pid: i32) -> bool {
             .ok()
             .is_some_and(|output| {
                 output.status.success()
-                    && !String::from_utf8_lossy(&output.stdout).trim().starts_with('Z')
+                    && !String::from_utf8_lossy(&output.stdout)
+                        .trim()
+                        .starts_with('Z')
             })
     }
 }

@@ -1,6 +1,6 @@
 use seer_core::proto::{ClientMsg, ServerMsg};
 
-use super::{CommandError, authenticate, receive_reply, send, unexpected_reply};
+use super::{CommandError, authenticate, finish_request, receive_reply, send, unexpected_reply};
 use crate::{IssuedInvite, ServerEntry};
 
 pub(crate) fn create(
@@ -12,7 +12,7 @@ pub(crate) fn create(
     }
     let (mut stream, _) = authenticate(server)?;
     send(&mut stream, &ClientMsg::Invite { hours })?;
-    match receive_reply(&mut stream)? {
+    let reply = receive_reply(&mut stream).and_then(|reply| match reply {
         ServerMsg::Seat {
             capsule,
             expires_in_secs,
@@ -22,5 +22,6 @@ pub(crate) fn create(
         }),
         ServerMsg::Refused { reason } => Err(CommandError::usage(reason)),
         _ => Err(unexpected_reply()),
-    }
+    });
+    finish_request(stream, reply)
 }

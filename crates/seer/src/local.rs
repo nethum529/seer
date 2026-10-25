@@ -50,10 +50,10 @@ pub type Attached = (Socket, Tree, Option<String>);
 // The stream, the runtime version, and the room refusal.
 type Ready = (UnixStream, Option<String>, Option<String>);
 
-struct StartupLock(File);
+pub(crate) struct StartupLock(File);
 
 impl StartupLock {
-    fn hold(path: &Path) -> io::Result<Self> {
+    pub(crate) fn hold(path: &Path) -> io::Result<Self> {
         let file = OpenOptions::new()
             .write(true)
             .create(true)

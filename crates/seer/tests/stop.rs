@@ -1,4 +1,3 @@
-#![cfg(target_os = "linux")]
 use std::fs;
 use std::io;
 use std::net::{SocketAddr, TcpListener, TcpStream};
@@ -290,4 +289,83 @@ impl Drop for Runtime {
         let _ = self.0.kill();
         let _ = self.0.wait();
     }
+}
+
+#[test]
+fn stop_leaves_a_stale_pid_alone_when_another_process_owns_the_port() {
+    let config = TestConfig::new();
+    let state_dir = config.root.join("state");
+    fs::create_dir_all(&state_dir).expect("state directory must exist");
+    let address = unused_address();
+    let listener = spawn_fake_room(address, env!("CARGO_PKG_VERSION"), None);
+    let unrelated = spawn_fake_room(unused_address(), env!("CARGO_PKG_VERSION"), None);
+    write_broker_config(&config, address, &state_dir);
+    fs::write(state_dir.join("broker.pid"), unrelated.pid().to_string())
+        .expect("stale pid must be saved");
+
+    let stopped = run(&config, &["stop"], "");
+
+    assert!(
+        process_exists(unrelated.pid()),
+        "an unrelated process must survive"
+    );
+    assert!(process_exists(listener.pid()), "the listener must survive");
+    assert!(!stopped.status.success());
+}
+
+#[test]
+fn start_refuses_an_occupied_port_without_reporting_success() {
+    let config = TestConfig::new();
+    let state_dir = config.root.join("state");
+    let listener = TcpListener::bind("127.0.0.1:0").expect("port must bind");
+    let address = listener
+        .local_addr()
+        .expect("listener must have an address");
+    write_broker_config(&config, address, &state_dir);
+
+    let started = run(&config, &["start"], "");
+
+    assert!(!started.status.success(), "{}", text(&started.stdout));
+    assert!(!text(&started.stdout).contains("Server started"));
+    assert!(!state_dir.join("broker.pid").exists());
+}
+
+#[test]
+fn stop_checks_the_listen_address_as_well_as_the_port() {
+    let config = TestConfig::new();
+    let state_dir = config.root.join("state");
+    fs::create_dir_all(&state_dir).expect("state directory must exist");
+    let address = unused_address();
+    let listener = spawn_fake_room(address, env!("CARGO_PKG_VERSION"), None);
+    let other_address = SocketAddr::new("::1".parse().expect("loopback address"), address.port());
+    let unrelated = spawn_fake_room(other_address, env!("CARGO_PKG_VERSION"), None);
+    write_broker_config(&config, address, &state_dir);
+    fs::write(state_dir.join("broker.pid"), unrelated.pid().to_string())
+        .expect("stale pid must be saved");
+
+    let stopped = run(&config, &["stop"], "");
+
+    assert!(
+        process_exists(unrelated.pid()),
+        "a process at another address must survive"
+    );
+    assert!(process_exists(listener.pid()), "the listener must survive");
+    assert!(!stopped.status.success());
+}
+
+#[test]
+fn stop_ends_local_terminals_after_the_room_server_has_crashed() {
+    let config = TestConfig::new();
+    let address = unused_address();
+    let room = spawn_fake_room(address, env!("CARGO_PKG_VERSION"), None);
+    write_broker_config(&config, address, &config.root.join("state"));
+    write_identity(&config, address);
+    let mut runtime = start_runtime(&config);
+    drop(room);
+
+    let stopped = run(&config, &["stop"], "");
+
+    assert!(!stopped.status.success());
+    wait_for_process_end(runtime.0.id().try_into().expect("runtime pid must fit"));
+    assert!(runtime.0.try_wait().expect("runtime status").is_some());
 }
