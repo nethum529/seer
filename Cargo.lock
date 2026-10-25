@@ -6839,7 +6839,7 @@ dependencies = [
 
 [[package]]
 name = "seer"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "crossterm",
  "libc",
@@ -6858,7 +6858,7 @@ dependencies = [
 
 [[package]]
 name = "seer-broker"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "constant_time_eq",
  "getrandom 0.3.4",
@@ -6872,7 +6872,7 @@ dependencies = [
 
 [[package]]
 name = "seer-core"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "serde",
  "serde_json",
@@ -6880,7 +6880,7 @@ dependencies = [
 
 [[package]]
 name = "seer-desktop"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "block2",
  "futures",
@@ -6902,7 +6902,7 @@ dependencies = [
 
 [[package]]
 name = "seer-net"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "iroh",
  "tokio",
@@ -6910,7 +6910,7 @@ dependencies = [
 
 [[package]]
 name = "seer-runtime"
-version = "0.6.1"
+version = "0.6.2"
 dependencies = [
  "alacritty_terminal",
  "libc",
