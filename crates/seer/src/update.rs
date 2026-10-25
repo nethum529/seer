@@ -34,6 +34,13 @@ pub(crate) fn exchange(arguments: impl Iterator<Item = String>) -> ExitCode {
     }
     match exchange_paths(&paths[0], &paths[1]) {
         Ok(()) => ExitCode::SUCCESS,
+        // macOS 13 and later block changes to a signed app without App Management access.
+        Err(error) if error.raw_os_error() == Some(libc::EPERM) => {
+            eprintln!(
+                "macOS blocked the update of Seer.app. Open System Settings, then Privacy & Security, then App Management. Turn on the app that runs this terminal, reopen it, and try again."
+            );
+            ExitCode::from(1)
+        }
         Err(error) => {
             eprintln!("Cannot exchange the installed app: {error}");
             ExitCode::from(1)
