@@ -3,6 +3,9 @@ use gpui::{
     WindowOptions, point, px, size,
 };
 
+#[cfg(target_os = "macos")]
+gpui::actions!(seer, [Quit]);
+
 mod appearance;
 mod assets;
 mod backdrop;
@@ -68,6 +71,8 @@ fn main() {
             }
         })
         .detach();
+        #[cfg(target_os = "macos")]
+        set_quit_menu(cx);
         let options = WindowOptions {
             window_bounds: Some(WindowBounds::Windowed(Bounds::centered(
                 None,
@@ -109,4 +114,15 @@ fn main() {
         }
         cx.activate(true);
     });
+}
+
+// macOS has no Quit item and no Cmd+Q until the app sets a menu bar.
+#[cfg(target_os = "macos")]
+fn set_quit_menu(cx: &mut gpui::App) {
+    cx.on_action(|_: &Quit, cx| cx.quit());
+    cx.bind_keys([gpui::KeyBinding::new("cmd-q", Quit, None)]);
+    cx.set_menus(vec![gpui::Menu {
+        name: "Seer".into(),
+        items: vec![gpui::MenuItem::action("Quit Seer", Quit)],
+    }]);
 }
